@@ -3,20 +3,14 @@ import {
   type TransactionCommon,
   bigIntToVmNumber,
   encodeDataPush,
-  encodeLockingBytecodeP2sh32,
   flattenBinArray,
   generateSigningSerializationBch,
   hash256,
-  hexToBin,
   secp256k1,
 } from '@bitauth/libauth';
 import { controllerBytecodeHex } from '@grandmas-wallet/contracts/controller';
 
-/** The controller covenant. Identical for every wallet; wallets differ by identity token category. */
-export const controllerRedeemBytecode: Uint8Array = hexToBin(controllerBytecodeHex);
-
-/** Pay-to-script-hash (32-byte) locking bytecode of the controller covenant. */
-export const controllerLockingBytecode: Uint8Array = encodeLockingBytecodeP2sh32(hash256(controllerRedeemBytecode));
+import { identityForScript, instantiate, lockingBytecodeOf } from './script.js';
 
 /** SIGHASH_ALL | SIGHASH_UTXOS | SIGHASH_FORKID — the only signing type the controller accepts. */
 export const CONTROLLER_SIGHASH_TYPE = 0x61;
@@ -31,42 +25,63 @@ const SELECTOR = {
   ownerUpdate: 3n,
 } as const;
 
-/** Function arguments are pushed in reverse order, then the function selector, then the redeem script. */
-const unlock = (selector: bigint, args: Uint8Array[]): Uint8Array =>
-  flattenBinArray([
-    ...[...args].reverse().map((arg) => encodeDataPush(arg)),
-    encodeDataPush(bigIntToVmNumber(selector)),
-    encodeDataPush(controllerRedeemBytecode),
-  ]);
-
 export interface KeyAuthorization {
   publicKey: Uint8Array;
   /** Signature followed by its one-byte signing type. */
   signature: Uint8Array;
 }
 
-/** Unlocking bytecode for each controller transition. */
-export const controllerUnlocking = {
-  ownerAuthorize: ({ publicKey, signature }: KeyAuthorization): Uint8Array =>
-    unlock(SELECTOR.ownerAuthorize, [publicKey, signature]),
+/** The controller covenant of one wallet. */
+export interface ControllerScript {
+  identity: Uint8Array;
+  redeemBytecode: Uint8Array;
+  /** Pay-to-script-hash (32-byte) locking bytecode: the wallet's controller address. */
+  lockingBytecode: Uint8Array;
+  /** Unlocking bytecode for each controller transition. */
+  unlock: {
+    ownerAuthorize: (authorization: KeyAuthorization) => Uint8Array;
+    requestRecovery: (authorization: KeyAuthorization, proposedOwnerKeyHash: Uint8Array) => Uint8Array;
+    finalizeRecovery: (authorization: KeyAuthorization) => Uint8Array;
+    ownerUpdate: (
+      authorization: KeyAuthorization,
+      update: { ownerKeyHash: Uint8Array; recovererKeyHash: Uint8Array; challengeDelay: Uint8Array },
+    ) => Uint8Array;
+  };
+}
 
-  requestRecovery: ({ publicKey, signature }: KeyAuthorization, proposedOwnerKeyHash: Uint8Array): Uint8Array =>
-    unlock(SELECTOR.requestRecovery, [publicKey, signature, proposedOwnerKeyHash]),
-
-  finalizeRecovery: ({ publicKey, signature }: KeyAuthorization): Uint8Array =>
-    unlock(SELECTOR.finalizeRecovery, [publicKey, signature]),
-
-  ownerUpdate: (
-    { publicKey, signature }: KeyAuthorization,
-    update: { ownerKeyHash: Uint8Array; recovererKeyHash: Uint8Array; challengeDelay: Uint8Array },
-  ): Uint8Array =>
-    unlock(SELECTOR.ownerUpdate, [
-      publicKey,
-      signature,
-      update.ownerKeyHash,
-      update.recovererKeyHash,
-      update.challengeDelay,
-    ]),
+/**
+ * The controller covenant for a wallet identity. The identity is part of the
+ * script, so every wallet has its own controller address, and only that
+ * wallet's identity token can act as the controller there.
+ */
+export const controllerScript = (identity: Uint8Array): ControllerScript => {
+  const redeemBytecode = instantiate(controllerBytecodeHex, [identityForScript(identity)]);
+  /** Function arguments are pushed in reverse order, then the function selector, then the redeem script. */
+  const unlock = (selector: bigint, args: Uint8Array[]): Uint8Array =>
+    flattenBinArray([
+      ...[...args].reverse().map((arg) => encodeDataPush(arg)),
+      encodeDataPush(bigIntToVmNumber(selector)),
+      encodeDataPush(redeemBytecode),
+    ]);
+  return {
+    identity,
+    redeemBytecode,
+    lockingBytecode: lockingBytecodeOf(redeemBytecode),
+    unlock: {
+      ownerAuthorize: ({ publicKey, signature }) => unlock(SELECTOR.ownerAuthorize, [publicKey, signature]),
+      requestRecovery: ({ publicKey, signature }, proposedOwnerKeyHash) =>
+        unlock(SELECTOR.requestRecovery, [publicKey, signature, proposedOwnerKeyHash]),
+      finalizeRecovery: ({ publicKey, signature }) => unlock(SELECTOR.finalizeRecovery, [publicKey, signature]),
+      ownerUpdate: ({ publicKey, signature }, update) =>
+        unlock(SELECTOR.ownerUpdate, [
+          publicKey,
+          signature,
+          update.ownerKeyHash,
+          update.recovererKeyHash,
+          update.challengeDelay,
+        ]),
+    },
+  };
 };
 
 export interface SignInputParameters {

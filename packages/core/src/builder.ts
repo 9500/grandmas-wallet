@@ -12,13 +12,7 @@ import {
   secp256k1,
 } from '@bitauth/libauth';
 
-import {
-  CONTROLLER_INDEX,
-  controllerLockingBytecode,
-  controllerRedeemBytecode,
-  controllerUnlocking,
-  signInput,
-} from './controller.js';
+import { CONTROLLER_INDEX, controllerScript, signInput } from './controller.js';
 import type { ProtectedScript } from './protected.js';
 import { type ControllerState, encodeChallengeDelay, encodeControllerState } from './state.js';
 import {
@@ -101,7 +95,7 @@ const delayBytes = (sequence: number): Uint8Array =>
 
 /** The controller output for a wallet identity in a given state. */
 export const controllerOutput = (identity: Uint8Array, state: ControllerState, valueSatoshis: bigint): Output => ({
-  lockingBytecode: controllerLockingBytecode,
+  lockingBytecode: controllerScript(identity).lockingBytecode,
   valueSatoshis,
   token: { amount: 0n, category: identity, nft: { capability: 'mutable', commitment: encodeControllerState(state) } },
 });
@@ -111,22 +105,31 @@ export const controllerOutput = (identity: Uint8Array, state: ControllerState, v
  * input; the matching successor from {@link controllerSuccessor} must be the
  * first output.
  */
+const identityOf = (utxo: Utxo): Uint8Array => {
+  const identity = utxo.output.token?.category;
+  if (identity === undefined) {
+    throw new Error('The controller output carries no identity token.');
+  }
+  return identity;
+};
+
 export const controllerInput = (utxo: Utxo, state: ControllerState, action: ControllerAction, key: KeyPair): InputSpec => ({
   utxo,
   // Finalization must carry the challenge delay as its relative locktime.
   sequence: action.kind === 'finalizeRecovery' ? encodeChallengeDelay(state.challengeDelay) : 0,
   unlock: (sign) => {
-    const authorization = { publicKey: key.publicKey, signature: sign(key.privateKey, controllerRedeemBytecode) };
+    const script = controllerScript(identityOf(utxo));
+    const authorization = { publicKey: key.publicKey, signature: sign(key.privateKey, script.redeemBytecode) };
     switch (action.kind) {
       case 'ownerAuthorize':
-        return controllerUnlocking.ownerAuthorize(authorization);
+        return script.unlock.ownerAuthorize(authorization);
       case 'requestRecovery':
-        return controllerUnlocking.requestRecovery(authorization, action.proposedOwnerKeyHash);
+        return script.unlock.requestRecovery(authorization, action.proposedOwnerKeyHash);
       case 'finalizeRecovery':
-        return controllerUnlocking.finalizeRecovery(authorization);
+        return script.unlock.finalizeRecovery(authorization);
       case 'ownerUpdate': {
         const next = afterOwnerUpdate(state, action.update);
-        return controllerUnlocking.ownerUpdate(authorization, {
+        return script.unlock.ownerUpdate(authorization, {
           ownerKeyHash: next.ownerKeyHash,
           recovererKeyHash: next.recovererKeyHash,
           challengeDelay: delayBytes(encodeChallengeDelay(next.challengeDelay)),
@@ -138,11 +141,7 @@ export const controllerInput = (utxo: Utxo, state: ControllerState, action: Cont
 
 /** The controller output that must follow `action`, keeping the controller's identity and value. */
 export const controllerSuccessor = (utxo: Utxo, state: ControllerState, action: ControllerAction): Output => {
-  const identity = utxo.output.token?.category;
-  if (identity === undefined) {
-    throw new Error('The controller output carries no identity token.');
-  }
-  return controllerOutput(identity, applyControllerAction(state, action), utxo.output.valueSatoshis);
+  return controllerOutput(identityOf(utxo), applyControllerAction(state, action), utxo.output.valueSatoshis);
 };
 
 export interface BuildParameters {

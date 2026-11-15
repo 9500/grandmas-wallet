@@ -13,7 +13,7 @@ const compile = (name: string) =>
 
 describe('compiled contracts', () => {
   it.each([
-    ['controller', controllerBytecodeHex, []],
+    ['controller', controllerBytecodeHex, ['identity']],
     ['asset', assetBytecodeHex, ['identity']],
     ['savingsJar', savingsJarBytecodeHex, ['identity', 'unlockTime']],
   ])('%s bytecode in use matches its source', (name, bytecodeHex, constructorInputs) => {

@@ -2,7 +2,7 @@
 
 A scripted run of the whole wallet lifecycle on chipnet: create a wallet, spend, open a recovery claim, cancel it, claim again, wait out the challenge delay, complete recovery, and spend with the replacement key. Along the way it sends three transactions that must be refused and checks that the network refuses them.
 
-It needs an Electrum (Fulcrum) server for chipnet and about 60,000 satoshis of chipnet BCH. Expect to get back everything except roughly 10,000 satoshis: about 9,000 in fees and 1,000 that stay in the controller output, which cannot be closed.
+It needs an Electrum (Fulcrum) server for chipnet and about 30,000 satoshis of chipnet BCH. Expect to get back everything except roughly 10,000 satoshis: about 9,000 in fees and 1,000 that stay in the controller output, which cannot be closed.
 
 ## Commands
 

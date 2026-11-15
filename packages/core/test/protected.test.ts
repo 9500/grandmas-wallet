@@ -5,6 +5,7 @@ import {
   type ControllerState,
   afterFinalizeRecovery,
   assetScript,
+  controllerScript,
   encodeControllerState,
   savingsJarScript,
 } from '../src/index.js';
@@ -200,6 +201,7 @@ describe('only the genuine controller counts (C09)', () => {
   const strangerState: ControllerState = { ...activeState, ownerKeyHash: stranger.keyHash };
   const impostor = (category: Uint8Array, capability: 'mutable' | 'minting' | 'none'): Output => ({
     ...controllerOutput(encodeControllerState(strangerState)),
+    lockingBytecode: controllerScript(category).lockingBytecode,
     token: { amount: 0n, category, nft: { capability, commitment: encodeControllerState(strangerState) } },
   });
 

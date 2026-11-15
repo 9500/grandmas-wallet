@@ -16,9 +16,7 @@ import {
   afterOwnerAuthorize,
   afterOwnerUpdate,
   afterRequestRecovery,
-  controllerLockingBytecode,
-  controllerRedeemBytecode,
-  controllerUnlocking,
+  controllerScript,
   encodeChallengeDelay,
   encodeControllerState,
   signInput,
@@ -64,8 +62,10 @@ export const pendingState: ControllerState = {
 export const delayBytes = (sequence: number): Uint8Array =>
   Uint8Array.of(sequence & 0xff, (sequence >> 8) & 0xff, (sequence >> 16) & 0xff);
 
+export const controller = controllerScript(identity);
+
 export const controllerOutput = (commitment: Uint8Array, valueSatoshis = CONTROLLER_VALUE): Output => ({
-  lockingBytecode: controllerLockingBytecode,
+  lockingBytecode: controller.lockingBytecode,
   valueSatoshis,
   token: { amount: 0n, category: identity, nft: { capability: 'mutable', commitment } },
 });
@@ -92,6 +92,8 @@ export interface Spend {
   controllerSource?: Output;
   /** Replace the controller output entirely; `null` omits it. */
   controllerSuccessor?: Output | null;
+  /** Identity whose controller script unlocks the input, instead of the one whose token the input carries. */
+  unlockAsIdentity?: Uint8Array;
   /** Public key presented to the contract, instead of the signer's. */
   presentedPublicKey?: Uint8Array;
   signingType?: number;
@@ -143,6 +145,10 @@ export const build = (spend: Spend): ResolvedSpend => {
       ? controllerOutput(spend.nextCommitment ?? encodeControllerState(expectedNext(spend)))
       : spend.controllerSuccessor;
 
+  // A controller input is unlocked with the script of the identity whose token it carries, so a
+  // well-formed controller of a different wallet can be built too.
+  const script = controllerScript(spend.unlockAsIdentity ?? controllerSource.token?.category ?? identity);
+
   const funding: Output = { lockingBytecode: anyoneCanSpend, valueSatoshis: 5_000n };
   const defaultSequence =
     spend.action.kind === 'finalizeRecovery' ? encodeChallengeDelay(spend.state.challengeDelay) : 0;
@@ -191,7 +197,7 @@ export const build = (spend: Spend): ResolvedSpend => {
       transaction,
       sourceOutputs,
       inputIndex: controllerIndex,
-      coveredBytecode: controllerRedeemBytecode,
+      coveredBytecode: script.redeemBytecode,
       privateKey: spend.signer.privateKey,
       ...(spend.signingType === undefined ? {} : { signingType: spend.signingType }),
     }),
@@ -201,13 +207,13 @@ export const build = (spend: Spend): ResolvedSpend => {
   const unlockingBytecode = ((): Uint8Array => {
     switch (action.kind) {
       case 'ownerAuthorize':
-        return controllerUnlocking.ownerAuthorize(authorization);
+        return script.unlock.ownerAuthorize(authorization);
       case 'requestRecovery':
-        return controllerUnlocking.requestRecovery(authorization, action.proposedOwnerKeyHash);
+        return script.unlock.requestRecovery(authorization, action.proposedOwnerKeyHash);
       case 'finalizeRecovery':
-        return controllerUnlocking.finalizeRecovery(authorization);
+        return script.unlock.finalizeRecovery(authorization);
       case 'ownerUpdate':
-        return controllerUnlocking.ownerUpdate(authorization, {
+        return script.unlock.ownerUpdate(authorization, {
           ownerKeyHash: action.update.ownerKeyHash ?? spend.state.ownerKeyHash,
           recovererKeyHash: action.update.recovererKeyHash ?? spend.state.recovererKeyHash,
           challengeDelay:

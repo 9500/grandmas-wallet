@@ -245,7 +245,7 @@ describe('chipnet run against a simulated network', () => {
     await sweepAll(start(), destination);
     const returned = chain.balanceOf(destination);
     // Controller (1,000) and the still-locked jar (10,000) remain; the rest came back minus fees.
-    expect(chain.totalValue() - returned).toBe(11_000n);
-    expect(FUNDING - returned).toBeLessThan(11_000n + 6_000n);
+    expect(chain.totalValue() - returned).toBe(6_000n);
+    expect(FUNDING - returned).toBeLessThan(6_000n + 6_000n);
   });
 });

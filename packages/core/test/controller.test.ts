@@ -7,7 +7,7 @@ import {
   afterOwnerAuthorize,
   afterOwnerUpdate,
   afterRequestRecovery,
-  controllerLockingBytecode,
+  controllerScript,
   decodeControllerState,
   encodeControllerState,
 } from '../src/index.js';
@@ -17,6 +17,7 @@ import {
   activeState,
   anyoneCanSpend,
   build,
+  controller,
   controllerOutput,
   delayBytes,
   expectAccepted,
@@ -358,7 +359,7 @@ describe('identity and continuity (C09)', () => {
   it('rejects a successor without the identity token', () => {
     for (const [, spend] of allTransitions) {
       expectChangeRejected(spend, {
-        controllerSuccessor: { lockingBytecode: controllerLockingBytecode, valueSatoshis: CONTROLLER_VALUE },
+        controllerSuccessor: { lockingBytecode: controller.lockingBytecode, valueSatoshis: CONTROLLER_VALUE },
       });
     }
   });
@@ -383,7 +384,7 @@ describe('identity and continuity (C09)', () => {
       const successor = build(spend).transaction.outputs[0];
       if (successor === undefined) throw new Error('missing successor');
       expectChangeRejected(spend, {
-        controllerSuccessor: { lockingBytecode: controllerLockingBytecode, valueSatoshis: CONTROLLER_VALUE },
+        controllerSuccessor: { lockingBytecode: controller.lockingBytecode, valueSatoshis: CONTROLLER_VALUE },
         extraOutputs: [successor],
       });
     }
@@ -397,7 +398,7 @@ describe('identity and continuity (C09)', () => {
 
   it('rejects a controller UTXO without a token, or with a fungible-only or immutable token', () => {
     const commitment = encodeControllerState(activeState);
-    const base = { lockingBytecode: controllerLockingBytecode, valueSatoshis: CONTROLLER_VALUE };
+    const base = { lockingBytecode: controller.lockingBytecode, valueSatoshis: CONTROLLER_VALUE };
     const sources = [
       base,
       { ...base, token: { amount: 10n, category: identity } },
@@ -406,6 +407,29 @@ describe('identity and continuity (C09)', () => {
     for (const controllerSource of sources) {
       expectChangeRejected(authorize, { controllerSource, controllerSuccessor: controllerSource });
     }
+  });
+
+  it('rejects the identity token of another wallet at this wallet\'s controller address', () => {
+    const otherIdentity = new Uint8Array(32).fill(0x66);
+    for (const [, spend] of allTransitions) {
+      const misplaced = (commitment: Uint8Array) => ({
+        lockingBytecode: controller.lockingBytecode,
+        valueSatoshis: CONTROLLER_VALUE,
+        token: { amount: 0n, category: otherIdentity, nft: { capability: 'mutable' as const, commitment } },
+      });
+      const successor = successorOf(spend);
+      // Unlocked with this wallet's script, as the address requires, but carrying the other wallet's token.
+      expectChangeRejected(spend, {
+        controllerSource: misplaced(encodeControllerState(spend.state)),
+        controllerSuccessor: misplaced(successor.nft.commitment),
+        unlockAsIdentity: identity,
+      });
+    }
+  });
+
+  it('gives each wallet its own controller address', () => {
+    expect(controllerScript(new Uint8Array(32).fill(0x66)).lockingBytecode).not.toEqual(controller.lockingBytecode);
+    expect(() => controllerScript(new Uint8Array(31))).toThrow();
   });
 
   it('rejects an unknown state version (X02)', () => {

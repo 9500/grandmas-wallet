@@ -1,7 +1,7 @@
 import { type TransactionCommon, binToHex } from '@bitauth/libauth';
 
 import type { ControllerAction, Utxo } from './builder.js';
-import { controllerLockingBytecode } from './controller.js';
+import { controllerScript } from './controller.js';
 import { type ControllerState, decodeControllerState, encodeControllerState } from './state.js';
 import { afterFinalizeRecovery, afterOwnerAuthorize } from './transitions.js';
 
@@ -46,8 +46,8 @@ const readController = (
   if (output === undefined) {
     return fail('The transaction has no controller output.');
   }
-  if (!sameBytes(output.lockingBytecode, controllerLockingBytecode)) {
-    return fail('The identity token is not held by the controller script.');
+  if (!sameBytes(output.lockingBytecode, controllerScript(identity).lockingBytecode)) {
+    return fail('The identity token is not held by this wallet\'s controller script.');
   }
   const { token } = output;
   if (token === undefined || !sameBytes(token.category, identity)) {

@@ -2,5 +2,6 @@ export * from './builder.js';
 export * from './controller.js';
 export * from './genesis.js';
 export * from './protected.js';
+export * from './script.js';
 export * from './state.js';
 export * from './transitions.js';

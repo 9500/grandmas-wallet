@@ -1,6 +1,11 @@
 {
   "contractName": "RecoveryController",
-  "constructorInputs": [],
+  "constructorInputs": [
+    {
+      "name": "identity",
+      "type": "bytes32"
+    }
+  ],
   "abi": [
     {
       "name": "ownerAuthorize",
@@ -71,124 +76,129 @@
       ]
     }
   ],
-  "bytecode": "c0009dc2529d00cf8201459d76517f75518800ce01207f77518800cd00c78800d100ce8800d300d09d00cc00c6a269 OP_0 OP_DEFINE 7ca97b88828c7f77016188 OP_1 OP_DEFINE 140000000000000000000000000000000000000000 OP_2 OP_DEFINE OP_DUP OP_0 OP_NUMEQUAL OP_IF OP_0 OP_INVOKE OP_DUP 1a OP_SPLIT OP_DROP OP_6 OP_SPLIT OP_NIP OP_3 OP_PICK OP_5 OP_PICK OP_1 OP_INVOKE OP_2SWAP OP_CHECKSIGVERIFY OP_0 OP_OUTPUTTOKENCOMMITMENT 0100 OP_ROT 31 OP_SPLIT OP_DROP OP_2 OP_SPLIT OP_NIP OP_CAT OP_2 OP_INVOKE OP_CAT OP_EQUAL OP_NIP OP_ELSE OP_DUP OP_1 OP_NUMEQUAL OP_IF OP_3 OP_ROLL OP_SIZE 14 OP_EQUALVERIFY OP_0 OP_INVOKE OP_DUP OP_2 OP_SPLIT OP_DROP OP_1 OP_SPLIT OP_NIP 00 OP_EQUALVERIFY OP_DUP 2e OP_SPLIT OP_DROP 1a OP_SPLIT OP_NIP OP_4 OP_PICK OP_6 OP_PICK OP_1 OP_INVOKE OP_4 OP_ROLL OP_4 OP_ROLL OP_CHECKSIGVERIFY OP_OVER OP_2 OP_INVOKE OP_EQUAL OP_NOT OP_VERIFY OP_0 OP_OUTPUTTOKENCOMMITMENT 0101 OP_ROT 31 OP_SPLIT OP_DROP OP_2 OP_SPLIT OP_NIP OP_CAT OP_ROT OP_CAT OP_EQUAL OP_NIP OP_ELSE OP_DUP OP_2 OP_NUMEQUAL OP_IF OP_0 OP_INVOKE OP_DUP OP_2 OP_SPLIT OP_DROP OP_1 OP_SPLIT OP_NIP OP_1 OP_EQUALVERIFY OP_DUP 2e OP_SPLIT OP_DROP 1a OP_SPLIT OP_NIP OP_3 OP_PICK OP_5 OP_PICK OP_1 OP_INVOKE OP_2SWAP OP_CHECKSIGVERIFY OP_DUP 31 OP_SPLIT OP_DROP 2e OP_SPLIT OP_NIP OP_BIN2NUM OP_CHECKSEQUENCEVERIFY OP_DROP OP_DUP OP_6 OP_SPLIT OP_DROP OP_2 OP_SPLIT OP_NIP OP_BIN2NUM OP_1ADD OP_0 OP_OUTPUTTOKENCOMMITMENT 0100 OP_ROT OP_4 OP_NUM2BIN OP_CAT OP_2 OP_PICK 45 OP_SPLIT OP_DROP 31 OP_SPLIT OP_NIP OP_CAT OP_ROT 31 OP_SPLIT OP_DROP 1a OP_SPLIT OP_NIP OP_CAT OP_2 OP_INVOKE OP_CAT OP_EQUAL OP_NIP OP_ELSE OP_3 OP_NUMEQUALVERIFY OP_ROT OP_SIZE 14 OP_EQUALVERIFY OP_3 OP_ROLL OP_SIZE 14 OP_EQUALVERIFY OP_4 OP_ROLL OP_SIZE OP_3 OP_EQUALVERIFY OP_0 OP_INVOKE OP_DUP 1a OP_SPLIT OP_DROP OP_6 OP_SPLIT OP_NIP OP_DUP OP_6 OP_PICK OP_8 OP_PICK OP_1 OP_INVOKE OP_6 OP_ROLL OP_6 OP_ROLL OP_CHECKSIGVERIFY OP_4 OP_PICK OP_2 OP_INVOKE OP_EQUAL OP_NOT OP_VERIFY OP_3 OP_PICK OP_2 OP_INVOKE OP_EQUAL OP_NOT OP_VERIFY OP_2 OP_PICK 0000bf OP_AND 000000 OP_EQUALVERIFY OP_2 OP_PICK OP_2 OP_SPLIT OP_DROP 0000 OP_EQUAL OP_NOT OP_VERIFY OP_SWAP OP_6 OP_SPLIT OP_DROP OP_2 OP_SPLIT OP_NIP OP_BIN2NUM OP_4 OP_PICK OP_ROT OP_EQUAL OP_NOTIF OP_1ADD OP_ENDIF OP_0 OP_OUTPUTTOKENCOMMITMENT 0100 OP_ROT OP_4 OP_NUM2BIN OP_CAT OP_4 OP_ROLL OP_CAT OP_3 OP_ROLL OP_CAT OP_ROT OP_CAT OP_2 OP_INVOKE OP_CAT OP_EQUAL OP_ENDIF OP_ENDIF OP_ENDIF",
-  "source": "pragma cashscript ^0.14.0;\n\n// Grandma's Wallet recovery controller, scheme v1.\n//\n// The controller UTXO carries the wallet's identity NFT (mutable capability).\n// The NFT commitment holds the controller state (69 bytes):\n//\n//   [0]      version            0x01\n//   [1]      status             0x00 Active, 0x01 Pending\n//   [2..6]   owner epoch        4 bytes, little-endian\n//   [6..26]  owner key hash     hash160\n//   [26..46] recoverer key hash hash160\n//   [46..49] challenge delay    BIP68 relative locktime, 3 bytes, little-endian\n//   [49..69] proposed owner     hash160, all zero when Active\n//\n// Transaction layout for every function:\n//   Inputs:  00-controller, 01+ anything (fee funding, protected assets)\n//   Outputs: 00-controller, 01+ anything\n//\n// The contract has no constructor parameters: every wallet uses the same\n// bytecode and is distinguished by the token category of its identity NFT.\n// The initial state is not validated here; clients must validate the genesis\n// transaction before trusting an identity.\n\nbytes20 constant NO_PROPOSED_OWNER = 0x0000000000000000000000000000000000000000;\n\n// SIGHASH_ALL | SIGHASH_UTXOS | SIGHASH_FORKID: the signature covers every\n// input, every spent output, and every output of the transaction.\nbytes1 constant REQUIRED_SIGHASH = 0x61;\n\n// Checks that hold for every transition: position, continuity of the\n// covenant and its identity token, and preservation of the controller value.\n// Returns the current state.\nfunction continuedController() returns (bytes) {\n    require(this.activeInputIndex == 0);\n    require(tx.version == 2);\n\n    bytes state = tx.inputs[0].nftCommitment;\n    require(state.length == 69);\n    require(state.split(1)[0] == 0x01);\n\n    // The identity token must be an NFT with mutable capability.\n    require(tx.inputs[0].tokenCategory.split(32)[1] == 0x01);\n\n    require(tx.outputs[0].lockingBytecode == tx.inputs[0].lockingBytecode);\n    require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory);\n    require(tx.outputs[0].tokenAmount == tx.inputs[0].tokenAmount);\n    require(tx.outputs[0].value >= tx.inputs[0].value);\n\n    return state;\n}\n\n// Checks that `pk` is the key whose hash160 is `keyHash` and that `s` commits\n// to the whole transaction. The signature itself is verified by the caller.\nfunction authorizedKey(bytes keyHash, pubkey pk, sig s) {\n    require(hash160(pk) == keyHash);\n    require(bytes(s).split(bytes(s).length - 1)[1] == REQUIRED_SIGHASH);\n}\n\ncontract RecoveryController() {\n    // Owner approves a transaction. The controller continues as Active with\n    // the same owner, recoverer and delay. If a recovery claim was pending,\n    // it is cancelled.\n    function ownerAuthorize(pubkey ownerPk, sig ownerSig) {\n        bytes state = continuedController();\n        authorizedKey(state.slice(6, 26), ownerPk, ownerSig);\n        require(checkSig(ownerSig, ownerPk));\n\n        require(tx.outputs[0].nftCommitment == 0x0100 + state.slice(2, 49) + NO_PROPOSED_OWNER);\n    }\n\n    // Recoverer opens a claim naming the proposed new owner. Only possible\n    // when no claim is pending. The challenge delay starts with the new\n    // controller output.\n    function requestRecovery(pubkey recovererPk, sig recovererSig, bytes20 proposedOwner) {\n        bytes state = continuedController();\n        require(state.slice(1, 2) == 0x00);\n        authorizedKey(state.slice(26, 46), recovererPk, recovererSig);\n        require(checkSig(recovererSig, recovererPk));\n\n        require(proposedOwner != NO_PROPOSED_OWNER);\n        require(tx.outputs[0].nftCommitment == 0x0101 + state.slice(2, 49) + proposedOwner);\n    }\n\n    // Recoverer completes a claim after the challenge delay. Installs exactly\n    // the proposed owner named by the pending claim and starts a new epoch.\n    function finalizeRecovery(pubkey recovererPk, sig recovererSig) {\n        bytes state = continuedController();\n        require(state.slice(1, 2) == 0x01);\n        authorizedKey(state.slice(26, 46), recovererPk, recovererSig);\n        require(checkSig(recovererSig, recovererPk));\n\n        require(this.age >= int(state.slice(46, 49)));\n\n        int nextEpoch = int(state.slice(2, 6)) + 1;\n        require(\n            tx.outputs[0].nftCommitment ==\n                0x0100 + toPaddedBytes(nextEpoch, 4) + state.slice(49, 69) + state.slice(26, 49) + NO_PROPOSED_OWNER\n        );\n    }\n\n    // Owner replaces the owner key, the recoverer, or the challenge delay.\n    // Any pending claim is cancelled. Changing the owner starts a new epoch.\n    function ownerUpdate(pubkey ownerPk, sig ownerSig, bytes20 newOwner, bytes20 newRecoverer, bytes3 newDelay) {\n        bytes state = continuedController();\n        bytes currentOwner = state.slice(6, 26);\n        authorizedKey(currentOwner, ownerPk, ownerSig);\n        require(checkSig(ownerSig, ownerPk));\n\n        require(newOwner != NO_PROPOSED_OWNER);\n        require(newRecoverer != NO_PROPOSED_OWNER);\n\n        // A valid delay uses only the BIP68 type flag (bit 22) and value\n        // (low 16 bits), and its value is not zero.\n        require((newDelay & 0x0000bf) == 0x000000);\n        require(newDelay.split(2)[0] != 0x0000);\n\n        int epoch = int(state.slice(2, 6));\n        if (newOwner != currentOwner) {\n            epoch = epoch + 1;\n        }\n\n        require(\n            tx.outputs[0].nftCommitment ==\n                0x0100 + toPaddedBytes(epoch, 4) + newOwner + newRecoverer + newDelay + NO_PROPOSED_OWNER\n        );\n    }\n}\n",
-  "fingerprint": "6f1f70b475847b944c98807786fc240dfaf6ed9342890350e346f65d09519fa1",
+  "bytecode": "c0009dc2529d00cf8201459d76517f75518800ce7b517e8800cd00c78800d100ce8800d300d09d00cc00c6a269 OP_0 OP_DEFINE 7ca97b88828c7f77016188 OP_1 OP_DEFINE 140000000000000000000000000000000000000000 OP_2 OP_DEFINE OP_OVER OP_0 OP_NUMEQUAL OP_IF OP_0 OP_INVOKE OP_DUP 1a OP_SPLIT OP_DROP OP_6 OP_SPLIT OP_NIP OP_3 OP_PICK OP_5 OP_PICK OP_1 OP_INVOKE OP_2SWAP OP_CHECKSIGVERIFY OP_0 OP_OUTPUTTOKENCOMMITMENT 0100 OP_ROT 31 OP_SPLIT OP_DROP OP_2 OP_SPLIT OP_NIP OP_CAT OP_2 OP_INVOKE OP_CAT OP_EQUAL OP_NIP OP_ELSE OP_OVER OP_1 OP_NUMEQUAL OP_IF OP_4 OP_ROLL OP_SIZE 14 OP_EQUALVERIFY OP_SWAP OP_0 OP_INVOKE OP_DUP OP_2 OP_SPLIT OP_DROP OP_1 OP_SPLIT OP_NIP 00 OP_EQUALVERIFY OP_DUP 2e OP_SPLIT OP_DROP 1a OP_SPLIT OP_NIP OP_4 OP_PICK OP_6 OP_PICK OP_1 OP_INVOKE OP_4 OP_ROLL OP_4 OP_ROLL OP_CHECKSIGVERIFY OP_OVER OP_2 OP_INVOKE OP_EQUAL OP_NOT OP_VERIFY OP_0 OP_OUTPUTTOKENCOMMITMENT 0101 OP_ROT 31 OP_SPLIT OP_DROP OP_2 OP_SPLIT OP_NIP OP_CAT OP_ROT OP_CAT OP_EQUAL OP_NIP OP_ELSE OP_OVER OP_2 OP_NUMEQUAL OP_IF OP_0 OP_INVOKE OP_DUP OP_2 OP_SPLIT OP_DROP OP_1 OP_SPLIT OP_NIP OP_1 OP_EQUALVERIFY OP_DUP 2e OP_SPLIT OP_DROP 1a OP_SPLIT OP_NIP OP_3 OP_PICK OP_5 OP_PICK OP_1 OP_INVOKE OP_2SWAP OP_CHECKSIGVERIFY OP_DUP 31 OP_SPLIT OP_DROP 2e OP_SPLIT OP_NIP OP_BIN2NUM OP_CHECKSEQUENCEVERIFY OP_DROP OP_DUP OP_6 OP_SPLIT OP_DROP OP_2 OP_SPLIT OP_NIP OP_BIN2NUM OP_1ADD OP_0 OP_OUTPUTTOKENCOMMITMENT 0100 OP_ROT OP_4 OP_NUM2BIN OP_CAT OP_2 OP_PICK 45 OP_SPLIT OP_DROP 31 OP_SPLIT OP_NIP OP_CAT OP_ROT 31 OP_SPLIT OP_DROP 1a OP_SPLIT OP_NIP OP_CAT OP_2 OP_INVOKE OP_CAT OP_EQUAL OP_NIP OP_ELSE OP_SWAP OP_3 OP_NUMEQUALVERIFY OP_3 OP_ROLL OP_SIZE 14 OP_EQUALVERIFY OP_4 OP_ROLL OP_SIZE 14 OP_EQUALVERIFY OP_5 OP_ROLL OP_SIZE OP_3 OP_EQUALVERIFY OP_3 OP_ROLL OP_0 OP_INVOKE OP_DUP 1a OP_SPLIT OP_DROP OP_6 OP_SPLIT OP_NIP OP_DUP OP_6 OP_PICK OP_8 OP_PICK OP_1 OP_INVOKE OP_6 OP_ROLL OP_6 OP_ROLL OP_CHECKSIGVERIFY OP_4 OP_PICK OP_2 OP_INVOKE OP_EQUAL OP_NOT OP_VERIFY OP_3 OP_PICK OP_2 OP_INVOKE OP_EQUAL OP_NOT OP_VERIFY OP_2 OP_PICK 0000bf OP_AND 000000 OP_EQUALVERIFY OP_2 OP_PICK OP_2 OP_SPLIT OP_DROP 0000 OP_EQUAL OP_NOT OP_VERIFY OP_SWAP OP_6 OP_SPLIT OP_DROP OP_2 OP_SPLIT OP_NIP OP_BIN2NUM OP_4 OP_PICK OP_ROT OP_EQUAL OP_NOTIF OP_1ADD OP_ENDIF OP_0 OP_OUTPUTTOKENCOMMITMENT 0100 OP_ROT OP_4 OP_NUM2BIN OP_CAT OP_4 OP_ROLL OP_CAT OP_3 OP_ROLL OP_CAT OP_ROT OP_CAT OP_2 OP_INVOKE OP_CAT OP_EQUAL OP_ENDIF OP_ENDIF OP_ENDIF",
+  "source": "pragma cashscript ^0.14.0;\n\n// Grandma's Wallet recovery controller, scheme v1.\n//\n// The controller UTXO carries the wallet's identity NFT (mutable capability).\n// The NFT commitment holds the controller state (69 bytes):\n//\n//   [0]      version            0x01\n//   [1]      status             0x00 Active, 0x01 Pending\n//   [2..6]   owner epoch        4 bytes, little-endian\n//   [6..26]  owner key hash     hash160\n//   [26..46] recoverer key hash hash160\n//   [46..49] challenge delay    BIP68 relative locktime, 3 bytes, little-endian\n//   [49..69] proposed owner     hash160, all zero when Active\n//\n// Transaction layout for every function:\n//   Inputs:  00-controller, 01+ anything (fee funding, protected assets)\n//   Outputs: 00-controller, 01+ anything\n//\n// The contract is constructed with the wallet identity: the token category of\n// the identity NFT, in the byte order contracts see. Each wallet therefore has\n// its own controller address, and only that wallet's identity NFT can act as\n// the controller at that address.\n// The initial state is not validated here; clients must validate the genesis\n// transaction before trusting an identity.\n\nbytes20 constant NO_PROPOSED_OWNER = 0x0000000000000000000000000000000000000000;\n\n// SIGHASH_ALL | SIGHASH_UTXOS | SIGHASH_FORKID: the signature covers every\n// input, every spent output, and every output of the transaction.\nbytes1 constant REQUIRED_SIGHASH = 0x61;\n\n// Checks that hold for every transition: position, continuity of the\n// covenant and its identity token, and preservation of the controller value.\n// Returns the current state.\nfunction continuedController(bytes32 identity) returns (bytes) {\n    require(this.activeInputIndex == 0);\n    require(tx.version == 2);\n\n    bytes state = tx.inputs[0].nftCommitment;\n    require(state.length == 69);\n    require(state.split(1)[0] == 0x01);\n\n    // The controller must carry this wallet's identity NFT, with mutable capability.\n    require(tx.inputs[0].tokenCategory == identity + 0x01);\n\n    require(tx.outputs[0].lockingBytecode == tx.inputs[0].lockingBytecode);\n    require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory);\n    require(tx.outputs[0].tokenAmount == tx.inputs[0].tokenAmount);\n    require(tx.outputs[0].value >= tx.inputs[0].value);\n\n    return state;\n}\n\n// Checks that `pk` is the key whose hash160 is `keyHash` and that `s` commits\n// to the whole transaction. The signature itself is verified by the caller.\nfunction authorizedKey(bytes keyHash, pubkey pk, sig s) {\n    require(hash160(pk) == keyHash);\n    require(bytes(s).split(bytes(s).length - 1)[1] == REQUIRED_SIGHASH);\n}\n\ncontract RecoveryController(bytes32 identity) {\n    // Owner approves a transaction. The controller continues as Active with\n    // the same owner, recoverer and delay. If a recovery claim was pending,\n    // it is cancelled.\n    function ownerAuthorize(pubkey ownerPk, sig ownerSig) {\n        bytes state = continuedController(identity);\n        authorizedKey(state.slice(6, 26), ownerPk, ownerSig);\n        require(checkSig(ownerSig, ownerPk));\n\n        require(tx.outputs[0].nftCommitment == 0x0100 + state.slice(2, 49) + NO_PROPOSED_OWNER);\n    }\n\n    // Recoverer opens a claim naming the proposed new owner. Only possible\n    // when no claim is pending. The challenge delay starts with the new\n    // controller output.\n    function requestRecovery(pubkey recovererPk, sig recovererSig, bytes20 proposedOwner) {\n        bytes state = continuedController(identity);\n        require(state.slice(1, 2) == 0x00);\n        authorizedKey(state.slice(26, 46), recovererPk, recovererSig);\n        require(checkSig(recovererSig, recovererPk));\n\n        require(proposedOwner != NO_PROPOSED_OWNER);\n        require(tx.outputs[0].nftCommitment == 0x0101 + state.slice(2, 49) + proposedOwner);\n    }\n\n    // Recoverer completes a claim after the challenge delay. Installs exactly\n    // the proposed owner named by the pending claim and starts a new epoch.\n    function finalizeRecovery(pubkey recovererPk, sig recovererSig) {\n        bytes state = continuedController(identity);\n        require(state.slice(1, 2) == 0x01);\n        authorizedKey(state.slice(26, 46), recovererPk, recovererSig);\n        require(checkSig(recovererSig, recovererPk));\n\n        require(this.age >= int(state.slice(46, 49)));\n\n        int nextEpoch = int(state.slice(2, 6)) + 1;\n        require(\n            tx.outputs[0].nftCommitment ==\n                0x0100 + toPaddedBytes(nextEpoch, 4) + state.slice(49, 69) + state.slice(26, 49) + NO_PROPOSED_OWNER\n        );\n    }\n\n    // Owner replaces the owner key, the recoverer, or the challenge delay.\n    // Any pending claim is cancelled. Changing the owner starts a new epoch.\n    function ownerUpdate(pubkey ownerPk, sig ownerSig, bytes20 newOwner, bytes20 newRecoverer, bytes3 newDelay) {\n        bytes state = continuedController(identity);\n        bytes currentOwner = state.slice(6, 26);\n        authorizedKey(currentOwner, ownerPk, ownerSig);\n        require(checkSig(ownerSig, ownerPk));\n\n        require(newOwner != NO_PROPOSED_OWNER);\n        require(newRecoverer != NO_PROPOSED_OWNER);\n\n        // A valid delay uses only the BIP68 type flag (bit 22) and value\n        // (low 16 bits), and its value is not zero.\n        require((newDelay & 0x0000bf) == 0x000000);\n        require(newDelay.split(2)[0] != 0x0000);\n\n        int epoch = int(state.slice(2, 6));\n        if (newOwner != currentOwner) {\n            epoch = epoch + 1;\n        }\n\n        require(\n            tx.outputs[0].nftCommitment ==\n                0x0100 + toPaddedBytes(epoch, 4) + newOwner + newRecoverer + newDelay + NO_PROPOSED_OWNER\n        );\n    }\n}\n",
+  "fingerprint": "4fafb1334b4f99b1eca5abbd50840b5931d01d222056a2fc9a8d90a25e57d42f",
   "debug": {
-    "bytecode": "2fc0009dc2529d00cf8201459d76517f75518800ce01207f77518800cd00c78800d100ce8800d300d09d00cc00c6a26900890b7ca97b88828c7f77016188518915140000000000000000000000000000000000000000528976009c63008a76011a7f75567f7753795579518a72ad00d20201007b01317f75527f777e528a7e87776776519c63537a82011488008a76527f75517f7701008876012e7f75011a7f7754795679518a547a547aad78528a87916900d20201017b01317f75527f777e7b7e87776776529c63008a76527f75517f77518876012e7f75011a7f7753795579518a72ad7601317f75012e7f7781b27576567f75527f77818b00d20201007b54807e527901457f7501317f777e7b01317f75011a7f777e528a7e877767539d7b82011488537a82011488547a825388008a76011a7f75567f777656795879518a567a567aad5479528a8791695379528a8791695279030000bf8403000000885279527f750200008791697c567f75527f778154797b87648b6800d20201007b54807e547a7e537a7e7b7e528a7e87686868",
-    "sourceMap": "34::51:1;;::::1;55::58::0;;::::1;25::25:80:0;;::::1;64:4:70:5:0;;;;65:22:65:43:1;;66::66:27:0;:37::39;:22::40:1;;:34::35:0;:22::40:1;;:42::49:0;;:51::59;;:8::60:1;;67:25:67:42:0;:8::45:1;69:27:69:28:0;:16::43:1;:47::53:0;:56::61;:71::73;:56::74:1;;:68::69:0;:56::74:1;;:47;:77::94;;:47;:8::96;64:58:70:5;:4;75::83::0;;;;:67:75:88;;;;;76:22:76:43:1;;77:16:77:21:0;:31::32;:16::33:1;;:28::29:0;:16::33:1;;:37::41:0;:8::43:1;78:22:78:27:0;:38::40;:22::41:1;;:34::36:0;:22::41:1;;:43::54:0;;:56::68;;:8::69:1;;79:25:79:37:0;;:39::50;;:8::53:1;81:16:81:29:0;:33::50:1;;:16;;:8::52;82:27:82:28:0;:16::43:1;:47::53:0;:56::61;:71::73;:56::74:1;;:68::69:0;:56::74:1;;:47;:77::90:0;:47:::1;:8::92;75:90:83:5;:4;87::100::0;;;;88:22:88:43:1;;89:16:89:21:0;:31::32;:16::33:1;;:28::29:0;:16::33:1;;:37::41:0;:8::43:1;90:22:90:27:0;:38::40;:22::41:1;;:34::36:0;:22::41:1;;:43::54:0;;:56::68;;:8::69:1;;91:25:91:50:0;:8::53:1;93:32:93:37:0;:48::50;:32::51:1;;:44::46:0;:32::51:1;;:28::52;:8::54;;95:28:95:33:0;:43::44;:28::45:1;;:40::41:0;:28::45:1;;:24::46;:::50;97:23:97:24:0;:12::39:1;98:16:98:22:0;:39::48;:50::51;:25::52:1;:16;:55::60:0;;:71::73;:55::74:1;;:67::69:0;:55::74:1;;:16;:77::82:0;:93::95;:77::96:1;;:89::91:0;:77::96:1;;:16;:99::116;;:16;96:8:99:10;87:68:100:5;:4;104::127::0;;:55:104:71;;;;:73::93;;;;;:95::110;;;;;105:22:105:43:1;;106:29:106:34:0;:44::46;:29::47:1;;:41::42:0;:29::47:1;;107:22:107:34:0;:36::43;;:45::53;;:8::54:1;;108:25:108:33:0;;:35::42;;:8::45:1;110:16:110:24:0;;:28::45:1;;:16;;:8::47;111:16:111:28:0;;:32::49:1;;:16;;:8::51;115:17:115:25:0;;:28::36;:17:::1;:41::49:0;:8::51:1;116:16:116:24:0;;:31::32;:16::33:1;:::36;:40::46:0;:16:::1;;:8::48;118:24:118:29:0;:39::40;:24::41:1;;:36::37:0;:24::41:1;;:20::42;119:12:119:20:0;;:24::36;:12:::1;::121:9:0;120::120:30:1;119:38:121:9;124:23:124:24:0;:12::39:1;125:16:125:22:0;:39::44;:46::47;:25::48:1;:16;:51::59:0;;:16:::1;:62::74:0;;:16:::1;:77::85:0;:16:::1;:88::105;;:16;123:8:126:10;60:0:128:1;;",
+    "bytecode": "2dc0009dc2529d00cf8201459d76517f75518800ce7b517e8800cd00c78800d100ce8800d300d09d00cc00c6a26900890b7ca97b88828c7f77016188518915140000000000000000000000000000000000000000528978009c63008a76011a7f75567f7753795579518a72ad00d20201007b01317f75527f777e528a7e87776778519c63547a820114887c008a76527f75517f7701008876012e7f75011a7f7754795679518a547a547aad78528a87916900d20201017b01317f75527f777e7b7e87776778529c63008a76527f75517f77518876012e7f75011a7f7753795579518a72ad7601317f75012e7f7781b27576567f75527f77818b00d20201007b54807e527901457f7501317f777e7b01317f75011a7f777e528a7e8777677c539d537a82011488547a82011488557a825388537a008a76011a7f75567f777656795879518a567a567aad5479528a8791695379528a8791695279030000bf8403000000885279527f750200008791697c567f75527f778154797b87648b6800d20201007b54807e547a7e537a7e7b7e528a7e87686868",
+    "sourceMap": "36::53:1;;::::1;57::60::0;;::::1;27::27:80:0;;::::1;66:4:72:5:0;;;;67:22:67:51:1;;68::68:27:0;:37::39;:22::40:1;;:34::35:0;:22::40:1;;:42::49:0;;:51::59;;:8::60:1;;69:25:69:42:0;:8::45:1;71:27:71:28:0;:16::43:1;:47::53:0;:56::61;:71::73;:56::74:1;;:68::69:0;:56::74:1;;:47;:77::94;;:47;:8::96;66:58:72:5;:4;77::85::0;;;;:67:77:88;;;;;78:42:78:50;:22::51:1;;79:16:79:21:0;:31::32;:16::33:1;;:28::29:0;:16::33:1;;:37::41:0;:8::43:1;80:22:80:27:0;:38::40;:22::41:1;;:34::36:0;:22::41:1;;:43::54:0;;:56::68;;:8::69:1;;81:25:81:37:0;;:39::50;;:8::53:1;83:16:83:29:0;:33::50:1;;:16;;:8::52;84:27:84:28:0;:16::43:1;:47::53:0;:56::61;:71::73;:56::74:1;;:68::69:0;:56::74:1;;:47;:77::90:0;:47:::1;:8::92;77:90:85:5;:4;89::102::0;;;;90:22:90:51:1;;91:16:91:21:0;:31::32;:16::33:1;;:28::29:0;:16::33:1;;:37::41:0;:8::43:1;92:22:92:27:0;:38::40;:22::41:1;;:34::36:0;:22::41:1;;:43::54:0;;:56::68;;:8::69:1;;93:25:93:50:0;:8::53:1;95:32:95:37:0;:48::50;:32::51:1;;:44::46:0;:32::51:1;;:28::52;:8::54;;97:28:97:33:0;:43::44;:28::45:1;;:40::41:0;:28::45:1;;:24::46;:::50;99:23:99:24:0;:12::39:1;100:16:100:22:0;:39::48;:50::51;:25::52:1;:16;:55::60:0;;:71::73;:55::74:1;;:67::69:0;:55::74:1;;:16;:77::82:0;:93::95;:77::96:1;;:89::91:0;:77::96:1;;:16;:99::116;;:16;98:8:101:10;89:68:102:5;:4;106::129::0;;;:55:106:71;;;;;:73::93;;;;;:95::110;;;;;107:42:107:50;;:22::51:1;;108:29:108:34:0;:44::46;:29::47:1;;:41::42:0;:29::47:1;;109:22:109:34:0;:36::43;;:45::53;;:8::54:1;;110:25:110:33:0;;:35::42;;:8::45:1;112:16:112:24:0;;:28::45:1;;:16;;:8::47;113:16:113:28:0;;:32::49:1;;:16;;:8::51;117:17:117:25:0;;:28::36;:17:::1;:41::49:0;:8::51:1;118:16:118:24:0;;:31::32;:16::33:1;:::36;:40::46:0;:16:::1;;:8::48;120:24:120:29:0;:39::40;:24::41:1;;:36::37:0;:24::41:1;;:20::42;121:12:121:20:0;;:24::36;:12:::1;::123:9:0;122::122:30:1;121:38:123:9;126:23:126:24:0;:12::39:1;127:16:127:22:0;:39::44;:46::47;:25::48:1;:16;:51::59:0;;:16:::1;:62::74:0;;:16:::1;:77::85:0;:16:::1;:88::105;;:16;125:8:128:10;62:0:130:1;;",
     "logs": [],
     "requires": [
       {
-        "ip": 29,
-        "line": 67
-      },
-      {
-        "ip": 45,
+        "ip": 30,
         "line": 69
       },
       {
-        "ip": 66,
-        "line": 77
+        "ip": 46,
+        "line": 71
       },
       {
-        "ip": 84,
+        "ip": 68,
         "line": 79
       },
       {
-        "ip": 90,
+        "ip": 86,
         "line": 81
       },
       {
-        "ip": 105,
-        "line": 82
+        "ip": 92,
+        "line": 83
       },
       {
-        "ip": 121,
-        "line": 89
+        "ip": 107,
+        "line": 84
       },
       {
-        "ip": 136,
+        "ip": 123,
         "line": 91
       },
       {
-        "ip": 145,
+        "ip": 138,
         "line": 93
       },
       {
-        "ip": 184,
-        "line": 96
+        "ip": 147,
+        "line": 95
       },
       {
-        "ip": 222,
-        "line": 108
+        "ip": 186,
+        "line": 98
       },
       {
-        "ip": 229,
+        "ip": 228,
         "line": 110
       },
       {
-        "ip": 236,
-        "line": 111
+        "ip": 235,
+        "line": 112
       },
       {
         "ip": 242,
-        "line": 115
+        "line": 113
       },
       {
-        "ip": 251,
-        "line": 116
+        "ip": 248,
+        "line": 117
       },
       {
-        "ip": 286,
-        "line": 123
+        "ip": 257,
+        "line": 118
+      },
+      {
+        "ip": 292,
+        "line": 125
       }
     ],
-    "sourceTags": "45:45:sc;51:55:pv;105:105:sc;184:184:sc;188:191:pv;192:196:pv;197:201:pv",
+    "sourceTags": "45:45:sc;51:55:pv;106:106:sc;185:185:sc;190:194:pv;195:199:pv;200:204:pv",
     "functions": [
       {
         "id": 0,
         "name": "continuedController",
-        "inputs": [],
-        "bytecode": "c0009dc2529d00cf8201459d76517f75518800ce01207f77518800cd00c78800d100ce8800d300d09d00cc00c6a269",
-        "sourceMap": "35:12:35:33;:37::38;:4::40:1;36:12:36:22:0;:26::27;:4::29:1;38:28:38::0;:18::44:1;39:12:39:24;:28::30:0;:4::32:1;40:12:40:17:0;:24::25;:12::26:1;:::29;:33::37:0;:4::39:1;43:22:43:23:0;:12::38:1;:45::47:0;:12::48:1;:::51;:55::59:0;:4::61:1;45:23:45:24:0;:12::41:1;:55::56:0;:45::73:1;:4::75;46:23:46:24:0;:12::39:1;:53::54:0;:43::69:1;:4::71;47:23:47:24:0;:12::37:1;:51::52:0;:41::65:1;:4::67;48:23:48:24:0;:12::31:1;:45::46:0;:35::53:1;:12;:4::55",
+        "inputs": [
+          {
+            "name": "identity",
+            "type": "bytes32"
+          }
+        ],
+        "bytecode": "c0009dc2529d00cf8201459d76517f75518800ce7b517e8800cd00c78800d100ce8800d300d09d00cc00c6a269",
+        "sourceMap": "37:12:37:33;:37::38;:4::40:1;38:12:38:22:0;:26::27;:4::29:1;40:28:40::0;:18::44:1;41:12:41:24;:28::30:0;:4::32:1;42:12:42:17:0;:24::25;:12::26:1;:::29;:33::37:0;:4::39:1;45:22:45:23:0;:12::38:1;:42::50:0;:53::57;:42:::1;:4::59;47:23:47:24:0;:12::41:1;:55::56:0;:45::73:1;:4::75;48:23:48:24:0;:12::39:1;:53::54:0;:43::69:1;:4::71;49:23:49:24:0;:12::37:1;:51::52:0;:41::65:1;:4::67;50:23:50:24:0;:12::31:1;:45::46:0;:35::53:1;:12;:4::55",
         "logs": [],
         "requires": [
           {
             "ip": 2,
-            "line": 35
+            "line": 37
           },
           {
             "ip": 5,
-            "line": 36
+            "line": 38
           },
           {
             "ip": 10,
-            "line": 39
+            "line": 41
           },
           {
             "ip": 16,
-            "line": 40
+            "line": 42
           },
           {
-            "ip": 23,
-            "line": 43
-          },
-          {
-            "ip": 28,
+            "ip": 22,
             "line": 45
           },
           {
-            "ip": 33,
-            "line": 46
-          },
-          {
-            "ip": 38,
+            "ip": 27,
             "line": 47
           },
           {
-            "ip": 44,
+            "ip": 32,
             "line": 48
+          },
+          {
+            "ip": 37,
+            "line": 49
+          },
+          {
+            "ip": 43,
+            "line": 50
           }
         ]
       },
@@ -210,16 +220,16 @@
           }
         ],
         "bytecode": "7ca97b88828c7f77016188",
-        "sourceMap": "56:20:56:22;:12::23:1;:27::34:0;:4::36:1;57:18:57:42;:27::46;:12::47;:::50;:54::70;:4::72",
+        "sourceMap": "58:20:58:22;:12::23:1;:27::34:0;:4::36:1;59:18:59:42;:27::46;:12::47;:::50;:54::70;:4::72",
         "logs": [],
         "requires": [
           {
             "ip": 3,
-            "line": 56
+            "line": 58
           },
           {
             "ip": 9,
-            "line": 57
+            "line": 59
           }
         ],
         "inlineRanges": "8:8:REQUIRED_SIGHASH"
@@ -230,7 +240,7 @@
         "kind": "constant",
         "inputs": [],
         "bytecode": "140000000000000000000000000000000000000000",
-        "sourceMap": "25:37:25:79",
+        "sourceMap": "27:37:27:79",
         "logs": [],
         "requires": []
       },
@@ -239,7 +249,7 @@
         "kind": "constant",
         "inputs": [],
         "bytecode": "0161",
-        "sourceMap": "29:35:29:39",
+        "sourceMap": "31:35:31:39",
         "logs": [],
         "requires": []
       }
