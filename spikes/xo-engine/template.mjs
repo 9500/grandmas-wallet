@@ -34,6 +34,7 @@ export const spikeTemplate = {
       ...view('Send'),
       roles: {
         owner: {
+          generate: ['ownerKey'],
           requirements: {
             variables: ['identity', 'stateBody', 'sentSatoshis', 'recipientLockingScript'],
             secrets: ['ownerKey'],
@@ -47,6 +48,7 @@ export const spikeTemplate = {
       ...view('Request recovery'),
       roles: {
         recoverer: {
+          generate: ['recovererKey'],
           requirements: { variables: ['identity', 'stateBody', 'proposedOwnerKeyHash'], secrets: ['recovererKey'] },
         },
       },
@@ -57,6 +59,7 @@ export const spikeTemplate = {
       ...view('Finalize recovery'),
       roles: {
         recoverer: {
+          generate: ['recovererKey'],
           requirements: { variables: ['identity', 'finalizedState', 'challengeSequence'], secrets: ['recovererKey'] },
         },
       },
@@ -148,6 +151,7 @@ export const spikeTemplate = {
       ...view('Recovery controller'),
       lockingType: 'p2sh',
       lockingBytecode: 'controllerBytecode',
+      state: { variables: ['identity'] },
       roles: {
         owner: { state: { secrets: ['ownerKey'] }, actions: [{ action: 'send', role: 'owner', secrets: [{ ownerKey: null }] }] },
         recoverer: {
@@ -174,8 +178,8 @@ export const spikeTemplate = {
     },
   },
   scripts: {
-    controllerBytecode: `0x${hexOf('controller')}`,
     // Constructor argument (identity as contracts see it), then the compiled contract.
+    controllerBytecode: `<$(<identity> OP_REVERSEBYTES)> 0x${hexOf('controller')}`,
     assetBytecode: `<$(<identity> OP_REVERSEBYTES)> 0x${hexOf('asset')}`,
     // version, status, epoch | owner | recoverer | delay | proposed owner
     unlockOwnerAuthorize: '<ownerKey.schnorr_signature.all_outputs_all_utxos> <ownerKey.public_key> <0>',

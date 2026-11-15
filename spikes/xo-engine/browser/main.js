@@ -10,7 +10,7 @@ const log = (...parts) => {
 };
 
 try {
-  const mnemonic = localStorage.getItem('spike-mnemonic') ?? generateBip39Mnemonic().phrase;
+  const mnemonic = localStorage.getItem('spike-mnemonic') ?? generateBip39Mnemonic();
   localStorage.setItem('spike-mnemonic', mnemonic);
   const started = performance.now();
   const engine = await Engine.create(mnemonic, { network: XO_SUPPORTED_NETWORKS.chipnet });

@@ -144,3 +144,15 @@ The controller, asset covenant and Savings Jar were run through the full lifecyc
 **Cost:** 60,000 satoshis in, 49,655 returned. Of the 10,345 difference, 1,000 remain in the controller output and 9,345 were fees for 14 transactions at 1 satoshi per byte. A controller transaction is roughly 700 to 1,000 bytes.
 
 **Not covered by this run:** token and NFT transfers, owner updates, block-based delays, and behaviour across a chain reorganization.
+
+## D7 — Controller address is specific to each wallet
+
+**Date:** 15 Nov 2026 · **Status:** implemented, tested in the VM, and run once on chipnet; supersedes the "no constructor parameters" part of D4
+
+The controller contract takes the wallet identity as a parameter and requires the token it carries to be that identity's NFT with mutable capability. Compiled size is 405 bytes plus the 33-byte identity push.
+
+**Why:** with one shared controller script, every wallet's controller sat at the same address. Tools that follow outputs by script (the XO engine, Electrum subscriptions) then show every wallet's controller to every user: an XO test account listed another wallet's controller as its own spendable output. With the identity in the script, a wallet's controller can be found and watched by address, and a notification for that address concerns that wallet only.
+
+**Unchanged:** the transition rules, the state layout, the authorization interface, and the asset and Savings Jar contracts. The address is derived from the identity alone, so enrollment and restoration records need no new field. A template can express the script with the identity as a variable, so one template serves all wallets.
+
+**Evidence:** `packages/core/test/controller.test.ts` adds a test that another wallet's identity token at this wallet's controller address is rejected. The chipnet lifecycle was repeated with this contract (identity `ffc65007e29e31f46d50755bf812f1a05364b6cf0d2683264d379826a82f9939`, `docs/chipnet-log.md`): all permitted steps accepted, all three invalid attempts refused.

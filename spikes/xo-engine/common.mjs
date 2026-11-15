@@ -11,7 +11,7 @@ mkdirSync(DATA, { recursive: true });
 /** A test mnemonic per account name, created once and kept in .data (git-ignored). */
 export const mnemonicFor = (account) => {
   const path = `${DATA}${account}.mnemonic`;
-  if (!existsSync(path)) writeFileSync(path, generateBip39Mnemonic().phrase ?? generateBip39Mnemonic(), { mode: 0o600 });
+  if (!existsSync(path)) writeFileSync(path, generateBip39Mnemonic(), { mode: 0o600 });
   return readFileSync(path, 'utf8').trim();
 };
 
