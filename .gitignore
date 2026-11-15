@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# secrets and local wallet state
+.env
+.env.*
+*.sqlite
+*.sqlite-*
+*.mnemonic
+.claude/settings.local.json
