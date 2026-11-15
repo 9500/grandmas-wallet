@@ -1,0 +1,20 @@
+{
+  "name": "xo-engine-spike",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway experiments against the XO engine. Not part of the workspace build.",
+  "dependencies": {
+    "@bitauth/libauth": "3.1.0-next.8",
+    "@xo-cash/engine": "0.1.1-next.18029697917",
+    "@xo-cash/state": "0.0.5",
+    "@xo-cash/templates": "0.0.12",
+    "@xo-cash/types": "0.0.8",
+    "@xo-cash/utils": "0.0.10",
+    "fake-indexeddb": "^6.2.8"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1",
+    "vite": "^8.3.8",
+    "vite-plugin-node-polyfills": "^0.28.0"
+  }
+}
