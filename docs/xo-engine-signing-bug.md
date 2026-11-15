@@ -74,4 +74,14 @@ Two points to decide when applying it:
 
 ## Result of the fix
 
-The change was applied to the published build (`dist/index.mjs`) and tested on chipnet with a template whose contracts accept only `all_outputs_all_utxos` signatures. RESULTS_PLACEHOLDER
+The change was applied to the published build (`dist/index.mjs`) and tested on chipnet with a template whose contracts accept only `all_outputs_all_utxos` signatures. All of these two-input transactions were accepted:
+
+| Transaction | Inputs | Chipnet transaction |
+| --- | --- | --- |
+| Owner spends the contract output and a second contract output | 2 contract inputs, both `all_outputs_all_utxos` | `e445c2b2fc908d50d73910f50fad305669f6d212eda2018cde67ccd132cc9f53` |
+| Second account spends the contract output, paying the fee from the standard wallet template | 1 contract input (`all_outputs_all_utxos`) and 1 standard input (`all_outputs`) | `23b36e4a9aff6e16acd34f8455852225eb6f01286f34da8b17e8d23fdc60ba7e` |
+| The same with a relative-timelock sequence number on the contract input | as above | `00edf06db59de252bd0fc3307b51b7b13cdd78a72f89f23086b4f94c5f8e7c66` |
+
+Before the change, the first of these was rejected with `mandatory-script-verify-flag-failed`.
+
+The script that applies the change to an installed engine is `spikes/xo-engine/patches/engine-sign-all-utxos.mjs` in this repository.

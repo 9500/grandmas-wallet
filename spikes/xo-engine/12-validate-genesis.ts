@@ -5,7 +5,7 @@ import { binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
 import { validateGenesis, controllerScript, assetScript } from '../../packages/core/src/index.js';
 import { Electrum } from '../../packages/chipnet/src/electrum.js';
 
-const flow = JSON.parse(readFileSync(new URL('./.data/flow.json', import.meta.url), 'utf8'));
+const flow = JSON.parse(readFileSync(new URL(`./.data/${process.env.FLOW_NAME ?? 'flow'}.json`, import.meta.url), 'utf8'));
 const electrum = await Electrum.connect('wss://chipnet.9500.cash:443');
 const hex = await electrum.getTransaction(flow.controller.hash);
 await electrum.disconnect();
