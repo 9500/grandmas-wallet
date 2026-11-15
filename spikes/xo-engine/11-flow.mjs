@@ -5,11 +5,13 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { binToHex, hexToBin, hash160, hash256, encodeLockingBytecodeP2sh32, decodeTransactionBch, cashAddressToLockingBytecode } from '@bitauth/libauth';
 import { p2pkhTemplate } from '@xo-cash/templates';
 // The template is frozen: keys are derived under its identifier, so any edit would orphan the wallet created with it.
-const spikeTemplate = JSON.parse(readFileSync(new URL('./flow-template.json', import.meta.url), 'utf8'));
+const spikeTemplate = JSON.parse(readFileSync(new URL(`./${process.env.FLOW_NAME ?? 'flow'}-template.json`, import.meta.url), 'utf8'));
 import { openEngine, address, show, DATA } from './common.mjs';
 
 const [account, step, ...args] = process.argv.slice(2);
-const FLOW = `${DATA}flow.json`;
+// FLOW_NAME selects a wallet: its progress file in .data and its frozen template next to this script.
+const FLOW_NAME = process.env.FLOW_NAME ?? 'flow';
+const FLOW = `${DATA}${FLOW_NAME}.json`;
 const flow = existsSync(FLOW) ? JSON.parse(readFileSync(FLOW, 'utf8')) : {};
 const remember = (entries) => { Object.assign(flow, entries); writeFileSync(FLOW, JSON.stringify(flow, null, 1)); };
 const idOf = (stored) => stored.invitation?.invitationIdentifier ?? stored.invitationIdentifier;
@@ -23,7 +25,7 @@ const spike = (await engine.importTemplate(spikeTemplate)).templateIdentifier;
 await engine.setDefaultPolicies({ change: { templateIdentifier: p2pkh }, receive: { templateIdentifier: p2pkh }, address: { templateIdentifier: p2pkh } });
 // Re-create the first few addresses so their outputs are tracked again in this fresh state.
 const ownLocking = [];
-for (let i = 0; i < 12; i++) ownLocking.push(await engine.generateLockingBytecodeFromDefaultPolicy('receive'));
+for (let i = 0; i < 16; i++) ownLocking.push(await engine.generateLockingBytecodeFromDefaultPolicy('receive'));
 const template = await engine.getTemplate(spike);
 
 const coins = async () => {

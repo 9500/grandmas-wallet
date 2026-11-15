@@ -156,3 +156,15 @@ The controller contract takes the wallet identity as a parameter and requires th
 **Unchanged:** the transition rules, the state layout, the authorization interface, and the asset and Savings Jar contracts. The address is derived from the identity alone, so enrollment and restoration records need no new field. A template can express the script with the identity as a variable, so one template serves all wallets.
 
 **Evidence:** `packages/core/test/controller.test.ts` adds a test that another wallet's identity token at this wallet's controller address is rejected. The chipnet lifecycle was repeated with this contract (identity `ffc65007e29e31f46d50755bf812f1a05364b6cf0d2683264d379826a82f9939`, `docs/chipnet-log.md`): all permitted steps accepted, all three invalid attempts refused.
+
+## D8 — Contracts accept two signing types
+
+**Date:** 15 Nov 2026 · **Status:** implemented and tested in the VM; supersedes the "signing type `0x61` only" rule in D4 and D5
+
+The controller and the shared authorization interface accept a signature of type `0x41` (all inputs and outputs) or `0x61` (the same plus the amount and script of every spent output). Any other type is rejected. Compiled sizes: controller 412 bytes, asset covenant 94, Savings Jar 97.
+
+**Why:** the current XO engine cannot produce a valid `0x61` signature for a transaction with more than one input (`docs/xo-engine-signing-bug.md`), and every controller transaction has at least two. Requiring `0x61` would make the wallet unusable on the stock engine, which the hackathon bounty expects.
+
+**What `0x41` still guarantees:** the signature commits to every input outpoint, every sequence number, every output, and the signed input's own amount and script. It cannot be reused in another transaction and no output can be altered. All contract-level properties (C03–C12, C14) are unchanged, and the tests run every transition under both types.
+
+**What it gives up:** the signer's own assurance about the amounts and scripts of the *other* inputs. A signer that looks those up itself, as the wallet and the XO engine do, loses nothing. A signer that is handed a transaction without that data (an offline or hardware signer) would not notice if it were lied to about another input's amount. Such a signer should use `0x61`, which stays accepted; this project's own transaction builder uses `0x61`.
