@@ -42,7 +42,7 @@ export const recoverer = key(0x02);
 export const newOwner = key(0x03);
 export const stranger = key(0x04);
 
-export const identity = new Uint8Array(32).fill(0x1d);
+export const identity = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
 export const anyoneCanSpend = hexToBin('51'); // OP_1
 export const CONTROLLER_VALUE = 1_000n;
 
