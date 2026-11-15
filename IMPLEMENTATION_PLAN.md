@@ -2,7 +2,7 @@
 
 **Based on:** [Architecture proposal v0.1](Grandmas_Wallet_Architecture_Proposal_v0.1.md)
 **Date:** 15 November 2026
-**Target:** BCH Blaze 2026 (14–28 Nov; judging listed as 23–27 Nov — confirm the submission deadline on DoraHacks)
+**Target:** BCH Blaze 2026, "Build with XO" bounty
 
 This plan turns the proposal's Milestones A–D into concrete work. Section numbers prefixed with `§` refer to the proposal; `C01`…`X04` are its acceptance tests.
 
@@ -31,7 +31,10 @@ Findings from the references (S1–S18) and from inspecting the published packag
 | `@xo-cash/state` supports IndexedDB and SQLite; `RemoteEncryptedStateManager` is "Not implemented yet". | The restoration archive is ours to build. |
 | Commits are append-only; reservations are local only; commit expiry is not enforced. | Affects crash recovery (R04/R05) and the connection adapter (X03). |
 | Multi-party invitations need both sides to have imported the identical template. | The enrollment package must carry the exact template (§7.3). |
-| `xo-web-devtool` (blaze.xo.cash) has no declared license. | Use it as a tool only; do not copy its code. |
+| `parseTemplate` (`@xo-cash/utils`) validates with a Zod schema that "rejects unknown keys at every level" and reports every failing field in one `TemplateInvalidError`. | Confirms the point above; run `parseTemplate` in the template build so schema errors surface early. |
+| The engine README points to `playground/examples/receive-satoshis.js` in the engine repository for a full fund → sign → execute flow. | Starting point for the two-account script (B5). |
+| `xo-web-devtool` (`@xo-cash/web-dev-wallet` 0.1.0, served at blaze.xo.cash) is a Vite + React 19 app offering wallet flows, a script debugger, transaction inspection and a template builder. It has no `license` field and no LICENSE file; its README says parts were AI-written and need review. | Use it as a tool only; do not copy its code. Our UIs are built independently. |
+| The devtool pins `engine 0.1.1-next.18029697917`, `state 0.0.5`, `templates 0.0.12`, `types 0.0.8`, `utils 0.0.10`, `crypto 0.0.5`, `primitives 0.0.3`, `libauth ^3.1.0-next.8`, `@electrum-cash/web-socket 4.2.0`. | Pin the same set, so invitations we produce load in the debug tool that judges use. |
 
 ### 1.3 Contract patterns (CashTokens, CashScript modular design)
 
@@ -76,7 +79,8 @@ Findings from the references (S1–S18) and from inspecting the published packag
 | Enrollment encryption | HPKE (RFC 9180) base mode, DHKEM(X25519)/HKDF-SHA256/ChaCha20-Poly1305, via `hpke-js` | Proposal's candidate; small and standard. |
 | Archive encryption / signing | XChaCha20-Poly1305 content key; secp256k1 Schnorr record signatures by the current owner key | Separates read capability from write authority (§9.4). |
 | Chain access | Electrum (via the engine's `@electrum-cash/*`), at least two servers for monitoring | §3 "avoid a single notification endpoint". |
-| UI | Vite + React web apps (owner, bank, demo dapp) | Fastest path; mobile hardening is explicitly later work. |
+| UI | Three Vite + React single-page apps (owner wallet, bank, demo dapp), each built to static files and hosted on its own subdomain (§5) | Web UI is a requirement. Same stack as the XO devtool; mobile hardening is later work. |
+| Browser storage / chain access | `@xo-cash/state` IndexedDB backend; Electrum over secure WebSocket (`@electrum-cash/web-socket`) | The engine must run fully in the browser; no backend holds keys. |
 
 Proposed layout:
 
@@ -89,9 +93,11 @@ packages/
   archive/            record schema, signing, encryption, store adapters, write-before-sign gate
   connect/            WizardConnect XO extension (wallet + dapp sides)
 apps/
-  owner/              owner wallet + background monitor
-  bank/               recoverer console
+  owner/              owner wallet web UI + monitor
+  bank/               recoverer web UI
   demo-dapp/          application that requests the demo position action
+  archive-store/      minimal encrypted-blob HTTP store (run as two instances)
+deploy/               build + hosting configuration per subdomain
 test/                 acceptance suites C*, R*, X*
 docs/                 protocol notes, decisions log, demo script, xo-feedback-notes
 ```
@@ -192,7 +198,7 @@ Because XO secrets are derivation indexes, the **recovery credential is a dedica
 
 | # | Task | Output |
 | --- | --- | --- |
-| B1 | Spike: import a minimal covenant template into the engine on chipnet; confirm token outputs, mutable-NFT commitments computed by CashASM, `sequenceNumber`, and multi-input transactions across two locking scripts work | go/no-go notes; issues logged for XO feedback |
+| B1 | Spike (in Node **and** in a minimal browser page): import a minimal covenant template into the engine on chipnet; confirm token outputs, mutable-NFT commitments computed by CashASM, `sequenceNumber`, and multi-input transactions across two locking scripts work | go/no-go notes; issues logged for XO feedback |
 | B2 | `templates/recovery-controller`: roles `owner`, `recoverer`; actions `initialize`, `send` (ownerAuthorize + asset inputs), `requestRecovery`, `cancelRecovery`, `finalizeRecovery`, `updatePolicy`; follow-ups attached to the controller locking script per role | template + content hash |
 | B3 | Asset receive/send and Savings Jar (`deposit`, `withdraw`) as actions composing with the controller input | templates |
 | B4 | Build script that injects compiled bytecode into templates and asserts it equals the bytecode tested in Milestone A | reproducible template build |
@@ -223,29 +229,41 @@ Fallback if B1 finds a blocking engine gap: keep the template as the description
 | D2 | Messages `xo_action_request/response`, `xo_invitation_update`, `xo_action_result`; idempotent by `sequence` + invitation id | X03 |
 | D3 | Wallet side: validate template hash against the reviewed set, build the invitation, add controller + asset inputs and change, run the write-before-sign gate, show effects, sign, broadcast | owner app |
 | D4 | Demo dapp: "Open a Savings Jar" / "Withdraw" buttons; no invitation vocabulary in the UI | demo-dapp |
+| D0 | App shells for owner and bank: engine in the browser (IndexedDB), account creation, per-environment config, chipnet banner | two deployable SPAs |
 | D5 | Owner app screens: Set up recovery, Recovery enabled, Recovery request detected, Cancel recovery; developer inspector panel | §13 |
 | D6 | Bank app screens: import package, enrolled wallet, propose replacement owner, claim status, chain-derived eligibility, finalize | §13 |
 | D7 | Monitor: subscribe to the controller script hash on ≥2 Electrum servers; on Pending → alert and (configurable) auto-cancel; rebuild status after reorg/conflict | C13 |
+| D8 | Deploy wallet, bank, dapp and both stores to their subdomains; run the full demo across the public hosts | live URLs |
 
 ---
 
-## 5. Schedule
+## 5. Deployment and hosting
 
-Assumes one developer and a submission by **22 Nov** to leave margin before judging starts; adjust once the DoraHacks deadline is confirmed.
+Both web UIs are publicly reachable on subdomains of `9500.cash`. The owner wallet and the bank are **separately hosted pages on different FQDNs**. Hostnames below are placeholders until chosen.
 
-| Day | Focus | Done when |
+| Host (placeholder) | Serves | Notes |
 | --- | --- | --- |
-| Sun 15 | Plan, repo, scaffolding (A1), state codec (A2) | CI green |
-| Mon 16 | Controller + asset + jar contracts, harness (A3–A5) | positive tests pass |
-| Tue 17 | Adversarial tests, validators, chipnet smoke (A6–A9); XO spike (B1) | **gate: C03–C09 pass** |
-| Wed 18 | XO templates and two-account flow (B2–B5) | recovery runs through invitations |
-| Thu 19 | Bounty artefacts (B6–B7); enrollment + archive format (C1–C3) | invitations inspectable in the debug tool |
-| Fri 20 | Stores, gate, restore engine, replacement flow (C4–C7) | X04 passes from the command line |
-| Sat 21 | WizardConnect path, owner/bank/dapp UI, monitor (D1–D7) | end-to-end demo in browsers |
-| Sun 22 | Demo recording, README, repro instructions, **hand-written XO feedback**, submit | submitted |
-| 23–27 | Buffer during judging: fixes, docs | — |
+| `wallet.9500.cash` | owner wallet SPA | Keys and XO state live in this origin's IndexedDB only. |
+| `bank.9500.cash` | bank SPA | Separate origin, so its storage (enrollment packages, recovery mnemonic) is isolated from the wallet by the browser. Also publishes the bank's HPKE public key at a fixed path. |
+| `jar.9500.cash` | demo dapp | Third origin, so the WizardConnect path is a real cross-site connection; can be taken offline to demonstrate X01. |
+| `store1.9500.cash`, `store2.9500.cash` | archive stores | Two instances of `apps/archive-store`: put/get of opaque encrypted records with an acknowledgment. Hold no keys. |
 
-**Cut order if time runs short** (last cut first): WalletConnect (already out) → second archive store → WizardConnect path (replace with a direct in-page request) → web UIs (replace with CLI scripts) → token variants of the asset covenant. Never cut: Milestone A tests, the XO template + invitation, the adversarial demonstration.
+Consequences for the implementation:
+
+- **Everything security-relevant runs client-side.** The hosts serve static files; no server sees a mnemonic. HTTPS is mandatory (WebCrypto, WebSocket Electrum, camera for QR).
+- **Bank key authentication (§7.2):** the wallet fetches the bank's encryption public key from the bank's FQDN over TLS and shows that hostname to the user during "Set up recovery". The hostname is the "trusted directory" for the prototype; the fingerprint is displayed for out-of-band comparison.
+- **Enrollment delivery:** the wallet produces a link to `bank.9500.cash/#enroll=<HPKE ciphertext>` (fragment, so it is never sent to a server or logged) and the equivalent QR. Observing the link reveals nothing without the bank's private key (R01).
+- **Replacement device:** restoring is done by opening `wallet.9500.cash` in a fresh browser profile — a new origin storage is the "new phone". "Erase the original wallet" in the demo is clearing site data.
+- **Cross-origin:** archive stores send CORS headers for the wallet and bank origins. The wallet↔dapp path uses WizardConnect over a Nostr relay, so it needs no CORS; the relay URL is configurable.
+- **Monitoring** only runs while the wallet tab is open. The UI states this plainly ("protection is active while this page is open"); background operation is out of scope.
+- **Public exposure:** chipnet only, with a visible "test network — demo" banner on both sites; no mainnet configuration is shipped. Each app has per-environment config (network, Electrum servers, store URLs, peer hostnames) so local development uses `localhost` ports with the same code.
+- `deploy/` holds the static build output mapping and web-server configuration (cache headers, SPA fallback, a restrictive Content-Security-Policy listing only the Electrum, store and relay endpoints).
+
+**Needed from the project owner before deployment:** the chosen subdomain names, and where they are hosted (the server/provider and how files are published), so `deploy/` can target it.
+
+### Scope fallbacks
+
+If something must be dropped, drop in this order: WalletConnect (already out) → second archive store → WizardConnect path (replace with a direct cross-origin request from the dapp) → token variants of the asset covenant. Never dropped: Milestone A tests, the XO template and invitations, the owner and bank web UIs, the adversarial demonstration.
 
 ---
 
@@ -278,7 +296,9 @@ The two demonstrations from §18 become scripts: `scripts/demo-recovery.ts` (ful
 | Chipnet block timing makes the demo slow or flaky | 3-block delay; pre-recorded run as backup; all logic also proven in the VM |
 | Engine `next` release changes mid-week | Exact version pins and a lockfile |
 | Feedback rejected as AI-written | Written personally from `docs/xo-feedback-notes.md` |
-| Scope | Cut order in §5 |
+| Engine does not run cleanly in the browser (IndexedDB backend, WebSocket Electrum, bundling) | Verify in spike B1 with a minimal Vite page, not only in Node |
+| Publicly hosted demo is mistaken for a real wallet | Chipnet only, permanent test banner, no mainnet build |
+| Scope | Fallback order in §5 |
 
 ---
 
@@ -286,9 +306,8 @@ The two demonstrations from §18 become scripts: `scripts/demo-recovery.ts` (ful
 
 Mainnet deployment and audit, production challenge duration, mobile background scheduling, WalletConnect, Cauldron/Moria integrations, multi-guardian schemes, watchtowers and claim bonds, on-chain archive profile, mnemonic-only bootstrap, controller upgrades and migration.
 
-## 9. Open questions for the project owner
+## 9. Decisions from the project owner (15 Nov 2026)
 
-1. Team size and the actual submission deadline (changes §5).
-2. Licence for this repository (MIT suggested, matching the XO packages).
-3. Is a CLI-driven demo acceptable if the web UIs are cut, or is a visual demo a must?
-4. Should the bank role be demonstrated as a second browser profile or as a separate hosted page?
+- Licence: MIT.
+- Web UIs are required for both the wallet and the bank, publicly available on subdomains of `9500.cash`, on different FQDNs.
+- Time and progress tracking is handled by the project owner; this plan defines order and exit criteria, not dates.

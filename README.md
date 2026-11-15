@@ -10,3 +10,7 @@ Built for BCH Blaze 2026 on the XO stack.
 
 - [Architecture proposal v0.1](Grandmas_Wallet_Architecture_Proposal_v0.1.md)
 - [Implementation plan](IMPLEMENTATION_PLAN.md)
+
+## License
+
+[MIT](LICENSE)
