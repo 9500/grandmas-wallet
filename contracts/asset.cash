@@ -1,0 +1,22 @@
+pragma cashscript ^0.14.0;
+
+import "./lib/authorization.cash";
+
+// Grandma's Wallet asset covenant.
+//
+// Holds BCH, fungible tokens or an NFT for the wallet identified by
+// `identity`. Its address is the wallet's receiving address and stays the
+// same when the owner key is replaced.
+//
+// Transaction layout:
+//   Inputs:  00-controller, 01+ assets and anything else
+//   Outputs: 00-controller, 01+ anything
+//
+// Outputs are not restricted here: the owner's signature covers every output,
+// and the wallet decides where payments and change go.
+contract Asset(bytes32 identity) {
+    function spend(pubkey ownerPk, sig ownerSig) {
+        ownerApproves(identity, ownerPk, ownerSig);
+        require(checkSig(ownerSig, ownerPk));
+    }
+}

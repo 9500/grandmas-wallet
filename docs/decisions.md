@@ -92,3 +92,38 @@ Source: `contracts/controller.cash` (CashScript 0.14.0). Compiled size: 402 byte
 - The epoch stops at 2^31-1 owner changes.
 
 **Tests:** `packages/core/test/controller.test.ts` runs the compiled bytecode in the libauth 2026 VM with standardness rules on. Each rejection test first confirms the unmodified transaction is accepted, then applies one change. Covered acceptance tests at controller level: C01, C03, C04, C05, C06, C09, C10, C11, C12, C14, X02. C02, C07 and C08 need the asset and application contracts.
+
+## D5 — Shared authorization interface v1, asset covenant and Savings Jar
+
+**Date:** 15 Nov 2026 · **Status:** implemented and tested in the VM; not audited, not yet run on chipnet
+
+Sources: `contracts/lib/authorization.cash` (the interface), `contracts/asset.cash` (87 bytes), `contracts/savingsJar.cash` (90 bytes).
+
+**Interface v1.** A protected input is constructed with the wallet identity (the controller's token category) and requires all of:
+
+1. Input 0 carries that identity's NFT with mutable capability.
+2. The state in input 0 is 69 bytes with version `0x01`.
+3. A public key that hashes to the owner recorded in that state, and a signature by it with signing type `0x61`.
+4. Output 0 carries the same identity NFT, and its state equals the input state with the claim cleared: same epoch, owner, recoverer and delay, status Active.
+
+Rule 4 is stricter than the implementation plan proposed ("same owner and epoch"): the recoverer and delay must be unchanged too. The only controller transitions that produce such a successor are an owner authorization and an owner update that changes nothing.
+
+**Consequences**
+
+- A recovery claim or completion can never share a transaction with a protected spend, whoever signs the protected input (C07, C08).
+- Replacing the owner, recoverer or delay and spending protected outputs are separate transactions.
+- Spending while a claim is pending works in one transaction and cancels the claim (C10).
+- After recovery the old owner key fails on every protected output at once, and the new owner spends them where they are (C12).
+- Each protected input carries its own owner public key and signature (about 100 bytes per input).
+
+**Asset covenant.** One script per identity; holds BCH, fungible tokens or NFTs. It places no rule on outputs: the owner's signature covers them and the wallet chooses where change goes. It is a pay-to-script-hash (32-byte) output although the script would fit a bare script, because the wallet's receiving address must be expressible as a CashAddress that other wallets can pay.
+
+**Savings Jar.** Parameters: identity and unlock time (block height or timestamp). Withdrawal needs the interface and a transaction locktime at or after the unlock time. Deposits are ordinary payments to the jar address; there is no separate top-up function. The unlock time is part of the script, so it must be preserved to find and spend the jar again — it is the first piece of data the restoration archive has to carry.
+
+**Known limits**
+
+- All of a wallet's assets sit at one address, so its balance and activity are publicly linked.
+- Every protected spend consumes and recreates the controller, so a wallet's spends are sequential.
+- Tokens or outputs sent to these addresses by others are spendable by the owner like any other; nothing here filters them.
+
+**Tests:** `packages/core/test/protected.test.ts`. Rejection tests for the attacks check that the transaction fails at the protected input while the controller input on its own is satisfied, so the protection is shown to come from the interface and not from the controller. With these, the controller, asset covenant and Savings Jar pass C01–C12 and C14 in the VM, which meets the plan's first checkpoint (C03–C09). C13 concerns wallet behaviour on reorganizations and is not a contract test.

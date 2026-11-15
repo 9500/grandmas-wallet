@@ -10,6 +10,7 @@ import { expect } from 'vitest';
 
 import {
   type ControllerState,
+  type ProtectedScript,
   type ControllerUpdate,
   afterFinalizeRecovery,
   afterOwnerAuthorize,
@@ -100,6 +101,19 @@ export interface Spend {
   /** Place the funding input before the controller. */
   controllerSecond?: boolean;
   extraOutputs?: Output[];
+  /** Protected inputs (assets, application positions) spent after the controller and funding inputs. */
+  protectedInputs?: ProtectedInput[];
+  locktime?: number;
+}
+
+/** An input guarded by the shared authorization interface. */
+export interface ProtectedInput {
+  source: Output;
+  script: ProtectedScript;
+  signer: Key;
+  presentedPublicKey?: Uint8Array;
+  signingType?: number;
+  sequence?: number;
 }
 
 export interface ResolvedSpend {
@@ -147,11 +161,23 @@ export const build = (spend: Spend): ResolvedSpend => {
   };
 
   const controllerIndex = spend.controllerSecond === true ? 1 : 0;
-  const sourceOutputs = controllerIndex === 0 ? [controllerSource, funding] : [funding, controllerSource];
+  const protectedInputs = spend.protectedInputs ?? [];
+  const sourceOutputs = [
+    ...(controllerIndex === 0 ? [controllerSource, funding] : [funding, controllerSource]),
+    ...protectedInputs.map(({ source }) => source),
+  ];
   const transaction: TransactionCommon = {
     version: spend.version ?? 2,
-    locktime: 0,
-    inputs: controllerIndex === 0 ? [controllerInput, fundingInput] : [fundingInput, controllerInput],
+    locktime: spend.locktime ?? 0,
+    inputs: [
+      ...(controllerIndex === 0 ? [controllerInput, fundingInput] : [fundingInput, controllerInput]),
+      ...protectedInputs.map(({ sequence }, index) => ({
+        outpointTransactionHash: new Uint8Array(32).fill(0xa0 + index),
+        outpointIndex: index,
+        sequenceNumber: sequence ?? 0,
+        unlockingBytecode: new Uint8Array(0),
+      })),
+    ],
     outputs: [
       ...(successor === null ? [] : [successor]),
       { lockingBytecode: anyoneCanSpend, valueSatoshis: 3_000n },
@@ -193,6 +219,23 @@ export const build = (spend: Spend): ResolvedSpend => {
   if (input === undefined) throw new Error('missing controller input');
   input.unlockingBytecode = unlockingBytecode;
 
+  protectedInputs.forEach((protectedInput, index) => {
+    const inputIndex = 2 + index;
+    const target = transaction.inputs[inputIndex];
+    if (target === undefined) throw new Error('missing protected input');
+    target.unlockingBytecode = protectedInput.script.unlock({
+      publicKey: protectedInput.presentedPublicKey ?? protectedInput.signer.publicKey,
+      signature: signInput({
+        transaction,
+        sourceOutputs,
+        inputIndex,
+        coveredBytecode: protectedInput.script.redeemBytecode,
+        privateKey: protectedInput.signer.privateKey,
+        ...(protectedInput.signingType === undefined ? {} : { signingType: protectedInput.signingType }),
+      }),
+    });
+  });
+
   return { sourceOutputs, transaction };
 };
 
@@ -207,7 +250,11 @@ export const expectAccepted = (spend: Spend | ResolvedSpend): void => {
 };
 
 export const expectRejected = (spend: Spend | ResolvedSpend): void => {
-  expect(verify(spend)).toBeTypeOf('string');
+  const result = verify(spend);
+  expect(result).toBeTypeOf('string');
+  // A transaction that pays out more BCH than it takes in is rejected before
+  // any script runs, which would hide what the test means to check.
+  expect(result).not.toContain('sum of transaction output values');
 };
 
 /**
@@ -217,4 +264,22 @@ export const expectRejected = (spend: Spend | ResolvedSpend): void => {
 export const expectChangeRejected = (base: Spend, change: Partial<Spend>): void => {
   expectAccepted(base);
   expectRejected({ ...base, ...change });
+};
+
+/** The index of the input whose evaluation failed, or `undefined` if the transaction is valid. */
+export const failingInput = (spend: Spend | ResolvedSpend): number | undefined => {
+  const result = verify(spend);
+  if (result === true) return undefined;
+  const match = /input index (\d+)/.exec(result);
+  if (match?.[1] === undefined) throw new Error(`Rejected without naming an input: ${result}`);
+  return Number(match[1]);
+};
+
+/**
+ * Assert that the transaction is rejected by a protected input (index 2 or
+ * later) while the controller input on its own is satisfied. Evaluation stops
+ * at the first failing input, so a failure at index 2+ means inputs 0 and 1 passed.
+ */
+export const expectRejectedByProtectedInput = (spend: Spend | ResolvedSpend): void => {
+  expect(failingInput(spend)).toBeGreaterThanOrEqual(2);
 };

@@ -4,7 +4,7 @@ A Bitcoin Cash wallet that can recover access after a lost phone without manual 
 
 Built for BCH Blaze 2026 on the XO stack.
 
-**Status:** early development. The recovery controller contract exists and is tested in a virtual machine only. Nothing has been audited or run on a network.
+**Status:** early development. The recovery controller, the asset covenant and a demonstration application (Savings Jar) exist as contracts and are tested in a virtual machine only. Nothing has been audited or run on a network.
 
 ## Documents
 
