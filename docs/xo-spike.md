@@ -85,7 +85,7 @@ Two small changes, both outside the engine itself:
 
 For chipnet the activation height can be a constant, since it is now history. Mainnet activates by median time past in May 2027, so a general fix has to derive the activation from the header chain, which needs the eleven headers before each block.
 
-A local fix has not been made. The engine takes network parameters through its `electrumServers` option, so only the formula would need patching in the installed package.
+A local fix exists: `spikes/xo-engine/patches/chipnet-faster-blocks.mjs` changes the two installed packages. With it, verification reaches the tip about 10 seconds after start, follows new blocks, and logs no errors once it has caught up. The write-up for the maintainers is `docs/xo-chipnet-header-verification.md`.
 
 ## Consequences for the design
 

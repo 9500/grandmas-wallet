@@ -19,7 +19,16 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const engine = await openEngine(account);
 const noise = console.error;
-console.error = () => undefined; // header verification noise, see experiment 5
+if (process.env.WAIT_SYNC === '1') {
+  // Give block header verification time to reach the tip before anything asks about confirmed transactions.
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const status = await engine.getChainStatus();
+    if (status.verifiedHeight >= status.currentHeight) break;
+    await wait(2000);
+  }
+}
+const engineErrors = [];
+console.error = (...args) => engineErrors.push(String(args[0]).slice(0, 120)); // header verification noise without the chipnet patch, see experiment 5
 const p2pkh = (await engine.importTemplate(p2pkhTemplate)).templateIdentifier;
 const spike = (await engine.importTemplate(spikeTemplate)).templateIdentifier;
 await engine.setDefaultPolicies({ change: { templateIdentifier: p2pkh }, receive: { templateIdentifier: p2pkh }, address: { templateIdentifier: p2pkh } });
@@ -220,6 +229,7 @@ try {
   console.log('FAILED:', error.name, error.message, (error.stack ?? '').split('\n').slice(1, 6).join(' <- ').replace(/file:[^ ]*index.mjs/g, '…'));
 } finally {
   console.error = noise;
+  if (process.env.SHOW_ERRORS === '1') console.log('engine errors logged:', engineErrors.length, [...new Set(engineErrors)].slice(0, 2));
   await engine.stop().catch(() => undefined);
   process.exit(0);
 }
