@@ -8,6 +8,7 @@ Bitcoin Cash wallet with on-chain, challenge-period key recovery, built on the X
 # Workflow
 
 - Run `npm run check` before every commit.
+- After adding or changing a dependency, regenerate the lockfile from scratch (`rm -rf node_modules package-lock.json && npm install`). A lockfile updated incrementally has twice failed `npm ci` on CI.
 - Commit locally as work progresses, but push to GitHub only at major milestones or when asked. CI runs on push, so do not push just to run it.
 
 # Commit and Release Guidelines
