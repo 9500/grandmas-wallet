@@ -52,7 +52,40 @@ Checked on 15 Nov 2026: no newer release exists that could fix it. The engine in
 
 The cause is the switch to one-minute blocks. The packaged chipnet parameters fix the ideal block time at 600 seconds. Height 332451 (12:35 UTC on 15 Nov) is the first block under the new rules: it claims minimum difficulty after a gap of 160 seconds, which the new rules allow (more than twice 60 seconds) and the old ones do not (more than twice 600), and the blocks after it use a difficulty about ten times lower than before (experiment 9).
 
-The engine accepts custom network parameters through its `electrumServers` option, so a local workaround may be possible once the new chipnet difficulty parameters are known. It has not been tried. For now the effect is limited to logged errors and a chain status that stays behind the tip.
+### The rule chipnet follows now
+
+Read from the source the chipnet build is made from: Bitcoin Cash Node merge request !2184, "Implement CHIP-2025-03 Faster Blocks for Bitcoin Cash" (branch `blocktime/proposed1`, commit `6f12f6a`), files `src/chainparams.cpp`, `src/consensus/consensus.h` and `src/pow.cpp`. The master branch does not contain it.
+
+| Parameter (chipnet) | Value |
+| --- | --- |
+| Activation | `upgrade2027ActivationTime = 1794744000` (2026-11-15 12:00:00 UTC); a block is under the new rules when its parent's median time past is at or after this |
+| First block under the new rules | height 332451 (derived from the headers, not a constant in the source) |
+| Ideal block time | 600 seconds before, 60 seconds from that block on |
+| Difficulty anchor | unchanged: height 16844, bits `0x1d00ffff`, previous block time 1605451779, mined at a 600-second interval |
+| Half-life | unchanged: 3600 seconds |
+| Minimum-difficulty rule (test networks) | allowed when a block's time is more than twice the ideal block time after its parent: 1200 seconds before, 120 seconds after |
+
+The difficulty formula changes from counting blocks to counting "ticks", the sum of the ideal block times of all blocks so far:
+
+```
+exponent = (parent time - anchor previous time) - (ticks at parent - ticks at anchor + 600)
+target   = anchor target * 2^(exponent / half-life) * (600 / ideal block time of this block)
+```
+
+Before the activation every block adds 600 ticks, so this equals the old formula. After it, each block adds 60 ticks and the target is multiplied by ten.
+
+Experiment 16 implements this reading and compares it with real chipnet headers: 24 blocks around the activation and the last 300 blocks up to the tip (height 333059). All 324 match.
+
+### What a fix takes
+
+Two small changes, both outside the engine itself:
+
+- `@electrum-cash/checkpoint`: chipnet's parameters gain the activation point and the new ideal block time.
+- `@electrum-cash/application`: `calculateAsertTarget` uses the tick-based formula and the per-block ideal time for the minimum-difficulty rule. About 30 to 40 lines.
+
+For chipnet the activation height can be a constant, since it is now history. Mainnet activates by median time past in May 2027, so a general fix has to derive the activation from the header chain, which needs the eleven headers before each block.
+
+A local fix has not been made. The engine takes network parameters through its `electrumServers` option, so only the formula would need patching in the installed package.
 
 ## Consequences for the design
 
