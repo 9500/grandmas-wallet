@@ -158,10 +158,15 @@ const operations: Record<string, (request: Json) => Promise<unknown>> = {
 
   /** Join an invitation another account started, generating the keys the role needs. */
   join: async (request) => {
-    const { invitation, role, variables, derive } = request as {
-      invitation: string; role: string; variables?: Variables; derive?: Record<string, string>;
+    const { invitation, role, generate, variables, derive } = request as {
+      invitation: string; role: string; generate?: string[]; variables?: Variables; derive?: Record<string, string>;
     };
-    const stored = await engine.acceptInvitation(deserializeInvitation(invitation), { roleIdentifier: role });
+    const incoming = deserializeInvitation(invitation);
+    const stored = await engine.acceptInvitation(incoming, {
+      roleIdentifier: role,
+      // Keys the role does not generate by itself are created only when asked for, on first use.
+      ...(generate === undefined ? {} : { intent: { action: incoming.actionIdentifier, role, generate } }),
+    });
     const invitationIdentifier = identifierOf(stored);
     const all: Variables = { ...variables };
     for (const [variableIdentifier, secret] of Object.entries(derive ?? {})) all[variableIdentifier] = await keyHash(secret);

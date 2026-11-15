@@ -43,11 +43,12 @@ describe('templates', () => {
     expect(savingsJarTemplate.scripts['unlockSavingsJar']).toBe('');
   });
 
-  it('generates a key only where a wallet or a new owner first appears', () => {
+  it('generates a key in one place only: when a wallet is created', () => {
+    // Everything else finds its key through the engine's stored state, or asks for a key when joining.
     const generating = Object.entries(grandmasWalletTemplate.actions).flatMap(([action, { roles }]) =>
       Object.entries(roles ?? {}).flatMap(([role, { generate }]) => (generate === undefined ? [] : [`${action}/${role}`])),
     );
-    expect(generating.sort()).toEqual(['createWallet/owner', 'requestRecovery/owner']);
+    expect(generating).toEqual(['createWallet/owner']);
   });
 
   it('keeps the controller first among inputs and outputs wherever it is spent', () => {
@@ -109,7 +110,9 @@ describe.each([
     const missing = [...usedBy(actionName)].filter((name) => !declared.has(name));
     // A key that the action itself creates is declared without being used in that transaction.
     const created = new Set(roles.flatMap((role) => role.generate ?? []));
-    const unused = [...declared].filter((name) => !usedBy(actionName).has(name) && !created.has(name));
+    // The new owner's key is declared for a recovery request, which names it without using it.
+    const named = actionName === 'requestRecovery' ? new Set(['ownerKey']) : new Set<string>();
+    const unused = [...declared].filter((name) => !usedBy(actionName).has(name) && !created.has(name) && !named.has(name));
     expect(missing, 'used but not declared').toEqual([]);
     expect(unused, 'declared but not used').toEqual([]);
   });

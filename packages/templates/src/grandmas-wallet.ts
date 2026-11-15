@@ -190,8 +190,10 @@ export const grandmasWalletTemplate = {
         },
         owner: {
           name: 'Become the new owner',
-          description: 'Create the key that will own the wallet once recovery is complete.',
-          generate: ['ownerKey'],
+          description: 'Name the key that will own the wallet once recovery is complete.',
+          // The new owner's device creates its key the first time it joins a request, by asking for it when
+          // it accepts, and uses that same key if a request has to be made again. Generating one here would
+          // give it a different key on every request, while the engine keeps signing with the first.
           requirements: { variables: ['proposedOwnerKeyHash'], secrets: ['ownerKey'] },
         },
       },

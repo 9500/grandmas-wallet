@@ -5,8 +5,8 @@
 //   npm run xo-demo -- addresses     show where each account receives ordinary coins
 //   npm run xo-demo -- run           the lifecycle
 //   npm run xo-demo -- run-short     the lifecycle without the cancelled request and the payments
-//   npm run xo-demo -- rescue        return a wallet's funds after a run that stopped part-way
-//   npm run xo-demo -- pay <from> <account or address> <satoshis>   move ordinary coins
+//   npm run xo-demo -- rescue [file] return a wallet's funds after a run that stopped part-way
+//   npm run xo-demo -- distribute <from> <account or address>=<satoshis> ...   move ordinary coins
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -217,6 +217,8 @@ class Lifecycle {
    */
   async send(agent: Agent, built: Built, step: string, shows: string, options: { waitUntilFinal?: boolean } = {}): Promise<TransactionCommon> {
     const transaction = decode(built.transactionHex);
+    const unsigned = (built.missing as { inputsMissingSignatures?: unknown[] } | undefined)?.inputsMissingSignatures ?? [];
+    if (unsigned.length > 0) throw new Error(`${step}: ${unsigned.length} input(s) were left unsigned: ${JSON.stringify(unsigned).slice(0, 300)}`);
     const check = verifyTransaction({ transaction, sourceOutputs: await this.spent(transaction) });
     if (check !== true) throw new Error(`${step}: the engine built a transaction that fails the local check: ${check}`);
     // The network relays at one satoshi per byte; a lower fee would be refused only after the invitation is final.
@@ -241,6 +243,13 @@ class Lifecycle {
       }
     }
     this.remember(built.transactionHex, built.transactionId);
+    // The engine's list of coins trails a broadcast; wait until it no longer offers what was just spent.
+    const spentOutpoints = new Set(transaction.inputs.map((input) => `${hex(input.outpointTransactionHash)}:${input.outpointIndex}`));
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const coins = await agent.request<Coin[]>('coins');
+      if (!coins.some((coin) => spentOutpoints.has(`${coin.transactionId}:${coin.index}`))) break;
+      await sleep(1_500);
+    }
     const file = `${String(this.record.length + 1).padStart(2, '0')}-${step}.json`;
     writeFileSync(resolve(INVITATIONS, file), `${invitation}\n`);
     this.record.push({ step, shows, account: agent.name, transactionId: built.transactionId, file });
@@ -395,6 +404,8 @@ class Lifecycle {
     const joined = await this.replacement.request<{ invitation: string; invitationIdentifier: string; derived: Record<string, string> }>('join', {
       invitation: started.invitation,
       role: 'owner',
+      // The device creates its owner key on its first request and names the same key on any later one.
+      ...(firstTime ? { generate: ['ownerKey'] } : {}),
       derive: { proposedOwnerKeyHash: 'ownerKey' },
     });
     const built = await this.recoverer.request<Built>('continue', {
@@ -528,8 +539,9 @@ class Lifecycle {
  * the key the XO engine would derive. For a run that stopped part-way, whose engine state is gone.
  */
 const rescue = async (agents: Agent[]): Promise<void> => {
-  if (!existsSync(ON_CHAIN)) throw new Error('nothing recorded to rescue');
-  const record = JSON.parse(readFileSync(ON_CHAIN, 'utf8')) as {
+  const recordPath = process.argv[3] === undefined ? ON_CHAIN : resolve(DATA, process.argv[3]);
+  if (!existsSync(recordPath)) throw new Error('nothing recorded to rescue');
+  const record = JSON.parse(readFileSync(recordPath, 'utf8')) as {
     identity: string;
     controller: { transactionId: string; index: number };
     wallet: { transactionId: string; index: number };
@@ -576,7 +588,7 @@ const rescue = async (agents: Agent[]): Promise<void> => {
     if (!result.accepted) throw new Error(`rescue refused by the network: ${result.reason}`);
     say(`Returned ${built.transaction.outputs[1]?.valueSatoshis} sat to ${holder.agent.name} (${built.transactionId}).`);
     if (record.jar !== undefined && !jarUnlocked) say('A savings jar is still locked; run rescue again later to return it.');
-    else writeFileSync(ON_CHAIN, JSON.stringify({ ...record, rescued: built.transactionId }, null, 1));
+    else writeFileSync(recordPath, JSON.stringify({ ...record, rescued: built.transactionId }, null, 1));
   } finally {
     await electrum.disconnect();
   }
@@ -599,19 +611,35 @@ const main = async (): Promise<void> => {
     for (const agent of agents) {
       say(`${agent.name.padEnd(12)} ${addressOf(agent.coinLockingBytecode)}  ${total(await agent.coins())} sat`);
     }
-    if (command === 'pay') {
-      // Move ordinary coins from one account to another account or address, for setting up a run.
-      const [, from, to, amount] = process.argv.slice(2);
+    if (command === 'distribute') {
+      // Move ordinary coins from one account to others, for setting up a run:
+      //   distribute <from> <account or address>=<satoshis> ...
+      // All payments happen in one session, because an account's engine state, and with it the change of
+      // each payment, is lost when its process ends. What is left goes back to the account's first address.
+      const [, from, ...targets] = process.argv.slice(2);
       const payer = agents.find((agent) => agent.name === from);
-      const recipient = agents.find((agent) => agent.name === to);
-      const decoded = recipient === undefined ? cashAddressToLockingBytecode(to ?? '') : undefined;
-      if (payer === undefined || amount === undefined || typeof decoded === 'string') {
-        throw new Error('usage: pay <owner|recoverer|replacement> <account or chipnet address> <satoshis>');
+      if (payer === undefined || targets.length === 0) throw new Error('usage: distribute <from> <account or address>=<satoshis> ...');
+      const pay = async (lockingBytecode: string, amount: bigint, label: string): Promise<void> => {
+        const built = await payer.request<Built>('pay', { lockingBytecode, satoshis: sats(amount) });
+        await payer.request('broadcast', { invitationIdentifier: built.invitationIdentifier });
+        say(`Paid ${amount} sat from ${from} to ${label} (${built.transactionId}).`);
+        // Wait for the engine to drop the spent coins and pick up the change before the next payment.
+        for (let attempt = 0; attempt < 40; attempt++) {
+          const coins = await payer.request<Coin[]>('coins');
+          if (coins.every((coin) => coin.transactionId === built.transactionId)) return;
+          await sleep(1_500);
+        }
+        throw new Error('the engine did not register the payment');
+      };
+      for (const target of targets) {
+        const [to = '', amount = ''] = target.split('=');
+        const recipient = agents.find((agent) => agent.name === to);
+        const decoded = recipient === undefined ? cashAddressToLockingBytecode(to) : undefined;
+        if (typeof decoded === 'string' || !/^\d+$/.test(amount)) throw new Error(`cannot pay "${target}"`);
+        await pay(recipient?.coinLockingBytecode ?? hex((decoded as { bytecode: Uint8Array }).bytecode), BigInt(amount), to);
       }
-      const lockingBytecode = recipient?.coinLockingBytecode ?? hex((decoded as { bytecode: Uint8Array }).bytecode);
-      const built = await payer.request<Built>('pay', { lockingBytecode, satoshis: sats(BigInt(amount)) });
-      await payer.request('broadcast', { invitationIdentifier: built.invitationIdentifier });
-      say(`Paid ${amount} sat from ${from} to ${to} (${built.transactionId}).`);
+      const rest = total(await payer.coins());
+      if (rest > COIN_FEE + 546n) await pay(payer.coinLockingBytecode, rest - COIN_FEE, 'itself');
       return;
     }
     if (command === 'rescue') {
