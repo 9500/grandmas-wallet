@@ -4,6 +4,7 @@
 // usage (from the repository root):
 //   npm run xo-demo -- addresses     show where each account receives ordinary coins
 //   npm run xo-demo -- run           the lifecycle
+//   npm run xo-demo -- run-short     the lifecycle without the cancelled request and the payments
 //   npm run xo-demo -- rescue        return a wallet's funds after a run that stopped part-way
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -53,11 +54,25 @@ const ON_CHAIN = resolve(DATA, 'on-chain.json');
 const ENDPOINT = process.env['CHIPNET_ENDPOINT'] ?? 'wss://chipnet.9500.cash:443';
 
 const CONTROLLER_SATOSHIS = 1_000n;
-/** Enough for a transaction of about 1,100 bytes at one satoshi per byte. */
-const FEE = 1_150n;
-const CREATE_FEE = 500n;
+// Fees are set per kind of transaction from their measured sizes, at a little over one satoshi per byte.
+/** Owner actions that spend the controller and wallet funds: about 1,100 bytes. */
+const FEE = 1_120n;
+/** Recoverer actions and changes of settings, which spend the controller and one ordinary coin: under 1,020 bytes. */
+const CONTROLLER_ONLY_FEE = 1_030n;
+/** Creating the wallet: about 350 bytes. */
+const CREATE_FEE = 360n;
+/** An ordinary one-input payment: under 200 bytes. */
+const COIN_FEE = 200n;
+/** Each ordinary coin spent beyond the first adds about 141 bytes. */
+const EXTRA_COIN_FEE = 150n;
+/** Changing the settings passes three more values to the controller than other actions: about 70 bytes. */
+const UPDATE_EXTRA_FEE = 80n;
+
+/** Fee for a transaction that spends the controller and the given ordinary coins. */
+const controllerFee = (coins: unknown[], extra = 0n): bigint =>
+  CONTROLLER_ONLY_FEE + EXTRA_COIN_FEE * BigInt(Math.max(coins.length - 1, 0)) + extra;
 const PAYMENT = 600n;
-const JAR_AMOUNT = 1_750n;
+const JAR_AMOUNT = 1_700n;
 /** One 512-second interval, time-based, as a mainnet wallet would use. */
 const CHALLENGE_DELAY = { unit: 'time512', value: 1 } as const;
 const JAR_LOCK_SECONDS = 420;
@@ -202,6 +217,11 @@ class Lifecycle {
     const transaction = decode(built.transactionHex);
     const check = verifyTransaction({ transaction, sourceOutputs: await this.spent(transaction) });
     if (check !== true) throw new Error(`${step}: the engine built a transaction that fails the local check: ${check}`);
+    // The network relays at one satoshi per byte; a lower fee would be refused only after the invitation is final.
+    const sources = await this.spent(transaction);
+    const fee = sources.reduce((sum, output) => sum + output.valueSatoshis, 0n) - transaction.outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n);
+    const size = BigInt(built.transactionHex.length / 2);
+    if (fee < size) throw new Error(`${step}: fee of ${fee} sat is below one satoshi per byte for ${size} bytes`);
 
     const deadline = Date.now() + RETRY_LIMIT_MS;
     let waiting = false;
@@ -267,7 +287,7 @@ class Lifecycle {
     let coins = await this.owner.coins();
     if (!coins.some((coin) => coin.index === 0)) {
       // The identity is the hash of a transaction whose first output funds the wallet; make such an output.
-      const built = await this.owner.request<Built>('pay', { lockingBytecode: this.owner.coinLockingBytecode, satoshis: sats(total(coins) - 400n) });
+      const built = await this.owner.request<Built>('pay', { lockingBytecode: this.owner.coinLockingBytecode, satoshis: sats(total(coins) - COIN_FEE) });
       await this.owner.request('broadcast', { invitationIdentifier: built.invitationIdentifier });
       await this.owner.sees([{ transactionId: built.transactionId, index: 0 }]);
       coins = await this.owner.coins();
@@ -377,7 +397,7 @@ class Lifecycle {
     const built = await this.recoverer.request<Built>('continue', {
       invitation: joined.invitation,
       outputs: ['pendingControllerOutput'],
-      rawOutputs: [{ lockingBytecode: this.recoverer.coinLockingBytecode, satoshis: String(total(coins) - FEE) }],
+      rawOutputs: [{ lockingBytecode: this.recoverer.coinLockingBytecode, satoshis: String(total(coins) - controllerFee(coins)) }],
       build: true,
     });
     const transaction = await this.send(this.recoverer, built, step, 'Recoverer and replacement device request recovery together; the recoverer pays the fee');
@@ -406,7 +426,7 @@ class Lifecycle {
       },
       inputs: [this.controllerInput('finalizeControllerInput'), ...asInputs(coins)],
       outputs: ['nextControllerOutput'],
-      rawOutputs: [{ lockingBytecode: this.recoverer.coinLockingBytecode, satoshis: String(total(coins) - FEE) }],
+      rawOutputs: [{ lockingBytecode: this.recoverer.coinLockingBytecode, satoshis: String(total(coins) - controllerFee(coins)) }],
     });
     const transaction = await this.send(this.recoverer, built, 'complete-recovery', 'Recoverer completes recovery once the challenge delay has passed', { waitUntilFinal: true });
     this.advance(transaction, built.transactionId, 'finalizeRecovery');
@@ -456,7 +476,7 @@ class Lifecycle {
   /** The new owner doubles the challenge delay, paying the fee from coins outside the wallet. */
   async updateRecovery(): Promise<void> {
     const coins = await this.replacement.coins();
-    if (total(coins) < FEE + 546n) {
+    if (total(coins) < controllerFee(coins, UPDATE_EXTRA_FEE) + 546n) {
       say('  skip   change-recovery-settings: the replacement device has no coins outside the wallet for the fee');
       return;
     }
@@ -476,7 +496,7 @@ class Lifecycle {
       },
       inputs: [this.controllerInput('updateControllerInput'), ...asInputs(coins)],
       outputs: ['nextControllerOutput'],
-      rawOutputs: [{ lockingBytecode: this.replacement.coinLockingBytecode, satoshis: String(total(coins) - FEE) }],
+      rawOutputs: [{ lockingBytecode: this.replacement.coinLockingBytecode, satoshis: String(total(coins) - controllerFee(coins, UPDATE_EXTRA_FEE)) }],
     });
     const transaction = await this.send(this.replacement, built, 'change-recovery-settings', 'New owner changes the challenge delay, paying the fee from outside the wallet');
     this.advance(transaction, built.transactionId, 'ownerUpdate');
@@ -587,7 +607,7 @@ const main = async (): Promise<void> => {
       await rescue(agents);
       return;
     }
-    if (command !== 'run') return;
+    if (command !== 'run' && command !== 'run-short') return;
 
     const electrum = await Electrum.connect(ENDPOINT);
     const run = new Lifecycle(electrum, owner, recoverer, replacement);
@@ -596,18 +616,23 @@ const main = async (): Promise<void> => {
       await run.createWallet(hex(recovererKey.keyHash));
       say(`  identity ${run.identity}`);
 
-      say('Recovery request, cancelled by the owner');
-      await run.requestRecovery('request-recovery-1', true);
-      await run.cancel();
+      // The short run leaves out the cancelled request and the payments, for when test coins are scarce.
+      const full = command === 'run';
+      if (full) {
+        await run.pay(owner, 'send', 'Owner pays from the wallet without the recoverer');
+        say('Recovery request, cancelled by the owner');
+        await run.requestRecovery('request-recovery-1', true);
+        await run.cancel();
+      }
       await run.openJar();
 
       say('Recovery after an unchallenged delay');
-      const invitationIdentifier = await run.requestRecovery('request-recovery-2', false);
+      const invitationIdentifier = await run.requestRecovery(full ? 'request-recovery-2' : 'request-recovery', !full);
       await run.finalize();
 
       say('The replacement device takes over');
       await run.adopt(invitationIdentifier);
-      await run.pay(replacement, 'send-after-recovery', 'New owner pays from the same wallet funds, which never moved');
+      if (full) await run.pay(replacement, 'send-after-recovery', 'New owner pays from the same wallet funds, which never moved');
       await run.withdrawJar();
       await run.updateRecovery();
       say('Lifecycle complete.');
