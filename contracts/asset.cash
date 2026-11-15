@@ -12,11 +12,12 @@ import "./lib/authorization.cash";
 //   Inputs:  00-controller, 01+ assets and anything else
 //   Outputs: 00-controller, 01+ anything
 //
-// Outputs are not restricted here: the owner's signature covers every output,
-// and the wallet decides where payments and change go.
+// Outputs are not restricted here: the owner's signature on the controller
+// covers every output, and the wallet decides where payments and change go.
 contract Asset(bytes32 identity) {
-    function spend(pubkey ownerPk, sig ownerSig) {
-        ownerApproves(identity, ownerPk, ownerSig);
-        require(checkSig(ownerSig, ownerPk));
+    function spend() {
+        ownerApproves(identity);
+        // The controller enforces this as well; the compiler needs a function to end on a check of its own.
+        require(tx.version == 2);
     }
 }

@@ -567,8 +567,8 @@ const rescue = async (agents: Agent[]): Promise<void> => {
     const built = buildTransaction({
       inputs: [
         controllerInput(controller, state, action, holder.key),
-        protectedInput(await fetch(record.wallet), assetScript(identity), holder.key),
-        ...(record.jar !== undefined && jarUnlocked ? [protectedInput(await fetch(record.jar), savingsJarScript(identity, record.jar.unlockTime), holder.key)] : []),
+        protectedInput(await fetch(record.wallet), assetScript(identity)),
+        ...(record.jar !== undefined && jarUnlocked ? [protectedInput(await fetch(record.jar), savingsJarScript(identity, record.jar.unlockTime))] : []),
       ],
       outputs: [controllerSuccessor(controller, state, action)],
       changeLockingBytecode: hexToBin(holder.agent.coinLockingBytecode),

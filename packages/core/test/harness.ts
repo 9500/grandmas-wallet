@@ -108,13 +108,10 @@ export interface Spend {
   locktime?: number;
 }
 
-/** An input guarded by the shared authorization interface. */
+/** An input guarded by the shared authorization interface. It carries no signature. */
 export interface ProtectedInput {
   source: Output;
   script: ProtectedScript;
-  signer: Key;
-  presentedPublicKey?: Uint8Array;
-  signingType?: number;
   sequence?: number;
 }
 
@@ -226,20 +223,9 @@ export const build = (spend: Spend): ResolvedSpend => {
   input.unlockingBytecode = unlockingBytecode;
 
   protectedInputs.forEach((protectedInput, index) => {
-    const inputIndex = 2 + index;
-    const target = transaction.inputs[inputIndex];
+    const target = transaction.inputs[2 + index];
     if (target === undefined) throw new Error('missing protected input');
-    target.unlockingBytecode = protectedInput.script.unlock({
-      publicKey: protectedInput.presentedPublicKey ?? protectedInput.signer.publicKey,
-      signature: signInput({
-        transaction,
-        sourceOutputs,
-        inputIndex,
-        coveredBytecode: protectedInput.script.redeemBytecode,
-        privateKey: protectedInput.signer.privateKey,
-        ...(protectedInput.signingType === undefined ? {} : { signingType: protectedInput.signingType }),
-      }),
-    });
+    target.unlockingBytecode = protectedInput.script.unlockingBytecode;
   });
 
   return { sourceOutputs, transaction };

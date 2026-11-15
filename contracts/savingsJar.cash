@@ -15,9 +15,8 @@ import "./lib/authorization.cash";
 //   Inputs:  00-controller, 01+ jars and anything else
 //   Outputs: 00-controller, 01+ anything
 contract SavingsJar(bytes32 identity, int unlockTime) {
-    function withdraw(pubkey ownerPk, sig ownerSig) {
+    function withdraw() {
+        ownerApproves(identity);
         require(tx.time >= unlockTime);
-        ownerApproves(identity, ownerPk, ownerSig);
-        require(checkSig(ownerSig, ownerPk));
     }
 }

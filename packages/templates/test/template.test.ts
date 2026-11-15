@@ -9,27 +9,38 @@ import { Crypto } from '@xo-cash/crypto';
 import { compileCashAssemblyString, generateTemplateIdentifier, parseTemplate } from '@xo-cash/utils';
 import { describe, expect, it } from 'vitest';
 
-import { grandmasWalletTemplate, grandmasWalletTemplateIdentifier } from '../src/index.js';
+import {
+  grandmasWalletTemplate,
+  grandmasWalletTemplateIdentifier,
+  savingsJarTemplate,
+  savingsJarTemplateIdentifier,
+} from '../src/index.js';
 
-const frozen = parseTemplate(
-  readFileSync(new URL('../frozen/grandmas-wallet-v1.json', import.meta.url), 'utf8'),
-);
+const frozen = (name: string) => parseTemplate(readFileSync(new URL(`../frozen/${name}.json`, import.meta.url), 'utf8'));
 
-describe("Grandma's Wallet template", () => {
-  it('is accepted by the XO template validator', () => {
+describe('templates', () => {
+  it('are accepted by the XO template validator', () => {
     expect(() => parseTemplate(grandmasWalletTemplate)).not.toThrow();
+    expect(() => parseTemplate(savingsJarTemplate)).not.toThrow();
   });
 
-  it('matches the frozen version 1, whose identifier every key depends on', () => {
-    expect(generateTemplateIdentifier(frozen)).toBe(grandmasWalletTemplateIdentifier);
-    expect(frozen).toEqual(grandmasWalletTemplate);
+  it('match their frozen version 1; every wallet key depends on the wallet template\'s identifier', () => {
+    expect(generateTemplateIdentifier(frozen('grandmas-wallet-v1'))).toBe(grandmasWalletTemplateIdentifier);
+    expect(frozen('grandmas-wallet-v1')).toEqual(grandmasWalletTemplate);
+    expect(generateTemplateIdentifier(frozen('savings-jar-v1'))).toBe(savingsJarTemplateIdentifier);
+    expect(frozen('savings-jar-v1')).toEqual(savingsJarTemplate);
   });
 
-  it('carries exactly the contract bytecode that the contract tests run', () => {
-    const { scripts } = grandmasWalletTemplate;
-    expect(scripts['controllerBytecode']).toBe(`<$(<identity> OP_REVERSEBYTES)> 0x${controllerBytecodeHex}`);
-    expect(scripts['walletBytecode']).toBe(`<$(<identity> OP_REVERSEBYTES)> 0x${assetBytecodeHex}`);
-    expect(scripts['savingsJarBytecode']).toBe(`<unlockTime> <$(<identity> OP_REVERSEBYTES)> 0x${savingsJarBytecodeHex}`);
+  it('carry exactly the contract bytecode that the contract tests run', () => {
+    expect(grandmasWalletTemplate.scripts['controllerBytecode']).toBe(`<$(<identity> OP_REVERSEBYTES)> 0x${controllerBytecodeHex}`);
+    expect(grandmasWalletTemplate.scripts['walletBytecode']).toBe(`<$(<identity> OP_REVERSEBYTES)> 0x${assetBytecodeHex}`);
+    expect(savingsJarTemplate.scripts['savingsJarBytecode']).toBe(`<unlockTime> <$(<identity> OP_REVERSEBYTES)> 0x${savingsJarBytecodeHex}`);
+  });
+
+  it('keep keys out of applications: the savings jar has no secrets and wallet funds need no signature', () => {
+    expect(JSON.stringify(savingsJarTemplate)).not.toMatch(/private_key|secrets|signature/);
+    expect(grandmasWalletTemplate.scripts['unlockWalletFunds']).toBe('');
+    expect(savingsJarTemplate.scripts['unlockSavingsJar']).toBe('');
   });
 
   it('generates a key only where a wallet or a new owner first appears', () => {
@@ -48,8 +59,10 @@ describe("Grandma's Wallet template", () => {
   });
 });
 
-describe('variables each action needs', () => {
-  const template = grandmasWalletTemplate;
+describe.each([
+  ['wallet', grandmasWalletTemplate],
+  ['savings jar', savingsJarTemplate],
+])('variables each %s action needs', (_name, template) => {
   const variableNames = new Set(Object.keys(template.variables ?? {}));
   const scriptNames = new Set(Object.keys(template.scripts));
 
@@ -90,7 +103,7 @@ describe('variables each action needs', () => {
     return union(reads(transaction.locktime), ...fromOutputs, ...fromInputs);
   };
 
-  it.each(Object.keys(grandmasWalletTemplate.actions))('%s declares every variable its transaction uses', (actionName) => {
+  it.each(Object.keys(template.actions))('%s declares every variable its transaction uses', (actionName) => {
     const roles = Object.values(template.actions[actionName]?.roles ?? {});
     const declared = new Set(roles.flatMap((role) => [...(role.requirements?.variables ?? []), ...(role.requirements?.secrets ?? [])]));
     const missing = [...usedBy(actionName)].filter((name) => !declared.has(name));

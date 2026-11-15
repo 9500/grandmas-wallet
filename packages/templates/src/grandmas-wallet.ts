@@ -1,13 +1,15 @@
 import { assetBytecodeHex } from '@grandmas-wallet/contracts/asset';
 import { controllerBytecodeHex } from '@grandmas-wallet/contracts/controller';
-import { savingsJarBytecodeHex } from '@grandmas-wallet/contracts/savingsJar';
 import type { XOTemplate } from '@xo-cash/types';
 
 /**
  * The XO template for Grandma's Wallet.
  *
- * One template serves every wallet: the wallet identity is a variable, and it is part of the controller,
- * wallet and savings jar scripts, so each wallet has its own addresses.
+ * One template serves every wallet: the wallet identity is a variable, and it is part of the controller
+ * and wallet scripts, so each wallet has its own addresses.
+ *
+ * Applications are separate templates. Their outputs hold no key: they are released when the wallet's
+ * owner approves a transaction through the controller, which is what the `approve` action is for.
  *
  * The XO engine derives keys under the template identifier, which is a hash of this content. Any change
  * here, including to a description, gives every account different keys. A wallet is therefore tied to the
@@ -96,11 +98,10 @@ export const grandmasWalletTemplate = {
   start: [{ action: 'createWallet', role: 'owner', generate: ['ownerKey'] }],
 
   defaults: {
-    // Receiving and change both go to the wallet's one address. The address default gives the address of a
-    // savings jar for a chosen unlock time, which can be paid into directly.
+    // Receiving and change both go to the wallet's one address.
     receive: { output: 'receivedFundsOutput', role: 'owner' },
     change: { output: 'changeOutput', role: 'owner' },
-    address: { lockingScript: 'savingsJarLockingScript', role: 'owner' },
+    address: { lockingScript: 'walletLockingScript', role: 'owner' },
   },
 
   actions: {
@@ -142,20 +143,17 @@ export const grandmasWalletTemplate = {
       ['changeSatoshis'],
       'cancelRecoveryTransaction',
     ),
-    openSavingsJar: ownerSpend(
-      'Open savings jar',
-      'Lock part of the wallet\'s funds until a chosen time. Only the wallet\'s owner at that time can take them out.',
-      'savings',
-      ['jarSatoshis', 'unlockTime', 'changeSatoshis'],
-      'openSavingsJarTransaction',
-    ),
-    withdrawSavingsJar: ownerSpend(
-      'Empty savings jar',
-      'Move a savings jar\'s funds back into the wallet once its unlock time has passed.',
-      'savings',
-      ['unlockTime', 'receivedSatoshis'],
-      'withdrawSavingsJarTransaction',
-    ),
+    approve: {
+      name: 'Approve',
+      description:
+        'Approve a transaction that spends outputs of an application bound to this wallet, such as a savings jar. The application\'s own rules still apply. If a recovery request is pending, approving also cancels it.',
+      icon: 'approve',
+      roles: {
+        owner: { requirements: { variables: ['identity', 'controllerState', 'controllerSatoshis'], secrets: ['ownerKey'] } },
+      },
+      requirements: { participants: [one('owner')] },
+      transaction: 'approveTransaction',
+    },
     updateRecovery: {
       name: 'Change recovery settings',
       description:
@@ -246,23 +244,15 @@ export const grandmasWalletTemplate = {
       version: 2,
       locktime: 0,
     },
-    openSavingsJarTransaction: {
-      name: 'Savings jar opened',
-      description: '$(<jarSatoshis>) satoshis were locked in a savings jar.',
-      icon: 'savings',
-      inputs: [{ input: 'ownerControllerInput', ...CONTROLLER_AT_START }, { input: 'walletInput' }],
-      outputs: [{ output: 'activeControllerOutput', ...CONTROLLER_FIRST }, { output: 'savingsJarOutput' }, { output: 'changeOutput' }],
+    approveTransaction: {
+      name: 'Approved',
+      description: 'The owner approved a transaction for an application bound to this wallet.',
+      icon: 'approve',
+      // The application's inputs and outputs follow the controller. The locktime is left to the invitation,
+      // since an application may need one.
+      inputs: [{ input: 'ownerControllerInput', ...CONTROLLER_AT_START }],
+      outputs: [{ output: 'activeControllerOutput', ...CONTROLLER_FIRST }],
       version: 2,
-      locktime: 0,
-    },
-    withdrawSavingsJarTransaction: {
-      name: 'Savings jar emptied',
-      description: 'A savings jar was emptied into the wallet.',
-      icon: 'savings',
-      inputs: [{ input: 'ownerControllerInput', ...CONTROLLER_AT_START }, { input: 'savingsJarInput' }],
-      outputs: [{ output: 'activeControllerOutput', ...CONTROLLER_FIRST }, { output: 'receivedFundsOutput' }],
-      version: 2,
-      locktime: '$(<unlockTime>)',
     },
     updateRecoveryTransaction: {
       name: 'Recovery settings changed',
@@ -321,15 +311,9 @@ export const grandmasWalletTemplate = {
     },
     walletInput: {
       name: 'Wallet funds',
-      description: 'Funds held by the wallet.',
+      description: 'Funds held by the wallet. Released by the owner\'s approval on the controller; they need no signature of their own.',
       icon: 'wallet',
-      unlockingScript: 'unlockProtected',
-    },
-    savingsJarInput: {
-      name: 'Savings jar',
-      description: 'A savings jar whose unlock time has passed.',
-      icon: 'savings',
-      unlockingScript: 'unlockProtected',
+      unlockingScript: 'unlockWalletFunds',
     },
   },
 
@@ -377,14 +361,6 @@ export const grandmasWalletTemplate = {
       lockingScript: '$(<recipientLockingScript>)',
       valueSatoshis: '$(<sentSatoshis>)',
     },
-    savingsJarOutput: {
-      name: 'Savings jar',
-      description: '$(<jarSatoshis>) satoshis locked until the jar\'s unlock time.',
-      icon: 'savings',
-      lockingScript: 'savingsJarLockingScript',
-      valueSatoshis: '$(<jarSatoshis>)',
-      token: null,
-    },
   },
 
   lockingScripts: {
@@ -402,7 +378,7 @@ export const grandmasWalletTemplate = {
           actions: [
             { action: 'send', role: 'owner', secrets: [{ ownerKey: null }] },
             { action: 'cancelRecovery', role: 'owner', secrets: [{ ownerKey: null }] },
-            { action: 'openSavingsJar', role: 'owner', secrets: [{ ownerKey: null }] },
+            { action: 'approve', role: 'owner', secrets: [{ ownerKey: null }] },
             { action: 'updateRecovery', role: 'owner', secrets: [{ ownerKey: null }] },
           ],
         },
@@ -417,37 +393,17 @@ export const grandmasWalletTemplate = {
     },
     walletLockingScript: {
       name: 'Wallet funds',
-      description: 'The wallet\'s receiving address. Spendable only with the approval of the wallet\'s current owner.',
+      description: 'The wallet\'s receiving address. Spendable only in a transaction the wallet\'s current owner approves.',
       icon: 'wallet',
       lockingType: 'p2sh',
       lockingBytecode: 'walletBytecode',
+      unlockingBytecode: 'unlockWalletFunds',
       state: { variables: ['identity'] },
       roles: {
         owner: {
-          state: { secrets: ['ownerKey'] },
-          actions: [
-            { action: 'send', role: 'owner', secrets: [{ ownerKey: null }] },
-            { action: 'openSavingsJar', role: 'owner', secrets: [{ ownerKey: null }] },
-          ],
+          actions: [{ action: 'send', role: 'owner', secrets: [{ ownerKey: null }] }],
           balance: { satoshis: true, fungibleTokens: true, nonfungibleTokens: true },
           selectable: true,
-        },
-        recoverer: { relevant: false },
-      },
-    },
-    savingsJarLockingScript: {
-      name: 'Savings jar',
-      description: 'Funds locked until the jar\'s unlock time, then spendable with the approval of the wallet\'s owner.',
-      icon: 'savings',
-      lockingType: 'p2sh',
-      lockingBytecode: 'savingsJarBytecode',
-      state: { variables: ['identity', 'unlockTime'] },
-      roles: {
-        owner: {
-          state: { secrets: ['ownerKey'] },
-          actions: [{ action: 'withdrawSavingsJar', role: 'owner', secrets: [{ ownerKey: null }] }],
-          balance: { satoshis: true },
-          selectable: false,
         },
         recoverer: { relevant: false },
       },
@@ -459,7 +415,6 @@ export const grandmasWalletTemplate = {
     // Contracts see a token category in the reverse of the byte order used for the identity elsewhere.
     controllerBytecode: `<$(<identity> OP_REVERSEBYTES)> 0x${controllerBytecodeHex}`,
     walletBytecode: `<$(<identity> OP_REVERSEBYTES)> 0x${assetBytecodeHex}`,
-    savingsJarBytecode: `<unlockTime> <$(<identity> OP_REVERSEBYTES)> 0x${savingsJarBytecodeHex}`,
 
     // Controller functions take their arguments in reverse order, followed by the function number.
     unlockOwnerAuthorize: '<ownerKey.schnorr_signature.all_outputs> <ownerKey.public_key> <0>',
@@ -468,7 +423,8 @@ export const grandmasWalletTemplate = {
     unlockFinalizeRecovery: '<recovererKey.schnorr_signature.all_outputs> <recovererKey.public_key> <2>',
     unlockOwnerUpdate:
       '<newChallengeDelay> <newRecovererKeyHash> <newOwnerKeyHash> <ownerKey.schnorr_signature.all_outputs> <ownerKey.public_key> <3>',
-    unlockProtected: '<ownerKey.schnorr_signature.all_outputs> <ownerKey.public_key>',
+    // Wallet funds take no arguments: the script itself is all that is needed to unlock them.
+    unlockWalletFunds: '',
 
     stateBody: STATE_BODY,
   },
@@ -558,16 +514,6 @@ export const grandmasWalletTemplate = {
       name: 'Change',
       description: 'Satoshis returning to the wallet.',
       type: 'satoshis',
-    },
-    jarSatoshis: {
-      name: 'Amount to save',
-      description: 'Satoshis to lock in the savings jar.',
-      type: 'satoshis',
-    },
-    unlockTime: {
-      name: 'Unlock time',
-      description: 'When the savings jar can be emptied, as a Unix timestamp.',
-      type: 'integer',
     },
     recipientLockingScript: {
       name: 'Recipient',

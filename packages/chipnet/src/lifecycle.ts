@@ -284,8 +284,8 @@ export class Run {
     return buildTransaction({
       inputs: [
         controllerInput(utxo, state, action, key),
-        ...chosen.map((asset) => protectedInput(asset, this.asset, key)),
-        ...jars.map((jar) => protectedInput(jar, this.jar, key)),
+        ...chosen.map((asset) => protectedInput(asset, this.asset)),
+        ...jars.map((jar) => protectedInput(jar, this.jar)),
       ],
       outputs: [controllerSuccessor(utxo, state, action), ...(options.payments ?? [])],
       changeLockingBytecode: options.changeLockingBytecode ?? this.asset.lockingBytecode,
@@ -358,7 +358,7 @@ export const runLifecycle = async (run: Run): Promise<void> => {
 
   run.env.log('Recovery claim, challenged by the owner');
   await run.refuse('attack-claim-with-spend', 'Recoverer tries to take wallet funds in the claim transaction (C07)', () =>
-    run.recovererAction(claim, [protectedInput(run.utxos('asset')[0] as Utxo, run.asset, run.recoverer)]),
+    run.recovererAction(claim, [protectedInput(run.utxos('asset')[0] as Utxo, run.asset)]),
   );
   await run.accept('claim-1', 'Recoverer opens a recovery claim, paying its own fee', () => run.recovererAction(claim));
   await run.refuse('attack-early-finalize', 'Recoverer tries to complete recovery before the delay (C03)', () =>

@@ -1,39 +1,40 @@
 pragma cashscript ^0.14.0;
 
-// Grandma's Wallet shared authorization interface, v1.
+// Grandma's Wallet shared authorization interface, v2.
 //
-// A protected output (an asset or an application position) is bound to a
+// A protected output (wallet funds or an application position) is bound to a
 // wallet identity: the token category of the wallet's controller. It may only
-// be spent in a transaction in which the current owner of that identity
-// approves, which this function checks from the protected input's side.
+// be spent in a transaction that the current owner of that identity approves.
 //
 // Transaction layout:
 //   Inputs:  00-controller, 01+ protected inputs and anything else
 //   Outputs: 00-controller, 01+ anything
 //
-// The presence of the controller is not treated as approval. The recoverer
-// can also spend the controller, to open or complete a recovery claim, so a
-// protected input additionally requires:
-//   - a signature by the owner recorded in the controller state being spent,
-//     covering every input and output of the transaction, and
-//   - a controller successor that keeps that same owner, epoch, recoverer and
-//     delay with no claim pending. Recovery claims and completions never
-//     produce such a successor.
+// A protected output holds no key and checks no signature. It requires that
+//   - input 0 is the wallet's controller, and
+//   - the controller continues with the same owner, epoch, recoverer and
+//     delay, and with no recovery claim pending.
 //
-// The caller must verify the signature itself with checkSig(ownerSig, ownerPk).
-function ownerApproves(bytes32 identity, pubkey ownerPk, sig ownerSig) {
+// The controller is spent in the same transaction and enforces its own rules.
+// Only its owner-signed functions can produce that successor: a recovery
+// request leaves a claim pending and a completed recovery changes the owner
+// and epoch. The owner's signature, which the controller requires to cover
+// every input and output, is therefore what approves the protected spend.
+//
+// The presence of the controller alone is not treated as approval: the
+// recoverer can also spend it, to request or complete recovery, and neither
+// satisfies the second requirement.
+//
+// A controller that offered any way to reach that successor without the
+// owner's signature would break this interface. The version byte of the
+// state identifies the controller rules this version was written against.
+function ownerApproves(bytes32 identity) {
     // The genuine controller: the identity NFT with mutable capability.
     require(tx.inputs[0].tokenCategory == identity + 0x01);
 
     bytes state = tx.inputs[0].nftCommitment;
     require(state.length == 69);
     require(state.split(1)[0] == 0x01);
-
-    require(hash160(ownerPk) == state.slice(6, 26));
-    // The signature must cover every input and every output: SIGHASH_ALL | SIGHASH_FORKID (0x41),
-    // optionally with SIGHASH_UTXOS (0x61).
-    bytes signingType = bytes(ownerSig).split(bytes(ownerSig).length - 1)[1];
-    require(signingType == 0x41 || signingType == 0x61);
 
     require(tx.outputs[0].tokenCategory == identity + 0x01);
     require(

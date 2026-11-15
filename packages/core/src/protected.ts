@@ -1,29 +1,29 @@
-import { bigIntToVmNumber, encodeDataPush, flattenBinArray } from '@bitauth/libauth';
+import { bigIntToVmNumber, encodeDataPush } from '@bitauth/libauth';
 import { assetBytecodeHex } from '@grandmas-wallet/contracts/asset';
 import { savingsJarBytecodeHex } from '@grandmas-wallet/contracts/savingsJar';
 
-import type { KeyAuthorization } from './controller.js';
 import { identityForScript, instantiate, lockingBytecodeOf } from './script.js';
 
 /**
- * Outputs protected by the shared authorization interface: spendable only
- * with the approval of the current owner of a wallet identity.
+ * Outputs protected by the shared authorization interface: spendable only in
+ * a transaction that the current owner of a wallet identity approves through
+ * the wallet's controller. They hold no key of their own.
  */
-
-const ownerUnlocking = ({ publicKey, signature }: KeyAuthorization, redeemBytecode: Uint8Array): Uint8Array =>
-  flattenBinArray([encodeDataPush(signature), encodeDataPush(publicKey), encodeDataPush(redeemBytecode)]);
 
 export interface ProtectedScript {
   redeemBytecode: Uint8Array;
   lockingBytecode: Uint8Array;
-  /** Unlocking bytecode for a spend approved by the wallet owner. */
-  unlock: (authorization: KeyAuthorization) => Uint8Array;
+  /**
+   * Unlocking bytecode: only the script itself. A protected output checks no signature; it is released by
+   * the wallet's controller being spent with the owner's approval in the same transaction.
+   */
+  unlockingBytecode: Uint8Array;
 }
 
 const protectedScript = (redeemBytecode: Uint8Array): ProtectedScript => ({
   redeemBytecode,
   lockingBytecode: lockingBytecodeOf(redeemBytecode),
-  unlock: (authorization) => ownerUnlocking(authorization, redeemBytecode),
+  unlockingBytecode: encodeDataPush(redeemBytecode),
 });
 
 /**
@@ -35,7 +35,7 @@ export const assetScript = (identity: Uint8Array): ProtectedScript =>
 
 /**
  * A Savings Jar position: funds locked until `unlockTime`, then withdrawable
- * by the wallet owner. `unlockTime` is a block height below 500,000,000 and a
+ * in a transaction the wallet owner approves. `unlockTime` is a block height below 500,000,000 and a
  * Unix timestamp from there on; a withdrawing transaction needs a locktime of
  * the same kind at or after it, and a non-final sequence number on the jar input.
  */

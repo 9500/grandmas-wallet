@@ -62,12 +62,14 @@ export const p2pkhInput = (utxo: Utxo, key: KeyPair): InputSpec => ({
     flattenBinArray([encodeDataPush(sign(key.privateKey, utxo.output.lockingBytecode)), encodeDataPush(key.publicKey)]),
 });
 
-/** An asset or application position approved by the wallet owner. */
-export const protectedInput = (utxo: Utxo, script: ProtectedScript, ownerKey: KeyPair, sequence = 0): InputSpec => ({
+/**
+ * Wallet funds or an application position. It needs no signature of its own: the transaction must also
+ * spend the wallet's controller with the owner's approval, as its first input.
+ */
+export const protectedInput = (utxo: Utxo, script: ProtectedScript, sequence = 0): InputSpec => ({
   utxo,
   sequence,
-  unlock: (sign) =>
-    script.unlock({ publicKey: ownerKey.publicKey, signature: sign(ownerKey.privateKey, script.redeemBytecode) }),
+  unlock: () => script.unlockingBytecode,
 });
 
 export type ControllerAction =

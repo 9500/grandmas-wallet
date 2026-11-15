@@ -172,7 +172,7 @@ describe('identity genesis', () => {
     const snapshot = validateGenesis(genesis.transaction, genesis.transactionHash, identity);
     const action: ControllerAction = { kind: 'ownerAuthorize' };
     const later = buildTransaction({
-      inputs: [controllerInput(snapshot.utxo, snapshot.state, action, owner), protectedInput(utxoOf(genesis, 1), asset, owner)],
+      inputs: [controllerInput(snapshot.utxo, snapshot.state, action, owner), protectedInput(utxoOf(genesis, 1), asset)],
       outputs: [controllerSuccessor(snapshot.utxo, snapshot.state, action)],
       changeLockingBytecode: asset.lockingBytecode,
     });
@@ -200,7 +200,7 @@ describe('wallet lifecycle built with the transaction builder', () => {
       const built = buildTransaction({
         inputs: [
           controllerInput(controller.utxo, controller.state, action, key),
-          protectedInput(assetUtxo, asset, key),
+          protectedInput(assetUtxo, asset),
           ...extra.map(({ input }) => input),
         ],
         outputs: [
@@ -250,7 +250,7 @@ describe('wallet lifecycle built with the transaction builder', () => {
     // The old key no longer works; the replacement key spends the same asset output and the jar.
     expect(verifyTransaction(ownerSpends(owner))).toBeTypeOf('string');
     built = accepted(
-      ownerSpends(replacement, [{ input: protectedInput(jarUtxo, jar, replacement), locktime: UNLOCK_TIME }]),
+      ownerSpends(replacement, [{ input: protectedInput(jarUtxo, jar), locktime: UNLOCK_TIME }]),
     );
     advance(built);
 

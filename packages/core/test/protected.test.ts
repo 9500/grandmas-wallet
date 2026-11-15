@@ -34,16 +34,14 @@ const jar = savingsJarScript(identity, UNLOCK_HEIGHT);
 const tokenCategory = new Uint8Array(32).fill(0x70);
 const recipient = anyoneCanSpend;
 
-const bchAsset = (signer = owner): ProtectedInput => ({
+const bchAsset = (): ProtectedInput => ({
   source: { lockingBytecode: asset.lockingBytecode, valueSatoshis: 10_000n },
   script: asset,
-  signer,
 });
 
-const jarInput = (signer = owner): ProtectedInput => ({
+const jarInput = (): ProtectedInput => ({
   source: { lockingBytecode: jar.lockingBytecode, valueSatoshis: 50_000n },
   script: jar,
-  signer,
 });
 
 const payment: Output = { lockingBytecode: recipient, valueSatoshis: 6_000n };
@@ -66,7 +64,7 @@ const withdraw: Spend = {
 };
 
 /** Both kinds of protected input, as [name, input factory, base transaction]. */
-const protectedKinds: [string, (signer?: typeof owner) => ProtectedInput, Spend][] = [
+const protectedKinds: [string, () => ProtectedInput, Spend][] = [
   ['asset', bchAsset, send],
   ['savings jar', jarInput, withdraw],
 ];
@@ -122,68 +120,58 @@ describe('owner spends protected assets', () => {
   });
 });
 
-describe('only the current owner can spend', () => {
-  it.each(protectedKinds)('%s: rejects a signature by another key', (_name, input, base) => {
+describe('approval comes from the controller', () => {
+  it.each(protectedKinds)('%s: is unlocked by its script alone, with no key or signature', (_name, input) => {
+    const { script } = input();
+    expect(script.unlockingBytecode.length).toBeLessThan(script.redeemBytecode.length + 4);
+    expect([...script.unlockingBytecode.slice(-script.redeemBytecode.length)]).toEqual([...script.redeemBytecode]);
+  });
+
+  it.each(protectedKinds)('%s: cannot be spent when anyone but the owner signs for the controller', (_name, _input, base) => {
     expectAccepted(base);
     for (const signer of [recoverer, newOwner, stranger]) {
-      expectRejectedByProtectedInput({ ...base, protectedInputs: [input(signer)] });
+      expect(failingInput({ ...base, signer })).toBe(0);
     }
   });
 
-  it.each(protectedKinds)('%s: rejects another key presented as the owner key', (_name, input, base) => {
-    expectRejectedByProtectedInput({
-      ...base,
-      protectedInputs: [{ ...input(stranger), presentedPublicKey: owner.publicKey }],
-    });
-  });
-
-  it.each(protectedKinds)('%s: accepts an owner signature over all inputs and outputs without the spent outputs', (_name, input, base) => {
-    expectAccepted({ ...base, signingType: 0x41, protectedInputs: [{ ...input(), signingType: 0x41 }] });
-    expectAccepted({ ...base, protectedInputs: [{ ...input(), signingType: 0x41 }] });
-  });
-
-  it.each(protectedKinds)('%s: rejects an owner signature that does not cover every input and output', (_name, input, base) => {
-    for (const signingType of [0x42, 0x43, 0xc1, 0x62]) {
-      expectRejectedByProtectedInput({ ...base, protectedInputs: [{ ...input(), signingType }] });
+  it.each(protectedKinds)('%s: cannot be spent when the owner\'s signature leaves inputs or outputs open', (_name, _input, base) => {
+    // 0xc1 would let further inputs be added after signing; 0x42 and 0x43 leave outputs open.
+    for (const signingType of [0xc1, 0x42, 0x43, 0xc3]) {
+      expect(failingInput({ ...base, signingType })).toBe(0);
     }
+  });
+
+  it.each(protectedKinds)('%s: is spent under either accepted signing type', (_name, _input, base) => {
+    expectAccepted({ ...base, signingType: 0x41 });
+    expectAccepted({ ...base, signingType: 0x61 });
   });
 });
 
 describe('recoverer cannot spend through a recovery claim (C07)', () => {
-  it.each(protectedKinds)('%s: rejects a spend attached to a claim', (_name, input, base) => {
-    const attack: Spend = { ...base, ...claim };
-    for (const signer of [recoverer, newOwner]) {
-      expectRejectedByProtectedInput({ ...attack, protectedInputs: [input(signer)] });
-    }
-  });
-
-  it.each(protectedKinds)('%s: rejects a spend attached to a claim even with an owner signature', (_name, input, base) => {
-    // The owner's signature alone is not enough: the controller must also continue under the owner.
-    expectRejectedByProtectedInput({ ...base, ...claim, protectedInputs: [input(owner)] });
+  it.each(protectedKinds)('%s: rejects a spend attached to a claim', (_name, _input, base) => {
+    // The claim itself is valid; the protected input refuses to ride along.
+    expectAccepted({ ...claim });
+    expectRejectedByProtectedInput({ ...base, ...claim });
   });
 });
 
 describe('recovery completion cannot carry a spend (C08)', () => {
-  it.each(protectedKinds)('%s: rejects a spend attached to a completed recovery', (_name, input, base) => {
-    const attack: Spend = { ...base, ...finalize };
+  it.each(protectedKinds)('%s: rejects a spend attached to a completed recovery', (_name, _input, base) => {
     expectAccepted({ ...finalize, ...(base.locktime === undefined ? {} : { locktime: base.locktime }) });
-    for (const signer of [recoverer, newOwner, owner]) {
-      expectRejectedByProtectedInput({ ...attack, protectedInputs: [input(signer)] });
-    }
+    expectRejectedByProtectedInput({ ...base, ...finalize });
   });
 
-  it.each(protectedKinds)('%s: rejects a spend attached to an early completion attempt', (_name, input, base) => {
-    expect(failingInput({ ...base, ...finalize, sequence: 1, protectedInputs: [input(newOwner)] })).toBe(0);
+  it.each(protectedKinds)('%s: rejects a spend attached to an early completion attempt', (_name, _input, base) => {
+    expect(failingInput({ ...base, ...finalize, sequence: 1 })).toBe(0);
   });
 });
 
 describe('owner changes and spending are separate steps', () => {
-  it.each(protectedKinds)('%s: rejects a spend in the transaction that replaces the owner or recoverer', (_name, input, base) => {
+  it.each(protectedKinds)('%s: rejects a spend in the transaction that replaces the owner or recoverer', (_name, _input, base) => {
     for (const update of [{ ownerKeyHash: newOwner.keyHash }, { recovererKeyHash: stranger.keyHash }]) {
       const rotation: Spend = { ...base, action: { kind: 'ownerUpdate', update } };
       expectAccepted({ ...rotation, protectedInputs: [], extraOutputs: [] });
-      expectRejectedByProtectedInput({ ...rotation, protectedInputs: [input(owner)] });
-      expectRejectedByProtectedInput({ ...rotation, protectedInputs: [input(newOwner)] });
+      expectRejectedByProtectedInput(rotation);
     }
   });
 });
@@ -191,13 +179,12 @@ describe('owner changes and spending are separate steps', () => {
 describe('after a completed recovery (C12)', () => {
   const recovered: ControllerState = afterFinalizeRecovery(pendingState);
 
-  it.each(protectedKinds)('%s: the new owner spends the same output without it having moved', (_name, input, base) => {
-    expectAccepted({ ...base, state: recovered, signer: newOwner, protectedInputs: [input(newOwner)] });
+  it.each(protectedKinds)('%s: the new owner spends the same output without it having moved', (_name, _input, base) => {
+    expectAccepted({ ...base, state: recovered, signer: newOwner });
   });
 
-  it.each(protectedKinds)('%s: the old owner key is rejected', (_name, input, base) => {
-    expectRejectedByProtectedInput({ ...base, state: recovered, signer: newOwner, protectedInputs: [input(owner)] });
-    expectRejected({ ...base, state: recovered, signer: owner, protectedInputs: [input(owner)] });
+  it.each(protectedKinds)('%s: the old owner key is rejected', (_name, _input, base) => {
+    expect(failingInput({ ...base, state: recovered, signer: owner })).toBe(0);
   });
 });
 
@@ -215,7 +202,7 @@ describe('only the genuine controller counts (C09)', () => {
     const fake = impostor(otherIdentity, 'mutable');
     const attack: Spend = { ...base, state: strangerState, signer: stranger, controllerSource: fake, controllerSuccessor: fake };
     expectAccepted({ ...attack, protectedInputs: [], extraOutputs: [] });
-    expectRejectedByProtectedInput({ ...attack, protectedInputs: [input(stranger)] });
+    expectRejectedByProtectedInput({ ...attack, protectedInputs: [input()] });
   });
 
   it.each(protectedKinds)('%s: rejects a token of the right category with the wrong capability', (_name, input, base) => {
@@ -227,7 +214,7 @@ describe('only the genuine controller counts (C09)', () => {
         signer: stranger,
         controllerSource: fake,
         controllerSuccessor: fake,
-        protectedInputs: [input(stranger)],
+        protectedInputs: [input()],
       });
     }
   });
@@ -262,7 +249,7 @@ describe('savings jar keeps its time lock', () => {
 
   it('recovery does not shorten the lock: the new owner must also wait', () => {
     const recovered = afterFinalizeRecovery(pendingState);
-    const byNewOwner: Spend = { ...withdraw, state: recovered, signer: newOwner, protectedInputs: [jarInput(newOwner)] };
+    const byNewOwner: Spend = { ...withdraw, state: recovered, signer: newOwner };
     expectAccepted(byNewOwner);
     expectRejectedByProtectedInput({ ...byNewOwner, locktime: UNLOCK_HEIGHT - 1 });
   });
