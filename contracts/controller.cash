@@ -26,9 +26,14 @@ pragma cashscript ^0.14.0;
 
 bytes20 constant NO_PROPOSED_OWNER = 0x0000000000000000000000000000000000000000;
 
-// SIGHASH_ALL | SIGHASH_UTXOS | SIGHASH_FORKID: the signature covers every
-// input, every spent output, and every output of the transaction.
-bytes1 constant REQUIRED_SIGHASH = 0x61;
+// Accepted signing types. Both cover every input and every output of the
+// transaction, so a signature cannot be moved to another transaction or have
+// outputs changed.
+//   0x41  SIGHASH_ALL | SIGHASH_FORKID
+//   0x61  SIGHASH_ALL | SIGHASH_UTXOS | SIGHASH_FORKID, which also covers the
+//         amount and script of every spent output
+bytes1 constant SIGHASH_ALL = 0x41;
+bytes1 constant SIGHASH_ALL_UTXOS = 0x61;
 
 // Checks that hold for every transition: position, continuity of the
 // covenant and its identity token, and preservation of the controller value.
@@ -56,7 +61,8 @@ function continuedController(bytes32 identity) returns (bytes) {
 // to the whole transaction. The signature itself is verified by the caller.
 function authorizedKey(bytes keyHash, pubkey pk, sig s) {
     require(hash160(pk) == keyHash);
-    require(bytes(s).split(bytes(s).length - 1)[1] == REQUIRED_SIGHASH);
+    bytes signingType = bytes(s).split(bytes(s).length - 1)[1];
+    require(signingType == SIGHASH_ALL || signingType == SIGHASH_ALL_UTXOS);
 }
 
 contract RecoveryController(bytes32 identity) {

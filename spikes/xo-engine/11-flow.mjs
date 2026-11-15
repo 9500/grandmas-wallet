@@ -123,11 +123,11 @@ const steps = {
     const funding = spendable.find((u) => u.outpointTransactionHash === flow.identity && u.outpointIndex === 0);
     if (funding === undefined) throw new Error('identity outpoint not found among spendable coins');
     const v = variable('owner');
-    const walletSatoshis = total(spendable) - 1000n - 700n;
+    const walletSatoshis = BigInt(funding.valueSatoshis) - 1000n - 700n;
     const stored = await engine.createInvitation({
       templateIdentifier: spike, actionIdentifier: 'initialize', intent: template.start[0],
       variables: [v('identity', flow.identity), v('recovererKeyHash', flow.recovererKeyHash), v('walletSatoshis', walletSatoshis)],
-      inputs: asInputs([funding, ...spendable.filter((u) => u !== funding)]),
+      inputs: asInputs([funding]),
     });
     const id = idOf(stored);
     const ownerKeyHash = await ownKeyHash('ownerKey');
@@ -155,27 +155,17 @@ const steps = {
       inputs: [outpoint(flow.controller, 'controllerOwnerInput'), outpoint(flow.wallet, 'walletInput')],
     });
     const id = idOf(stored);
-    // The send invitation is created first so that it derives key index 0, the key the wallet was created with;
-    // every action in this trial template generates its key, and in a fresh state the first one generated is index 0.
-    // A fresh engine state does not know the wallet script. Resolving the wallet output in an unused
-    // "initialize" invitation stores it again, so the wallet input counts as this account's own.
-    const scratch = await engine.createInvitation({
-      templateIdentifier: spike, actionIdentifier: 'initialize', intent: template.start[0],
-      variables: [v('identity', flow.identity), v('recovererKeyHash', flow.recovererKeyHash), v('ownerKeyHash', flow.ownerKeyHash), v('walletSatoshis', 1000n)],
-    });
-    await engine.appendInvitation(idOf(scratch), { outputs: [{ outputIdentifier: 'walletOutput' }] });
     const change = BigInt(flow.wallet.value) - BigInt(amount) - CONTROLLER_FEE;
+    // Change goes back to the wallet through the template's wallet output. Resolving it inside this invitation
+    // also makes the wallet script known to this fresh engine state, under the same key as the controller input.
+    await engine.appendInvitation(id, { variables: [v('walletSatoshis', change)] });
     await engine.appendInvitation(id, {
-      outputs: [
-        { outputIdentifier: 'activeControllerOutput' },
-        { outputIdentifier: 'paymentOutput' },
-        ...(change >= 546n ? [{ lockingBytecode: walletLocking(), valueSatoshis: change }] : []),
-      ],
+      outputs: [{ outputIdentifier: 'activeControllerOutput' }, { outputIdentifier: 'paymentOutput' }, { outputIdentifier: 'walletOutput' }],
     });
     const built = await finish(id, 'send');
     remember({
       controller: { hash: built.transactionHash, index: 0 },
-      wallet: change >= 546n ? { hash: built.transactionHash, index: 2, value: change.toString() } : undefined,
+      wallet: { hash: built.transactionHash, index: 2, value: change.toString() },
       state: `0100${stateBody()}${'00'.repeat(20)}`,
     });
   },

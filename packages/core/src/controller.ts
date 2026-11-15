@@ -12,8 +12,18 @@ import { controllerBytecodeHex } from '@grandmas-wallet/contracts/controller';
 
 import { identityForScript, instantiate, lockingBytecodeOf } from './script.js';
 
-/** SIGHASH_ALL | SIGHASH_UTXOS | SIGHASH_FORKID — the only signing type the controller accepts. */
+/**
+ * SIGHASH_ALL | SIGHASH_UTXOS | SIGHASH_FORKID — the signing type this library uses. It covers every input,
+ * every output, and the amount and script of every spent output.
+ */
 export const CONTROLLER_SIGHASH_TYPE = 0x61;
+
+/**
+ * Signing types the contracts accept. `0x41` (SIGHASH_ALL | SIGHASH_FORKID) covers every input and output
+ * but not the other inputs' spent outputs; it is accepted so that signers which cannot provide those, such
+ * as the current XO engine, can still authorize a transaction.
+ */
+export const ACCEPTED_SIGHASH_TYPES = [0x41, 0x61] as const;
 
 /** Position of the controller in every transaction that spends it. */
 export const CONTROLLER_INDEX = 0;

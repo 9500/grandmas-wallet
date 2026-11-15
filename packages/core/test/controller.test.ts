@@ -168,9 +168,17 @@ describe('authority', () => {
     );
   });
 
-  it('rejects signatures that do not cover the whole transaction', () => {
-    // 0x41 ALL, 0x42 NONE, 0x43 SINGLE, 0xc1 ALL|ANYONECANPAY, 0x62 NONE|UTXOS
-    for (const signingType of [0x41, 0x42, 0x43, 0xc1, 0x62]) {
+  it('accepts a signature over all inputs and outputs, with or without the spent outputs', () => {
+    for (const signingType of [0x41, 0x61]) {
+      for (const [, spend] of allTransitions) {
+        expectAccepted({ ...spend, signingType });
+      }
+    }
+  });
+
+  it('rejects signatures that do not cover every input and output', () => {
+    // 0x42 NONE, 0x43 SINGLE, 0xc1 ALL|ANYONECANPAY, 0x62 NONE|UTXOS, 0x63 SINGLE|UTXOS, 0xc3 SINGLE|ANYONECANPAY
+    for (const signingType of [0x42, 0x43, 0xc1, 0x62, 0x63, 0xc3]) {
       for (const [, spend] of allTransitions) {
         expectChangeRejected(spend, { signingType });
       }

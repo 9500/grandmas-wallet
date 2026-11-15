@@ -15,7 +15,7 @@ pragma cashscript ^0.14.0;
 // can also spend the controller, to open or complete a recovery claim, so a
 // protected input additionally requires:
 //   - a signature by the owner recorded in the controller state being spent,
-//     covering the whole transaction, and
+//     covering every input and output of the transaction, and
 //   - a controller successor that keeps that same owner, epoch, recoverer and
 //     delay with no claim pending. Recovery claims and completions never
 //     produce such a successor.
@@ -30,8 +30,10 @@ function ownerApproves(bytes32 identity, pubkey ownerPk, sig ownerSig) {
     require(state.split(1)[0] == 0x01);
 
     require(hash160(ownerPk) == state.slice(6, 26));
-    // SIGHASH_ALL | SIGHASH_UTXOS | SIGHASH_FORKID
-    require(bytes(ownerSig).split(bytes(ownerSig).length - 1)[1] == 0x61);
+    // The signature must cover every input and every output: SIGHASH_ALL | SIGHASH_FORKID (0x41),
+    // optionally with SIGHASH_UTXOS (0x61).
+    bytes signingType = bytes(ownerSig).split(bytes(ownerSig).length - 1)[1];
+    require(signingType == 0x41 || signingType == 0x61);
 
     require(tx.outputs[0].tokenCategory == identity + 0x01);
     require(

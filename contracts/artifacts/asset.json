@@ -21,12 +21,12 @@
       ]
     }
   ],
-  "bytecode": "OP_OVER OP_3 OP_PICK OP_0 OP_UTXOTOKENCATEGORY OP_3 OP_PICK OP_1 OP_CAT OP_EQUALVERIFY OP_0 OP_UTXOTOKENCOMMITMENT OP_SIZE 45 OP_NUMEQUALVERIFY OP_DUP OP_1 OP_SPLIT OP_DROP OP_1 OP_EQUALVERIFY OP_ROT OP_HASH160 OP_OVER 1a OP_SPLIT OP_DROP OP_6 OP_SPLIT OP_NIP OP_EQUALVERIFY OP_OVER OP_ROT OP_SIZE OP_NIP OP_1SUB OP_SPLIT OP_NIP 61 OP_EQUALVERIFY OP_0 OP_OUTPUTTOKENCATEGORY OP_ROT OP_1 OP_CAT OP_EQUALVERIFY OP_0 OP_OUTPUTTOKENCOMMITMENT 0100 OP_ROT 31 OP_SPLIT OP_DROP OP_2 OP_SPLIT OP_NIP OP_CAT 0000000000000000000000000000000000000000 OP_CAT OP_EQUALVERIFY OP_CHECKSIG",
+  "bytecode": "OP_OVER OP_3 OP_PICK OP_0 OP_UTXOTOKENCATEGORY OP_3 OP_PICK OP_1 OP_CAT OP_EQUALVERIFY OP_0 OP_UTXOTOKENCOMMITMENT OP_SIZE 45 OP_NUMEQUALVERIFY OP_DUP OP_1 OP_SPLIT OP_DROP OP_1 OP_EQUALVERIFY OP_ROT OP_HASH160 OP_OVER 1a OP_SPLIT OP_DROP OP_6 OP_SPLIT OP_NIP OP_EQUALVERIFY OP_OVER OP_ROT OP_SIZE OP_NIP OP_1SUB OP_SPLIT OP_NIP OP_DUP 41 OP_EQUAL OP_SWAP 61 OP_EQUAL OP_BOOLOR OP_VERIFY OP_0 OP_OUTPUTTOKENCATEGORY OP_ROT OP_1 OP_CAT OP_EQUALVERIFY OP_0 OP_OUTPUTTOKENCOMMITMENT 0100 OP_ROT 31 OP_SPLIT OP_DROP OP_2 OP_SPLIT OP_NIP OP_CAT 0000000000000000000000000000000000000000 OP_CAT OP_EQUALVERIFY OP_CHECKSIG",
   "source": "pragma cashscript ^0.14.0;\n\nimport \"./lib/authorization.cash\";\n\n// Grandma's Wallet asset covenant.\n//\n// Holds BCH, fungible tokens or an NFT for the wallet identified by\n// `identity`. Its address is the wallet's receiving address and stays the\n// same when the owner key is replaced.\n//\n// Transaction layout:\n//   Inputs:  00-controller, 01+ assets and anything else\n//   Outputs: 00-controller, 01+ anything\n//\n// Outputs are not restricted here: the owner's signature covers every output,\n// and the wallet decides where payments and change go.\ncontract Asset(bytes32 identity) {\n    function spend(pubkey ownerPk, sig ownerSig) {\n        ownerApproves(identity, ownerPk, ownerSig);\n        require(checkSig(ownerSig, ownerPk));\n    }\n}\n",
-  "fingerprint": "0f711217189841f3ad3cf907f3e622caee37329e2bfcd202e3a829797d5da929",
+  "fingerprint": "e0b3e5e21eb1a1ed63d21a5eb83bf339d7ba40a5d724c8b4346be3a3848cdc98",
   "debug": {
-    "bytecode": "78537900ce5379517e8800cf8201459d76517f7551887ba978011a7f75567f7788787b82778c7f7701618800d17b517e8800d20201007b01317f75527f777e1400000000000000000000000000000000000000007e88ac",
-    "sourceMap": "19:32:19:39;:41::49;;:8::50:1;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;20::20:45",
+    "bytecode": "78537900ce5379517e8800cf8201459d76517f7551887ba978011a7f75567f7788787b82778c7f77760141877c0161879b6900d17b517e8800d20201007b01317f75527f777e1400000000000000000000000000000000000000007e88ac",
+    "sourceMap": "19:32:19:39;:41::49;;:8::50:1;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;20::20:45",
     "logs": [],
     "requires": [
       {
@@ -46,19 +46,19 @@
         "line": 19
       },
       {
-        "ip": 40,
-        "line": 19
-      },
-      {
         "ip": 46,
         "line": 19
       },
       {
-        "ip": 60,
+        "ip": 52,
         "line": 19
       },
       {
-        "ip": 62,
+        "ip": 66,
+        "line": 19
+      },
+      {
+        "ip": 68,
         "line": 20
       }
     ],
@@ -79,8 +79,8 @@
             "type": "sig"
           }
         ],
-        "bytecode": "00ce5379517e8800cf8201459d76517f7551887ba978011a7f75567f7788787b82778c7f7701618800d17b517e8800d20201007b01317f75527f777e1400000000000000000000000000000000000000007e88",
-        "sourceMap": "26:22:26:23;:12::38:1;:42::50:0;;:53::57;:42:::1;:4::59;28:28:28:29:0;:18::44:1;29:12:29:24;:28::30:0;:4::32:1;30:12:30:17:0;:24::25;:12::26:1;:::29;:33::37:0;:4::39:1;32:20:32:27:0;:12::28:1;:32::37:0;:47::49;:32::50:1;;:44::45:0;:32::50:1;;:4::52;34:18:34:26:0;:40::48;:34::56:1;;:::60;:12::61;:::64;:68::72:0;:4::74:1;36:23:36:24:0;:12::39:1;:43::51:0;:54::58;:43:::1;:4::60;38:19:38:20:0;:8::35:1;39:12:39:18:0;:21::26;:36::38;:21::39:1;;:33::34:0;:21::39:1;;:12;:42::84:0;:12:::1;37:4:40:6",
+        "bytecode": "00ce5379517e8800cf8201459d76517f7551887ba978011a7f75567f7788787b82778c7f77760141877c0161879b6900d17b517e8800d20201007b01317f75527f777e1400000000000000000000000000000000000000007e88",
+        "sourceMap": "26:22:26:23;:12::38:1;:42::50:0;;:53::57;:42:::1;:4::59;28:28:28:29:0;:18::44:1;29:12:29:24;:28::30:0;:4::32:1;30:12:30:17:0;:24::25;:12::26:1;:::29;:33::37:0;:4::39:1;32:20:32:27:0;:12::28:1;:32::37:0;:47::49;:32::50:1;;:44::45:0;:32::50:1;;:4::52;35:30:35:38:0;:52::60;:46::68:1;;:::72;:24::73;:::76;36:12:36:23:0;:27::31;:12:::1;:35::46:0;:50::54;:35:::1;:12;:4::56;38:23:38:24:0;:12::39:1;:43::51:0;:54::58;:43:::1;:4::60;40:19:40:20:0;:8::35:1;41:12:41:18:0;:21::26;:36::38;:21::39:1;;:33::34:0;:21::39:1;;:12;:42::84:0;:12:::1;39:4:42:6",
         "sourceFile": "lib/authorization.cash",
         "logs": [],
         "requires": [
@@ -101,24 +101,24 @@
             "line": 32
           },
           {
-            "ip": 36,
-            "line": 34
-          },
-          {
             "ip": 42,
             "line": 36
           },
           {
-            "ip": 56,
-            "line": 37
+            "ip": 48,
+            "line": 38
+          },
+          {
+            "ip": 62,
+            "line": 39
           }
         ]
       }
     ],
     "sources": {
-      "lib/authorization.cash": "pragma cashscript ^0.14.0;\n\n// Grandma's Wallet shared authorization interface, v1.\n//\n// A protected output (an asset or an application position) is bound to a\n// wallet identity: the token category of the wallet's controller. It may only\n// be spent in a transaction in which the current owner of that identity\n// approves, which this function checks from the protected input's side.\n//\n// Transaction layout:\n//   Inputs:  00-controller, 01+ protected inputs and anything else\n//   Outputs: 00-controller, 01+ anything\n//\n// The presence of the controller is not treated as approval. The recoverer\n// can also spend the controller, to open or complete a recovery claim, so a\n// protected input additionally requires:\n//   - a signature by the owner recorded in the controller state being spent,\n//     covering the whole transaction, and\n//   - a controller successor that keeps that same owner, epoch, recoverer and\n//     delay with no claim pending. Recovery claims and completions never\n//     produce such a successor.\n//\n// The caller must verify the signature itself with checkSig(ownerSig, ownerPk).\nfunction ownerApproves(bytes32 identity, pubkey ownerPk, sig ownerSig) {\n    // The genuine controller: the identity NFT with mutable capability.\n    require(tx.inputs[0].tokenCategory == identity + 0x01);\n\n    bytes state = tx.inputs[0].nftCommitment;\n    require(state.length == 69);\n    require(state.split(1)[0] == 0x01);\n\n    require(hash160(ownerPk) == state.slice(6, 26));\n    // SIGHASH_ALL | SIGHASH_UTXOS | SIGHASH_FORKID\n    require(bytes(ownerSig).split(bytes(ownerSig).length - 1)[1] == 0x61);\n\n    require(tx.outputs[0].tokenCategory == identity + 0x01);\n    require(\n        tx.outputs[0].nftCommitment ==\n            0x0100 + state.slice(2, 49) + 0x0000000000000000000000000000000000000000\n    );\n}\n"
+      "lib/authorization.cash": "pragma cashscript ^0.14.0;\n\n// Grandma's Wallet shared authorization interface, v1.\n//\n// A protected output (an asset or an application position) is bound to a\n// wallet identity: the token category of the wallet's controller. It may only\n// be spent in a transaction in which the current owner of that identity\n// approves, which this function checks from the protected input's side.\n//\n// Transaction layout:\n//   Inputs:  00-controller, 01+ protected inputs and anything else\n//   Outputs: 00-controller, 01+ anything\n//\n// The presence of the controller is not treated as approval. The recoverer\n// can also spend the controller, to open or complete a recovery claim, so a\n// protected input additionally requires:\n//   - a signature by the owner recorded in the controller state being spent,\n//     covering every input and output of the transaction, and\n//   - a controller successor that keeps that same owner, epoch, recoverer and\n//     delay with no claim pending. Recovery claims and completions never\n//     produce such a successor.\n//\n// The caller must verify the signature itself with checkSig(ownerSig, ownerPk).\nfunction ownerApproves(bytes32 identity, pubkey ownerPk, sig ownerSig) {\n    // The genuine controller: the identity NFT with mutable capability.\n    require(tx.inputs[0].tokenCategory == identity + 0x01);\n\n    bytes state = tx.inputs[0].nftCommitment;\n    require(state.length == 69);\n    require(state.split(1)[0] == 0x01);\n\n    require(hash160(ownerPk) == state.slice(6, 26));\n    // The signature must cover every input and every output: SIGHASH_ALL | SIGHASH_FORKID (0x41),\n    // optionally with SIGHASH_UTXOS (0x61).\n    bytes signingType = bytes(ownerSig).split(bytes(ownerSig).length - 1)[1];\n    require(signingType == 0x41 || signingType == 0x61);\n\n    require(tx.outputs[0].tokenCategory == identity + 0x01);\n    require(\n        tx.outputs[0].nftCommitment ==\n            0x0100 + state.slice(2, 49) + 0x0000000000000000000000000000000000000000\n    );\n}\n"
     },
-    "inlineRanges": "4:60:ownerApproves"
+    "inlineRanges": "4:66:ownerApproves"
   },
   "compiler": {
     "name": "cashc",

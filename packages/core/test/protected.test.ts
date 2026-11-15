@@ -137,8 +137,13 @@ describe('only the current owner can spend', () => {
     });
   });
 
-  it.each(protectedKinds)('%s: rejects an owner signature that does not cover the whole transaction', (_name, input, base) => {
-    for (const signingType of [0x41, 0x42, 0xc1, 0x62]) {
+  it.each(protectedKinds)('%s: accepts an owner signature over all inputs and outputs without the spent outputs', (_name, input, base) => {
+    expectAccepted({ ...base, signingType: 0x41, protectedInputs: [{ ...input(), signingType: 0x41 }] });
+    expectAccepted({ ...base, protectedInputs: [{ ...input(), signingType: 0x41 }] });
+  });
+
+  it.each(protectedKinds)('%s: rejects an owner signature that does not cover every input and output', (_name, input, base) => {
+    for (const signingType of [0x42, 0x43, 0xc1, 0x62]) {
       expectRejectedByProtectedInput({ ...base, protectedInputs: [{ ...input(), signingType }] });
     }
   });
