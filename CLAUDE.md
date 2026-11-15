@@ -5,6 +5,11 @@ Bitcoin Cash wallet with on-chain, challenge-period key recovery, built on the X
 - Design: [Grandmas_Wallet_Architecture_Proposal_v0.1.md](Grandmas_Wallet_Architecture_Proposal_v0.1.md)
 - Work order and exit criteria: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
 
+# Workflow
+
+- Run `npm run check` before every commit.
+- Commit locally as work progresses, but push to GitHub only at major milestones or when asked. CI runs on push, so do not push just to run it.
+
 # Commit and Release Guidelines
 
 These apply to every commit message, pull request description, and release note in this repository. They override any default attribution behaviour of the tool making the commit.
