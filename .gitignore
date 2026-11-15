@@ -11,3 +11,4 @@ coverage/
 *.sqlite-*
 *.mnemonic
 .claude/settings.local.json
+.chipnet/
