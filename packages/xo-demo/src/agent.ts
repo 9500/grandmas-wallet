@@ -10,7 +10,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 import { binToHex, generateBip39Mnemonic, hash160, hexToBin } from '@bitauth/libauth';
-import { grandmasWalletTemplate } from '@grandmas-wallet/templates';
+import { grandmasWalletTemplate, savingsJarTemplate } from '@grandmas-wallet/templates';
 import { Engine, XO_SUPPORTED_NETWORKS } from '@xo-cash/engine';
 import { p2pkhTemplate } from '@xo-cash/templates';
 import { deserializeInvitation, serializeInvitation } from '@xo-cash/utils';
@@ -30,8 +30,9 @@ console.warn = console.error;
 const engine = await Engine.create(mnemonic, { network: XO_SUPPORTED_NETWORKS.chipnet });
 const coinsTemplate = (await engine.importTemplate(p2pkhTemplate)).templateIdentifier;
 const walletTemplate = (await engine.importTemplate(grandmasWalletTemplate)).templateIdentifier;
+const jarTemplate = (await engine.importTemplate(savingsJarTemplate)).templateIdentifier;
 const coinPolicies = { change: { templateIdentifier: coinsTemplate }, receive: { templateIdentifier: coinsTemplate }, address: { templateIdentifier: coinsTemplate } };
-const walletPolicies = { change: { templateIdentifier: walletTemplate }, receive: { templateIdentifier: walletTemplate }, address: { templateIdentifier: walletTemplate } };
+const policiesOf = (templateIdentifier: string) => ({ change: { templateIdentifier: coinsTemplate }, receive: { templateIdentifier }, address: { templateIdentifier } });
 await engine.setDefaultPolicies(coinPolicies);
 const coinLockingBytecode = await engine.generateLockingBytecodeFromDefaultPolicy('receive');
 const template = grandmasWalletTemplate;
@@ -117,7 +118,7 @@ const operations: Record<string, (request: Json) => Promise<unknown>> = {
       transactionId: output.outpointTransactionHash,
       index: output.outpointIndex,
       satoshis: String(output.valueSatoshis),
-      template: output.templateIdentifier === walletTemplate ? 'wallet' : 'coins',
+      template: output.templateIdentifier === walletTemplate ? 'wallet' : output.templateIdentifier === jarTemplate ? 'jar' : 'coins',
       commitment: output.tokenNftCommitment,
     })),
 
@@ -130,9 +131,9 @@ const operations: Record<string, (request: Json) => Promise<unknown>> = {
    * `derive` names variables to fill with the hash of a key this invitation generated.
    */
   start: async (request) => {
-    const { action, role, generate, variables, inputs, outputs, rawOutputs, derive } = request as {
+    const { action, role, generate, variables, inputs, outputs, rawOutputs, derive, locktime } = request as {
       action: string; role: string; generate?: string[]; variables?: Variables; inputs?: InputRequest[];
-      outputs?: string[]; rawOutputs?: RawOutput[]; derive?: Record<string, string>;
+      outputs?: string[]; rawOutputs?: RawOutput[]; derive?: Record<string, string>; locktime?: number;
     };
     const stored = await engine.createInvitation({
       templateIdentifier: walletTemplate,
@@ -140,6 +141,7 @@ const operations: Record<string, (request: Json) => Promise<unknown>> = {
       intent: intentFor(action, role, generate),
       variables: variablesFor(role, variables),
       inputs: inputsFor(inputs),
+      ...(locktime === undefined ? {} : { transactionLocktime: locktime }),
     });
     const invitationIdentifier = identifierOf(stored);
     for (const [variableIdentifier, secret] of Object.entries(derive ?? {})) {
@@ -197,14 +199,15 @@ const operations: Record<string, (request: Json) => Promise<unknown>> = {
   },
 
   /**
-   * Make a wallet script known to this account under the keys of an invitation it took part in:
-   * `receive` for the wallet's address, `address` for a savings jar.
+   * Make an address known to this account, so that it follows the outputs there and can spend them:
+   * the wallet's own address, or a savings jar for a given unlock time.
    */
-  track: async ({ policy, variables, invitationIdentifier }) => {
-    await engine.setDefaultPolicies(walletPolicies);
+  track: async ({ what, variables }) => {
+    const [templateIdentifier, policy] = what === 'jar' ? [jarTemplate, 'address' as const] : [walletTemplate, 'address' as const];
+    await engine.setDefaultPolicies(policiesOf(templateIdentifier));
     try {
       const values = Object.fromEntries(Object.entries((variables ?? {}) as Variables).map(([name, raw]) => [name, value(raw)]));
-      return await engine.generateLockingBytecodeFromDefaultPolicy(policy as 'receive' | 'address', values, invitationIdentifier as string);
+      return await engine.generateLockingBytecodeFromDefaultPolicy(policy, values);
     } finally {
       await engine.setDefaultPolicies(coinPolicies);
     }
@@ -223,6 +226,9 @@ const operations: Record<string, (request: Json) => Promise<unknown>> = {
     });
     const invitationIdentifier = identifierOf(stored);
     await append(invitationIdentifier, { outputs: [{ outputIdentifier: 'transferSatoshisOutput' }] });
+    // Anything left over beyond the fee returns to this account.
+    const change = await engine.calculateChange(invitationIdentifier);
+    if (BigInt(change.valueSatoshis) > 1_000n) await engine.addChangeToInvitation(invitationIdentifier);
     return complete(invitationIdentifier);
   },
 

@@ -6,6 +6,7 @@
 //   npm run xo-demo -- run           the lifecycle
 //   npm run xo-demo -- run-short     the lifecycle without the cancelled request and the payments
 //   npm run xo-demo -- rescue        return a wallet's funds after a run that stopped part-way
+//   npm run xo-demo -- pay <from> <account or address> <satoshis>   move ordinary coins
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -16,6 +17,7 @@ import {
   type Output,
   type TransactionCommon,
   binToHex,
+  cashAddressToLockingBytecode,
   decodeTransactionBch,
   generateBip39Mnemonic,
   hexToBin,
@@ -355,18 +357,19 @@ class Lifecycle {
     await this.ownerAction(agent, step, shows, 'send', { sentSatoshis: sats(PAYMENT), recipientLockingScript: agent.coinLockingBytecode }, ['paymentOutput'], PAYMENT);
   }
 
+  /** Opening a jar is an ordinary payment from the wallet to the jar's address. */
   async openJar(): Promise<void> {
     const unlockTime = Math.floor(Date.now() / 1000) + JAR_LOCK_SECONDS;
-    const amount = JAR_AMOUNT;
+    const jar = savingsJarScript(hexToBin(this.identity), unlockTime);
     const { transaction, transactionId } = await this.ownerAction(
-      this.owner, 'open-savings-jar', 'Owner locks funds in a savings jar', 'openSavingsJar',
-      { jarSatoshis: sats(amount), unlockTime }, ['savingsJarOutput'], amount,
+      this.owner, 'open-savings-jar', 'Owner pays into a savings jar, an application with its own template', 'send',
+      { sentSatoshis: sats(JAR_AMOUNT), recipientLockingScript: hex(jar.lockingBytecode) }, ['paymentOutput'], JAR_AMOUNT,
     );
     this.jar = { utxo: this.utxo(transaction, transactionId, 1), unlockTime };
     this.persist();
-    if (hex(this.jar.utxo.output.lockingBytecode) !== hex(savingsJarScript(hexToBin(this.identity), unlockTime).lockingBytecode)) {
-      throw new Error('the savings jar address the engine produced differs from the one this library derives');
-    }
+    // The owner's engine learns the jar's address from the Savings Jar template.
+    const tracked = await this.owner.request<string>('track', { what: 'jar', variables: { identity: this.identity, unlockTime } });
+    if (tracked !== hex(jar.lockingBytecode)) throw new Error('the savings jar address from its template differs from the one this library derives');
   }
 
   async cancel(): Promise<void> {
@@ -432,45 +435,38 @@ class Lifecycle {
     this.advance(transaction, built.transactionId, 'finalizeRecovery');
   }
 
-  /** The replacement device makes the wallet's and the jar's addresses its own, under its new key. */
-  async adopt(invitationIdentifier: string): Promise<void> {
-    const wallet = await this.replacement.request<string>('track', {
-      policy: 'receive',
-      variables: { identity: this.identity, receivedSatoshis: sats(0n) },
-      invitationIdentifier,
-    });
+  /** The replacement device starts following the wallet's and the jar's addresses. Neither needs a key. */
+  async adopt(): Promise<void> {
+    const wallet = await this.replacement.request<string>('track', { what: 'wallet', variables: { identity: this.identity } });
     if (wallet !== hex(this.wallet.output.lockingBytecode)) throw new Error('the replacement device derived a different wallet address');
     if (this.jar !== undefined) {
-      const jar = await this.replacement.request<string>('track', {
-        policy: 'address',
-        variables: { identity: this.identity, unlockTime: this.jar.unlockTime },
-        invitationIdentifier,
-      });
+      const jar = await this.replacement.request<string>('track', { what: 'jar', variables: { identity: this.identity, unlockTime: this.jar.unlockTime } });
       if (jar !== hex(this.jar.utxo.output.lockingBytecode)) throw new Error('the replacement device derived a different savings jar address');
     }
   }
 
+  /**
+   * The new owner empties the jar: the wallet's approve action, with the jar as an extra input from the
+   * Savings Jar template and its funds going to the wallet's address.
+   */
   async withdrawJar(): Promise<void> {
     if (this.jar === undefined) return;
     const { utxo, unlockTime } = this.jar;
-    const received = utxo.output.valueSatoshis - FEE;
-    await this.replacement.sees([this.controllerInput(''), { transactionId: hex(utxo.transactionHash), index: utxo.index }]);
+    const jarInput = { transactionId: hex(utxo.transactionHash), index: utxo.index };
+    await this.replacement.sees([this.controllerInput(''), jarInput]);
     const built = await this.replacement.request<Built>('start', {
-      action: 'withdrawSavingsJar',
+      action: 'approve',
       role: 'owner',
-      variables: {
-        identity: this.identity,
-        controllerState: this.stateHex,
-        controllerSatoshis: sats(CONTROLLER_SATOSHIS),
-        unlockTime,
-        receivedSatoshis: sats(received),
-      },
-      inputs: [this.controllerInput('ownerControllerInput'), { transactionId: hex(utxo.transactionHash), index: utxo.index, inputIdentifier: 'savingsJarInput' }],
-      outputs: ['activeControllerOutput', 'receivedFundsOutput'],
+      variables: { identity: this.identity, controllerState: this.stateHex, controllerSatoshis: sats(CONTROLLER_SATOSHIS) },
+      inputs: [this.controllerInput('ownerControllerInput'), jarInput],
+      outputs: ['activeControllerOutput'],
+      rawOutputs: [{ lockingBytecode: hex(this.wallet.output.lockingBytecode), satoshis: String(utxo.output.valueSatoshis - FEE) }],
+      locktime: unlockTime,
     });
-    const transaction = await this.send(this.replacement, built, 'empty-savings-jar', 'New owner empties the savings jar after its unlock time; the jar never moved', { waitUntilFinal: true });
+    const transaction = await this.send(this.replacement, built, 'empty-savings-jar', 'New owner approves emptying the savings jar after its unlock time; the jar never moved', { waitUntilFinal: true });
     this.advance(transaction, built.transactionId, 'ownerAuthorize');
     delete this.jar;
+    this.persist();
   }
 
   /** The new owner doubles the challenge delay, paying the fee from coins outside the wallet. */
@@ -603,6 +599,21 @@ const main = async (): Promise<void> => {
     for (const agent of agents) {
       say(`${agent.name.padEnd(12)} ${addressOf(agent.coinLockingBytecode)}  ${total(await agent.coins())} sat`);
     }
+    if (command === 'pay') {
+      // Move ordinary coins from one account to another account or address, for setting up a run.
+      const [, from, to, amount] = process.argv.slice(2);
+      const payer = agents.find((agent) => agent.name === from);
+      const recipient = agents.find((agent) => agent.name === to);
+      const decoded = recipient === undefined ? cashAddressToLockingBytecode(to ?? '') : undefined;
+      if (payer === undefined || amount === undefined || typeof decoded === 'string') {
+        throw new Error('usage: pay <owner|recoverer|replacement> <account or chipnet address> <satoshis>');
+      }
+      const lockingBytecode = recipient?.coinLockingBytecode ?? hex((decoded as { bytecode: Uint8Array }).bytecode);
+      const built = await payer.request<Built>('pay', { lockingBytecode, satoshis: sats(BigInt(amount)) });
+      await payer.request('broadcast', { invitationIdentifier: built.invitationIdentifier });
+      say(`Paid ${amount} sat from ${from} to ${to} (${built.transactionId}).`);
+      return;
+    }
     if (command === 'rescue') {
       await rescue(agents);
       return;
@@ -627,11 +638,11 @@ const main = async (): Promise<void> => {
       await run.openJar();
 
       say('Recovery after an unchallenged delay');
-      const invitationIdentifier = await run.requestRecovery(full ? 'request-recovery-2' : 'request-recovery', !full);
+      await run.requestRecovery(full ? 'request-recovery-2' : 'request-recovery', !full);
       await run.finalize();
 
       say('The replacement device takes over');
-      await run.adopt(invitationIdentifier);
+      await run.adopt();
       if (full) await run.pay(replacement, 'send-after-recovery', 'New owner pays from the same wallet funds, which never moved');
       await run.withdrawJar();
       await run.updateRecovery();

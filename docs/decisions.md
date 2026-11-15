@@ -170,3 +170,25 @@ The controller and the shared authorization interface accept a signature of type
 **What it gives up:** the signer's own assurance about the amounts and scripts of the *other* inputs. A signer that looks those up itself, as the wallet and the XO engine do, loses nothing. A signer that is handed a transaction without that data (an offline or hardware signer) would not notice if it were lied to about another input's amount. Such a signer should use `0x61`, which stays accepted; this project's own transaction builder uses `0x61`.
 
 **Evidence:** every transition and both kinds of protected input are tested under both types, and six other types are rejected (`packages/core/test`). The chipnet lifecycle was run a third time with these contracts (identity `1a2e586aad9ca8e60a3332d78e690f41960abea28248edafcb05673429f94be1`, `docs/chipnet-log.md`): all permitted steps accepted, all three invalid attempts refused.
+
+## D9 — Authorization interface v2: protected outputs hold no key
+
+**Date:** 16 Nov 2026 · **Status:** implemented and tested in the VM; not yet run on chipnet; supersedes the signature rule (points 3 and the per-input signature) of D5
+
+A protected output (wallet funds, or an application position such as a savings jar) no longer checks a signature. It requires that input 0 is the wallet's controller and that the controller continues with the same owner, epoch, recoverer and delay and no claim pending. The owner's signature is checked once, by the controller, and covers every input and output.
+
+Compiled sizes: asset covenant 64 bytes (was 94), Savings Jar 64 (was 97). A protected input carries only its script, about 130 bytes less than before.
+
+**Why**
+
+- The XO engine derives keys per template. With a signature in every protected output, an application in its own template could never produce the wallet owner's signature, so every application would have had to be part of the wallet template, and adding one would have meant new keys for every wallet.
+- With no key in the application, the Savings Jar is its own XO template with no secrets, usable with any wallet identity. Opening a jar is an ordinary payment to its address; emptying it is the wallet template's `approve` action with the jar as an extra input.
+
+**Why this is still owner approval and not mere presence of the controller**
+
+Only the controller's owner-signed functions can produce the required successor state. A recovery request leaves a claim pending; a completed recovery changes the owner and the epoch. The tests show a protected input refusing to ride along with either, and failing at the controller when anyone but the owner signs or when the signature leaves inputs or outputs open.
+
+**What changes for safety**
+
+- Before, a protected output was safe even against a flaw in the controller, because it checked the signature itself. Now its safety rests on the controller never offering a way to reach the unchanged successor state without the owner's signature. Any later controller version must keep that property; the state's version byte ties an application to the controller rules it was written against.
+- One signature on the controller releases every protected input in the transaction. A wallet must therefore examine every input of a transaction it is asked to approve and show the user everything being spent. This was enforced by the contracts before and is now the wallet software's duty.
