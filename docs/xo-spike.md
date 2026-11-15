@@ -1,6 +1,6 @@
 # XO engine spike
 
-**Date:** 15 Nov 2026 · **Status:** blocked on one design decision. The engine runs our contracts as far as creating a wallet on chipnet, but it cannot sign a transaction that spends the controller, because of how it handles the signing type the contracts require. See "The signing problem" below.
+**Date:** 15 Nov 2026 · **Status:** done. The unmodified XO engine runs the whole recovery lifecycle with our contracts on chipnet, once the contracts accept the plain "all inputs and outputs" signing type (decision D8). One engine defect was found, fixed locally to confirm the diagnosis, and written up for the XO team (`docs/xo-engine-signing-bug.md`).
 
 ## Answers so far
 
@@ -12,8 +12,9 @@
 | Can a template compute an NFT commitment? | Only by joining hex text | Exp. 3 and 4. Token fields (category, commitment) are evaluated as text. Variables are inserted as their hex text, and pieces can be concatenated inside one `$( … )`. Byte operations and hashing give unusable results, and key operations (`<key.public_key>`) are not available there at all. |
 | Can an action be funded from ordinary coins held under another template? | Yes | Exp. 11. The wallet was created through the engine with a pay-to-public-key-hash input from the standard wallet template in the same invitation. |
 | Can the identity be created through the engine? | Yes | Exp. 11 and 12. The engine-built genesis (chipnet `453795030d49c50e7dad639483ff868886037eb2f57a09ccebbdd6474dd3246c`) passes `validateGenesis`, and its controller and wallet addresses equal the ones `packages/core` derives. |
-| Can the engine spend the controller and a wallet output together? | It builds the transaction correctly but signs it wrongly | Exp. 11, 13, 14. Layout, state and unlocking scripts are right; both signatures are invalid. See "The signing problem". |
-| Finalization with a relative timelock, and the recoverer acting from a second account | Not reached | Blocked by the signing problem. The recoverer account did derive its key and receive funds. |
+| Can the engine spend the controller and a wallet output together? | Yes, with signing type `all_outputs` | Exp. 11. On the unmodified engine with the D8 contracts: chipnet `6c38365b12e7d7cc675cb40ce84994c639c46eef9abc1d5ace166d3860b5ba46`. With `all_outputs_all_utxos` the engine signs wrongly; see "The signing problem". |
+| Can the recoverer act from a second account, paying its own fee from ordinary coins? | Yes | Exp. 11. Claim: chipnet `92d6c9b88273b2f7e4a2208455ebee8bff3fae180a01e86f4bc266dace4d207b`. The recoverer's key is the first key its account derives under the template; the owner had put its hash into the wallet state beforehand. |
+| Does finalization with a relative-timelock sequence number work? | Yes | Exp. 11. The template's `sequenceNumber` expression sets the input's sequence; the network refused the transaction until the delay had passed and accepted it about 11 minutes after the claim: chipnet `3f178550fc11a85682a484fbd56b5bb39afdccbd1911e5415ec04c7035240218`. A spend by the owner afterwards was accepted too (`af4e3e5ae7233478b65c2d3339aee95829f63e79b74a5c6d14bc574db5a23791`). |
 | Are keys reproducible from the mnemonic? | Yes, per template | Exp. 3. A secret is a derivation index; the same mnemonic, template and index give the same key on every run. A key is derived under the template identifier, so any change to the template changes every key. |
 | Does block header verification cope with chipnet today? | No, but it does not stop the engine | Exp. 5 and 6. Verification stops at height 332451 ("claims target 486604799, expected 437753688") about 500 blocks below the tip and logs errors for every later transaction. Confirmed outputs are still recorded and listed. |
 | Does the engine run in a browser? | Yes | Exp. 7. With the dev wallet's build workarounds (`@xo-cash/state` imports `fs`, `path`, `better-sqlite3` and `indexeddbshim`, which must be stubbed) it starts in headless Chromium in about 1.5 s, connects to chipnet, and keeps its template, keys and invitations across a page reload. The bundle is 1.6 MB before compression. |
@@ -25,13 +26,15 @@ Our contracts require signatures of type `0x61`: all inputs, all outputs, and al
 
 When the engine signs an input it gives the signing code the spent output of that input only; the spent outputs of the other inputs are left empty (`sourceOutputs[inputIndex] = …` on an otherwise empty list). A signature that covers all spent outputs is therefore computed over the wrong data whenever the transaction has more than one input, and the network rejects it. Experiment 14 confirms this exactly: both of the engine's signatures verify against a message built with only that input's spent output, and against nothing else.
 
-Every transaction that spends the controller has at least two inputs (the controller plus a fee or wallet input), so with the current contracts no controller action can be executed through this engine version. The standard templates do not meet the problem because they use `all_outputs` (type `0x41`), which needs only the signed input's own spent output.
+Every transaction that spends the controller has at least two inputs (the controller plus a fee or wallet input), so contracts that insist on `0x61` cannot be used through this engine version. The standard templates do not meet the problem because they use `all_outputs` (type `0x41`), which needs only the signed input's own spent output.
 
-Options:
+What was done about it:
 
-1. **Accept type `0x41` in the contracts as well.** `0x41` still covers every input outpoint, every output and the signed input's own value and script, so a signature cannot be moved to another transaction or have outputs changed. What is lost is the signer's assurance about the *other* inputs' amounts and scripts, which matters for a signer that cannot look them up (an offline or hardware signer), not for the contract. This is a small contract change and unblocks XO now.
-2. **Wait for an engine fix** and report the problem to the XO team. The contracts stay as they are; XO work stops until then.
-3. **Build the transactions with our own builder and use XO only for description.** Possible, since we can derive the same keys (experiment 15), but it would not meet the bounty's requirement of a transaction executed through an invitation.
+1. **The diagnosis was confirmed with a local fix.** Filling in the other inputs' spent outputs (about ten lines, `spikes/xo-engine/patches/engine-sign-all-utxos.mjs`) made the engine's signatures valid. With the fix and the `0x61`-only contracts, the full lifecycle ran on chipnet: create, spend, claim, finalize after the delay, spend again.
+2. **The contracts now accept `0x41` as well as `0x61`** (decision D8), so the wallet does not depend on the fix. With these contracts and `all_outputs` in the template, the same lifecycle ran on the unmodified engine.
+3. **The defect is written up for the XO team** in `docs/xo-engine-signing-bug.md`, with the cause, a reproduction, the fix, and the chipnet transactions that show it working.
+
+The patch is not applied in the repository's normal state; the wallet is to be built on the published engine.
 
 ## Other things learned while executing
 
@@ -59,10 +62,9 @@ The engine accepts custom network parameters through its `electrumServers` optio
 4. **The recoverer's key can be known to the owner in advance.** Since derivation is deterministic, the owner can open the recovery mnemonic it generated, derive the recoverer's public key, and put its hash into the initial state. The recoverer's engine, opened later with the same mnemonic and template, derives the same key. This still has to be shown end to end.
 5. **Node processes cannot persist engine state** with the pinned version. Scripts must repeat key generation in the same order on every run, or run in a browser.
 
-## Still open
+## Not covered by the spike
 
-Waiting on the signing decision:
-
-- A follow-up action that spends the controller and a wallet output together, accepted by the network.
-- Finalization with a relative-timelock sequence number.
-- The recoverer acting from a second account.
+- The owner and recoverer using persistent engine state in a browser across a whole lifecycle. Each step here ran in a fresh Node process, with a trial template in which every action generates its key so that a fresh process re-derives key 0. The real template must generate keys only when the wallet is created, and that arrangement has not been run end to end.
+- One-way enrollment: the owner deriving the recoverer's public key from the recovery mnemonic. The derivation is shown to match (experiment 15), but here the recoverer's account produced its key hash first and handed it to the owner.
+- Cancelling a claim, owner updates, token and NFT transfers, and the Savings Jar through the engine.
+- The engine's block header verification on chipnet, which is still failing.
