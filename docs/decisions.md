@@ -173,7 +173,7 @@ The controller and the shared authorization interface accept a signature of type
 
 ## D9 — Authorization interface v2: protected outputs hold no key
 
-**Date:** 16 Nov 2026 · **Status:** implemented and tested in the VM; not yet run on chipnet; supersedes the signature rule (points 3 and the per-input signature) of D5
+**Date:** 16 Nov 2026 · **Status:** implemented, tested in the VM, and run once on chipnet; supersedes the signature rule (points 3 and the per-input signature) of D5
 
 A protected output (wallet funds, or an application position such as a savings jar) no longer checks a signature. It requires that input 0 is the wallet's controller and that the controller continues with the same owner, epoch, recoverer and delay and no claim pending. The owner's signature is checked once, by the controller, and covers every input and output.
 
@@ -192,3 +192,5 @@ Only the controller's owner-signed functions can produce the required successor 
 
 - Before, a protected output was safe even against a flaw in the controller, because it checked the signature itself. Now its safety rests on the controller never offering a way to reach the unchanged successor state without the owner's signature. Any later controller version must keep that property; the state's version byte ties an application to the controller rules it was written against.
 - One signature on the controller releases every protected input in the transaction. A wallet must therefore examine every input of a transaction it is asked to approve and show the user everything being spent. This was enforced by the contracts before and is now the wallet software's duty.
+
+**Chipnet:** the scripted lifecycle was run with these contracts (identity `f1ff8fb1ffbaf081d161d67a2d578bff9fa0476ab4dd4dc288b8e7fff83b33b9`, `docs/chipnet-log.md`). All permitted steps were accepted. The network refused a spend of wallet funds attached to a recovery request, a completion before the delay, and a spend approved by the old owner key after recovery. Eleven transactions cost 8,763 satoshis in fees, against roughly 1,000 each for controller transactions before.
