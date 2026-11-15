@@ -3,16 +3,24 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=22" },
-  "workspaces": ["packages/*", "apps/*"],
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "contracts"
+  ],
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "build:contracts": "npm run build -w @grandmas-wallet/contracts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
+    "@types/node": "^24.19.2",
     "eslint": "^10.15.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.72.2",

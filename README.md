@@ -4,7 +4,7 @@ A Bitcoin Cash wallet that can recover access after a lost phone without manual 
 
 Built for BCH Blaze 2026 on the XO stack.
 
-**Status:** early development. No contract has been implemented or audited yet; the only code so far is the controller state format.
+**Status:** early development. The recovery controller contract exists and is tested in a virtual machine only. Nothing has been audited or run on a network.
 
 ## Documents
 
@@ -18,7 +18,8 @@ Requires Node 22 or later.
 
 ```bash
 npm install
-npm run check   # typecheck, lint, tests
+npm run check             # typecheck, lint, tests
+npm run build:contracts   # recompile contracts after editing them
 ```
 
 ## License

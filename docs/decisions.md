@@ -53,3 +53,42 @@ Use the versions the XO web dev wallet pins, so invitations produced here load i
 | `@electrum-cash/web-socket` | 4.2.0 |
 
 Only libauth is installed so far; each XO package is added, at the version above, by the first workspace that uses it.
+
+## D4 — Controller contract v1
+
+**Date:** 15 Nov 2026 · **Status:** implemented and tested in the VM; not audited, not yet run on chipnet
+
+Source: `contracts/controller.cash` (CashScript 0.14.0). Compiled size: 402 bytes, 196 opcodes, so the controller is a pay-to-script-hash (32-byte) output. The contract has no constructor parameters; every wallet shares the same bytecode and address, and is told apart by its identity token category.
+
+**Rules that hold for every transition**
+
+- The controller is input 0 and its successor is output 0.
+- Transaction version is 2.
+- The successor has the same locking bytecode, the same token category and capability (mutable), the same fungible amount, and at least the same BCH value.
+- The state is 69 bytes with version `0x01`.
+- The authorizing signature must use signing type `0x61` (all inputs, all outputs, all spent outputs). Other types are rejected even when the signature is otherwise valid.
+
+**Transitions**
+
+| Function | Signed by | From | Result |
+| --- | --- | --- | --- |
+| `ownerAuthorize` | owner | Active or Pending | Active; owner, recoverer, delay and epoch unchanged; claim cleared |
+| `requestRecovery` | recoverer | Active only | Pending with the presented proposed owner; nothing else changes |
+| `finalizeRecovery` | recoverer, after the relative delay | Pending only | Active; owner becomes the proposed owner; epoch + 1 |
+| `ownerUpdate` | owner | Active or Pending | Active with the given owner, recoverer and delay; epoch + 1 only if the owner changed |
+
+**Decisions taken**
+
+- Combined authorize-and-cancel is included: `ownerAuthorize` on a Pending controller cancels the claim (proposal decision #4).
+- A second claim on a Pending controller is rejected, including one naming the same proposed owner. A different destination requires the first claim to be cancelled or finalized first, which gives a fresh delay (C06).
+- `ownerUpdate` validates the new delay on chain (only the BIP68 value and type flag, value not zero) and rejects zero key hashes.
+- The duplicate-identity rule needs no output scan: with a mutable (non-minting) token and a fixed fungible amount, consensus rules already prevent a second token of the category from being created.
+
+**Known limits**
+
+- The initial state is not checked by the contract. A client must validate the genesis transaction (exactly one token output of the category, mutable, valid state, sent to the controller script) before trusting an identity. This validator is the next piece of client work.
+- The VM tests check that the finalizing input carries a sequence number satisfying the delay. That the UTXO has really aged that long is enforced by nodes (BIP68) and will be exercised on chipnet.
+- Any party can attach further inputs and outputs to a controller transaction. The signer's signature covers all of them.
+- The epoch stops at 2^31-1 owner changes.
+
+**Tests:** `packages/core/test/controller.test.ts` runs the compiled bytecode in the libauth 2026 VM with standardness rules on. Each rejection test first confirms the unmodified transaction is accepted, then applies one change. Covered acceptance tests at controller level: C01, C03, C04, C05, C06, C09, C10, C11, C12, C14, X02. C02, C07 and C08 need the asset and application contracts.

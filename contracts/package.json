@@ -1,0 +1,17 @@
+{
+  "name": "@grandmas-wallet/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "devDependencies": {
+    "cashc": "0.14.0",
+    "@cashscript/utils": "0.14.0"
+  },
+  "exports": {
+    "./controller": "./artifacts/controller.ts"
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}
