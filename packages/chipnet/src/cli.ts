@@ -80,7 +80,7 @@ const writeLog = (state: RunState): void => {
     const step = state.steps[name];
     if (step === undefined) return '';
     const detail = step.networkReply === undefined ? (step.note ?? '') : `network: ${step.networkReply}; local check: ${step.localCheck ?? ''}`;
-    return `| ${name} | ${step.description} | ${step.status} | \`${step.transactionId}\` | ${detail.replaceAll('|', '/')} |`;
+    return `| ${name} | ${step.description} | ${step.status} | \`${step.transactionId}\` | ${detail.replaceAll('|', '/').replace(/\s+/g, ' ').trim()} |`;
   });
   const text = [
     '# Chipnet run log',
