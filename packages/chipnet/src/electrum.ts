@@ -46,7 +46,9 @@ export class Electrum {
   static async connect(endpoint: string): Promise<Electrum> {
     const url = new URL(endpoint);
     const scheme = url.protocol.replace(':', '');
-    const port = Number(url.port);
+    // The URL parser drops a port that is the default for its scheme (443 for wss, 80 for ws).
+    const defaults: Record<string, number> = { wss: 443, ws: 80, ssl: 50002, tls: 50002, tcp: 50001 };
+    const port = url.port === '' ? (defaults[scheme] ?? 0) : Number(url.port);
     if (!['tcp', 'ssl', 'tls', 'ws', 'wss'].includes(scheme) || !Number.isInteger(port) || port <= 0) {
       throw new Error(`Endpoint must look like ssl://host:port (tcp, ssl, ws or wss), got "${endpoint}".`);
     }

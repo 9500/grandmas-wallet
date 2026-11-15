@@ -54,7 +54,7 @@ const CONTROLLER_VALUE = 1_000n;
 const ASSET_VALUE = 30_000n;
 const JAR_VALUE = 10_000n;
 const PAYMENT_VALUE = 2_000n;
-export const MINIMUM_FUNDING = 60_000n;
+export const MINIMUM_FUNDING = 55_000n;
 /** Mainnet-style challenge delay: one 512-second interval. */
 export const CHALLENGE_DELAY = { unit: 'time512', value: 1 } as const;
 const JAR_LOCK_SECONDS = 300;

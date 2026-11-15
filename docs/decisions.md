@@ -127,3 +127,20 @@ Rule 4 is stricter than the implementation plan proposed ("same owner and epoch"
 - Tokens or outputs sent to these addresses by others are spendable by the owner like any other; nothing here filters them.
 
 **Tests:** `packages/core/test/protected.test.ts`. Rejection tests for the attacks check that the transaction fails at the protected input while the controller input on its own is satisfied, so the protection is shown to come from the interface and not from the controller. With these, the controller, asset covenant and Savings Jar pass C01–C12 and C14 in the VM, which meets the plan's first checkpoint (C03–C09). C13 concerns wallet behaviour on reorganizations and is not a contract test.
+
+## D6 — Chipnet run of the contracts
+
+**Date:** 15 Nov 2026 · **Status:** done once, on chipnet with one-minute blocks
+
+The controller, asset covenant and Savings Jar were run through the full lifecycle on chipnet (`docs/chipnet-run.md`; results in `docs/chipnet-log.md`). Wallet identity `1819a56a9094983ba24ed3a85906c0c07261eac47e37b50454059a56481e656b`.
+
+**Confirmed on the network**
+
+- Every permitted transaction was accepted: genesis, owner payment, claim, cancellation, second claim, completion after the delay, payment and Savings Jar withdrawal by the replacement key.
+- The three invalid attempts were refused by the node: a claim carrying a spend of wallet funds (script failure), completion immediately after the claim (`non-BIP68-final`), and a spend by the old owner key after recovery (script failure).
+- The time-based relative delay is enforced by nodes. With a delay of one 512-second interval, the completing transaction was accepted about 11 minutes after the claim was sent: the interval itself plus the lag of the median block time.
+- The Savings Jar's timestamp lock is enforced the same way: with a 5-minute lock, withdrawal was accepted about 12.5 minutes after the jar was created.
+
+**Cost:** 60,000 satoshis in, 49,655 returned. Of the 10,345 difference, 1,000 remain in the controller output and 9,345 were fees for 14 transactions at 1 satoshi per byte. A controller transaction is roughly 700 to 1,000 bytes.
+
+**Not covered by this run:** token and NFT transfers, owner updates, block-based delays, and behaviour across a chain reorganization.
