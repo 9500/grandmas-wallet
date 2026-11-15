@@ -17,6 +17,14 @@ The spike asks whether the XO engine can express and run the recovery controller
 | Does block header verification cope with chipnet today? | No, but it does not stop the engine | Exp. 5 and 6. Verification stops at height 332451 ("claims target 486604799, expected 437753688") about 500 blocks below the tip and logs errors for every later transaction. Confirmed outputs are still recorded and listed. |
 | Does the engine bundle for a browser? | Yes, with the dev wallet's workarounds | Exp. 7. `@xo-cash/state` imports `fs`, `path`, `better-sqlite3` and `indexeddbshim`; these must be stubbed or polyfilled. The bundle is 1.6 MB before compression. Running it is untested: headless Chromium on the dev VM lacks system libraries. |
 
+## The chipnet header problem
+
+Checked on 15 Nov 2026: no newer release exists that could fix it. The engine in use is the newest published (`next`, 14 Nov). Header verification lives in `@electrum-cash/application` (newest: 1 Oct) with network parameters from `@electrum-cash/checkpoint` (newest: 30 Sep); both predate the chipnet change, and neither repository shows related work.
+
+The cause is the switch to one-minute blocks. The packaged chipnet parameters fix the ideal block time at 600 seconds. Height 332451 (12:35 UTC on 15 Nov) is the first block under the new rules: it claims minimum difficulty after a gap of 160 seconds, which the new rules allow (more than twice 60 seconds) and the old ones do not (more than twice 600), and the blocks after it use a difficulty about ten times lower than before (experiment 9).
+
+The engine accepts custom network parameters through its `electrumServers` option, so a local workaround may be possible once the new chipnet difficulty parameters are known. It has not been tried. For now the effect is limited to logged errors and a chain status that stays behind the tip.
+
 ## Consequences for the design
 
 1. **The wallet computes controller states, the template only assembles them.** The owner key hash, the next state and the finalized state are passed in as variables. This suits us: `packages/core` already computes every successor state. It also means the template cannot by itself guarantee that an output state is right; the contract does that.
