@@ -34,7 +34,7 @@ const spike = (await engine.importTemplate(spikeTemplate)).templateIdentifier;
 await engine.setDefaultPolicies({ change: { templateIdentifier: p2pkh }, receive: { templateIdentifier: p2pkh }, address: { templateIdentifier: p2pkh } });
 // Re-create the first few addresses so their outputs are tracked again in this fresh state.
 const ownLocking = [];
-for (let i = 0; i < 16; i++) ownLocking.push(await engine.generateLockingBytecodeFromDefaultPolicy('receive'));
+for (let i = 0; i < Number(process.env.ADDRS ?? 16); i++) ownLocking.push(await engine.generateLockingBytecodeFromDefaultPolicy('receive'));
 const template = await engine.getTemplate(spike);
 
 const coins = async () => {

@@ -58,7 +58,11 @@ const ownerSpend = (name: string, description: string, icon: string, variables: 
   name,
   description,
   icon,
-  roles: { owner: { requirements: { variables: ['identity', 'controllerState', ...variables], secrets: ['ownerKey'] } } },
+  roles: {
+    owner: {
+      requirements: { variables: ['identity', 'controllerState', 'controllerSatoshis', ...variables], secrets: ['ownerKey'] },
+    },
+  },
   requirements: { participants: [one('owner')] },
   transaction,
 });

@@ -48,6 +48,60 @@ describe("Grandma's Wallet template", () => {
   });
 });
 
+describe('variables each action needs', () => {
+  const template = grandmasWalletTemplate;
+  const variableNames = new Set(Object.keys(template.variables ?? {}));
+  const scriptNames = new Set(Object.keys(template.scripts));
+
+  /** Variables a piece of CashAssembly reads, following references to the template's named scripts. */
+  const reads = (text: unknown, seen = new Set<string>()): Set<string> => {
+    const found = new Set<string>();
+    if (typeof text !== 'string') return found;
+    for (const [word] of text.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) {
+      if (variableNames.has(word)) found.add(word);
+      if (scriptNames.has(word) && !seen.has(word)) {
+        seen.add(word);
+        reads(template.scripts[word], seen).forEach((name) => found.add(name));
+      }
+    }
+    return found;
+  };
+  const union = (...sets: Set<string>[]): Set<string> => new Set(sets.flatMap((set) => [...set]));
+
+  const usedBy = (actionName: string): Set<string> => {
+    const action = template.actions[actionName];
+    const transaction = template.transactions?.[action?.transaction ?? ''];
+    if (transaction === undefined) throw new Error(`no transaction for ${actionName}`);
+    const fromOutputs = transaction.outputs.map(({ output }) => {
+      const definition = template.outputs[output];
+      const lockingScript = template.lockingScripts[definition?.lockingScript ?? ''];
+      return union(
+        reads(definition?.valueSatoshis),
+        reads(definition?.lockingScript),
+        reads(definition?.token?.category),
+        reads(definition?.token?.nft?.commitment),
+        reads(lockingScript?.lockingBytecode),
+      );
+    });
+    const fromInputs = transaction.inputs.map(({ input }) => {
+      const definition = template.inputs[input];
+      return union(reads(definition?.unlockingScript), reads(definition?.sequenceNumber));
+    });
+    return union(reads(transaction.locktime), ...fromOutputs, ...fromInputs);
+  };
+
+  it.each(Object.keys(grandmasWalletTemplate.actions))('%s declares every variable its transaction uses', (actionName) => {
+    const roles = Object.values(template.actions[actionName]?.roles ?? {});
+    const declared = new Set(roles.flatMap((role) => [...(role.requirements?.variables ?? []), ...(role.requirements?.secrets ?? [])]));
+    const missing = [...usedBy(actionName)].filter((name) => !declared.has(name));
+    // A key that the action itself creates is declared without being used in that transaction.
+    const created = new Set(roles.flatMap((role) => role.generate ?? []));
+    const unused = [...declared].filter((name) => !usedBy(actionName).has(name) && !created.has(name));
+    expect(missing, 'used but not declared').toEqual([]);
+    expect(unused, 'declared but not used').toEqual([]);
+  });
+});
+
 describe('controller states written by the template', () => {
   const owner = 'aa'.repeat(20);
   const recoverer = 'bb'.repeat(20);
