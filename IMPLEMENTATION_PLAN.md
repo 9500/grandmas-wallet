@@ -15,7 +15,7 @@ Findings from the references (S1–S18) and from inspecting the published packag
 ### 1.1 Network and VM
 
 - The May 2026 upgrade (P2S, loops, functions, bitwise) is live on mainnet and chipnet. XO templates declare `supported: [... "BCH_2026_05"]` and default to `lockingType: "p2s"`.
-- **To verify:** the P2S CHIP's raised NFT-commitment limit (expected 128 bytes, up from 40). The controller state layout (§3.2 below) depends on it; the fallback is a hashed-state commitment.
+- The P2S CHIP raised the NFT-commitment limit from 40 to 128 bytes. **Verified** against the CHIP text and in the libauth 2026 VM (see `docs/decisions.md`, D1), so the controller state (§3.2 below) is stored unhashed.
 
 ### 1.2 XO stack (the bounty target)
 
