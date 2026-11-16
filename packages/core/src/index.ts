@@ -6,3 +6,4 @@ export * from './script.js';
 export * from './state.js';
 export * from './transitions.js';
 export * from './xo-keys.js';
+export * from './history.js';

@@ -1,0 +1,17 @@
+{
+  "name": "@grandmas-wallet/archive-store",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "start": "tsx src/cli.ts"
+  },
+  "exports": {
+    ".": "./src/server.ts"
+  },
+  "devDependencies": {
+    "@grandmas-wallet/archive": "0.0.0",
+    "tsx": "^4.20.0"
+  }
+}

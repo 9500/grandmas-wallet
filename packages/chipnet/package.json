@@ -14,6 +14,7 @@
     "@grandmas-wallet/core": "0.0.0"
   },
   "devDependencies": {
+    "@grandmas-wallet/testing": "0.0.0",
     "tsx": "^4.20.0"
   },
   "exports": {
