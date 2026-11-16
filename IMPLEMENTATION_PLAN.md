@@ -244,7 +244,7 @@ Both web UIs are publicly reachable on subdomains of `9500.cash`. The owner wall
 | Host (placeholder) | Serves | Notes |
 | --- | --- | --- |
 | `wallet.9500.cash` | owner wallet SPA | Keys and XO state live in this origin's IndexedDB only. |
-| `bank.9500.cash` | bank SPA | Separate origin, so its storage (enrollment packages, recovery mnemonic) is isolated from the wallet by the browser. Also publishes the bank's HPKE public key at a fixed path. |
+| `recoverer.9500.cash` | bank SPA | Separate origin, so its storage (enrollment packages, recovery mnemonic) is isolated from the wallet by the browser. Also publishes the bank's HPKE public key at a fixed path. |
 | `jar.9500.cash` | demo dapp | Third origin, so the WizardConnect path is a real cross-site connection; can be taken offline to demonstrate X01. |
 | `store1.9500.cash`, `store2.9500.cash` | archive stores | Instances of `apps/archive-store`: put/get of opaque encrypted records with an acknowledgment. Hold no keys. One is enough; the second shows the optional extra copy. |
 
@@ -252,7 +252,7 @@ Consequences for the implementation:
 
 - **Everything security-relevant runs client-side.** The hosts serve static files; no server sees a mnemonic. HTTPS is mandatory (WebCrypto, WebSocket Electrum, camera for QR).
 - **Bank key authentication (§7.2):** the wallet fetches the bank's encryption public key from the bank's FQDN over TLS and shows that hostname to the user during "Set up recovery". The hostname is the "trusted directory" for the prototype; the fingerprint is displayed for out-of-band comparison.
-- **Enrollment delivery:** the wallet produces a link to `bank.9500.cash/#enroll=<HPKE ciphertext>` (fragment, so it is never sent to a server or logged) and the equivalent QR. Observing the link reveals nothing without the bank's private key (R01).
+- **Enrollment delivery:** the wallet produces a link to `recoverer.9500.cash/#enroll=<HPKE ciphertext>` (fragment, so it is never sent to a server or logged) and the equivalent QR. Observing the link reveals nothing without the bank's private key (R01).
 - **Replacement device:** restoring is done by opening `wallet.9500.cash` in a fresh browser profile — a new origin storage is the "new phone". "Erase the original wallet" in the demo is clearing site data.
 - **Cross-origin:** archive stores send CORS headers for the wallet and bank origins. The wallet↔dapp path uses WizardConnect over a Nostr relay, so it needs no CORS; the relay URL is configurable.
 - **Monitoring** only runs while the wallet tab is open. The UI states this plainly ("protection is active while this page is open"); background operation is out of scope.
