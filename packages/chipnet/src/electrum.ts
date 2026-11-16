@@ -108,6 +108,12 @@ export class Electrum {
     }));
   }
 
+  /** Every transaction that created or spent an output of the script; height is 0 or less while unconfirmed. */
+  async getHistory(lockingBytecode: Uint8Array): Promise<{ transactionId: string; height: number }[]> {
+    const entries = await this.call<{ tx_hash: string; height: number }[]>('blockchain.scripthash.get_history', scriptHash(lockingBytecode));
+    return entries.map((entry) => ({ transactionId: entry.tx_hash, height: entry.height }));
+  }
+
   /** The raw transaction, or `undefined` if the server does not know it. */
   async getTransaction(transactionId: string): Promise<string | undefined> {
     const response = await this.client.request('blockchain.transaction.get', transactionId, false);

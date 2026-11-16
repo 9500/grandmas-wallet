@@ -194,3 +194,22 @@ Only the controller's owner-signed functions can produce the required successor 
 - One signature on the controller releases every protected input in the transaction. A wallet must therefore examine every input of a transaction it is asked to approve and show the user everything being spent. This was enforced by the contracts before and is now the wallet software's duty.
 
 **Chipnet:** the scripted lifecycle was run with these contracts (identity `f1ff8fb1ffbaf081d161d67a2d578bff9fa0476ab4dd4dc288b8e7fff83b33b9`, `docs/chipnet-log.md`). All permitted steps were accepted. The network refused a spend of wallet funds attached to a recovery request, a completion before the delay, and a spend approved by the old owner key after recovery. Eleven transactions cost 8,763 satoshis in fees, against roughly 1,000 each for controller transactions before.
+
+## D10 — Enrollment package and restoration archive v1
+
+**Date:** 16 Nov 2026 · **Status:** implemented and tested against a simulated chain; chipnet run through the XO engine pending
+
+The formats and rules are described in `docs/restoration.md`. The choices made:
+
+- **Sealing:** HPKE base mode with X25519, HKDF-SHA256 and ChaCha20-Poly1305. The sender is identified by the owner's signature inside the package and by the chain, not by the encryption.
+- **Recovery credential:** a dedicated mnemonic; the recovery key is the first key the XO engine derives from it for the wallet template. The recoverer opens it as its own XO account.
+- **Archive:** records signed by the owner key of their epoch, encrypted with XChaCha20-Poly1305 under a key shared with the recoverer, chained by naming the previous record, and stored as blobs named by their hash on two or more stores.
+- **Write before sign:** on by default, with every configured store required to confirm.
+- **Templates** are kept whole in the archive and referred to by content hash.
+- **Confirmation of receipt** is a note signed with the recovery key and left in the archive, so it needs no channel from the recoverer back to the owner.
+
+**Why records are verified against the chain and not by the archive key:** the recoverer holds the archive key, so the key cannot be what makes a record valid. The controller's history gives the owner of each epoch, and a record counts only when signed by that owner.
+
+**Why completeness is checked by walking the controller's history:** the controller state has no room set aside for an archive checkpoint, and a checkpoint would not list missing positions by itself. Every owner-approved transaction is in the controller's history, so an unspent output to a script address that no record describes can be found without any extra on-chain data. The limits of this are listed in `docs/restoration.md`.
+
+**What a record cannot do:** direct the wallet to an address. For a known kind of position the script is rebuilt from the parameters and the wallet identity and must equal the recorded one.

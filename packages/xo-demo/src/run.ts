@@ -5,6 +5,7 @@
 //   npm run xo-demo -- addresses     show where each account receives ordinary coins
 //   npm run xo-demo -- run           the lifecycle
 //   npm run xo-demo -- run-short     the lifecycle without the cancelled request and the payments
+//   npm run xo-demo -- device-loss   enrollment, a savings jar, loss of the owner's device, and restoration
 //   npm run xo-demo -- rescue [file] return a wallet's funds after a run that stopped part-way
 //   npm run xo-demo -- distribute <from> <account or address>=<satoshis> ...   move ordinary coins
 import { type ChildProcess, spawn } from 'node:child_process';
@@ -23,6 +24,16 @@ import {
   hexToBin,
   lockingBytecodeToCashAddress,
 } from '@bitauth/libauth';
+import {
+  type JsonValue,
+  type RestoreReport,
+  type TemplateReference,
+  ArchiveWriter,
+  HttpStore,
+  describeSavingsJar,
+  restore,
+} from '@grandmas-wallet/archive';
+import { createStoreServer } from '@grandmas-wallet/archive-store';
 import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import {
   type ControllerSnapshot,
@@ -44,13 +55,36 @@ import {
   validateGenesis,
   verifyTransaction,
 } from '@grandmas-wallet/core';
-import { grandmasWalletTemplateIdentifier } from '@grandmas-wallet/templates';
+import {
+  acknowledgeEnrollment,
+  createArchiveAccess,
+  createEnrollmentPackage,
+  enrollmentLink,
+  enrollmentStatus,
+  envelopeFromLink,
+  generateRecipientKeyPair,
+  openPackage,
+  recipientKeyFingerprint,
+  sealPackage,
+  verifyEnrollment,
+} from '@grandmas-wallet/enrollment';
+import {
+  grandmasWalletTemplate,
+  grandmasWalletTemplateIdentifier,
+  savingsJarTemplate,
+  savingsJarTemplateIdentifier,
+} from '@grandmas-wallet/templates';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '../../..');
 const DATA = resolve(ROOT, '.xo-demo');
-const INVITATIONS = resolve(ROOT, 'docs/bounty/invitations');
-const LOG = resolve(ROOT, 'docs/bounty/lifecycle-log.md');
+/** The device-loss run keeps its own record, so that it does not replace the lifecycle run's. */
+const DEVICE_LOSS = process.argv[2] === 'device-loss';
+const OUTPUT = resolve(ROOT, DEVICE_LOSS ? 'docs/device-loss' : 'docs/bounty');
+const INVITATIONS = resolve(OUTPUT, 'invitations');
+const LOG = resolve(OUTPUT, DEVICE_LOSS ? 'run-log.md' : 'lifecycle-log.md');
+const NETWORK = 'chipnet';
+const STORE_PORTS = [8787, 8788];
 /** Where the wallet's outputs currently are, kept so that funds can be returned if a run stops part-way. */
 const ON_CHAIN = resolve(DATA, 'on-chain.json');
 const ENDPOINT = process.env['CHIPNET_ENDPOINT'] ?? 'wss://chipnet.9500.cash:443';
@@ -366,19 +400,47 @@ class Lifecycle {
     await this.ownerAction(agent, step, shows, 'send', { sentSatoshis: sats(PAYMENT), recipientLockingScript: agent.coinLockingBytecode }, ['paymentOutput'], PAYMENT);
   }
 
-  /** Opening a jar is an ordinary payment from the wallet to the jar's address. */
-  async openJar(): Promise<void> {
+  /**
+   * Opening a jar is an ordinary payment from the wallet to the jar's address. With an archive, the jar is
+   * recorded there first, and the owner signs only after the backup stores have confirmed the record.
+   */
+  async openJar(archive?: { writer: ArchiveWriter; template: TemplateReference }): Promise<void> {
     const unlockTime = Math.floor(Date.now() / 1000) + JAR_LOCK_SECONDS;
     const jar = savingsJarScript(hexToBin(this.identity), unlockTime);
-    const { transaction, transactionId } = await this.ownerAction(
-      this.owner, 'open-savings-jar', 'Owner pays into a savings jar, an application with its own template', 'send',
-      { sentSatoshis: sats(JAR_AMOUNT), recipientLockingScript: hex(jar.lockingBytecode) }, ['paymentOutput'], JAR_AMOUNT,
-    );
+    const position = describeSavingsJar(this.identity, unlockTime, { positionId: `jar-${unlockTime}`, label: 'Savings jar', ...(archive === undefined ? {} : { template: archive.template }) });
+    const signAndSend = () =>
+      this.ownerAction(
+        this.owner, 'open-savings-jar', 'Owner pays into a savings jar, an application with its own template', 'send',
+        { sentSatoshis: sats(JAR_AMOUNT), recipientLockingScript: hex(jar.lockingBytecode) }, ['paymentOutput'], JAR_AMOUNT,
+      );
+    const { transaction, transactionId } = archive === undefined ? await signAndSend() : await archive.writer.protect([position], signAndSend);
     this.jar = { utxo: this.utxo(transaction, transactionId, 1), unlockTime };
     this.persist();
+    await archive?.writer.confirm(position, transactionId);
     // The owner's engine learns the jar's address from the Savings Jar template.
     const tracked = await this.owner.request<string>('track', { what: 'jar', variables: { identity: this.identity, unlockTime } });
     if (tracked !== hex(jar.lockingBytecode)) throw new Error('the savings jar address from its template differs from the one this library derives');
+  }
+
+  /**
+   * Take up a wallet from a restoration report alone: what a device knows that has never seen the wallet.
+   */
+  async takeUp(report: RestoreReport): Promise<void> {
+    const fetch = async ({ transactionId, index }: { transactionId: string; index: number }): Promise<Utxo> => {
+      const source = await this.electrum.getTransaction(transactionId);
+      if (source === undefined) throw new Error(`cannot find ${transactionId}`);
+      return this.utxo(this.remember(source, transactionId), transactionId, index);
+    };
+    this.identity = hex(report.controller.current.identity);
+    this.controller = report.controller.current;
+    const [funds, ...moreFunds] = report.funds.unspent;
+    if (funds === undefined || moreFunds.length > 0) throw new Error(`expected the wallet's funds in one output, found ${report.funds.unspent.length}`);
+    this.wallet = await fetch(funds);
+    const jars = report.positions.filter((position) => position.result === 'complete' && position.onChain === 'live');
+    const [jar] = jars;
+    const unlockTime = jar?.position.parameters['unlockTime'];
+    if (jar !== undefined && typeof unlockTime === 'number' && jar.unspent[0] !== undefined) this.jar = { utxo: await fetch(jar.unspent[0]), unlockTime };
+    this.persist();
   }
 
   async cancel(): Promise<void> {
@@ -517,9 +579,9 @@ class Lifecycle {
     writeFileSync(
       LOG,
       [
-        '# Lifecycle through the XO engine',
+        DEVICE_LOSS ? '# Device loss and restoration through the XO engine' : '# Lifecycle through the XO engine',
         '',
-        'Written by `npm run xo-demo -- run`. Every transaction was built and signed by the XO engine from an invitation, checked against the network\'s script rules by this project\'s own code, and then broadcast by the engine on chipnet.',
+        `Written by \`npm run xo-demo -- ${DEVICE_LOSS ? 'device-loss' : 'run'}\`. Every transaction was built and signed by the XO engine from an invitation, checked against the network's script rules by this project's own code, and then broadcast by the engine on chipnet.`,
         '',
         `- Template: Grandma's Wallet version 1, identifier \`${grandmasWalletTemplateIdentifier}\``,
         `- Wallet identity: \`${this.identity}\``,
@@ -594,6 +656,168 @@ const rescue = async (agents: Agent[]): Promise<void> => {
   }
 };
 
+/** The key an account's engine holds for the wallet template that matches a key hash in the controller. */
+const engineKey = (account: string, keyHash: Uint8Array) => {
+  const mnemonic = readFileSync(resolve(DATA, `${account}.mnemonic`), 'utf8').trim();
+  const key = [0, 1, 2, 3]
+    .map((index) => deriveXoTemplateKey(mnemonic, grandmasWalletTemplateIdentifier, index, 'testnet'))
+    .find((candidate) => hex(candidate.keyHash) === hex(keyHash));
+  if (key === undefined) throw new Error(`${account} does not hold the key the wallet names`);
+  return key;
+};
+
+const describeReport = (report: RestoreReport): void => {
+  const { state } = report.controller.current;
+  say(`  wallet   owner epoch ${state.ownerEpoch}, ${state.status}, funds ${report.funds.balance} sat`);
+  for (const position of report.positions) {
+    const held = position.unspent.reduce((sum, entry) => sum + entry.valueSatoshis, 0n);
+    say(`  position "${position.position.label ?? position.position.positionId}": ${position.result}, recorded ${position.recorded}, on chain ${position.onChain ?? 'not looked up'}, ${held} sat`);
+  }
+  for (const store of report.stores) say(`  store    ${store.name}: ${store.reachable ? `${store.listed} item(s)` : 'unreachable'}`);
+  say(`  result   ${report.completeness}${report.unresolved.length === 0 ? '' : `: ${report.unresolved.join(' ')}`}`);
+};
+
+/**
+ * Loss of the owner's device, start to finish.
+ *
+ * The first part is the owner's device: it sets the wallet up, makes the package for the recoverer, and
+ * opens a savings jar after recording it in the archive. The second part uses nothing the first part
+ * knew, only what the recoverer was sent: the package link, opened with the recoverer's private key.
+ */
+const deviceLoss = async (owner: Agent, recoverer: Agent, replacement: Agent, recoveryMnemonic: string): Promise<void> => {
+  const servers = STORE_PORTS.map((port, index) => {
+    const server = createStoreServer({ directory: resolve(DATA, `store-${index + 1}`) });
+    server.listen(port, '127.0.0.1');
+    return server;
+  });
+  const storeUrls = STORE_PORTS.map((port) => `http://127.0.0.1:${port}`);
+  const linkPath = resolve(DATA, 'enrollment-link.txt');
+  const bankKeyPath = resolve(DATA, 'recoverer-encryption-key.json');
+  if (!existsSync(bankKeyPath)) {
+    const keys = await generateRecipientKeyPair();
+    writeFileSync(bankKeyPath, JSON.stringify({ publicKey: hex(keys.publicKey), privateKey: hex(keys.privateKey) }), { mode: 0o600 });
+  }
+  const bankKeys = JSON.parse(readFileSync(bankKeyPath, 'utf8')) as { publicKey: string; privateKey: string };
+  const electrum = await Electrum.connect(ENDPOINT);
+  const runs: Lifecycle[] = [];
+  try {
+    // ── The owner's device ────────────────────────────────────────────────────────────────────
+    {
+      say('The owner sets up the wallet and enrolls the recoverer');
+      const run = new Lifecycle(electrum, owner, recoverer, replacement);
+      runs.push(run);
+      // The recovery mnemonic is made on the owner's side; the wallet names only the hash of its key.
+      const recoveryKey = deriveXoTemplateKey(recoveryMnemonic, grandmasWalletTemplateIdentifier, 0, 'testnet');
+      await run.createWallet(hex(recoveryKey.keyHash));
+      say(`  identity ${run.identity}`);
+
+      const ownerKey = engineKey('owner', run.controller.state.ownerKeyHash);
+      const archive = createArchiveAccess(storeUrls);
+      const stores = storeUrls.map((url) => new HttpStore(url));
+      const writer = new ArchiveWriter({
+        network: NETWORK,
+        identity: run.identity,
+        archiveId: hexToBin(archive.archiveId),
+        contentKey: hexToBin(archive.contentKey),
+        stores,
+        signer: () => ({ key: ownerKey, ownerEpoch: run.controller.state.ownerEpoch }),
+      });
+      // Both templates are kept whole in the archive, so that restoring does not depend on finding them elsewhere.
+      const walletTemplateHash = await writer.putTemplate(grandmasWalletTemplate as unknown as JsonValue);
+      const jarTemplateHash = await writer.putTemplate(savingsJarTemplate as unknown as JsonValue);
+      await writer.flush();
+
+      const signed = createEnrollmentPackage({
+        network: NETWORK,
+        identity: hexToBin(run.identity),
+        genesisTransactionId: hex(run.controller.utxo.transactionHash),
+        state: run.controller.state,
+        template: { identifier: grandmasWalletTemplateIdentifier, contentHash: walletTemplateHash },
+        credential: { mnemonic: recoveryMnemonic, derivation: { scheme: 'xo-template', templateIdentifier: grandmasWalletTemplateIdentifier, keyIndex: 0 } },
+        archive,
+        recoverer: 'recoverer (local demo)',
+        ownerKey,
+      });
+      const envelope = await sealPackage(signed, hexToBin(bankKeys.publicKey));
+      const link = enrollmentLink('https://recoverer.example/', envelope);
+      writeFileSync(linkPath, `${link}\n`, { mode: 0o600 });
+      say(`  package  sealed to recoverer key ${recipientKeyFingerprint(hexToBin(bankKeys.publicKey))}: ${envelope.length} bytes, link of ${link.length} characters`);
+      say(`  status   ${(await enrollmentStatus(signed, stores)).status}`);
+
+      say('The owner opens a savings jar; it is recorded in the archive before the owner signs');
+      await run.openJar({ writer, template: { identifier: savingsJarTemplateIdentifier, contentHash: jarTemplateHash } });
+
+      // The recoverer opens the link whenever it gets to it, and confirms.
+      await acknowledgeEnrollment(await openPackage(envelopeFromLink(link), hexToBin(bankKeys.privateKey)), stores);
+      say(`  status   ${(await enrollmentStatus(signed, stores)).status}`);
+    }
+    say('The owner\'s device is lost; its account takes no further part');
+
+    // ── The recoverer and a new device. Only the link and the recoverer's private key carry over. ──
+    say('The recoverer opens the package and checks it against the chain');
+    const opened = await openPackage(envelopeFromLink(readFileSync(linkPath, 'utf8').trim()), hexToBin(bankKeys.privateKey));
+    const verified = await verifyEnrollment(opened, electrum, NETWORK);
+    const { enrollment } = verified;
+    if (!verified.credentialAuthorized || verified.differences.length > 0) {
+      throw new Error(`the package does not match the wallet: ${verified.differences.join(' ') || 'the credential is not the wallet\'s recoverer'}`);
+    }
+    if (enrollment.recovery.mnemonic !== recoveryMnemonic) throw new Error('the recoverer account does not run on the mnemonic from the package');
+    const stores = enrollment.archive.stores.map((url) => new HttpStore(url));
+    const restoreNow = () =>
+      restore({
+        network: enrollment.network,
+        identity: enrollment.identity,
+        genesisTransactionId: enrollment.genesisTransactionId,
+        archiveId: hexToBin(enrollment.archive.archiveId),
+        contentKey: hexToBin(enrollment.archive.contentKey),
+        chain: electrum,
+        stores,
+      });
+    const found = await restoreNow();
+    describeReport(found);
+    if (found.completeness !== 'complete') throw new Error('the restoration is not complete; stopping before any recovery request');
+
+    const run = new Lifecycle(electrum, owner, recoverer, replacement);
+    // One record and one numbering for both parts of the run.
+    run.record.push(...(runs[0]?.record ?? []));
+    runs.push(run);
+    await run.takeUp(found);
+    say('Recovery to a key made on the new device');
+    await run.requestRecovery('request-recovery', true);
+    await run.finalize();
+
+    say('The new device takes over from the archive');
+    const restored = await restoreNow();
+    await run.takeUp(restored);
+    await run.adopt();
+    const jar = restored.positions.find((position) => position.onChain === 'live');
+    await run.withdrawJar();
+    const newOwnerKey = engineKey('replacement', run.controller.state.ownerKeyHash);
+    const writer = new ArchiveWriter({
+      network: enrollment.network,
+      identity: enrollment.identity,
+      archiveId: hexToBin(enrollment.archive.archiveId),
+      contentKey: hexToBin(enrollment.archive.contentKey),
+      stores,
+      signer: () => ({ key: newOwnerKey, ownerEpoch: run.controller.state.ownerEpoch }),
+      state: restored.writerState,
+    });
+    const emptied = run.record.at(-1)?.transactionId;
+    if (jar !== undefined && emptied !== undefined) await writer.close(jar.position, emptied);
+    await writer.flush();
+    describeReport(await restoreNow());
+    say('Device loss and restoration complete.');
+  } finally {
+    runs.at(-1)?.writeLog();
+    for (const agent of [recoverer, replacement]) {
+      const messages = await agent.request<string[]>('messages').catch(() => []);
+      if (messages.length > 0) say(`  ${agent.name}: the engine logged ${messages.length} message(s)`);
+    }
+    await electrum.disconnect();
+    servers.forEach((server) => server.close());
+  }
+};
+
 const main = async (): Promise<void> => {
   const [command = 'addresses'] = process.argv.slice(2);
   mkdirSync(DATA, { recursive: true });
@@ -644,6 +868,10 @@ const main = async (): Promise<void> => {
     }
     if (command === 'rescue') {
       await rescue(agents);
+      return;
+    }
+    if (command === 'device-loss') {
+      await deviceLoss(owner, recoverer, replacement, readFileSync(recoveryMnemonicPath, 'utf8').trim());
       return;
     }
     if (command !== 'run' && command !== 'run-short') return;
