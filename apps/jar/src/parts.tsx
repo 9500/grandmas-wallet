@@ -23,6 +23,7 @@ export const JarList = ({
   task,
   peerName,
   note,
+  problem,
   onEmpty,
   children,
 }: {
@@ -31,6 +32,8 @@ export const JarList = ({
   peerName: string;
   /** How the jars are held, in a few words. */
   note: string;
+  /** Why the list may be out of date or missing, if the wallet could not be asked. */
+  problem?: string | undefined;
   onEmpty: (jar: JarRow) => void;
   children?: ComponentChildren;
 }) => {
@@ -45,7 +48,7 @@ export const JarList = ({
       {jars === undefined ? (
         <p class="muted">Looking for your jars…</p>
       ) : jars.length === 0 ? (
-        <p class="muted">No jars yet.</p>
+        problem === undefined && <p class="muted">No jars yet.</p>
       ) : (
         <ul class="list">
           {jars.map((jar) => {
@@ -67,6 +70,11 @@ export const JarList = ({
             );
           })}
         </ul>
+      )}
+      {problem !== undefined && (
+        <p class="notice error" role="status">
+          The list of your jars could not be brought up to date. {problem} Your jars are safe in your wallet either way.
+        </p>
       )}
       {children}
     </Card>

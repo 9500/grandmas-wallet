@@ -37,6 +37,9 @@ export const XoJars = ({ environment, link, offered, peerName, onDisconnect }: {
   const requests = useMemo(() => new DappRequests(), []);
   const [jars, setJars] = useState<JarRow[] | undefined>();
   const [last, setLast] = useState<string | undefined>();
+  /** Why the list could not be brought up to date, if it could not. What was listed before stays on the page. */
+  const [listProblem, setListProblem] = useState<string | undefined>();
+  const [listing, setListing] = useState(false);
 
   /** An action of this application's template. The template itself goes along unless the wallet said it has it. */
   const ask = (details: Pick<ActionDetails, 'templateAction' | 'variables'> & Partial<ActionDetails>, progress: (step: string) => void) => {
@@ -44,18 +47,27 @@ export const XoJars = ({ environment, link, offered, peerName, onDisconnect }: {
     return requests.request({ template: TEMPLATE, ...(known ? {} : { definition: savingsJarTemplate }), role: 'saver', ...details }, (stage) => progress(STAGES[stage]));
   };
 
+  /** Ask the wallet for its jars. A wallet that does not answer is not a wallet without jars. */
   const list = async () => {
-    const positions = await requests.positions(TEMPLATE.identifier);
-    setJars(
-      positions
-        .map((jar) => ({ id: jar.position, label: jar.label === '' ? 'Savings jar' : jar.label, unlockTime: Number(jar.variables['unlockTime'] ?? 0), satoshis: BigInt(jar.satoshis) }))
-        .sort((a, b) => a.unlockTime - b.unlockTime),
-    );
+    setListing(true);
+    try {
+      const positions = await requests.positions(TEMPLATE.identifier);
+      setJars(
+        positions
+          .map((jar) => ({ id: jar.position, label: jar.label === '' ? 'Savings jar' : jar.label, unlockTime: Number(jar.variables['unlockTime'] ?? 0), satoshis: BigInt(jar.satoshis) }))
+          .sort((a, b) => a.unlockTime - b.unlockTime),
+      );
+      setListProblem(undefined);
+    } catch (error) {
+      setListProblem((error as Error).message);
+    } finally {
+      setListing(false);
+    }
   };
 
   useEffect(() => {
     requests.attach(link.channel);
-    void list().catch(() => setJars([]));
+    void list();
     return () => requests.detach();
   }, [link]);
 
@@ -72,17 +84,27 @@ export const XoJars = ({ environment, link, offered, peerName, onDisconnect }: {
   const empty = (jar: JarRow) =>
     task.run(`empty-${jar.id}`, async (progress) => {
       // The wallet knows the jar's own values; the application names the jar and the action.
-      const result = await ask({ templateAction: 'withdraw', variables: {}, position: jar.id }, progress);
-      setLast(String(result['transactionId'] ?? ''));
-      await list();
+      try {
+        const result = await ask({ templateAction: 'withdraw', variables: {}, position: jar.id }, progress);
+        setLast(String(result['transactionId'] ?? ''));
+      } finally {
+        void list();
+      }
     });
 
   return (
     <>
-      <JarList jars={jars} task={task} peerName={peerName} note="Each jar belongs to your wallet and moves with it if you ever change devices." onEmpty={(jar) => void empty(jar)}>
+      <JarList
+        jars={jars ?? (listProblem === undefined ? undefined : [])}
+        task={task}
+        peerName={peerName}
+        note="Each jar belongs to your wallet and moves with it if you ever change devices."
+        problem={listProblem}
+        onEmpty={(jar) => void empty(jar)}
+      >
         <p>
-          <Button kind="quiet" onClick={() => void list()}>
-            Refresh
+          <Button kind="quiet" onClick={() => void list()} disabled={listing}>
+            {listing ? 'Asking your wallet…' : 'Refresh'}
           </Button>{' '}
           <Button kind="quiet" onClick={onDisconnect}>
             Disconnect

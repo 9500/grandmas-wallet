@@ -177,8 +177,15 @@ export class WalletConnector {
     const { id, template } = (message ?? {}) as { id?: unknown; template?: unknown };
     if (typeof id !== 'string' || typeof template !== 'string') return;
     const trusted = this.options.trusted().some((known) => known.identifier === template);
-    const positions = trusted ? await this.options.positions(template).catch(() => []) : [];
-    await channel.send({ action: POSITIONS, time: this.now(), id, positions }).catch(() => undefined);
+    let positions: ReportedPosition[] = [];
+    let error: string | undefined;
+    try {
+      if (trusted) positions = await this.options.positions(template);
+    } catch (problem) {
+      // Not being able to read the positions is not the same as holding none, and must not look like it.
+      error = (problem as Error).message || 'The wallet could not read its positions.';
+    }
+    await channel.send({ action: POSITIONS, time: this.now(), id, trusted, positions, ...(error === undefined ? {} : { error }) }).catch(() => undefined);
   }
 
   /** Take in one message that claims to be a request. */

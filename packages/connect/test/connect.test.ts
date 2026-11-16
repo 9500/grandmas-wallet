@@ -11,6 +11,7 @@ import {
   ProtocolError,
   RequestRefusedError,
   WalletConnector,
+  WalletSilentError,
   XO_EXTENSION,
   readAdvertisement,
   temporaryLedger,
@@ -55,7 +56,7 @@ const link = () => {
 
 const settle = () => new Promise((done) => setTimeout(done, 0));
 
-const setup = (options: { fail?: boolean; storage?: ReturnType<typeof temporaryLedger>; now?: () => number; trusted?: boolean } = {}) => {
+const setup = (options: { fail?: boolean; storage?: ReturnType<typeof temporaryLedger>; now?: () => number; trusted?: boolean; unreadable?: boolean } = {}) => {
   const wires = link();
   const executed: LedgerEntry[] = [];
   const trusted = options.trusted === true ? [TEMPLATE] : [];
@@ -67,7 +68,10 @@ const setup = (options: { fail?: boolean; storage?: ReturnType<typeof temporaryL
       if (typeof identifier !== 'string' || typeof contentHash !== 'string') throw new Error('not a template');
       return { identifier, contentHash };
     },
-    positions: async (template) => [{ position: 'p-1', label: 'First', output: 'kept', variables: { template }, satoshis: '5000' }],
+    positions: async (template) => {
+      if (options.unreadable === true) throw new Error('The network could not be reached.');
+      return [{ position: 'p-1', label: 'First', output: 'kept', variables: { template }, satoshis: '5000' }];
+    },
     ...(options.storage === undefined ? {} : { storage: options.storage }),
     ...(options.now === undefined ? {} : { now: options.now }),
     execute: async (entry, stage) => {
@@ -219,6 +223,38 @@ describe('positions', () => {
     const { dapp, proposals } = setup({ trusted: true });
     expect(await dapp.positions(TEMPLATE.identifier)).toEqual([{ position: 'p-1', label: 'First', output: 'kept', variables: { template: TEMPLATE.identifier }, satoshis: '5000' }]);
     expect(proposals()).toEqual([]);
+  });
+
+  it('are not said to be none when the wallet could not read them', async () => {
+    const { dapp } = setup({ trusted: true, unreadable: true });
+    await expect(dapp.positions(TEMPLATE.identifier)).rejects.toThrow('could not read what it holds: The network could not be reached.');
+  });
+
+  it('are not said to be none when the wallet does not answer', async () => {
+    const wires = link();
+    const dapp = new DappRequests();
+    dapp.attach(wires.dapp);
+    await expect(dapp.positions(TEMPLATE.identifier, 2, 5)).rejects.toBeInstanceOf(WalletSilentError);
+    // Asked twice, as the same question.
+    expect(wires.sentToWallet.map((message) => (message as { id?: string }).id)).toEqual([expect.any(String), expect.any(String)]);
+    expect(new Set(wires.sentToWallet.map((message) => (message as { id?: string }).id)).size).toBe(1);
+  });
+
+  it('are asked for again when the first asking gets no answer', async () => {
+    const { dapp, wallet, connector } = setup({ trusted: true });
+    // The wallet's first answer is lost on the way.
+    const send = wallet.send.bind(wallet);
+    let lost = 0;
+    wallet.send = async (message) => {
+      if (message.action === 'xo_positions' && lost === 0) {
+        lost += 1;
+        return;
+      }
+      await send(message);
+    };
+    void connector;
+    expect(await dapp.positions(TEMPLATE.identifier, 3, 5)).toHaveLength(1);
+    expect(lost).toBe(1);
   });
 
   it('are not reported to an application whose template the wallet does not trust', async () => {

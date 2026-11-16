@@ -28,6 +28,14 @@ export class RequestRefusedError extends Error {
   }
 }
 
+/** The wallet did not answer a question in time. Nothing is known about what it holds. */
+export class WalletSilentError extends Error {
+  constructor() {
+    super('Your wallet did not answer. Check that its page is open, then try again.');
+    this.name = 'WalletSilentError';
+  }
+}
+
 interface Pending {
   request: ActionRequest;
   onStage: (stage: RequestStage) => void;
@@ -39,7 +47,7 @@ const newId = (): string => Array.from(crypto.getRandomValues(new Uint8Array(12)
 
 export class DappRequests {
   private readonly pending = new Map<string, Pending>();
-  private readonly listing = new Map<string, (positions: ReportedPosition[]) => void>();
+  private readonly listing = new Map<string, (answer: { positions: ReportedPosition[]; error?: string }) => void>();
   private channel: Channel | undefined;
   private stop: (() => void) | undefined;
 
@@ -82,23 +90,39 @@ export class DappRequests {
 
   /**
    * Ask which positions of a template the wallet holds. A wallet that does not trust the template says none.
-   * @throws if the wallet does not answer in time
+   *
+   * The question is asked again a few times if no answer comes: a relay may deliver messages out of order,
+   * and the session then discards the older one.
+   *
+   * @throws WalletSilentError if the wallet does not answer; RequestRefusedError if it could not read its positions
    */
-  positions(templateIdentifier: string, timeoutMs = 20_000): Promise<ReportedPosition[]> {
+  positions(templateIdentifier: string, attempts = 4, intervalMs = 7_000): Promise<ReportedPosition[]> {
     const { channel } = this;
     if (channel === undefined) return Promise.reject(new Error('No wallet is connected.'));
     const id = newId();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let asked = 0;
+      const finish = (): void => {
+        clearInterval(timer);
         this.listing.delete(id);
-        reject(new Error('The wallet did not answer.'));
-      }, timeoutMs);
-      this.listing.set(id, (positions) => {
-        clearTimeout(timer);
-        this.listing.delete(id);
-        resolve(positions);
+      };
+      const ask = (): void => {
+        if (asked >= attempts) {
+          finish();
+          reject(new WalletSilentError());
+          return;
+        }
+        asked += 1;
+        // Each asking carries the current time; the wallet answers every one, and the first answer is taken.
+        (this.channel ?? channel).send({ action: POSITIONS_REQUEST, time: this.now(), id, template: templateIdentifier }).catch(() => undefined);
+      };
+      const timer = setInterval(ask, intervalMs);
+      this.listing.set(id, (answer) => {
+        finish();
+        if (answer.error !== undefined) reject(new RequestRefusedError(`Your wallet could not read what it holds: ${answer.error}`));
+        else resolve(answer.positions);
       });
-      channel.send({ action: POSITIONS_REQUEST, time: this.now(), id, template: templateIdentifier }).catch(() => undefined);
+      ask();
     });
   }
 
@@ -106,8 +130,8 @@ export class DappRequests {
     const { action, id } = (message ?? {}) as { action?: unknown; id?: unknown };
     if (typeof id !== 'string') return;
     if (action === POSITIONS) {
-      const { positions } = message as { positions?: unknown };
-      this.listing.get(id)?.(Array.isArray(positions) ? (positions as ReportedPosition[]) : []);
+      const { positions, error } = message as { positions?: unknown; error?: unknown };
+      this.listing.get(id)?.({ positions: Array.isArray(positions) ? (positions as ReportedPosition[]) : [], ...(typeof error === 'string' && error !== '' ? { error } : {}) });
       return;
     }
     const open = this.pending.get(id);

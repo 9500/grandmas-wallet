@@ -129,7 +129,11 @@ export interface ReportedPosition {
 export interface PositionsResponse extends Envelope {
   action: typeof POSITIONS;
   id: string;
+  /** Whether the wallet trusts the template asked about. If not, it reports no positions whatever it holds. */
+  trusted: boolean;
   positions: ReportedPosition[];
+  /** Set if the wallet could not read its positions just now. The list is then not to be taken as empty. */
+  error?: string;
 }
 
 export type XoMessage = ActionRequest | ActionResponse | InvitationUpdate | ActionResult | PositionsRequest | PositionsResponse;
