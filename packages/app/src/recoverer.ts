@@ -12,6 +12,7 @@ import { type EnrollmentPackage, type VerifiedEnrollment, acknowledgeEnrollment,
 
 import type { XoAccount } from './account.js';
 import { type Eligibility, recoveryEligibility } from './eligibility.js';
+import { positionKinds } from './positions.js';
 import { type AppChain, type Sent, checkAndSend, controllerFee, hex, outpointOf, sats, waitUntilSeen } from './support.js';
 
 /**
@@ -165,6 +166,7 @@ export class RecoveryDesk {
       contentKey: hexToBin(this.enrollment.archive.contentKey),
       chain: this.deps.chain,
       stores: this.stores,
+      kinds: positionKinds(this.deps.account),
     });
   }
 

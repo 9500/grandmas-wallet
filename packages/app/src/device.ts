@@ -5,6 +5,7 @@ import { readControllerHistory } from '@grandmas-wallet/core';
 import type { XoAccount } from './account.js';
 import { type Eligibility, recoveryEligibility } from './eligibility.js';
 import { type WalletDependencies, OwnerWallet, walletKeys } from './owner.js';
+import { positionKinds } from './positions.js';
 import type { RecoveryTicket } from './recoverer.js';
 import { type AppChain, hex } from './support.js';
 
@@ -91,7 +92,7 @@ export const takeoverProgress = async (chain: AppChain, takeover: TakeoverRecord
 };
 
 /** Read the wallet from the chain and the archive into this device's own copy. */
-export const restoreForTakeover = (chain: AppChain, takeover: TakeoverRecord, stores: ArchiveStore[], local: ArchiveStore): Promise<RestoreReport> =>
+export const restoreForTakeover = (account: XoAccount, chain: AppChain, takeover: TakeoverRecord, stores: ArchiveStore[], local: ArchiveStore): Promise<RestoreReport> =>
   restore({
     network: takeover.wallet.network,
     identity: takeover.wallet.identity,
@@ -101,11 +102,12 @@ export const restoreForTakeover = (chain: AppChain, takeover: TakeoverRecord, st
     chain,
     stores,
     local,
+    kinds: positionKinds(account),
   });
 
 /** Finish the takeover once the wallet names this device's key: restore, and open the wallet here. */
 export const completeTakeover = async (deps: WalletDependencies, takeover: TakeoverRecord): Promise<{ wallet: OwnerWallet; report: RestoreReport }> => {
-  const report = await restoreForTakeover(deps.chain, takeover, takeover.wallet.archive.stores.map(deps.openStore), deps.local);
+  const report = await restoreForTakeover(deps.account, deps.chain, takeover, takeover.wallet.archive.stores.map(deps.openStore), deps.local);
   const wallet = await OwnerWallet.takeOver(deps, takeover.wallet, report);
   return { wallet, report };
 };

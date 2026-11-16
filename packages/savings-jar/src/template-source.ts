@@ -2,13 +2,13 @@ import { savingsJarBytecodeHex } from '@grandmas-wallet/contracts/savingsJar';
 import type { XOTemplate } from '@xo-cash/types';
 
 /**
- * The XO template for the Savings Jar, a small application that relies on a Grandma's Wallet for
- * authorization.
+ * The XO template of the Savings Jar application, for wallets that are identified by a token category
+ * and approve transactions through a controller.
  *
- * A jar is bound to a wallet identity and an unlock time. It holds no key, so this template has no secrets
- * and is independent of the wallet template: anyone can pay into a jar, and after the unlock time its funds
- * are released by the wallet's owner approving a transaction through the wallet's controller (the wallet
- * template's `approve` action, with the jar as an extra input).
+ * A jar is bound to a wallet identity and an unlock time. It holds no key, so this template has no secrets:
+ * anyone can pay into a jar, and after the unlock time its funds are released in a transaction the wallet's
+ * owner approves through the wallet's controller. The template says what a deposit pays and what a
+ * withdrawal spends and when; the wallet adds its approval and its funds around that.
  *
  * Because a jar belongs to the wallet's identity and not to a key, it stays in place when the wallet's owner
  * key is replaced, and the new owner is the one who can empty it.
@@ -19,7 +19,7 @@ export const savingsJarTemplate = {
   description:
     'Funds set aside for a wallet until a chosen time. Anyone can pay into a jar. After its unlock time, the owner of the wallet it belongs to can empty it by approving the withdrawal with that wallet. Replacing the wallet\'s owner key changes who can empty the jar, never when.',
   icon: 'savings',
-  version: '1',
+  version: '2',
   supported: ['BCH_2026_05'],
 
   roles: {
@@ -49,6 +49,16 @@ export const savingsJarTemplate = {
       requirements: { participants: [{ role: 'saver', slots: { min: 1, max: 1 } }] },
       transaction: 'depositTransaction',
     },
+    withdraw: {
+      name: 'Empty a savings jar',
+      description: 'Return everything in the jar to the wallet. Possible only after the jar\'s unlock time.',
+      icon: 'savings',
+      roles: {
+        saver: { requirements: { variables: ['identity', 'unlockTime'] } },
+      },
+      requirements: { participants: [{ role: 'saver', slots: { min: 1, max: 1 } }] },
+      transaction: 'withdrawTransaction',
+    },
   },
 
   transactions: {
@@ -61,9 +71,26 @@ export const savingsJarTemplate = {
       version: 2,
       locktime: 0,
     },
+    withdrawTransaction: {
+      name: 'Emptied a savings jar',
+      description: 'The savings jar was emptied into the wallet.',
+      icon: 'savings',
+      inputs: [{ input: 'savingsJarInput' }],
+      outputs: [],
+      version: 2,
+      // The network accepts the transaction only once this time has passed.
+      locktime: '$(<unlockTime>)',
+    },
   },
 
-  inputs: {},
+  inputs: {
+    savingsJarInput: {
+      name: 'Savings jar',
+      description: 'The jar being emptied. It needs no signature of its own: the wallet\'s approval releases it.',
+      icon: 'savings',
+      unlockingScript: 'unlockSavingsJar',
+    },
+  },
 
   outputs: {
     savingsJarOutput: {
@@ -87,7 +114,7 @@ export const savingsJarTemplate = {
       unlockingBytecode: 'unlockSavingsJar',
       state: { variables: ['identity', 'unlockTime'] },
       roles: {
-        saver: { balance: { satoshis: true }, selectable: false },
+        saver: { balance: { satoshis: true }, selectable: false, actions: [{ action: 'withdraw', role: 'saver' }] },
       },
     },
   },
@@ -108,8 +135,8 @@ export const savingsJarTemplate = {
     },
     unlockTime: {
       name: 'Unlock time',
-      description: 'When the jar can be emptied, as a Unix timestamp.',
-      type: 'integer',
+      description: 'When the jar can be emptied.',
+      type: 'timestamp',
     },
     savedSatoshis: {
       name: 'Amount to save',

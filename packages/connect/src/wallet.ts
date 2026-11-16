@@ -1,13 +1,16 @@
 import {
+  type ActionDetails,
   type ActionRequest,
   type ActionResult,
   type Channel,
-  type OfferedTemplate,
-  type ParameterValue,
+  type ReportedPosition,
+  type TemplateName,
   ACTION_REQUEST,
   ACTION_RESPONSE,
   ACTION_RESULT,
   INVITATION_UPDATE,
+  POSITIONS,
+  POSITIONS_REQUEST,
   ProtocolError,
   parseRequest,
   sameRequest,
@@ -16,15 +19,14 @@ import {
 /**
  * The wallet's side: deciding what to do with each request that arrives, and
  * making sure that a request is carried out at most once however often it is
- * delivered.
+ * delivered. Nothing here is about any particular application or template.
  */
 
 /** What the wallet remembers about a request. Kept between sessions. */
-export interface LedgerEntry {
+export interface LedgerEntry extends ActionDetails {
   id: string;
-  template: string;
-  operation: string;
-  parameters: Record<string, ParameterValue>;
+  /** Whether the wallet trusted the template when the request arrived. If not, approving the request means trusting it. */
+  templateTrusted: boolean;
   /** Unix seconds, by the wallet's clock, when the request first arrived. */
   receivedAt: number;
   /**
@@ -50,21 +52,27 @@ export const temporaryLedger = (): LedgerStorage => {
 /** What the wallet shows the user before acting. */
 export interface Proposal {
   entry: LedgerEntry;
-  /** Agree, and have the wallet carry the request out. */
+  /** Agree, and have the wallet carry the request out. For a template not yet trusted, this also trusts it. */
   approve(): Promise<void>;
   decline(): Promise<void>;
 }
 
 export interface WalletConnectorOptions {
-  templates: OfferedTemplate[];
+  /** The templates the wallet trusts now. */
+  trusted(): TemplateName[];
+  /**
+   * Read a template an application sent and say what it is, without taking it in.
+   * @throws if it is not a template the wallet could use
+   */
+  identify(definition: unknown): TemplateName;
   storage?: LedgerStorage;
   /**
    * Carry out an approved request. Called at most once per request identifier.
    * `stage` reports progress to the application.
    */
   execute(entry: LedgerEntry, stage: (stage: 'recorded' | 'sent') => void): Promise<Record<string, unknown>>;
-  /** Operations that only read and are answered without asking the user. */
-  readOnly?: string[];
+  /** The positions of a trusted template the wallet holds. */
+  positions(templateIdentifier: string): Promise<ReportedPosition[]>;
   /** Called when a request needs the user's decision, and again whenever the list of open proposals changes. */
   onProposals(proposals: Proposal[]): void;
   /** Requests whose time is further than this from the wallet's clock are refused. Default 10 minutes. */
@@ -101,6 +109,8 @@ export class WalletConnector {
   private persist(): void {
     const cutoff = this.now() - (this.options.retentionSeconds ?? 30 * 86_400);
     this.entries = this.entries.filter((entry) => entry.receivedAt >= cutoff || entry.status === 'asked' || entry.status === 'working');
+    // A template that came with a request is kept only until the request is decided.
+    for (const entry of this.entries) if (entry.status !== 'asked' && entry.status !== 'working') delete entry.definition;
     this.storage.save(this.entries);
   }
 
@@ -116,12 +126,21 @@ export class WalletConnector {
   attach(name: string, channel: Channel): () => void {
     this.channels.set(name, channel);
     const stop = channel.onMessage((message) => {
-      if ((message as { action?: unknown } | null)?.action === ACTION_REQUEST) void this.receive(name, message);
+      const kind = (message as { action?: unknown } | null)?.action;
+      if (kind === ACTION_REQUEST) void this.receive(name, message);
+      if (kind === POSITIONS_REQUEST) void this.report(channel, message);
     });
+    // Whoever connects sees what is waiting for a decision.
+    this.announce();
     return () => {
       stop();
       this.channels.delete(name);
     };
+  }
+
+  /** The name of the channel a request arrived on in this session, if it did. */
+  cameFrom(id: string): string | undefined {
+    return this.origin.get(id);
   }
 
   get ledger(): readonly LedgerEntry[] {
@@ -147,6 +166,19 @@ export class WalletConnector {
       ...(entry.result === undefined ? {} : { result: entry.result }),
       ...(entry.error === undefined ? {} : { error: entry.error }),
     };
+  }
+
+  private trusts(template: TemplateName): boolean {
+    return this.options.trusted().some((known) => known.identifier === template.identifier && known.contentHash === template.contentHash);
+  }
+
+  /** Say which positions of a template the wallet holds. Only a template the wallet trusts gets an answer other than none. */
+  private async report(channel: Channel, message: unknown): Promise<void> {
+    const { id, template } = (message ?? {}) as { id?: unknown; template?: unknown };
+    if (typeof id !== 'string' || typeof template !== 'string') return;
+    const trusted = this.options.trusted().some((known) => known.identifier === template);
+    const positions = trusted ? await this.options.positions(template).catch(() => []) : [];
+    await channel.send({ action: POSITIONS, time: this.now(), id, positions }).catch(() => undefined);
   }
 
   /** Take in one message that claims to be a request. */
@@ -186,29 +218,40 @@ export class WalletConnector {
       await this.respond(request.id, request.sequence, false, 'The request is too old, or the clocks disagree.');
       return;
     }
-    const template = this.options.templates.find((offered) => offered.identifier === request.template);
-    if (template === undefined) {
-      await this.respond(request.id, request.sequence, false, 'This wallet has not reviewed that template.');
-      return;
-    }
-    if (!template.operations.includes(request.operation)) {
-      await this.respond(request.id, request.sequence, false, `This wallet does not offer "${request.operation}" for that template.`);
-      return;
+    const templateTrusted = this.trusts(request.template);
+    if (!templateTrusted) {
+      // A template the wallet has not seen has to come with the request, and be the one the request names.
+      if (request.definition === undefined) {
+        await this.respond(request.id, request.sequence, false, 'This wallet does not know that template. Send the template with the request.');
+        return;
+      }
+      let sent: TemplateName;
+      try {
+        sent = this.options.identify(request.definition);
+      } catch (error) {
+        await this.respond(request.id, request.sequence, false, `The template sent with the request cannot be used: ${(error as Error).message}`);
+        return;
+      }
+      if (sent.identifier !== request.template.identifier || sent.contentHash !== request.template.contentHash) {
+        await this.respond(request.id, request.sequence, false, 'The template sent with the request is not the one the request names.');
+        return;
+      }
     }
 
+    const { action: _action, time: _time, sequence: _sequence, id, definition, ...details } = request;
     const entry: LedgerEntry = {
-      id: request.id,
-      template: request.template,
-      operation: request.operation,
-      parameters: request.parameters,
+      id,
+      ...details,
+      // The wallet has its own copy of a template it trusts.
+      ...(templateTrusted || definition === undefined ? {} : { definition }),
+      templateTrusted,
       receivedAt: this.now(),
       status: 'asked',
     };
     this.entries.push(entry);
     this.persist();
     await this.respond(request.id, request.sequence, true);
-    if (this.options.readOnly?.includes(request.operation) === true) await this.carryOut(entry);
-    else this.announce();
+    this.announce();
   }
 
   private async carryOut(entry: LedgerEntry): Promise<void> {

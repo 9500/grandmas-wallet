@@ -19,10 +19,10 @@ import {
   p2pkhInput,
   p2pkhLockingBytecode,
   protectedInput,
-  savingsJarScript,
   validateGenesis,
   verifyTransaction,
 } from '../src/index.js';
+import { savingsJarScript } from '@grandmas-wallet/savings-jar';
 
 const keyOf = (seed: number): KeyPair => keyPairFromPrivateKey(new Uint8Array(32).fill(seed));
 const funder = keyOf(0x10);

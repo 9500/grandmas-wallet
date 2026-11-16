@@ -1,9 +1,10 @@
-import { type OwnerWallet, readLink } from '@grandmas-wallet/app';
+import { type ActionPreview, type ApplicationAction, type OwnerWallet, type WalletView, NotYetValidError, inspectTemplate, readLink } from '@grandmas-wallet/app';
 import { type LedgerEntry, type Proposal, WalletConnector, XO_EXTENSION_VERSION } from '@grandmas-wallet/connect';
 import { type LinkStatus, type WalletLink, newLinkKey, openWalletLink } from '@grandmas-wallet/connect/wizard';
-import { Button, Card, Field, TaskStatus, TextArea, formatSatoshis, formatTime, useTask } from '@grandmas-wallet/ui';
+import { Button, Card, Field, Spinner, TaskStatus, TextArea, formatTime, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
+import { ActionView, TemplateCard } from './ActionView.js';
 import { type Session, takeIncoming } from './session.js';
 
 /** A connection to an application, as the wallet keeps it. */
@@ -22,34 +23,106 @@ interface ConnectOffer {
   name: string;
 }
 
-const digits = (value: unknown): bigint => {
-  if (typeof value !== 'string' || !/^\d{1,15}$/.test(value)) throw new Error('The amount is not a whole number of satoshis.');
-  return BigInt(value);
+/** A request as the wallet's own action: the template's action, the values, and what the wallet is to fill in. */
+const actionOf = (entry: LedgerEntry): ApplicationAction => {
+  const bindings: Record<string, 'identity'> = {};
+  for (const [name, source] of Object.entries(entry.bindings ?? {})) {
+    if (source !== 'identity') throw new Error(`The application asks this wallet to fill in "${source}", which it does not have.`);
+    bindings[name] = 'identity';
+  }
+  return {
+    template: entry.template.identifier,
+    action: entry.templateAction,
+    role: entry.role,
+    variables: entry.variables,
+    bindings,
+    ...(entry.position === undefined ? {} : { positionId: entry.position }),
+    ...(entry.label === undefined ? {} : { label: entry.label }),
+  };
 };
 
-/** What a request means, in the words the user is asked to agree to. */
-const describe = (entry: LedgerEntry, wallet: OwnerWallet): string => {
-  const { operation, parameters } = entry;
-  try {
-    if (operation === 'open') {
-      const unlockTime = parameters['unlockTime'];
-      if (typeof unlockTime !== 'number') throw new Error();
-      const label = typeof parameters['label'] === 'string' ? ` named "${parameters['label'].slice(0, 40)}"` : '';
-      return `Put ${formatSatoshis(digits(parameters['satoshis']))} sat from your wallet into a savings jar${label}. It cannot be spent before ${formatTime(unlockTime)}.`;
+/**
+ * One request waiting for the user. A template the wallet has not seen is shown first, for the user to
+ * trust and remember or not; then the action, in the template's words and the wallet's own figures.
+ */
+const Request = ({ proposal, wallet, view, from, onChanged }: { proposal: Proposal; wallet: OwnerWallet; view: WalletView; from: string; onChanged: () => void }) => {
+  const task = useTask();
+  const { entry } = proposal;
+  const [trusted, setTrusted] = useState(wallet.trustedTemplates.some((template) => template.identifier === entry.template.identifier));
+  const [preview, setPreview] = useState<ActionPreview | undefined>();
+  const [problem, setProblem] = useState<string | undefined>();
+  const summary = useMemo(() => {
+    try {
+      return entry.definition === undefined ? undefined : inspectTemplate(entry.definition);
+    } catch {
+      return undefined;
     }
-    if (operation === 'empty') {
-      const jar = wallet.current.positions.find((item) => item.position.positionId === parameters['positionId']);
-      if (jar === undefined) throw new Error();
-      return `Empty the savings jar "${jar.position.label ?? 'Savings jar'}" (${formatSatoshis(jar.held)} sat) into your wallet.`;
-    }
-  } catch {
-    // Described as unreadable below.
-  }
-  return 'Something this wallet cannot describe. It is safest to decline.';
+  }, [entry.id]);
+
+  useEffect(() => {
+    if (!trusted) return;
+    setProblem(undefined);
+    wallet.previewAction(actionOf(entry)).then(setPreview, (error: Error) => setProblem(error.message));
+  }, [trusted, entry.id]);
+
+  const trust = () =>
+    task.run('trust', async (progress) => {
+      progress('Saving the template to the backup');
+      await wallet.trustTemplate(entry.definition);
+      setTrusted(true);
+      onChanged();
+    });
+  const decide = (agree: boolean) =>
+    task.run(agree ? 'approve' : 'decline', async (progress) => {
+      progress(agree ? 'Carrying it out' : 'Declining');
+      await (agree ? proposal.approve() : proposal.decline());
+    });
+
+  return (
+    <Card tone="warn">
+      <h2>{from} asks for your approval</h2>
+      {!trusted ? (
+        <>
+          <p>It uses a template this wallet has not seen before:</p>
+          {summary === undefined ? <p class="notice error">The template cannot be read. It is safest to decline.</p> : <TemplateCard summary={summary} />}
+          <div class="row">
+            <Button task={task} name="trust" onClick={() => void trust()} disabled={summary === undefined}>
+              Trust and remember this template
+            </Button>
+            <Button task={task} name="decline" kind="secondary" onClick={() => void decide(false)}>
+              Decline
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          {problem !== undefined ? (
+            <p class="notice error">This cannot be carried out: {problem}</p>
+          ) : preview === undefined ? (
+            <p>
+              <Spinner /> Working out what this would do…
+            </p>
+          ) : (
+            <ActionView preview={preview} identity={view.identity} />
+          )}
+          <div class="row">
+            <Button task={task} name="approve" onClick={() => void decide(true)} disabled={preview === undefined}>
+              Approve
+            </Button>
+            <Button task={task} name="decline" kind="secondary" onClick={() => void decide(false)}>
+              Decline
+            </Button>
+          </div>
+        </>
+      )}
+      <p class="small muted">Asked {formatTime(entry.receivedAt)}. Nothing happens unless you approve.</p>
+      <TaskStatus task={task} />
+    </Card>
+  );
 };
 
 /** Applications connected to the wallet, and what they ask for. */
-export const Apps = ({ session, wallet, onChanged }: { session: Session; wallet: OwnerWallet; onChanged: () => Promise<void> }) => {
+export const Apps = ({ session, wallet, view, onChanged }: { session: Session; wallet: OwnerWallet; view: WalletView; onChanged: () => Promise<void> }) => {
   const task = useTask();
   const [connections, setConnections] = useState<Connection[]>(session.vault.get<Connection[]>('connections') ?? []);
   const [statuses, setStatuses] = useState<Record<string, LinkStatus>>({});
@@ -57,51 +130,44 @@ export const Apps = ({ session, wallet, onChanged }: { session: Session; wallet:
   const [code, setCode] = useState(session.incoming?.kind === 'connect' ? session.incoming.text : '');
   const [offer, setOffer] = useState<ConnectOffer | undefined>();
   const links = useRef(new Map<string, { link: WalletLink; detach: () => void }>());
-  const jar = wallet.record.templates.jar;
+  const [, setTrustChanged] = useState(0);
+  const trustedNames = () => wallet.trustedTemplates.map(({ identifier, contentHash }) => ({ identifier, contentHash }));
 
   const connector = useMemo(
     () =>
       new WalletConnector({
-        templates: [{ identifier: jar.identifier, contentHash: jar.contentHash, operations: ['open', 'empty', 'list'] }],
-        readOnly: ['list'],
+        trusted: trustedNames,
+        identify: (definition) => {
+          const { identifier, contentHash } = inspectTemplate(definition);
+          return { identifier, contentHash };
+        },
         storage: {
           load: () => session.vault.get<LedgerEntry[]>('requests') ?? [],
           save: (entries) => session.vault.set('requests', entries),
         },
         onProposals: setProposals,
+        // An application is told of the positions made with its own template, and of no others.
+        positions: async (template) =>
+          (await wallet.refresh()).positions
+            .filter((item) => item.position.template?.identifier === template && item.status !== 'closed' && item.held > 0n)
+            .map((item) => ({
+              position: item.position.positionId,
+              label: item.position.label ?? '',
+              output: item.position.origin?.output ?? '',
+              variables: item.position.parameters,
+              satoshis: item.held.toString(),
+            })),
         execute: async (entry, stage) => {
-          const { operation, parameters } = entry;
-          if (operation === 'list') {
-            const view = await wallet.refresh();
-            return {
-              positions: view.positions
-                .filter((item) => item.status !== 'closed')
-                .map((item) => ({
-                  positionId: item.position.positionId,
-                  label: item.position.label ?? 'Savings jar',
-                  unlockTime: item.unlockTime ?? 0,
-                  satoshis: item.held.toString(),
-                  status: item.status,
-                })),
-            };
-          }
-          if (operation === 'open') {
-            const unlockTime = parameters['unlockTime'];
-            if (typeof unlockTime !== 'number' || !Number.isInteger(unlockTime) || unlockTime <= Date.now() / 1000) throw new Error('The unlock time is not in the future.');
-            const label = typeof parameters['label'] === 'string' && parameters['label'].trim() !== '' ? parameters['label'].trim().slice(0, 40) : 'Savings jar';
-            const sent = await wallet.openJar(digits(parameters['satoshis']), unlockTime, label, () => stage('recorded'));
+          if (!wallet.trustedTemplates.some((template) => template.identifier === entry.template.identifier)) throw new Error('The template was not trusted.');
+          try {
+            const sent = await wallet.runAction(actionOf(entry), () => stage('recorded'));
             stage('sent');
             await onChanged();
-            const opened = wallet.current.positions.find((item) => item.transactionId === sent.transactionId);
-            return { transactionId: sent.transactionId, positionId: opened?.position.positionId ?? '', unlockTime, label };
+            return { transactionId: sent.transactionId, positions: sent.positions };
+          } catch (error) {
+            if (error instanceof NotYetValidError) throw new Error('The network does not accept this yet: its clock runs some minutes behind. Please try again shortly.', { cause: error });
+            throw error;
           }
-          if (operation === 'empty') {
-            const sent = await wallet.emptyJar(String(parameters['positionId']));
-            stage('sent');
-            await onChanged();
-            return { transactionId: sent.transactionId };
-          }
-          throw new Error('This wallet does not know that operation.');
         },
       }),
     [],
@@ -113,12 +179,7 @@ export const Apps = ({ session, wallet, onChanged }: { session: Session; wallet:
       uri: connection.uri,
       privateKey: connection.privateKey,
       name: 'Grandma\'s Wallet',
-      offered: {
-        version: XO_EXTENSION_VERSION,
-        network: wallet.record.network,
-        interfaceVersion: 2,
-        templates: [{ identifier: jar.identifier, contentHash: jar.contentHash, operations: ['open', 'empty', 'list'] }],
-      },
+      offered: { version: XO_EXTENSION_VERSION, network: wallet.record.network, interfaceVersion: 2, bindings: ['identity'], templates: trustedNames() },
       onStatus: (status) => setStatuses((known) => ({ ...known, [connection.id]: status })),
     });
     links.current.set(connection.id, { link, detach: connector.attach(connection.id, link.channel) });
@@ -171,30 +232,15 @@ export const Apps = ({ session, wallet, onChanged }: { session: Session; wallet:
     save(connections.filter((item) => item.id !== connection.id));
   };
 
-  const decide = (proposal: Proposal, agree: boolean) =>
-    task.run(`decide-${proposal.entry.id}`, async (progress) => {
-      progress(agree ? 'Carrying it out' : 'Declining');
-      await (agree ? proposal.approve() : proposal.decline());
-    });
+  const fromOf = (proposal: Proposal): string => {
+    const connection = connections.find((item) => connector.cameFrom(proposal.entry.id) === item.id);
+    return connection === undefined ? 'A connected application' : (statuses[connection.id]?.peerName ?? connection.name);
+  };
 
   return (
     <>
       {proposals.map((proposal) => (
-        <Card tone="warn">
-          <h2>A connected application asks for your approval</h2>
-          <p>
-            <strong>{describe(proposal.entry, wallet)}</strong>
-          </p>
-          <p class="small muted">Asked {formatTime(proposal.entry.receivedAt)}. Nothing happens unless you approve.</p>
-          <div class="row">
-            <Button task={task} name={`decide-${proposal.entry.id}`} onClick={() => void decide(proposal, true)}>
-              Approve
-            </Button>
-            <Button task={task} kind="secondary" onClick={() => void decide(proposal, false)}>
-              Decline
-            </Button>
-          </div>
-        </Card>
+        <Request key={proposal.entry.id} proposal={proposal} wallet={wallet} view={view} from={fromOf(proposal)} onChanged={() => setTrustChanged((count) => count + 1)} />
       ))}
       <Card>
         <h2>Connected applications</h2>
@@ -233,7 +279,7 @@ export const Apps = ({ session, wallet, onChanged }: { session: Session; wallet:
         ) : (
           <>
             <p class="notice">
-              Connect to <strong>{offer.name}</strong>? It will be able to see your savings jars and ask this wallet to open or empty one. You approve each request.
+              Connect to <strong>{offer.name}</strong>? It will be able to ask this wallet to carry out actions of its own template, and to see what this wallet holds under that template. You approve each request.
             </p>
             <div class="row">
               <Button onClick={connect}>Connect</Button>

@@ -7,8 +7,8 @@ import {
   assetScript,
   controllerScript,
   encodeControllerState,
-  savingsJarScript,
 } from '../src/index.js';
+import { savingsJarScript } from '@grandmas-wallet/savings-jar';
 import {
   type ProtectedInput,
   type Spend,

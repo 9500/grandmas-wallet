@@ -3,44 +3,32 @@ import { readFileSync } from 'node:fs';
 import { binToHex, deriveSeedFromBip39Mnemonic } from '@bitauth/libauth';
 import { assetBytecodeHex } from '@grandmas-wallet/contracts/asset';
 import { controllerBytecodeHex } from '@grandmas-wallet/contracts/controller';
-import { savingsJarBytecodeHex } from '@grandmas-wallet/contracts/savingsJar';
 import { deriveXoTemplateKey, xoTemplateKeyPath } from '@grandmas-wallet/core';
 import { Crypto } from '@xo-cash/crypto';
 import { compileCashAssemblyString, generateTemplateIdentifier, parseTemplate } from '@xo-cash/utils';
 import { describe, expect, it } from 'vitest';
 
-import {
-  grandmasWalletTemplate,
-  grandmasWalletTemplateIdentifier,
-  savingsJarTemplate,
-  savingsJarTemplateIdentifier,
-} from '../src/index.js';
+import { grandmasWalletTemplate, grandmasWalletTemplateIdentifier } from '../src/index.js';
 
 const frozen = (name: string) => parseTemplate(readFileSync(new URL(`../frozen/${name}.json`, import.meta.url), 'utf8'));
 
-describe('templates', () => {
-  it('are accepted by the XO template validator', () => {
+describe('the wallet template', () => {
+  it('is accepted by the XO template validator', () => {
     expect(() => parseTemplate(grandmasWalletTemplate)).not.toThrow();
-    expect(() => parseTemplate(savingsJarTemplate)).not.toThrow();
   });
 
-  it('match their frozen version 1; every wallet key depends on the wallet template\'s identifier', () => {
+  it('matches its frozen version 1; every wallet key depends on the template\'s identifier', () => {
     expect(generateTemplateIdentifier(frozen('grandmas-wallet-v1'))).toBe(grandmasWalletTemplateIdentifier);
     expect(frozen('grandmas-wallet-v1')).toEqual(grandmasWalletTemplate);
-    expect(generateTemplateIdentifier(frozen('savings-jar-v1'))).toBe(savingsJarTemplateIdentifier);
-    expect(frozen('savings-jar-v1')).toEqual(savingsJarTemplate);
   });
 
-  it('carry exactly the contract bytecode that the contract tests run', () => {
+  it('carries exactly the contract bytecode that the contract tests run', () => {
     expect(grandmasWalletTemplate.scripts['controllerBytecode']).toBe(`<$(<identity> OP_REVERSEBYTES)> 0x${controllerBytecodeHex}`);
     expect(grandmasWalletTemplate.scripts['walletBytecode']).toBe(`<$(<identity> OP_REVERSEBYTES)> 0x${assetBytecodeHex}`);
-    expect(savingsJarTemplate.scripts['savingsJarBytecode']).toBe(`<unlockTime> <$(<identity> OP_REVERSEBYTES)> 0x${savingsJarBytecodeHex}`);
   });
 
-  it('keep keys out of applications: the savings jar has no secrets and wallet funds need no signature', () => {
-    expect(JSON.stringify(savingsJarTemplate)).not.toMatch(/private_key|secrets|signature/);
+  it('wallet funds need no signature of their own', () => {
     expect(grandmasWalletTemplate.scripts['unlockWalletFunds']).toBe('');
-    expect(savingsJarTemplate.scripts['unlockSavingsJar']).toBe('');
   });
 
   it('generates a key in one place only: when a wallet is created', () => {
@@ -60,10 +48,7 @@ describe('templates', () => {
   });
 });
 
-describe.each([
-  ['wallet', grandmasWalletTemplate],
-  ['savings jar', savingsJarTemplate],
-])('variables each %s action needs', (_name, template) => {
+describe.each([['wallet', grandmasWalletTemplate]])('variables each %s action needs', (_name, template) => {
   const variableNames = new Set(Object.keys(template.variables ?? {}));
   const scriptNames = new Set(Object.keys(template.scripts));
 

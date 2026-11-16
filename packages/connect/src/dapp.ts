@@ -1,12 +1,15 @@
 import {
+  type ActionDetails,
   type ActionRequest,
   type ActionResult,
   type Channel,
-  type ParameterValue,
+  type ReportedPosition,
   ACTION_REQUEST,
   ACTION_RESPONSE,
   ACTION_RESULT,
   INVITATION_UPDATE,
+  POSITIONS,
+  POSITIONS_REQUEST,
 } from './protocol.js';
 
 /**
@@ -36,6 +39,7 @@ const newId = (): string => Array.from(crypto.getRandomValues(new Uint8Array(12)
 
 export class DappRequests {
   private readonly pending = new Map<string, Pending>();
+  private readonly listing = new Map<string, (positions: ReportedPosition[]) => void>();
   private channel: Channel | undefined;
   private stop: (() => void) | undefined;
 
@@ -60,20 +64,14 @@ export class DappRequests {
   }
 
   /**
-   * Ask the wallet to carry out an operation of a template.
+   * Ask the wallet to carry out an action of the application's template.
    * @param id - to continue a request made before, for example after the page was loaded again
    * @throws RequestRefusedError
    */
-  request(
-    template: string,
-    operation: string,
-    parameters: Record<string, ParameterValue>,
-    onStage: (stage: RequestStage) => void = () => undefined,
-    id: string = newId(),
-  ): Promise<Record<string, unknown>> {
+  request(details: ActionDetails, onStage: (stage: RequestStage) => void = () => undefined, id: string = newId()): Promise<Record<string, unknown>> {
     const { channel } = this;
     if (channel === undefined) return Promise.reject(new Error('No wallet is connected.'));
-    const request: ActionRequest = { action: ACTION_REQUEST, time: this.now(), sequence: channel.nextSequence(), id, template, operation, parameters };
+    const request: ActionRequest = { action: ACTION_REQUEST, time: this.now(), sequence: channel.nextSequence(), id, ...details };
     return new Promise((resolve, reject) => {
       this.pending.set(id, { request, onStage, resolve, reject });
       onStage('sent');
@@ -82,9 +80,36 @@ export class DappRequests {
     });
   }
 
+  /**
+   * Ask which positions of a template the wallet holds. A wallet that does not trust the template says none.
+   * @throws if the wallet does not answer in time
+   */
+  positions(templateIdentifier: string, timeoutMs = 20_000): Promise<ReportedPosition[]> {
+    const { channel } = this;
+    if (channel === undefined) return Promise.reject(new Error('No wallet is connected.'));
+    const id = newId();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.listing.delete(id);
+        reject(new Error('The wallet did not answer.'));
+      }, timeoutMs);
+      this.listing.set(id, (positions) => {
+        clearTimeout(timer);
+        this.listing.delete(id);
+        resolve(positions);
+      });
+      channel.send({ action: POSITIONS_REQUEST, time: this.now(), id, template: templateIdentifier }).catch(() => undefined);
+    });
+  }
+
   private receive(message: unknown): void {
     const { action, id } = (message ?? {}) as { action?: unknown; id?: unknown };
     if (typeof id !== 'string') return;
+    if (action === POSITIONS) {
+      const { positions } = message as { positions?: unknown };
+      this.listing.get(id)?.(Array.isArray(positions) ? (positions as ReportedPosition[]) : []);
+      return;
+    }
     const open = this.pending.get(id);
     if (open === undefined) return;
     if (action === ACTION_RESPONSE) {

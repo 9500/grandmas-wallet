@@ -7,7 +7,6 @@ import {
   ArchiveWriter,
   HttpStore,
   MemoryStore,
-  describeSavingsJar,
   restore,
   templateContentHash,
 } from '@grandmas-wallet/archive';
@@ -26,7 +25,7 @@ import {
   sealPackage,
   verifyEnrollment,
 } from '@grandmas-wallet/enrollment';
-import { SimulatedChain, TestWallet, testKey } from '@grandmas-wallet/testing';
+import { SimulatedChain, TestWallet, describeSavingsJar, savingsJarKind, testKey } from '@grandmas-wallet/testing';
 import { afterAll, describe, expect, it } from 'vitest';
 
 /**
@@ -143,6 +142,7 @@ describe('device loss (X04)', () => {
         chain,
         stores,
         local: newDevice,
+        kinds: [savingsJarKind],
       });
 
     // The recoverer sees what there is to recover before starting.

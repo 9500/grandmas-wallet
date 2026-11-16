@@ -34,7 +34,7 @@ export interface TemplateReference {
 export interface PositionDescription {
   /** Stays the same across the records about one position. */
   positionId: string;
-  /** Names the rules for rebuilding and checking the position, e.g. `savings-jar`. */
+  /** Names the rules for rebuilding and checking the position, e.g. `xo-template-output`. */
   kind: string;
   /** Version of the owner-approval interface the position's contract uses. */
   interfaceVersion: number;
@@ -43,6 +43,8 @@ export interface PositionDescription {
   /** The script holding the position's funds, as hex. */
   lockingBytecode: string;
   template?: TemplateReference;
+  /** For an output of a template: the action that made it, the role the wallet took, and the output's name. */
+  origin?: { action: string; role: string; output: string };
   /** Things a restoring wallet must have or understand; anything it does not know makes the position unsupported. */
   requires: string[];
   label?: string;
@@ -111,8 +113,13 @@ const signedFromJson = (value: Record<string, unknown>): SignedMessage => {
   return { message, publicKey: hexToBin(publicKey), signature: hexToBin(signature) };
 };
 
+/**
+ * A template is kept as the text it arrived in. An XO template's identifier is a hash of its text as
+ * written, with its fields in their original order, so a copy with its fields rearranged would be a
+ * different template to an XO engine although it says the same.
+ */
 export const encodeBlob = (blob: Blob): Uint8Array =>
-  canonicalBytes(blob.type === 'template' ? { type: 'template', template: blob.template } : { type: blob.type, ...signedToJson(blob.signed) });
+  canonicalBytes(blob.type === 'template' ? { type: 'template', text: JSON.stringify(blob.template) } : { type: blob.type, ...signedToJson(blob.signed) });
 
 /** @throws RecordError if the bytes are not a blob this version can read */
 export const decodeBlob = (plaintext: Uint8Array): Blob => {
@@ -124,13 +131,21 @@ export const decodeBlob = (plaintext: Uint8Array): Blob => {
   }
   if (!isObject(value)) throw new RecordError('The blob is not readable.');
   if (value['type'] === 'record' || value['type'] === 'acknowledgment') return { type: value['type'], signed: signedFromJson(value) };
+  if (value['type'] === 'template' && typeof value['text'] === 'string') {
+    try {
+      return { type: 'template', template: JSON.parse(value['text']) as JsonValue };
+    } catch {
+      throw new RecordError('The template in the blob is not readable.');
+    }
+  }
+  // Written by earlier versions, with the template's fields in sorted order.
   if (value['type'] === 'template' && value['template'] !== undefined) return { type: 'template', template: value['template'] as JsonValue };
   throw new RecordError(`Blobs of type "${String(value['type'])}" are not known to this version.`);
 };
 
 const parsePosition = (value: unknown): PositionDescription => {
   if (!isObject(value)) throw new RecordError('The record has no position description.');
-  const { positionId, kind, interfaceVersion, parameters, lockingBytecode, template, requires, label } = value;
+  const { positionId, kind, interfaceVersion, parameters, lockingBytecode, template, origin, requires, label } = value;
   if (typeof positionId !== 'string' || positionId === '' || typeof kind !== 'string' || !isCount(interfaceVersion)) {
     throw new RecordError('The position description is incomplete.');
   }
@@ -144,6 +159,9 @@ const parsePosition = (value: unknown): PositionDescription => {
   if (template !== undefined && (!isObject(template) || typeof template['identifier'] !== 'string' || !isHex(template['contentHash'], 32))) {
     throw new RecordError('The template reference is incomplete.');
   }
+  if (origin !== undefined && (!isObject(origin) || typeof origin['action'] !== 'string' || typeof origin['role'] !== 'string' || typeof origin['output'] !== 'string')) {
+    throw new RecordError('The position\'s origin is incomplete.');
+  }
   if (label !== undefined && typeof label !== 'string') throw new RecordError('The position label is not text.');
   return {
     positionId,
@@ -153,6 +171,7 @@ const parsePosition = (value: unknown): PositionDescription => {
     lockingBytecode,
     requires: requires as string[],
     ...(template === undefined ? {} : { template: { identifier: template['identifier'] as string, contentHash: template['contentHash'] as string } }),
+    ...(origin === undefined ? {} : { origin: { action: origin['action'] as string, role: origin['role'] as string, output: origin['output'] as string } }),
     ...(label === undefined ? {} : { label }),
   };
 };

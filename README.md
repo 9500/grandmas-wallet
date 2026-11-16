@@ -4,7 +4,7 @@ A Bitcoin Cash wallet that can recover access after a lost phone without manual 
 
 Built for BCH Blaze 2026 on the XO stack.
 
-**Status:** early development, chipnet only. The contracts are tested in a virtual machine and have run through the full recovery lifecycle on chipnet, both with this project's own transaction builder and through the XO engine using the project's XO templates. A recoverer can be enrolled with one sealed package, and a replacement device can rebuild the wallet from that package, the chain and an encrypted archive; this is tested against a simulated chain and has been run on chipnet through the XO engine. The wallet, the recoverer and a small application that uses the wallet run as web pages, tried end to end on chipnet. Nothing has been audited.
+**Status:** early development, chipnet only. The contracts are tested in a virtual machine and have run through the full recovery lifecycle on chipnet, both with this project's own transaction builder and through the XO engine using the project's XO templates. A recoverer can be enrolled with one sealed package, and a replacement device can rebuild the wallet from that package, the chain and an encrypted archive; this is tested against a simulated chain and has been run on chipnet through the XO engine. The wallet, the recoverer and a small application run as web pages, tried end to end on chipnet. The wallet has no code for any application: an application presents its XO template, the user decides whether to trust it, and the wallet carries out the template's actions. The same application also works with ordinary wallets over WizardConnect, checked with Cashonize. Nothing has been audited.
 
 ## Documents
 

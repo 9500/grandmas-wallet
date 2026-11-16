@@ -4,13 +4,16 @@
 //
 // usage: node --import tsx scripts/ordinary-wallet.ts [--name ordinary]            print the address to fund
 //        node --import tsx scripts/ordinary-wallet.ts [--name ordinary] <wiz://…>  connect and sign
+//        node --import tsx scripts/ordinary-wallet.ts [--name ordinary] --sweep <address> [--server wss://…]  send every coin away
 //
 // The seed is kept in .xo-demo/ordinary/<name>.seed, so the same wallet returns each time.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { binToHex, decodeHdPublicKey, deriveHdPublicNodeChild, encodeCashAddress, hash160, hexToBin } from '@bitauth/libauth';
+import { binToHex, cashAddressToLockingBytecode, decodeHdPublicKey, deriveHdPublicNodeChild, encodeCashAddress, encodeTransactionBch, hash160, hexToBin } from '@bitauth/libauth';
+import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { ordinaryWallet } from '@grandmas-wallet/testing';
+import { readPaths, scanWallet } from '../apps/jar/src/plain.js';
 import { PROTOCOL_NAME, RelayMsgAction, type RelayClient, chunkExtensionAdvertisement, initiateWalletRelay, peerSupportsChunk } from '@wizardconnect/core';
 
 const args = process.argv.slice(2);
@@ -30,6 +33,35 @@ if (typeof receive === 'string') throw new Error(receive);
 const first = deriveHdPublicNodeChild(receive.node, 0);
 if (typeof first === 'string') throw new Error(first);
 console.log(`Wallet "${name}" receives at ${encodeCashAddress({ prefix: 'bchtest', type: 'p2pkh', payload: hash160(first.publicKey) }).address}`);
+
+const sweepAt = args.indexOf('--sweep');
+if (sweepAt !== -1) {
+  // Every coin of the wallet to one address, less the fee.
+  const destination = cashAddressToLockingBytecode(args[sweepAt + 1] ?? '');
+  if (typeof destination === 'string') throw new Error(destination);
+  const serverAt = args.indexOf('--server');
+  const electrum = await Electrum.connect(serverAt === -1 ? 'wss://chipnet.imaginary.cash:50004' : (args[serverAt + 1] ?? ''));
+  const { coins, balance } = await scanWallet({ ...electrum, getTransaction: (id) => electrum.getTransaction(id), getHistory: (script) => electrum.getHistory(script), listUnspent: (script) => electrum.listUnspent(script), broadcast: (hex) => electrum.broadcast(hex) }, readPaths(wallet.paths));
+  if (coins.length === 0) throw new Error('The wallet holds no coins.');
+  const fee = BigInt(10 + coins.length * 141 + 34 + 20);
+  const transaction = {
+    version: 2,
+    locktime: 0,
+    inputs: coins.map((coin) => ({ outpointTransactionHash: hexToBin(coin.transactionId), outpointIndex: coin.index, sequenceNumber: 0xfffffffe, unlockingBytecode: new Uint8Array() })),
+    outputs: [{ lockingBytecode: destination.bytecode, valueSatoshis: balance - fee }],
+  };
+  const signed = wallet.sign({
+    transaction: {
+      transaction: binToHex(encodeTransactionBch(transaction)),
+      sourceOutputs: coins.map((coin) => ({ lockingBytecode: binToHex(coin.lockingBytecode), valueSatoshis: `<bigint: ${coin.valueSatoshis}n>` })),
+    },
+    inputPaths: coins.map((coin, index) => [index, coin.path, coin.addressIndex]),
+  });
+  const sent = await electrum.broadcast(signed);
+  console.log(sent.accepted ? `Sent ${balance - fee} sat (${sent.transactionId})` : `Refused: ${sent.reason}`);
+  await electrum.disconnect();
+  process.exit(sent.accepted ? 0 : 1);
+}
 
 if (uri === undefined) process.exit(0);
 

@@ -15,7 +15,7 @@
     "@grandmas-wallet/connect": "0.0.0",
     "@grandmas-wallet/contracts": "0.0.0",
     "@grandmas-wallet/core": "0.0.0",
-    "@grandmas-wallet/templates": "0.0.0",
+    "@grandmas-wallet/savings-jar": "0.0.0",
     "@grandmas-wallet/ui": "0.0.0",
     "preact": "^11.2.0"
   },

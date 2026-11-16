@@ -1,6 +1,6 @@
 import { binToHex } from '@bitauth/libauth';
 import type { KeyPair } from '@grandmas-wallet/core';
-import { SimulatedChain, TestWallet, testKey } from '@grandmas-wallet/testing';
+import { SimulatedChain, TestWallet, describeSavingsJar, savingsJarKind, testKey } from '@grandmas-wallet/testing';
 
 import {
   type ArchiveStore,
@@ -8,7 +8,6 @@ import {
   type WriterState,
   ArchiveWriter,
   MemoryStore,
-  describeSavingsJar,
   generateArchiveId,
   generateContentKey,
   restore,
@@ -58,6 +57,7 @@ export const setup = () => {
       contentKey,
       chain,
       stores: [...stores] as ArchiveStore[],
+      kinds: [savingsJarKind],
       ...overrides,
     });
 

@@ -1,16 +1,14 @@
 import '@grandmas-wallet/ui/styles.css';
 
-import { type JsonValue, templateContentHash } from '@grandmas-wallet/archive';
-import type { XoAdvertisement } from '@grandmas-wallet/connect';
 import { type DappCredentials, type DappLink, type LinkStatus, type WalletOffer, openDappLink } from '@grandmas-wallet/connect/wizard';
-import { savingsJarTemplate, savingsJarTemplateIdentifier } from '@grandmas-wallet/templates';
+import type { XoAdvertisement } from '@grandmas-wallet/connect';
 import { type Environment, Button, Card, CopyBox, Page, QrCode, Spinner, Vault, loadEnvironment } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 
 import { PlainJars } from './PlainJars.js';
 import { type WalletPaths, readPaths } from './plain.js';
-import { XoJars } from './XoJars.js';
+import { XoJars, xoProblem } from './XoJars.js';
 
 /**
  * A small application that uses whatever wallet connects to it.
@@ -21,28 +19,16 @@ import { XoJars } from './XoJars.js';
  */
 
 const vault = new Vault('jar');
-const TEMPLATE_HASH = templateContentHash(savingsJarTemplate as unknown as JsonValue);
-
-/** Whether a wallet's XO offer covers this application's template, byte for byte. */
-const xoProblem = (offered: XoAdvertisement, network: string): string | undefined => {
-  if (offered.network !== network) return `The wallet is on ${offered.network}; this application is on ${network}.`;
-  const template = offered.templates.find((item) => item.identifier === savingsJarTemplateIdentifier);
-  if (template === undefined) return 'The wallet has not reviewed the Savings Jar template.';
-  if (template.contentHash !== TEMPLATE_HASH) return 'The wallet knows a different version of the Savings Jar template.';
-  if (!['open', 'empty', 'list'].every((operation) => template.operations.includes(operation))) return 'The wallet does not offer everything this application needs.';
-  return undefined;
-};
-
-type Mode = { kind: 'xo' } | { kind: 'plain'; paths: WalletPaths } | { kind: 'unusable'; reason: string };
+type Mode = { kind: 'xo'; offered: XoAdvertisement } | { kind: 'plain'; paths: WalletPaths } | { kind: 'unusable'; reason: string };
 
 /** How this application will work with the wallet that connected. XO requests are used where the wallet offers them. */
 const modeFor = (offer: WalletOffer, network: string): Mode => {
   const xo = offer.xo === undefined ? (offer.xoProblem ?? 'none offered') : xoProblem(offer.xo, network);
-  if (xo === undefined) return { kind: 'xo' };
+  if (xo === undefined && offer.xo !== undefined) return { kind: 'xo', offered: offer.xo };
   try {
     return { kind: 'plain', paths: readPaths(offer.paths) };
   } catch (error) {
-    return { kind: 'unusable', reason: offer.xo === undefined && offer.xoProblem === undefined ? (error as Error).message : xo };
+    return { kind: 'unusable', reason: offer.xo === undefined && offer.xoProblem === undefined ? (error as Error).message : (xo ?? (error as Error).message) };
   }
 };
 
@@ -87,7 +73,7 @@ const App = ({ environment }: { environment: Environment }) => {
 
   const peerName = status.peerName ?? 'your wallet';
   if (status.state === 'connected' && link.current !== undefined && mode?.kind === 'xo') {
-    return <XoJars environment={environment} link={link.current} peerName={peerName} onDisconnect={disconnect} />;
+    return <XoJars environment={environment} link={link.current} offered={mode.offered} peerName={peerName} onDisconnect={disconnect} />;
   }
   if (status.state === 'connected' && link.current !== undefined && mode?.kind === 'plain') {
     return <PlainJars environment={environment} link={link.current} paths={mode.paths} peerName={peerName} onDisconnect={disconnect} />;

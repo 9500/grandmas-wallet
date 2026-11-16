@@ -5,38 +5,7 @@
 import { binToHex, decodeTransactionBch, generateBip39Mnemonic, hexToBin } from '@bitauth/libauth';
 import { Engine, XO_SUPPORTED_NETWORKS } from '@xo-cash/engine';
 
-import { savingsJarScript } from '../../packages/core/src/index.js';
-import { savingsJarTemplate } from '../../packages/templates/src/index.js';
-
-const template = {
-  ...savingsJarTemplate,
-  actions: {
-    ...savingsJarTemplate.actions,
-    withdraw: {
-      name: 'Empty a savings jar',
-      description: 'Release the jar\'s funds after its unlock time.',
-      icon: 'savings',
-      roles: { saver: { requirements: { variables: ['identity', 'unlockTime'] } } },
-      requirements: { participants: [{ role: 'saver', slots: { min: 1, max: 1 } }] },
-      transaction: 'withdrawTransaction',
-    },
-  },
-  transactions: {
-    ...savingsJarTemplate.transactions,
-    withdrawTransaction: {
-      name: 'Emptied a savings jar',
-      description: 'The jar\'s funds were released.',
-      icon: 'savings',
-      inputs: [{ input: 'savingsJarInput' }],
-      outputs: [],
-      version: 2,
-      locktime: '$(<unlockTime>)',
-    },
-  },
-  inputs: {
-    savingsJarInput: { name: 'Savings jar', description: 'The jar being emptied.', icon: 'savings', unlockingScript: 'unlockSavingsJar' },
-  },
-};
+import { savingsJarScript, savingsJarTemplate as template } from '../../packages/savings-jar/src/index.js';
 
 const identity = 'c29c930243a9cc8117eac382bcdf757f4996557b91ce6aabf156bc2f3a4b04d6';
 const unlockTime = 1_800_000_000;

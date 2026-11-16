@@ -1,12 +1,14 @@
-import { binToHex, hash160, hexToBin } from '@bitauth/libauth';
-import { grandmasWalletTemplate, savingsJarTemplate } from '@grandmas-wallet/templates';
+import { binToHex, decodeTransactionBch, hash160, hexToBin } from '@bitauth/libauth';
+import { grandmasWalletTemplate } from '@grandmas-wallet/templates';
 import { Engine, XO_SUPPORTED_NETWORKS } from '@xo-cash/engine';
 import { p2pkhTemplate } from '@xo-cash/templates';
+import type { XOTemplate } from '@xo-cash/types';
 import { deserializeInvitation, serializeInvitation } from '@xo-cash/utils';
 
 /**
- * One XO account: an engine for one mnemonic, with the three templates the
- * wallet uses, and the handful of operations the wallet's actions are made of.
+ * One XO account: an engine for one mnemonic, with the wallet's template, the
+ * template for ordinary coins and whatever templates applications brought, and
+ * the handful of operations the wallet's actions are made of.
  *
  * Only one account can be open in a page or process at a time, because the
  * engine's network connection is shared.
@@ -17,8 +19,28 @@ export interface InputRequest { transactionId: string; index: number; inputIdent
 export interface RawOutput { lockingBytecode: string; satoshis: string }
 export interface Coin { transactionId: string; index: number; satoshis: string }
 export interface TrackedOutput extends Coin {
-  template: 'wallet' | 'jar' | 'coins';
+  /** `wallet` and `coins` for the account's own templates; otherwise the template's identifier. */
+  template: string;
   commitment?: string | undefined;
+}
+
+/** An action of an application's template, as the application asks for it. */
+export interface ApplicationActionRequest {
+  templateIdentifier: string;
+  action: string;
+  role: string;
+  variables: Variables;
+  /** Outputs the action spends, all given to the first input the action's transaction names. */
+  inputs?: { transactionId: string; index: number }[];
+}
+
+/** What an action of an application's template comes to, worked out by the engine from the template alone. */
+export interface ResolvedAction {
+  /** The outputs the action's transaction creates, in the template's order. */
+  outputs: { output: string; lockingBytecode: string; satoshis: bigint }[];
+  locktime: number;
+  /** Sequence numbers the template gives the action's inputs. */
+  sequenceNumbers: number[];
 }
 
 /** An action taken as far as a signed transaction that has not been sent. */
@@ -97,10 +119,33 @@ const intentFor = (action: string, role: string, generate?: string[]) => {
   return generate === undefined ? intent : { ...intent, generate };
 };
 
+/** The intent for an action of an application's template: a start entry, or a follow-up offered by one of its scripts. */
+const applicationIntent = (source: XOTemplate, action: string, role: string) => {
+  const start = source.start?.find((entry) => entry.action === action && entry.role === role);
+  if (start !== undefined) return start;
+  for (const lockingScript of Object.values(source.lockingScripts ?? {})) {
+    const followUp = lockingScript.roles?.[role]?.actions?.find((entry) => entry.action === action);
+    if (followUp !== undefined) return followUp;
+  }
+  return { action, role };
+};
+
+/** Whole numbers arrive from applications as numbers or as text; the engine wants numbers for the template's numeric variables. */
+const typed = (source: XOTemplate, variables: Variables): Variables =>
+  Object.fromEntries(
+    Object.entries(variables).map(([name, raw]) => {
+      const type = source.variables?.[name]?.type;
+      if ((type === 'integer' || type === 'satoshis' || type === 'timestamp' || type === 'bigint' || type === 'token_amount') && typeof raw === 'string' && /^\d+$/.test(raw)) {
+        return [name, Number.isSafeInteger(Number(raw)) ? Number(raw) : `${raw}n`];
+      }
+      return [name, raw];
+    }),
+  );
+
 export class XoAccount {
   private constructor(
     private readonly engine: Engine,
-    private readonly templates: { coins: string; wallet: string; jar: string },
+    private readonly templates: { coins: string; wallet: string },
     /** Where this account receives ordinary coins, as locking bytecode in hex. */
     readonly coinLockingBytecode: string,
   ) {}
@@ -113,14 +158,13 @@ export class XoAccount {
     const engine = await Engine.create(mnemonic, { network: XO_SUPPORTED_NETWORKS.chipnet });
     const coins = (await engine.importTemplate(p2pkhTemplate)).templateIdentifier;
     const wallet = (await engine.importTemplate(grandmasWalletTemplate)).templateIdentifier;
-    const jar = (await engine.importTemplate(savingsJarTemplate)).templateIdentifier;
     await engine.setDefaultPolicies({ change: { templateIdentifier: coins }, receive: { templateIdentifier: coins }, address: { templateIdentifier: coins } });
     let coinLockingBytecode = memory.get('coinLockingBytecode');
     if (coinLockingBytecode === undefined) {
       coinLockingBytecode = await engine.generateLockingBytecodeFromDefaultPolicy('receive');
       memory.set('coinLockingBytecode', coinLockingBytecode);
     }
-    return new XoAccount(engine, { coins, wallet, jar }, coinLockingBytecode);
+    return new XoAccount(engine, { coins, wallet }, coinLockingBytecode);
   }
 
   get walletTemplate(): string {
@@ -179,7 +223,7 @@ export class XoAccount {
       transactionId: output.outpointTransactionHash,
       index: output.outpointIndex,
       satoshis: String(output.valueSatoshis),
-      template: output.templateIdentifier === this.templates.wallet ? 'wallet' : output.templateIdentifier === this.templates.jar ? 'jar' : 'coins',
+      template: output.templateIdentifier === this.templates.wallet ? 'wallet' : output.templateIdentifier === this.templates.coins ? 'coins' : output.templateIdentifier,
       commitment: output.tokenNftCommitment,
     }));
   }
@@ -299,11 +343,11 @@ export class XoAccount {
   }
 
   /**
-   * Make an address known to this account, so that it follows the outputs there and can spend them:
-   * the wallet's own address, or a savings jar for a given unlock time. Returns the locking bytecode as hex.
+   * Make the wallet's own address known to this account, so that it follows the outputs there and can spend
+   * them. Returns the locking bytecode as hex.
    */
-  async track(what: 'wallet' | 'jar', variables: Variables = {}): Promise<string> {
-    const templateIdentifier = what === 'jar' ? this.templates.jar : this.templates.wallet;
+  async trackWallet(variables: Variables = {}): Promise<string> {
+    const templateIdentifier = this.templates.wallet;
     await this.engine.setDefaultPolicies({ change: { templateIdentifier: this.templates.coins }, receive: { templateIdentifier }, address: { templateIdentifier } });
     try {
       const values = Object.fromEntries(Object.entries(variables).map(([name, raw]) => [name, value(raw)]));
@@ -311,6 +355,72 @@ export class XoAccount {
     } finally {
       await this.engine.setDefaultPolicies(this.coinPolicies);
     }
+  }
+
+  /**
+   * Take in a template an application brought. The engine checks it against the template schema.
+   * @returns the template's identifier, which is the hash of its content
+   */
+  async importTemplate(template: unknown): Promise<string> {
+    return (await this.engine.importTemplate(template as Parameters<Engine['importTemplate']>[0])).templateIdentifier;
+  }
+
+  /** A template this account holds, by identifier. */
+  async template(templateIdentifier: string): Promise<XOTemplate | undefined> {
+    return this.engine.getTemplate(templateIdentifier);
+  }
+
+  /** An invitation on an application's template that is never sent: it exists to ask the engine what the template means. */
+  private async probe<T>(request: ApplicationActionRequest, work: (invitationIdentifier: string, template: XOTemplate) => Promise<T>): Promise<T> {
+    const template = await this.engine.getTemplate(request.templateIdentifier);
+    if (template === undefined) throw new Error('This account does not hold that template.');
+    const action = template.actions[request.action];
+    if (action === undefined) throw new Error(`The template has no action "${request.action}".`);
+    if (action.roles?.[request.role] === undefined) throw new Error(`The action "${request.action}" has no role "${request.role}".`);
+    const transaction = template.transactions?.[action.transaction ?? ''];
+    const [inputIdentifier] = (transaction?.inputs ?? []).map(({ input }) => input);
+    if ((request.inputs ?? []).length > 0 && inputIdentifier === undefined) throw new Error(`The action "${request.action}" spends nothing.`);
+    const stored = await this.engine.createInvitation({
+      templateIdentifier: request.templateIdentifier,
+      actionIdentifier: request.action,
+      intent: applicationIntent(template, request.action, request.role),
+      variables: variablesFor(request.role, typed(template, request.variables)),
+      inputs: inputsFor((request.inputs ?? []).map((input) => ({ ...input, ...(inputIdentifier === undefined ? {} : { inputIdentifier }) }))),
+    });
+    try {
+      return await work(stored.invitation.invitationIdentifier, template);
+    } finally {
+      // The invitation would otherwise keep holding the outputs it names.
+      await this.discard(stored.invitation.invitationIdentifier);
+    }
+  }
+
+  /** The script a template gives one of an action's outputs for these variables, as hex. Nothing is followed. */
+  async resolveOutput(request: ApplicationActionRequest, output: string): Promise<string> {
+    return this.probe(request, (invitationIdentifier) => this.engine.resolveInvitationOutputLockingBytecode(invitationIdentifier, output, request.role));
+  }
+
+  /**
+   * What an action of an application's template would create and require. The scripts of its outputs are
+   * followed by this account from here on, so that what is paid there can later be spent.
+   */
+  async resolveAction(request: ApplicationActionRequest): Promise<ResolvedAction> {
+    return this.probe(request, async (invitationIdentifier, template) => {
+      const transaction = template.transactions?.[template.actions[request.action]?.transaction ?? ''];
+      if (transaction === undefined) throw new Error(`The action "${request.action}" has no transaction.`);
+      const outputs = transaction.outputs.map(({ output }) => output);
+      if (outputs.length > 0) await this.append(invitationIdentifier, { outputs: outputs.map((outputIdentifier) => ({ outputIdentifier })) });
+      const built = await this.engine.buildInvitationTransactionFromMergedCommit(invitationIdentifier);
+      const decoded = decodeTransactionBch(hexToBin(built.serializedTransaction));
+      if (typeof decoded === 'string') throw new Error(`The engine built something that is not a transaction: ${decoded}`);
+      if (decoded.outputs.length !== outputs.length) throw new Error('The action\'s transaction has outputs the template does not name.');
+      if (decoded.outputs.some((output) => output.token !== undefined)) throw new Error('This wallet cannot yet carry out actions that create tokens.');
+      return {
+        outputs: decoded.outputs.map((output, index) => ({ output: outputs[index] as string, lockingBytecode: binToHex(output.lockingBytecode), satoshis: output.valueSatoshis })),
+        locktime: decoded.locktime,
+        sequenceNumbers: decoded.inputs.map((input) => input.sequenceNumber),
+      };
+    });
   }
 
   /**

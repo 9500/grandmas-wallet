@@ -18,7 +18,7 @@ import {
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
 import { Apps } from './Apps.js';
-import { Jars } from './Jars.js';
+import { Positions } from './Positions.js';
 import { RecoveryCard } from './RecoveryCard.js';
 import type { Session } from './session.js';
 
@@ -119,7 +119,7 @@ export const WalletScreen = ({ session, wallet, arrived }: { session: Session; w
       {arrived && (
         <Card tone="success">
           <h2>Your wallet is on this device now</h2>
-          <p>Your funds and savings jars were found from the wallet's records. The earlier device can no longer use the wallet.</p>
+          <p>Your funds and what you hold with applications were found from the wallet's records. The earlier device can no longer use the wallet.</p>
         </Card>
       )}
       {alarm !== undefined && (
@@ -167,9 +167,9 @@ export const WalletScreen = ({ session, wallet, arrived }: { session: Session; w
       </Card>
       <TaskStatus task={task} />
 
-      <Jars session={session} wallet={wallet} view={view} onChanged={refresh} />
+      <Positions session={session} wallet={wallet} view={view} onChanged={refresh} />
 
-      <Apps session={session} wallet={wallet} onChanged={refresh} />
+      <Apps session={session} wallet={wallet} view={view} onChanged={refresh} />
 
       <RecoveryCard session={session} wallet={wallet} view={view} onChanged={redraw} />
 
@@ -230,7 +230,7 @@ const Details = ({ wallet, view, onErase, onSave }: { session: Session; wallet: 
         ['Recoverer key hash', view.recovererKeyHash],
         ['Waiting period', describeDelay(view.challengeDelay)],
         ['Wallet template', wallet.record.templates.wallet.identifier],
-        ['Savings Jar template', wallet.record.templates.jar.identifier],
+        ['Trusted application templates', wallet.trustedTemplates.map((template) => `${template.name} (${template.identifier.slice(0, 12)}…)`).join(' · ') || 'none'],
         ['Archive', wallet.record.archive.archiveId],
         ['Backup', backup.map((store) => `${store.name}: ${store.held} of ${store.total}`).join(' · ') || 'not yet checked'],
       ]}

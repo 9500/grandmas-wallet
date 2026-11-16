@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { generateBip39Mnemonic } from '@bitauth/libauth';
 import { type ContinueRequest, type JoinRequest, type StartRequest, type Variables, XoAccount } from '@grandmas-wallet/app/account';
+import { savingsJarTemplate } from '@grandmas-wallet/savings-jar';
 
 const account = process.argv[2] ?? 'account';
 const DATA = resolve(dirname(fileURLToPath(import.meta.url)), '../../../.xo-demo');
@@ -38,7 +39,14 @@ const operations: Record<string, (request: Json) => Promise<unknown>> = {
   join: async (request) => xo.join(request as unknown as JoinRequest),
   continue: async (request) => xo.continue(request as unknown as ContinueRequest),
   broadcast: async ({ invitationIdentifier }) => xo.broadcast(invitationIdentifier as string),
-  track: async ({ what, variables }) => xo.track(what === 'jar' ? 'jar' : 'wallet', (variables ?? {}) as Variables),
+  // The wallet's own address, or the address of a savings jar. The account knows nothing of jars: it takes
+  // the application's template in and has the engine work the address out, which also makes it follow it.
+  track: async ({ what, variables }) => {
+    if (what !== 'jar') return xo.trackWallet((variables ?? {}) as Variables);
+    const templateIdentifier = await xo.importTemplate(savingsJarTemplate);
+    const deposit = await xo.resolveAction({ templateIdentifier, action: 'deposit', role: 'saver', variables: { ...((variables ?? {}) as Variables), savedSatoshis: 1_000 } });
+    return deposit.outputs[0]?.lockingBytecode;
+  },
   pay: async ({ lockingBytecode, satoshis }) => xo.pay(lockingBytecode as string, satoshis as string),
   stop: async () => {
     setTimeout(() => process.exit(0), 50);

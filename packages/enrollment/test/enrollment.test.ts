@@ -1,6 +1,6 @@
 import { binToHex, utf8ToBin } from '@bitauth/libauth';
-import { MemoryStore, describeSavingsJar, signMessage, templateContentHash } from '@grandmas-wallet/archive';
-import { SimulatedChain, TestWallet, testKey } from '@grandmas-wallet/testing';
+import { MemoryStore, signMessage, templateContentHash } from '@grandmas-wallet/archive';
+import { SimulatedChain, TestWallet, describeSavingsJar, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
 import {

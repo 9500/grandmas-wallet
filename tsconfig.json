@@ -20,6 +20,8 @@
     "packages/*/src",
     "packages/*/test",
     "apps/*/src",
+    "apps/*/test",
+    "scripts/*.ts",
     "contracts/artifacts/*.ts",
     "test",
     "*.ts"

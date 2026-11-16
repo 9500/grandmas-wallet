@@ -24,10 +24,10 @@ import {
   p2pkhInput,
   p2pkhLockingBytecode,
   protectedInput,
-  savingsJarScript,
   validateGenesis,
   verifyTransaction,
 } from '@grandmas-wallet/core';
+import { savingsJarScript } from '@grandmas-wallet/savings-jar';
 
 import type { BroadcastResult, UnspentEntry } from './electrum.js';
 import { type Role, type RunState, type StepRecord, applyTransaction, toStored, toUtxo } from './store.js';

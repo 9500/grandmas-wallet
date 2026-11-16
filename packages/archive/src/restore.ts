@@ -8,7 +8,7 @@ import {
 } from '@grandmas-wallet/core';
 
 import type { JsonValue } from './canonical.js';
-import { type PositionKind, savingsJarKind } from './kinds.js';
+import type { PositionKind } from './kinds.js';
 import {
   type ArchiveRecord,
   type PositionDescription,
@@ -44,6 +44,7 @@ export interface RestoreParameters {
   stores: ArchiveStore[];
   /** Where the restoring device keeps its own copy of the archive; filled with everything that was accepted. */
   local?: ArchiveStore;
+  /** The kinds of position the restoring wallet can rebuild. Without any, every position is reported as unsupported. */
   kinds?: PositionKind[];
   /** Templates the restoring wallet already has, by content hash. */
   knownTemplates?: Map<string, JsonValue>;
@@ -231,7 +232,7 @@ const orderRecords = (valid: ValidRecord[]) => {
 
 export const restore = async (parameters: RestoreParameters): Promise<RestoreReport> => {
   const identity = hexToBin(parameters.identity);
-  const kinds = new Map((parameters.kinds ?? [savingsJarKind]).map((kind) => [kind.kind, kind]));
+  const kinds = new Map((parameters.kinds ?? []).map((kind) => [kind.kind, kind]));
   const unresolved: string[] = [];
 
   // 1. The chain: who has owned the wallet, and what state it is in now.
@@ -297,12 +298,22 @@ export const restore = async (parameters: RestoreParameters): Promise<RestoreRep
       await locate(restored, hexToBin(position.lockingBytecode));
       continue;
     }
+    const template = position.template === undefined ? undefined : templates.get(position.template.contentHash);
+    if (position.template !== undefined && template === undefined) {
+      restored.result = 'incomplete';
+      restored.reasons.push(`The template ${position.template.identifier} is not in the archive and not known to this wallet.`);
+    } else if (template !== undefined) {
+      restored.template = template;
+    }
     let expected: string;
     try {
-      expected = kind.lockingBytecode(identity, position.parameters);
+      expected = await kind.lockingBytecode(identity, position.parameters, { position, ...(template === undefined ? {} : { template }) });
     } catch (error) {
       restored.result = 'incomplete';
       restored.reasons.push((error as Error).message);
+      // Recorded by the owner; where it says the funds are is still worth a look.
+      describedScripts.add(position.lockingBytecode);
+      await locate(restored, hexToBin(position.lockingBytecode));
       continue;
     }
     if (expected !== position.lockingBytecode) {
@@ -319,15 +330,6 @@ export const restore = async (parameters: RestoreParameters): Promise<RestoreRep
     if (unmet.length > 0) {
       restored.result = 'unsupported';
       restored.reasons.push(`Needs something this wallet does not have: ${unmet.join(', ')}.`);
-    }
-    if (position.template !== undefined) {
-      const template = templates.get(position.template.contentHash);
-      if (template === undefined) {
-        if (restored.result === 'complete') restored.result = 'incomplete';
-        restored.reasons.push(`The template ${position.template.identifier} is not in the archive and not known to this wallet.`);
-      } else {
-        restored.template = template;
-      }
     }
     await locate(restored, hexToBin(expected));
   }

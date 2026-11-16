@@ -18,8 +18,8 @@ import {
   p2pkhInput,
   p2pkhLockingBytecode,
   protectedInput,
-  savingsJarScript,
 } from '@grandmas-wallet/core';
+import { savingsJarScript } from '@grandmas-wallet/savings-jar';
 
 import type { SimulatedChain } from './simulated-chain.js';
 

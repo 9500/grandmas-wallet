@@ -1,6 +1,5 @@
-import { bigIntToVmNumber, encodeDataPush } from '@bitauth/libauth';
+import { encodeDataPush } from '@bitauth/libauth';
 import { assetBytecodeHex } from '@grandmas-wallet/contracts/asset';
-import { savingsJarBytecodeHex } from '@grandmas-wallet/contracts/savingsJar';
 
 import { identityForScript, instantiate, lockingBytecodeOf } from './script.js';
 
@@ -20,7 +19,8 @@ export interface ProtectedScript {
   unlockingBytecode: Uint8Array;
 }
 
-const protectedScript = (redeemBytecode: Uint8Array): ProtectedScript => ({
+/** A script under the authorization interface, from its redeem bytecode. Applications build their own with this. */
+export const protectedScript = (redeemBytecode: Uint8Array): ProtectedScript => ({
   redeemBytecode,
   lockingBytecode: lockingBytecodeOf(redeemBytecode),
   unlockingBytecode: encodeDataPush(redeemBytecode),
@@ -32,17 +32,3 @@ const protectedScript = (redeemBytecode: Uint8Array): ProtectedScript => ({
  */
 export const assetScript = (identity: Uint8Array): ProtectedScript =>
   protectedScript(instantiate(assetBytecodeHex, [identityForScript(identity)]));
-
-/**
- * A Savings Jar position: funds locked until `unlockTime`, then withdrawable
- * in a transaction the wallet owner approves. `unlockTime` is a block height below 500,000,000 and a
- * Unix timestamp from there on; a withdrawing transaction needs a locktime of
- * the same kind at or after it, and a non-final sequence number on the jar input.
- */
-export const savingsJarScript = (identity: Uint8Array, unlockTime: number): ProtectedScript => {
-  const scriptIdentity = identityForScript(identity);
-  if (!Number.isInteger(unlockTime) || unlockTime < 0 || unlockTime > 0xffffffff) {
-    throw new Error('Unlock time must be an integer from 0 to 4294967295.');
-  }
-  return protectedScript(instantiate(savingsJarBytecodeHex, [scriptIdentity, bigIntToVmNumber(BigInt(unlockTime))]));
-};

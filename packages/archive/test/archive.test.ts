@@ -434,6 +434,8 @@ describe('restoring from the archive', () => {
     const withTemplate = await restoreWith();
     expect(withTemplate.positions[0]?.result).toBe('complete');
     expect(withTemplate.positions[0]?.template).toEqual(template);
+    // Field for field in the order it was given: an XO template's identifier depends on it.
+    expect(JSON.stringify(withTemplate.positions[0]?.template)).toBe(JSON.stringify(template));
     expect(withTemplate.completeness).toBe('complete');
   });
 

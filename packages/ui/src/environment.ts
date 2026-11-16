@@ -10,10 +10,9 @@ import type { ChainReader } from '@grandmas-wallet/core';
  */
 export interface Environment {
   network: string;
-  /** The three applications, each on its own origin. */
+  /** The wallet and the recoverer, each on its own origin. */
   walletUrl: string;
   recovererUrl: string;
-  jarUrl: string;
   /** Backup stores a new wallet uses. One is enough. */
   stores: string[];
   /** Electrum servers, the first being the one actions are checked against. Two or more for monitoring. */

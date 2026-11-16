@@ -228,3 +228,26 @@ The formats and rules are described in `docs/restoration.md`. The choices made:
 - **Actions that are not sent release the coins they named.** The engine holds an invitation's inputs for it; without this, one failed attempt left the recoverer's fee account looking empty.
 - **Waiting periods are offered in time only.** A count of blocks stays possible in the contract, but depends on what a network makes of a block: on chipnet with one-minute blocks a delay of 5 was enforced as 50 blocks. Units of 512 seconds mean the same everywhere.
 - **Preact and Vite**, with the XO engine in the page and its Node-only imports replaced by empty stand-ins, as the XO web tool does.
+
+## D12 — Applications bring their own template; the wallet knows none
+
+**Date:** 16 Nov 2026 · **Status:** implemented; replaces the two entries of D11 on requests from applications and on key paths
+
+- **The wallet has no code for any application.** The Savings Jar's contract, script and XO template live with the application (`packages/savings-jar`, `apps/jar`). A test fails if the wallet, the recoverer or their libraries mention it.
+- **An application presents its XO template with its request.** The wallet checks that the template is the one the request names (XO identifier and content hash). A template it has not seen is shown to the user, by name, description and actions, to trust and remember or to decline. A trusted template is kept by the engine and, whole, in the archive.
+- **The XO engine is the interpreter.** For an action of a trusted template the wallet makes an invitation on that template that is never sent, has the engine build it, and reads off what the action pays, to which scripts, and with what lock time. The wallet has no knowledge of what the scripts are.
+- **Every action of an application is carried out inside the wallet template's `approve` action:** the controller first, then the position being spent if any, then the wallet's funds if the action needs them; the outputs the template asked for, and what is left returned to the wallet. The fee is set from the size of the transaction as built.
+- **The user sees two things side by side:** the template's words (action, description, variables shown by their declared type) and the wallet's own figures taken from the transaction (what goes where, how the wallet's funds change, the fee, the earliest time). An application can word its template as it likes; it cannot change the figures.
+- **A position is an output of a template.** Its record names the template, the action that made it, the role, the output and the action's variables. Restoring works the script out again with the engine from the template in the archive, and it must equal the recorded script. There are no built-in kinds of position.
+- **What can be done with a position comes from the template**, from the actions its locking script offers the wallet's role. The wallet lists them next to each position, so a position can be operated when the application's site is gone.
+- **The wallet offers one value of its own to fill into a template: its identity.** An application says which variable takes it. That is how a position comes to belong to the wallet and not to a key.
+- **An application learns only of positions made with its own template**, and only once the wallet trusts that template.
+- **The same application serves ordinary wallets.** It shows one WizardConnect address. A wallet that advertises `xo_v1` is asked for template actions; one that shares key paths is asked to sign transactions the application builds, with a jar locked to one of the wallet's keys. Checked with Cashonize on chipnet.
+
+**What stands in the way of going further:**
+
+- An invitation is for one template. An action that needs both the wallet's controller and an application's scripts cannot be one invitation of the application's template, so the wallet wraps it as above.
+- An application action whose inputs need a relative time lock is refused for now. The sequence numbers the template asks for are known, but carrying them into the wrapping invitation has not been tried.
+- Actions that create tokens are refused for now; the wrapping passes amounts in satoshis only.
+- `xo_v1` is this project's own extension. No other wallet speaks it yet.
+

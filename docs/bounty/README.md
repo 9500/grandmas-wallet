@@ -18,7 +18,9 @@ This folder does not contain the written developer feedback the bounty asks for;
 | Request recovery | recoverer and new owner | The recoverer opens the request; the new owner's device joins the invitation to name its key. |
 | Complete recovery | recoverer | Installs the new owner key once the delay has passed. |
 
-**Savings Jar** ([frozen/savings-jar-v1.json](../../packages/templates/frozen/savings-jar-v1.json)) is a small separate application: funds locked for a wallet until a chosen time. It has no keys of its own. Anyone can pay into a jar; after the unlock time it is emptied by the wallet's owner using the wallet template's Approve action, with the jar as an input. When the wallet's owner key is replaced, the jar stays where it is and the new owner is the one who can empty it.
+**Savings Jar** ([frozen/savings-jar-v1.json](../../packages/savings-jar/frozen/savings-jar-v1.json)) is a small separate application: funds locked for a wallet until a chosen time. It has no keys of its own. Anyone can pay into a jar; after the unlock time it is emptied by the wallet's owner using the wallet template's Approve action, with the jar as an input. When the wallet's owner key is replaced, the jar stays where it is and the new owner is the one who can empty it.
+
+The runs recorded here used version 1 of that template. [Version 2](../../packages/savings-jar/frozen/savings-jar-v2.json) adds a withdraw action with the jar as its input and the unlock time as its lock time, so that a wallet that has never seen the application can carry out both actions from the template alone ([how](../web-apps.md#how-the-wallet-carries-out-an-action-it-has-never-heard-of)). The script is the same in both.
 
 The contracts behind both templates are in [contracts/](../../contracts/). The templates carry their compiled bytecode unchanged, which a test checks.
 

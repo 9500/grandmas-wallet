@@ -1,15 +1,17 @@
-import { binToHex, hexToBin } from '@bitauth/libauth';
-import { savingsJarScript } from '@grandmas-wallet/core';
-
+import type { JsonValue } from './canonical.js';
 import type { PositionDescription } from './records.js';
 
 /**
  * The kinds of position a wallet knows how to rebuild.
  *
  * A record is a hint, not an authority: for a known kind the script is
- * rebuilt from the recorded parameters and the wallet identity, and must
- * equal the recorded script. A record that fails this cannot make the wallet
- * look anywhere it would not have looked by its own rules.
+ * rebuilt from what the record says and must equal the recorded script. A
+ * record that fails this cannot make the wallet look anywhere it would not
+ * have looked by its own rules.
+ *
+ * The wallet has no kinds of its own for particular applications. The one
+ * kind it uses is an output of an XO template, which covers any application
+ * whose template is kept in the archive.
  */
 
 export interface PositionKind {
@@ -20,36 +22,49 @@ export interface PositionKind {
   provides: string[];
   /**
    * The script for these parameters under this wallet identity, as hex.
-   * @throws if the parameters are not valid for the kind
+   * @param context - the whole description, and the position's template when the archive or the wallet has it
+   * @throws if the description is not valid for the kind
    */
-  lockingBytecode(identity: Uint8Array, parameters: PositionDescription['parameters']): string;
+  lockingBytecode(identity: Uint8Array, parameters: PositionDescription['parameters'], context: { position: PositionDescription; template?: JsonValue }): string | Promise<string>;
 }
 
-export const SAVINGS_JAR_KIND = 'savings-jar';
+export const TEMPLATE_OUTPUT_KIND = 'xo-template-output';
 
-export const savingsJarKind: PositionKind = {
-  kind: SAVINGS_JAR_KIND,
-  interfaceVersions: [2],
+/** Works out the script of a template's output for an action's variables. An XO engine does this. */
+export type TemplateOutputResolver = (template: JsonValue, origin: NonNullable<PositionDescription['origin']>, variables: PositionDescription['parameters']) => Promise<string>;
+
+/**
+ * Positions that are an output of an XO template: the record names the template, the action that made
+ * the output and the action's variables, and the script is whatever the template gives for them.
+ */
+export const templateOutputKind = (resolve: TemplateOutputResolver, interfaceVersions: number[] = [2]): PositionKind => ({
+  kind: TEMPLATE_OUTPUT_KIND,
+  interfaceVersions,
   provides: [],
-  lockingBytecode: (identity, parameters) => {
-    const unlockTime = parameters['unlockTime'];
-    if (typeof unlockTime !== 'number') throw new Error('A savings jar needs its unlock time.');
-    return binToHex(savingsJarScript(identity, unlockTime).lockingBytecode);
+  lockingBytecode: async (_identity, parameters, { position, template }) => {
+    if (position.origin === undefined) throw new Error('The record does not say which action of the template made the position.');
+    if (template === undefined) throw new Error('The position\'s template is not available.');
+    return resolve(template, position.origin, parameters);
   },
-};
+});
 
-/** Describe a savings jar for the archive. */
-export const describeSavingsJar = (
-  identity: string,
-  unlockTime: number,
-  options: { positionId: string; template?: PositionDescription['template']; label?: string },
-): PositionDescription => ({
+/** Describe an output of a template for the archive. */
+export const describeTemplateOutput = (options: {
+  positionId: string;
+  template: NonNullable<PositionDescription['template']>;
+  origin: NonNullable<PositionDescription['origin']>;
+  variables: PositionDescription['parameters'];
+  lockingBytecode: string;
+  interfaceVersion?: number;
+  label?: string;
+}): PositionDescription => ({
   positionId: options.positionId,
-  kind: SAVINGS_JAR_KIND,
-  interfaceVersion: 2,
-  parameters: { unlockTime },
-  lockingBytecode: savingsJarKind.lockingBytecode(hexToBin(identity), { unlockTime }),
+  kind: TEMPLATE_OUTPUT_KIND,
+  interfaceVersion: options.interfaceVersion ?? 2,
+  parameters: options.variables,
+  lockingBytecode: options.lockingBytecode,
+  template: options.template,
+  origin: options.origin,
   requires: [],
-  ...(options.template === undefined ? {} : { template: options.template }),
   ...(options.label === undefined ? {} : { label: options.label }),
 });

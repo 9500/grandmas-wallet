@@ -107,7 +107,7 @@ try {
   if (resume) {
     // Continue an earlier run from its kept browser storage, at the first request to move the wallet.
     await owner.open(config.walletUrl);
-    if (from !== 'return') await see(owner.page, 'Savings jars', 3 * MINUTE);
+    if (from !== 'return') await see(owner.page, 'Held with applications', 3 * MINUTE);
     await recoverer.open(config.recovererUrl);
   } else {
   // ── A new wallet ────────────────────────────────────────────────────────────────────────────
@@ -152,20 +152,31 @@ try {
 
   // ── A savings jar, asked for by an application ──────────────────────────────────────────────
   await jar.open(config.jarUrl);
-  const connectLink = await linkOf(jar.page, 'Open my wallet');
-  await owner.open(connectLink);
-  await click(owner.page, 'Connect', 2 * MINUTE);
+  // The application shows one WizardConnect address for any wallet; the owner copies it into the wallet.
+  const address = jar.page.locator('.copybox code').first();
+  await address.waitFor({ timeout: MINUTE });
+  const connectAddress = (await address.innerText()).trim();
+  await jar.shot('connect');
+  await owner.page.getByPlaceholder('wiz://', { exact: false }).fill(connectAddress);
+  await click(owner.page, 'Continue', MINUTE);
+  await click(owner.page, 'Connect', 2 * MINUTE, true);
   await see(jar.page, 'Your savings jars', 2 * MINUTE);
   say('Application: connected to the wallet');
   await jar.page.getByPlaceholder('0').fill('2000');
   await jar.page.getByPlaceholder('Holiday').fill('Holiday');
   await click(jar.page, 'Open a savings jar');
+  // The wallet has never seen the application's template: it asks whether to trust it, then shows the action.
   await see(owner.page, 'asks for your approval', 2 * MINUTE);
+  await see(owner.page, 'a template this wallet has not seen before', MINUTE);
+  await owner.shot('template');
+  await click(owner.page, 'Trust and remember this template', MINUTE);
+  await expectText(owner.page, 'what this wallet worked out', 2 * MINUTE, 'working out the action');
   await owner.shot('approval');
-  await click(owner.page, 'Approve');
+  await click(owner.page, 'Approve', MINUTE, true);
   await expectText(jar.page, 'Done.', 3 * MINUTE, 'opening the jar');
   await jar.shot('jar-opened');
-  await see(owner.page, 'Locked until', MINUTE);
+  await see(owner.page, 'Held with applications', MINUTE);
+  await owner.shot('position');
   jarOpenedAt = Date.now();
   say('Application: the jar is open; the wallet recorded it before signing');
   }
@@ -256,11 +267,15 @@ try {
     say(`New device: waiting ${Math.round(unlockIn / 1000)} s for the jar's time lock`);
     await newDevice.page.waitForTimeout(unlockIn);
   }
+  // The application is not involved: the wallet offers the action the jar's own template names.
   for (let attempt = 0; ; attempt++) {
     await newDevice.open(config.walletUrl);
-    await click(newDevice.page, 'Empty into wallet', 3 * MINUTE);
+    await click(newDevice.page, 'Empty a savings jar', 3 * MINUTE, true);
+    await expectText(newDevice.page, 'what this wallet worked out', 2 * MINUTE, 'working out the action');
+    if (attempt === 0) await newDevice.shot('emptying');
+    await click(newDevice.page, 'Confirm', MINUTE, true);
     await newDevice.page.waitForTimeout(20_000);
-    if (await newDevice.page.getByText('Emptied "Holiday"').first().isVisible().catch(() => false)) break;
+    if (await newDevice.page.getByText('Empty a savings jar: "Holiday"').first().isVisible().catch(() => false)) break;
     if (attempt > 20) throw new Error('the jar could not be emptied');
     await newDevice.page.waitForTimeout(40_000);
   }

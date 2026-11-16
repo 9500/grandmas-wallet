@@ -33,7 +33,6 @@ import {
   ArchiveWriter,
   HttpStore,
   MemoryStore,
-  describeSavingsJar,
   restore,
 } from '@grandmas-wallet/archive';
 import { createStoreServer } from '@grandmas-wallet/archive-store';
@@ -56,7 +55,6 @@ import {
   followController,
   readControllerHistory,
   protectedInput,
-  savingsJarScript,
   validateGenesis,
   verifyTransaction,
 } from '@grandmas-wallet/core';
@@ -76,9 +74,9 @@ import {
 import {
   grandmasWalletTemplate,
   grandmasWalletTemplateIdentifier,
-  savingsJarTemplate,
-  savingsJarTemplateIdentifier,
 } from '@grandmas-wallet/templates';
+import { savingsJarScript, savingsJarTemplate, savingsJarTemplateIdentifier } from '@grandmas-wallet/savings-jar';
+import { describeSavingsJar, savingsJarKind } from '@grandmas-wallet/testing';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '../../..');
@@ -852,6 +850,7 @@ const deviceLoss = async (owner: Agent, recoverer: Agent, replacement: Agent, re
         chain,
         stores,
         local: newDevice,
+        kinds: [savingsJarKind],
       });
     const found = await restoreNow();
     describeReport(found);
