@@ -203,7 +203,7 @@ The formats and rules are described in `docs/restoration.md`. The choices made:
 
 - **Sealing:** HPKE base mode with X25519, HKDF-SHA256 and ChaCha20-Poly1305. The sender is identified by the owner's signature inside the package and by the chain, not by the encryption.
 - **Recovery credential:** a dedicated mnemonic; the recovery key is the first key the XO engine derives from it for the wallet template. The recoverer opens it as its own XO account.
-- **Archive:** records signed by the owner key of their epoch, encrypted with XChaCha20-Poly1305 under a key shared with the recoverer, chained by naming the previous record, and stored as blobs named by their hash on two or more stores.
+- **Archive:** records signed by the owner key of their epoch, encrypted with XChaCha20-Poly1305 under a key shared with the recoverer, chained by naming the previous record, and stored as blobs named by their hash on one or more stores. The device keeps a full copy from which stores are filled, so stores can be added or replaced without the old ones.
 - **Write before sign:** on by default, with every configured store required to confirm.
 - **Templates** are kept whole in the archive and referred to by content hash.
 - **Confirmation of receipt** is a note signed with the recovery key and left in the archive, so it needs no channel from the recoverer back to the owner.

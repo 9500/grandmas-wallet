@@ -32,6 +32,7 @@ import {
   type TemplateReference,
   ArchiveWriter,
   HttpStore,
+  MemoryStore,
   describeSavingsJar,
   restore,
 } from '@grandmas-wallet/archive';
@@ -793,6 +794,8 @@ const deviceLoss = async (owner: Agent, recoverer: Agent, replacement: Agent, re
         identity: run.identity,
         archiveId: hexToBin(archive.archiveId),
         contentKey: hexToBin(archive.contentKey),
+        // The copy on the owner's device, which is lost with it.
+        local: new MemoryStore('device'),
         stores,
         signer: () => ({ key: ownerKey, ownerEpoch: run.controller.state.ownerEpoch }),
       });
@@ -837,6 +840,8 @@ const deviceLoss = async (owner: Agent, recoverer: Agent, replacement: Agent, re
     }
     if (enrollment.recovery.mnemonic !== recoveryMnemonic) throw new Error('the recoverer account does not run on the mnemonic from the package');
     const stores = enrollment.archive.stores.map((url) => new HttpStore(url));
+    // The new device's own copy of the archive, filled as it restores.
+    const newDevice = new MemoryStore('new-device');
     const restoreNow = () =>
       restore({
         network: enrollment.network,
@@ -846,6 +851,7 @@ const deviceLoss = async (owner: Agent, recoverer: Agent, replacement: Agent, re
         contentKey: hexToBin(enrollment.archive.contentKey),
         chain,
         stores,
+        local: newDevice,
       });
     const found = await restoreNow();
     describeReport(found);
@@ -872,6 +878,7 @@ const deviceLoss = async (owner: Agent, recoverer: Agent, replacement: Agent, re
       identity: enrollment.identity,
       archiveId: hexToBin(enrollment.archive.archiveId),
       contentKey: hexToBin(enrollment.archive.contentKey),
+      local: newDevice,
       stores,
       signer: () => ({ key: newOwnerKey, ownerEpoch: run.controller.state.ownerEpoch }),
       state: restored.writerState,

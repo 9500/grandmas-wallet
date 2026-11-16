@@ -233,7 +233,7 @@ Fallback if B1 finds a blocking engine gap: keep the template as the description
 | D5 | Owner app screens: Set up recovery, Recovery enabled, Recovery request detected, Cancel recovery; developer inspector panel | §13 |
 | D6 | Bank app screens: import package, enrolled wallet, propose replacement owner, claim status, chain-derived eligibility, finalize | §13 |
 | D7 | Monitor: subscribe to the controller script hash on ≥2 Electrum servers; on Pending → alert and (configurable) auto-cancel; rebuild status after reorg/conflict | C13 |
-| D8 | Deploy wallet, bank, dapp and both stores to their subdomains; run the full demo across the public hosts | live URLs |
+| D8 | Deploy wallet, bank, dapp and the store(s) to their subdomains; run the full demo across the public hosts | live URLs |
 
 ---
 
@@ -246,7 +246,7 @@ Both web UIs are publicly reachable on subdomains of `9500.cash`. The owner wall
 | `wallet.9500.cash` | owner wallet SPA | Keys and XO state live in this origin's IndexedDB only. |
 | `bank.9500.cash` | bank SPA | Separate origin, so its storage (enrollment packages, recovery mnemonic) is isolated from the wallet by the browser. Also publishes the bank's HPKE public key at a fixed path. |
 | `jar.9500.cash` | demo dapp | Third origin, so the WizardConnect path is a real cross-site connection; can be taken offline to demonstrate X01. |
-| `store1.9500.cash`, `store2.9500.cash` | archive stores | Two instances of `apps/archive-store`: put/get of opaque encrypted records with an acknowledgment. Hold no keys. |
+| `store1.9500.cash`, `store2.9500.cash` | archive stores | Instances of `apps/archive-store`: put/get of opaque encrypted records with an acknowledgment. Hold no keys. One is enough; the second shows the optional extra copy. |
 
 Consequences for the implementation:
 

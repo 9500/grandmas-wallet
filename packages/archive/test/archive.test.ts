@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type ArchiveRecord,
   BackupUnavailableError,
+  MemoryStore,
   RECORD_FORMAT,
   blobIdOf,
   canonicalJson,
@@ -95,7 +96,7 @@ describe('write before sign (R03)', () => {
     expect(await stores[1].list(archiveIdHex)).toEqual([]);
     await writer.flush();
     expect((await stores[1].list(archiveIdHex)).sort()).toEqual((await stores[0].list(archiveIdHex)).sort());
-    expect(writer.snapshot().queue).toEqual([]);
+    expect((await writer.status()).map((store) => store.held === store.total)).toEqual([true, true]);
   });
 
   it('keeps unconfirmed records across a restart of the wallet', async () => {
@@ -110,6 +111,87 @@ describe('write before sign (R03)', () => {
     const afterRestart = writerFor(owner, 0, JSON.parse(JSON.stringify(first.snapshot())));
     await afterRestart.flush();
     expect((await restoreWith()).positions).toHaveLength(1);
+  });
+});
+
+describe('where the archive is kept', () => {
+  it('works with a single store', async () => {
+    const { stores, writerFor, openJar, restoreWith } = setup();
+    const writer = writerFor(owner, 0);
+    writer.setStores([stores[0]]);
+    await openJar(writer);
+    const report = await restoreWith({ stores: [stores[0]] });
+    expect(report.completeness).toBe('complete');
+    expect(report.positions.map((position) => position.onChain)).toEqual(['live']);
+  });
+
+  it('still holds back the signature when the single store does not confirm (R03)', async () => {
+    const { stores, writerFor, jar } = setup();
+    const writer = writerFor(owner, 0);
+    writer.setStores([stores[0]]);
+    stores[0].unreachable = true;
+    let signed = 0;
+    await expect(writer.protect([jar().position], async () => (signed += 1))).rejects.toBeInstanceOf(BackupUnavailableError);
+    expect(signed).toBe(0);
+  });
+
+  it('needs at least one store, each with its own name', () => {
+    const { stores, writerFor } = setup();
+    const writer = writerFor(owner, 0);
+    expect(() => writer.setStores([])).toThrow('At least one');
+    expect(() => writer.setStores([stores[0], stores[0]])).toThrow('own name');
+    expect(() => writer.setStores([stores[0]], 2)).toThrow('between 1 and');
+  });
+
+  it('keeps every blob on the device', async () => {
+    const { stores, device, archiveIdHex, writerFor, openJar } = setup();
+    const writer = writerFor(owner, 0);
+    await openJar(writer);
+    await openJar(writer);
+    expect((await device.list(archiveIdHex)).sort()).toEqual((await stores[0].list(archiveIdHex)).sort());
+    expect(await device.list(archiveIdHex)).toHaveLength(4);
+  });
+
+  it('moves to another store without the old one taking part', async () => {
+    const { stores, archiveIdHex, writerFor, openJar, restoreWith } = setup();
+    const writer = writerFor(owner, 0);
+    writer.setStores([stores[0]]);
+    await openJar(writer);
+    expect(await stores[1].list(archiveIdHex)).toEqual([]);
+
+    // The old store is gone for good; the wallet is pointed at another and goes on.
+    stores[0].unreachable = true;
+    writer.setStores([stores[1]]);
+    await openJar(writer);
+
+    const report = await restoreWith({ stores: [stores[1]] });
+    expect(report.completeness).toBe('complete');
+    expect(report.positions.map((position) => position.onChain)).toEqual(['live', 'live']);
+  });
+
+  it('fills a store that is added later', async () => {
+    const { stores, archiveIdHex, writerFor, openJar } = setup();
+    const writer = writerFor(owner, 0);
+    writer.setStores([stores[0]]);
+    await openJar(writer);
+    writer.setStores([stores[0], stores[1]]);
+    expect((await writer.status()).map((store) => store.held)).toEqual([2, 0]);
+    await writer.flush();
+    expect((await stores[1].list(archiveIdHex)).sort()).toEqual((await stores[0].list(archiveIdHex)).sort());
+  });
+
+  it('gives a restoring device its own copy, from which a new store can be filled', async () => {
+    const { stores, archiveIdHex, writerFor, openJar, restoreWith } = setup();
+    await openJar(writerFor(owner, 0));
+    const newDevice = new MemoryStore('new-device');
+    const restored = await restoreWith({ local: newDevice });
+    expect((await newDevice.list(archiveIdHex)).sort()).toEqual((await stores[0].list(archiveIdHex)).sort());
+
+    const elsewhere = new MemoryStore('store-three');
+    const writer = writerFor(owner, 0, restored.writerState, undefined, newDevice);
+    writer.setStores([elsewhere]);
+    await writer.flush();
+    expect((await restoreWith({ stores: [elsewhere] })).completeness).toBe('complete');
   });
 });
 

@@ -42,6 +42,8 @@ export interface RestoreParameters {
   contentKey: Uint8Array;
   chain: ChainReader;
   stores: ArchiveStore[];
+  /** Where the restoring device keeps its own copy of the archive; filled with everything that was accepted. */
+  local?: ArchiveStore;
   kinds?: PositionKind[];
   /** Templates the restoring wallet already has, by content hash. */
   knownTemplates?: Map<string, JsonValue>;
@@ -250,6 +252,7 @@ export const restore = async (parameters: RestoreParameters): Promise<RestoreRep
       const blob = decodeBlob(unseal(parameters.contentKey, parameters.archiveId, sealed));
       if (blob.type === 'template') templates.set(templateContentHash(blob.template), blob.template);
       if (blob.type === 'record') valid.push({ blobId, record: checkRecord(blob.signed, parameters, controller) });
+      await parameters.local?.put(binToHex(parameters.archiveId), sealed);
     } catch (error) {
       rejected.push({ blobId, reason: (error as Error).message });
     }
@@ -376,8 +379,8 @@ export const restore = async (parameters: RestoreParameters): Promise<RestoreRep
     writerState: {
       nextSequence: head === undefined ? 0 : head.record.sequence + 1,
       head: head?.blobId ?? null,
-      queue: [],
       templates: [...templates.keys()],
+      stored: {},
     },
   };
 };

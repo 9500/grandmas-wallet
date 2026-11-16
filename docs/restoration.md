@@ -71,9 +71,15 @@ Reading and writing are separate powers. The recoverer can read every record but
 
 ### Write before sign
 
-Before the wallet signs anything that creates a position, it writes a `prepared` record and waits for the stores to confirm they hold it. If they do not, the signature is not made. By default every configured store must confirm; the number is a setting. A record that could not be delivered is kept on the device and sent again before anything else is released, so the chain of records does not fork. A store that was unreachable is brought up to date later.
+Before the wallet signs anything that creates a position, it writes a `prepared` record and waits for the stores to confirm they hold it. If they do not, the signature is not made. By default every configured store must confirm; the number is a setting. A record that could not be delivered stays in the device's copy and is sent again before anything else is released, so the chain of records does not fork. A store that was unreachable is brought up to date later.
 
 ### Backup stores
+
+One store is enough; more can be configured, with no upper limit. Whoever provides a store, such as the wallet's maker or the recoverer, is responsible for keeping it available. Several stores are a way to depend less on any one of them, not a requirement.
+
+The device keeps its own copy of the whole archive. Every blob is written there first and the stores are filled from it. Pointing the wallet at a different store therefore needs nothing from the old one: the new store receives the whole archive the next time the wallet writes to its stores, and a store added next to an existing one is filled the same way. A device that restores builds its copy from what it accepted. The device's copy is for filling stores; it is lost with the device and is not what recovery relies on.
+
+The recoverer finds the stores through the addresses in the enrollment package. After a change of stores the recoverer needs a new package, made and delivered the same way as the first, unless a store it already knows stays in use.
 
 A store keeps blobs under an archive identifier and returns them. It holds no keys. Its answer to a write is the blob's hash, which the wallet compares with its own. The server in `apps/archive-store` keeps blobs in a directory and limits their size and number.
 
@@ -104,7 +110,7 @@ A record is a hint about where to look, never an instruction. A record cannot ma
 | R03 Stores unavailable before a new position | The signature is not released |
 | R04 Device lost after sending, before recording | The `prepared` record leads to the funds on chain |
 | R05 Prepared transaction never sent | Reported as never created; not a position |
-| R06 A store fails or returns damaged data | The other copy is used; the failure is reported; content not signed by an owner is rejected |
+| R06 A store fails or returns damaged data | With more than one store, the other copy is used; the failure is reported; content not signed by an owner is rejected |
 | R07 Old or conflicting archive | A position missing from an old copy shows up as an undescribed output; gaps and conflicts are reported; an earlier owner cannot override the new one |
 | R08 Unknown kind, unmet requirement, missing template | Reported as unsupported or incomplete, with the reason |
 | X04 Device loss | A new device with a new key takes over the wallet and a savings jar from the package and the archive |
@@ -135,4 +141,4 @@ The server used must be able to return old transactions (a node with a transacti
 - **The old owner key can still write records for its own epoch.** They cannot displace the new owner's records, and are reported as a conflict when they follow the same record. They can add clutter.
 - **The recovery mnemonic passes through the owner's device.** The device does not keep it after the package is made, but ordinary storage cannot promise erasure. A leaked credential allows a recovery request, which the owner can cancel during the delay; it does not allow spending.
 - **The recoverer can read the archive.** That is part of the arrangement and must be said to the user.
-- **Not built:** adding or replacing stores after enrollment, write authorization at the store, an archive checkpoint in the controller state, compression of the package.
+- **Not built:** a screen for changing stores and sending the recoverer the new addresses (the writer supports the change itself), write authorization at the store, an archive checkpoint in the controller state, compression of the package.

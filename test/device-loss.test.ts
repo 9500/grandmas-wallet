@@ -6,6 +6,7 @@ import {
   type JsonValue,
   ArchiveWriter,
   HttpStore,
+  MemoryStore,
   describeSavingsJar,
   restore,
   templateContentHash,
@@ -75,6 +76,7 @@ describe('device loss (X04)', () => {
         identity: wallet.identityHex,
         archiveId: hexToBin(archive.archiveId),
         contentKey: hexToBin(archive.contentKey),
+        local: new MemoryStore('device'),
         stores,
         signer: () => ({ key: ownerKey, ownerEpoch: 0 }),
         now,
@@ -129,6 +131,8 @@ describe('device loss (X04)', () => {
     // ── The replacement device makes its own key and tells the recoverer its hash. ───────────
     const replacementKey = testKey(0x44);
     const stores = enrollment.archive.stores.map((url) => new HttpStore(url));
+    // The new device's own copy of the archive, filled as it restores.
+    const newDevice = new MemoryStore('new-device');
     const restoreNow = () =>
       restore({
         network: enrollment.network,
@@ -138,6 +142,7 @@ describe('device loss (X04)', () => {
         contentKey: hexToBin(enrollment.archive.contentKey),
         chain,
         stores,
+        local: newDevice,
       });
 
     // The recoverer sees what there is to recover before starting.
@@ -178,6 +183,7 @@ describe('device loss (X04)', () => {
       identity: enrollment.identity,
       archiveId: hexToBin(enrollment.archive.archiveId),
       contentKey: hexToBin(enrollment.archive.contentKey),
+      local: newDevice,
       stores,
       signer: () => ({ key: replacementKey, ownerEpoch: 1 }),
       state: after.writerState,

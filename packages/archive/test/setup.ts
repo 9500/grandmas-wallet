@@ -28,12 +28,20 @@ export const setup = () => {
   const contentKey = generateContentKey();
 
   /** A writer as a device would hold it: for one owner key, continuing from a saved state. */
-  const writerFor = (key: KeyPair, ownerEpoch: number, state?: WriterState, minimumAcknowledgments?: number): ArchiveWriter =>
+  const device = new MemoryStore('device');
+  const writerFor = (
+    key: KeyPair,
+    ownerEpoch: number,
+    state?: WriterState,
+    minimumAcknowledgments?: number,
+    local: MemoryStore = device,
+  ): ArchiveWriter =>
     new ArchiveWriter({
       network: NETWORK,
       identity: wallet.identityHex,
       archiveId,
       contentKey,
+      local,
       stores: [...stores],
       signer: () => ({ key, ownerEpoch }),
       now: () => Math.floor(chain.nowMs / 1000),
@@ -70,5 +78,5 @@ export const setup = () => {
     return { ...described, transactionId };
   };
 
-  return { chain, wallet, stores, archiveId, archiveIdHex: binToHex(archiveId), contentKey, writerFor, restoreWith, jar, openJar };
+  return { chain, wallet, stores, device, archiveId, archiveIdHex: binToHex(archiveId), contentKey, writerFor, restoreWith, jar, openJar };
 };
