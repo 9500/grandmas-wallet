@@ -231,7 +231,7 @@ The formats and rules are described in `docs/restoration.md`. The choices made:
 
 ## D12 — Applications bring their own template; the wallet knows none
 
-**Date:** 16 Nov 2026 · **Status:** implemented; replaces the two entries of D11 on requests from applications and on key paths
+**Date:** 16 Nov 2026 · **Status:** implemented and run end to end on chipnet in browsers (`docs/web-apps.md`); replaces the two entries of D11 on requests from applications and on key paths
 
 - **The wallet has no code for any application.** The Savings Jar's contract, script and XO template live with the application (`packages/savings-jar`, `apps/jar`). A test fails if the wallet, the recoverer or their libraries mention it.
 - **An application presents its XO template with its request.** The wallet checks that the template is the one the request names (XO identifier and content hash). A template it has not seen is shown to the user, by name, description and actions, to trust and remember or to decline. A trusted template is kept by the engine and, whole, in the archive.
@@ -250,4 +250,6 @@ The formats and rules are described in `docs/restoration.md`. The choices made:
 - An application action whose inputs need a relative time lock is refused for now. The sequence numbers the template asks for are known, but carrying them into the wrapping invitation has not been tried.
 - Actions that create tokens are refused for now; the wrapping passes amounts in satoshis only.
 - `xo_v1` is this project's own extension. No other wallet speaks it yet.
+- A template variable of type `timestamp` cannot be used in a script that is to be unlocked later: the engine reads the stored value back as text. The wallet declines such templates, and shows a whole number in the range of Unix times with the date it would be.
+- A template has to be kept as the text it arrived in. Its identifier depends on the order of its fields.
 

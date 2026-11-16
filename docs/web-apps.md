@@ -159,26 +159,45 @@ node scripts/jar-cashonize-demo.mjs --config deploy/config/production.json --ste
 
 ## What was run
 
-On 16 November 2026, on chipnet, with the script above. Screens and transactions are from the browsers; every transaction was built and signed by the XO engine in the page and passed this project's own evaluation before it was sent.
+On 16 November 2026, on chipnet, against the public addresses, with the scripts above. Screens and transactions are from the browsers; every transaction of the wallet was built and signed by the XO engine in the page and passed this project's own evaluation before it was sent.
 
-Wallet identity `c29c930243a9cc8117eac382bcdf757f4996557b91ce6aabf156bc2f3a4b04d6`, waiting period one 512-second interval, against the public addresses. The run took 16 minutes from start to finish.
+### The wallet, with an application it had never seen
+
+Wallet identity `a7b26de9beb13ab82470b129fdd32d48407f66dad7596b3f0d2b86044a035935`, waiting period one 512-second interval. The run took 19 minutes. The wallet's code contains nothing about the application; the template it was shown has the identifier `76df2b5c0f0a1447976f26ed7deeeed81eb13b679c803c7cc15eeed1690c75e9`.
 
 | # | Step | Done on | Transaction | Screen |
 | --- | --- | --- | --- | --- |
-| 1 | Owner creates the wallet | owner's page | `3439bc5126ed3c1e78d3cff87aec2e0bb588a8cf23ab8b43331b3449b5a8d196` | [02-owner-created.png](web-demo/02-owner-created.png) |
+| 1 | Owner creates the wallet | owner's page | `f5a4d5e34bcaf60f940cc8522258e4af980f577c6cace32a1bacf5afa2a1b8ae` | [02-owner-created.png](web-demo/02-owner-created.png) |
 | 2 | Recoverer opens the package and confirms; the wallet shows "Recovery is on" | recoverer's page | — | [06-owner-recovery-on.png](web-demo/06-owner-recovery-on.png) |
-| 3 | The Savings Jar application asks for a jar; the owner approves in the wallet | application and owner's page | `230472d89cce042ccf8f644d9eb9ebcf16374b8c530cebd75183d655b1f08a0c` | [07-owner-approval.png](web-demo/07-owner-approval.png) |
-| 4 | The recoverer asks to move the wallet to a device the owner does not know | recoverer's page and a stranger's device | `fc0dacfb249c9ff4ee6006e7dc7964c8c1b6d5e97ed26f7e806a7c70f84f603c` | [10-owner-alarm.png](web-demo/10-owner-alarm.png) |
-| 5 | The owner's page warns; the owner cancels | owner's page | `5d64e1469951b27e9495bfcd55c9ab9fbaf69111111bff40f4d208d9bded584b` | [11-stranger-cancelled.png](web-demo/11-stranger-cancelled.png) |
-| 6 | The owner's device is lost; the recoverer and a new device request the move | recoverer's page and the new device | `6c364676b363eaa7809b9756a88a5bae931c226920fbd7bbcf6a3798d78e5094` | [13-new-device-waiting.png](web-demo/13-new-device-waiting.png) |
-| 7 | The recoverer completes the move after the waiting period | recoverer's page | `d76aa77cc2ef0da58102b4e4b51433ecec82ed808aa33f445e4b5d4117eef6a9` | [14-recoverer-moved.png](web-demo/14-recoverer-moved.png) |
-| 8 | The new device opens the wallet: funds and jar found; the earlier device shows the wallet has moved | new device | — | [15-new-device-taken-over.png](web-demo/15-new-device-taken-over.png) |
-| 9 | The new device empties the jar after its time lock | new device | `15f088fb8b3c8f833570327f81294d8410e7397f973c17eae25967bdf25d7b86` | [17-new-device-jar-emptied.png](web-demo/17-new-device-jar-emptied.png) |
-| 10 | The new device sends the remaining funds out | new device | `6bf5fbeeefc375bb56359766e4f60a4e899039e78dbc99729760befbd66817b9` |  |
+| 3 | The Savings Jar shows a WizardConnect address; the owner pastes it into the wallet | application and owner's page | — | [07-jar-connect.png](web-demo/07-jar-connect.png) |
+| 4 | The application asks for a jar. The wallet shows the template it has not seen; the owner trusts it | owner's page | — | [08-owner-template.png](web-demo/08-owner-template.png) |
+| 5 | The wallet shows the action in the template's words and its own figures; the owner approves | owner's page | `bbacaea7fa77731055b82d8ae843c4d1d32518d2784ca388178e59b4ce354347` | [09-owner-approval.png](web-demo/09-owner-approval.png), [11-owner-position.png](web-demo/11-owner-position.png) |
+| 6 | The recoverer asks to move the wallet to a device the owner does not know | recoverer's page and a stranger's device | `33ab96d8ab5ea2749e825ec7eeb7929ce0c0438ddc201f3357336ef44821e06d` | [13-owner-alarm.png](web-demo/13-owner-alarm.png) |
+| 7 | The owner's page warns; the owner cancels | owner's page | `960abf7524d9016f06f36c0a4b65e65a8b833bce240cb19882c26c3d563e737e` | [14-stranger-cancelled.png](web-demo/14-stranger-cancelled.png) |
+| 8 | The owner's device is lost; the recoverer and a new device request the move | recoverer's page and the new device | `9c008f5cac227664b8bdff99f32728b4b5ad661a8b253de4ccb37f5cea22f4c5` | [16-new-device-waiting.png](web-demo/16-new-device-waiting.png) |
+| 9 | The recoverer completes the move after the waiting period | recoverer's page | `1962f34d1791c3fb013f0c995631ec37bce31189205c9c37beed0fe72b1fddcb` | [17-recoverer-moved.png](web-demo/17-recoverer-moved.png) |
+| 10 | The new device opens the wallet: funds, the jar and the jar's template found; the earlier device shows the wallet has moved | new device | — | [18-new-device-taken-over.png](web-demo/18-new-device-taken-over.png) |
+| 11 | The new device empties the jar after its time lock, from the wallet page, with the action the template names. The application is not connected | new device | `62563dd2b0a2926f4770392bf98803c958e8c8c78abc2049152de509501db103` | [20-new-device-emptying.png](web-demo/20-new-device-emptying.png) |
+| 12 | The new device sends the remaining funds out | new device | `d4afd8c39b7f61c2d118c88dfc9c23b3df233483c51591709614d81bdc00bc54` |  |
 
-All seventeen screens of the run are in [web-demo/](web-demo/).
+### The same application with ordinary wallets
 
-Three earlier runs the same day stopped part-way and led to fixes: fee coins held by a request that was started or not sent; the recoverer's fee allowance, which covered two actions and now covers four; a page reading its own transaction from a server that had not received it yet; and the smallest amount allowed at the wallet's address (576 satoshis, not 546). One of those runs used a waiting period counted in blocks; see the limits below.
+| Wallet | Step | Transaction | Screen |
+| --- | --- | --- | --- |
+| Cashonize (web, HD wallet on chipnet) | Connects with the address from the page; shares its public keys after asking the user | — | [cashonize-1-connect.png](web-demo/cashonize-1-connect.png) |
+| | Signs the payment into a jar that the application built | `b3c3169b8e45e46c93e952fa11d96f77d5ae418a53878c9cfaf914b6d75eb91f` | [cashonize-2-open-request.png](web-demo/cashonize-2-open-request.png) |
+| | Signs the jar's own input after the unlock time; the network refused the same transaction four times while its clock was behind | `8ebf0e5d462c98a1b6a26f84de073cc6de2eafea8b9412c3de13bbf6368f5886` | [cashonize-4-empty-request.png](web-demo/cashonize-4-empty-request.png) |
+| Command-line wallet written from the protocol's description | Payment into a jar | `50957dfbfdfe91ba13df0973b64ebae3a8f02037edb72ff77faaf80acbf55ba2` | |
+| | Jar emptied after the unlock time | `75df6247fb2bf9a383d13b827d2f9ff9db74996a690ff3208e1492d01d896685` | |
+
+### What the runs found
+
+Two runs of the wallet stopped at step 11 before the one above. Nothing was sent that should not have been, and the coins of both were returned with `scripts/rescue-wallet.ts`.
+
+- **A template restored from the backup was a different template to the engine.** An XO template's identifier depends on the order of its fields, and the archive wrote them sorted. Templates are now kept as the text they arrived in.
+- **A jar could be paid into and not emptied.** Its unlock time was declared as `timestamp`; the engine reads such a value back as text when it unlocks an output, and builds a different script. The wallet's own check refused the transaction each time. The template now declares an `integer`, and the wallet declines to trust a template with a `timestamp` variable.
+
+Earlier the same day, with the first version of the pages: fee coins held by a request that was started or not sent; the recoverer's fee allowance, which covered two actions and now covers four; a page reading its own transaction from a server that had not received it yet; the smallest amount allowed at the wallet's address (576 satoshis, not 546); and a waiting period counted in blocks, for which see the limits below.
 
 ## Limits
 
