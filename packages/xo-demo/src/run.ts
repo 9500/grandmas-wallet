@@ -7,6 +7,8 @@
 //   npm run xo-demo -- run-short     the lifecycle without the cancelled request and the payments
 //   npm run xo-demo -- device-loss   enrollment, a savings jar, loss of the owner's device, and restoration
 //   npm run xo-demo -- rescue [file] return a wallet's funds after a run that stopped part-way
+//   npm run xo-demo -- sweep <identity> <account or address>=<satoshis or "rest"> ...
+//                                    pay out an earlier wallet's funds, found from the chain
 //   npm run xo-demo -- distribute <from> <account or address>=<satoshis> ...   move ordinary coins
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -35,6 +37,7 @@ import {
 } from '@grandmas-wallet/archive';
 import { createStoreServer } from '@grandmas-wallet/archive-store';
 import { Electrum } from '@grandmas-wallet/chipnet/electrum';
+import { ChainPool } from '@grandmas-wallet/chipnet/pool';
 import {
   type ControllerSnapshot,
   type ControllerState,
@@ -50,6 +53,7 @@ import {
   encodeChallengeDelay,
   encodeControllerState,
   followController,
+  readControllerHistory,
   protectedInput,
   savingsJarScript,
   validateGenesis,
@@ -84,6 +88,11 @@ const OUTPUT = resolve(ROOT, DEVICE_LOSS ? 'docs/device-loss' : 'docs/bounty');
 const INVITATIONS = resolve(OUTPUT, 'invitations');
 const LOG = resolve(OUTPUT, DEVICE_LOSS ? 'run-log.md' : 'lifecycle-log.md');
 const NETWORK = 'chipnet';
+/**
+ * Further servers to read the wallet's history from, separated by commas. Needed when the main server
+ * cannot return transactions whose outputs are all spent (a node running without a transaction index).
+ */
+const HISTORY_ENDPOINTS = (process.env['CHIPNET_HISTORY_ENDPOINTS'] ?? '').split(',').map((endpoint) => endpoint.trim()).filter((endpoint) => endpoint !== '');
 const STORE_PORTS = [8787, 8788];
 /** Where the wallet's outputs currently are, kept so that funds can be returned if a run stops part-way. */
 const ON_CHAIN = resolve(DATA, 'on-chain.json');
@@ -656,6 +665,69 @@ const rescue = async (agents: Agent[]): Promise<void> => {
   }
 };
 
+/**
+ * Pay out the funds of a wallet from an earlier run. The wallet is read from the chain, so no record of
+ * the run is needed; the owner key is looked for among the local accounts. One target may take "rest".
+ */
+const sweep = async (agents: Agent[]): Promise<void> => {
+  const [, identityHex = '', ...targets] = process.argv.slice(2);
+  if (!/^[0-9a-f]{64}$/.test(identityHex) || targets.length === 0) throw new Error('usage: sweep <identity> <account or address>=<satoshis or "rest"> ...');
+  const servers = await Promise.all([ENDPOINT, ...HISTORY_ENDPOINTS].map((endpoint) => Electrum.connect(endpoint)));
+  const [electrum] = servers as [Electrum, ...Electrum[]];
+  try {
+    const identity = hexToBin(identityHex);
+    const { current } = await readControllerHistory(new ChainPool(servers), identity);
+    const holder = agents.find((agent) => {
+      try { return engineKey(agent.name, current.state.ownerKeyHash) !== undefined; } catch { return false; }
+    });
+    if (holder === undefined) throw new Error('no local account holds the wallet\'s owner key');
+    const key = engineKey(holder.name, current.state.ownerKeyHash);
+
+    const funds = assetScript(identity);
+    const coins: Utxo[] = [];
+    for (const entry of await electrum.listUnspent(funds.lockingBytecode)) {
+      const source = await electrum.getTransaction(entry.transactionId);
+      if (source === undefined) throw new Error(`cannot find ${entry.transactionId}`);
+      coins.push({ transactionHash: hexToBin(entry.transactionId), index: entry.index, output: decode(source).outputs[entry.index] as Output });
+    }
+    const available = coins.reduce((sum, coin) => sum + coin.output.valueSatoshis, 0n);
+    if (coins.length === 0) throw new Error('the wallet holds no funds');
+
+    const parsed = targets.map((target) => {
+      const [to = '', amount = ''] = target.split('=');
+      const account = agents.find((agent) => agent.name === to);
+      const decoded = account === undefined ? cashAddressToLockingBytecode(to) : undefined;
+      if (typeof decoded === 'string' || !/^(\d+|rest)$/.test(amount)) throw new Error(`cannot pay "${target}"`);
+      return { to, lockingBytecode: account === undefined ? (decoded as { bytecode: Uint8Array }).bytecode : hexToBin(account.coinLockingBytecode), amount };
+    });
+    if (parsed.filter((target) => target.amount === 'rest').length > 1) throw new Error('only one target can take the rest');
+    const fixed = parsed.reduce((sum, target) => sum + (target.amount === 'rest' ? 0n : BigInt(target.amount)), 0n);
+    const action = { kind: 'ownerAuthorize' } as const;
+    const build = (rest: bigint, sizing = false) =>
+      buildTransaction({
+        ...(sizing ? { maximumFeeSatoshis: available } : {}),
+        inputs: [controllerInput(current.utxo, current.state, action, key), ...coins.map((coin) => protectedInput(coin, funds))],
+        outputs: [
+          controllerSuccessor(current.utxo, current.state, action),
+          ...parsed.map((target) => ({ lockingBytecode: target.lockingBytecode, valueSatoshis: target.amount === 'rest' ? rest : BigInt(target.amount) })),
+        ],
+        // Without a target for the rest, what is left returns to the wallet.
+        ...(parsed.some((target) => target.amount === 'rest') ? {} : { changeLockingBytecode: funds.lockingBytecode }),
+      });
+    // The size does not depend on the amounts, so a first build gives the fee for the second.
+    const size = BigInt(build(546n, true).encoded.length);
+    const built = build(available - fixed - size - 2n);
+    const check = verifyTransaction(built);
+    if (check !== true) throw new Error(`the transaction fails the local check: ${check}`);
+    const result = await electrum.broadcast(hex(built.encoded));
+    if (!result.accepted) throw new Error(`refused by the network: ${result.reason}`);
+    say(`Paid out ${available} sat held by wallet ${identityHex.slice(0, 8)}… with the key of ${holder.name}, fee ${built.feeSatoshis} sat (${built.transactionId}).`);
+    built.transaction.outputs.slice(1).forEach((output, index) => say(`  ${parsed[index]?.to ?? 'back to the wallet'}: ${output.valueSatoshis} sat`));
+  } finally {
+    await Promise.all(servers.map((server) => server.disconnect()));
+  }
+};
+
 /** The key an account's engine holds for the wallet template that matches a key hash in the controller. */
 const engineKey = (account: string, keyHash: Uint8Array) => {
   const mnemonic = readFileSync(resolve(DATA, `${account}.mnemonic`), 'utf8').trim();
@@ -699,6 +771,8 @@ const deviceLoss = async (owner: Agent, recoverer: Agent, replacement: Agent, re
   }
   const bankKeys = JSON.parse(readFileSync(bankKeyPath, 'utf8')) as { publicKey: string; privateKey: string };
   const electrum = await Electrum.connect(ENDPOINT);
+  const others = await Promise.all(HISTORY_ENDPOINTS.map((endpoint) => Electrum.connect(endpoint)));
+  const chain = new ChainPool([electrum, ...others]);
   const runs: Lifecycle[] = [];
   try {
     // ── The owner's device ────────────────────────────────────────────────────────────────────
@@ -756,7 +830,7 @@ const deviceLoss = async (owner: Agent, recoverer: Agent, replacement: Agent, re
     // ── The recoverer and a new device. Only the link and the recoverer's private key carry over. ──
     say('The recoverer opens the package and checks it against the chain');
     const opened = await openPackage(envelopeFromLink(readFileSync(linkPath, 'utf8').trim()), hexToBin(bankKeys.privateKey));
-    const verified = await verifyEnrollment(opened, electrum, NETWORK);
+    const verified = await verifyEnrollment(opened, chain, NETWORK);
     const { enrollment } = verified;
     if (!verified.credentialAuthorized || verified.differences.length > 0) {
       throw new Error(`the package does not match the wallet: ${verified.differences.join(' ') || 'the credential is not the wallet\'s recoverer'}`);
@@ -770,7 +844,7 @@ const deviceLoss = async (owner: Agent, recoverer: Agent, replacement: Agent, re
         genesisTransactionId: enrollment.genesisTransactionId,
         archiveId: hexToBin(enrollment.archive.archiveId),
         contentKey: hexToBin(enrollment.archive.contentKey),
-        chain: electrum,
+        chain,
         stores,
       });
     const found = await restoreNow();
@@ -813,7 +887,7 @@ const deviceLoss = async (owner: Agent, recoverer: Agent, replacement: Agent, re
       const messages = await agent.request<string[]>('messages').catch(() => []);
       if (messages.length > 0) say(`  ${agent.name}: the engine logged ${messages.length} message(s)`);
     }
-    await electrum.disconnect();
+    await Promise.all([electrum, ...others].map((server) => server.disconnect()));
     servers.forEach((server) => server.close());
   }
 };
@@ -864,6 +938,10 @@ const main = async (): Promise<void> => {
       }
       const rest = total(await payer.coins());
       if (rest > COIN_FEE + 546n) await pay(payer.coinLockingBytecode, rest - COIN_FEE, 'itself');
+      return;
+    }
+    if (command === 'sweep') {
+      await sweep(agents);
       return;
     }
     if (command === 'rescue') {

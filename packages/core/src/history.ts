@@ -1,4 +1,4 @@
-import { type TransactionCommon, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
+import { type TransactionCommon, binToHex, decodeTransactionBch, hashTransactionUiOrder, hexToBin } from '@bitauth/libauth';
 
 import { controllerScript } from './controller.js';
 import {
@@ -89,9 +89,15 @@ export const readControllerHistory = async (
   const decoded = new Map<string, ControllerHistoryTransaction>();
   for (const entry of entries) {
     const hex = await chain.getTransaction(entry.transactionId);
-    if (hex === undefined) continue;
-    const transaction = decodeTransactionBch(hexToBin(hex));
-    if (typeof transaction === 'string') continue;
+    if (hex === undefined) {
+      // A step that cannot be read would be mistaken for the end of the history.
+      throw new IdentityValidationError(`Transaction ${entry.transactionId} from the controller's history is not available from the server.`);
+    }
+    const encoded = hexToBin(hex);
+    const transaction = decodeTransactionBch(encoded);
+    if (typeof transaction === 'string' || binToHex(hashTransactionUiOrder(encoded)) !== entry.transactionId) {
+      throw new IdentityValidationError(`The server returned something else in place of transaction ${entry.transactionId}.`);
+    }
     decoded.set(entry.transactionId, { transactionId: entry.transactionId, transaction, confirmed: entry.height > 0 });
   }
 

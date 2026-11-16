@@ -24,7 +24,8 @@ export interface ChainTip {
   time: number;
 }
 
-const APPLICATION = 'grandmas-wallet-chipnet';
+// Sent to the server on connecting. Kept generic, so that a server learns nothing about what is asking.
+const APPLICATION = 'electrum-client';
 const PROTOCOL_VERSION = '1.4.1';
 const TIMEOUT_MS = 30_000;
 
