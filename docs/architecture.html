@@ -602,16 +602,63 @@ dl.kv dt { font-weight: 600; } dl.kv dd { margin: 0; color: var(--muted); }
   </table>
   </div>
 
-  <h3>A bridge that asks nothing of the applications</h3>
-  <p>Three of the four already separate ownership from keys. What stops them is position and connection, and both could be met from the wallet's side with a second kind of address, here called a <strong>pocket</strong>:</p>
-  <div class="grid2">
-    <div class="card by" style="--c: var(--identity)"><div class="tag">Way in 1</div><p style="margin-top:6px">The owner's approval through the controller, exactly as for all wallet funds. This is the path a new device uses after recovery.</p></div>
-    <div class="card by" style="--c: var(--owner)"><div class="tag">Way in 2</div><p style="margin-top:6px">The signature of a session key kept on the device. No controller in the transaction, so the coin fits any layout, and an existing application can build with it over the ordinary signing request.</p></div>
-  </div>
-  <p style="margin-top:14px">Ownership NFTs and the coins an application needs would wait in the pocket. To an application the pocket looks like an ordinary wallet with one key. After recovery the new device moves the pocket's contents to a pocket with its own session key, in its first transaction.</p>
+  <h3>A bridge from the wallet's side: the pocket</h3>
+  <p>Three of the four already separate ownership from keys. What stops them is position and connection. The position problem could be met from the wallet's side, with no change to the applications' contracts, by a second kind of address called here a <strong>pocket</strong>.</p>
   <div class="note">
-    <p><strong>This is a proposal. It is not built and has not been reviewed.</strong> Its known cost: the old device's session key keeps working on the pocket until the new device has moved the contents, so that move must come first after a recovery. It gives a thief holding the device nothing they lack already, since the owner key spends without delay. It does nothing for positions with a fixed key inside: those need the application to change.</p>
+    <p><strong>This is a proposal. It is not built and has not been reviewed.</strong></p>
   </div>
+  <h3>What a pocket is and where it lives</h3>
+  <p>A pocket is a contract address of the same wallet, next to its main address. It is not a second wallet, an account or a service: it exists only as coins on chain locked by one small script. The script is built from two values, the wallet's identity and the hash of a <strong>pocket key</strong>, and it can be opened in two ways:</p>
+  <div class="grid2">
+    <div class="card by" style="--c: var(--identity)"><div class="tag">Way in 1: through the controller</div><p style="margin-top:6px">The owner's approval on the controller, exactly as for the main address. No signature of its own. This is the way a new device uses after recovery.</p></div>
+    <div class="card by" style="--c: var(--owner)"><div class="tag">Way in 2: the pocket key</div><p style="margin-top:6px">A signature of the pocket key. The controller is not in the transaction, so the coin fits whatever layout an application demands.</p></div>
+  </div>
+  <pre class="card" style="overflow-x:auto;margin:14px 0"><code style="background:none;padding:0">contract Pocket(bytes32 identity, bytes20 pocketKeyHash) {
+    function ownerSpend()                { ownerApproves(identity); }
+    function keySpend(pubkey pk, sig s)  { require(hash160(pk) == pocketKeyHash);
+                                           require(checkSig(s, pk)); }
+}</code></pre>
+  <p class="small">A sketch of the script, in the language of the project's other contracts.</p>
+  <p>Only what an application needs would sit there: the NFTs that prove ownership of positions (a Moria borrower NFT, a ParyonUSD loan key or staking receipt) and a little BCH for those transactions. Savings stay at the main address.</p>
+  <h3>Who holds the pocket key</h3>
+  <dl class="kv">
+    <dt>Owner's device</dt><dd>Holds the pocket's private key, derived from the owner mnemonic on a path of its own. It never leaves the device.</dd>
+    <dt>Recoverer</dt><dd>Does not hold it and does not need it. The package and the archive contain only the key's hash, which is public information. With it the recoverer can see what is in the pocket and cannot spend it.</dd>
+    <dt>Backup stores</dt><dd>Hold the sealed record with the hash. They can read nothing.</dd>
+    <dt>New device</dt><dd>Never learns the old pocket key. It reaches the old pocket through the controller, and makes a pocket key of its own.</dd>
+  </dl>
+  <p style="margin-top:12px">The record of a pocket, 20 bytes of key hash, is written to the backup stores before anything is sent there, like every other record. Without it a new device could not work out the pocket's address.</p>
+  <h3>Who can spend, and when</h3>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Moment</th><th>Main address</th><th>Pocket</th></tr></thead>
+    <tbody>
+      <tr><td>Every day</td><td>The owner's device</td><td>The owner's device, either way in</td></tr>
+      <tr><td>Recoverer, at any time</td><td><span class="pill ok">cannot</span></td><td><span class="pill ok">cannot</span></td></tr>
+      <tr><td>Device lost or stolen, recovery not yet complete</td><td>Whoever holds the device</td><td>Whoever holds the device</td></tr>
+      <tr><td>Recovery complete, pocket not yet emptied</td><td>The new device only</td><td>The new device, through the controller. <span class="pill part">The old device's pocket key still works</span></td></tr>
+      <tr><td>Contents moved to the new pocket</td><td>The new device only</td><td>The new device only</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="margin-top:12px">The fourth row is the cost of the idea. Completing a recovery switches off the old owner key everywhere at once, because every coin asks the controller. The pocket key is checked by the pocket's own script, which cannot see the controller unless the controller is in the transaction, so it stays valid until the coins have left. A script cannot be given an expiry date either: the network can require "not before" a time and has no "not after".</p>
+  <h3>How the NFTs reach the new pocket</h3>
+  <p>The new device does this as its first transaction after taking over. Applications take no part in it.</p>
+  <ol>
+    <li>It reads the old pocket's record from the archive, works out the address from the identity and the old key hash, and finds the coins there.</li>
+    <li>It makes its own pocket key and writes the record of the new pocket to the backup stores.</li>
+    <li>It builds one transaction with the wallet's ordinary <em>Approve</em>: the controller first, signed by the new owner key, then every coin of the old pocket, each opened through the controller. Each NFT goes to the new pocket's address with its category, commitment and capability unchanged.</li>
+  </ol>
+  <div class="scroll"><figure><div id="pk-dia"></div>
+    <figcaption>Emptying the old pocket after recovery. The old pocket key is not used. The applications' contracts name the NFTs, not where they are kept, so every position is exactly as it was.</figcaption></figure></div>
+  <p style="margin-top:12px">A Moria loan names the hash of the borrower NFT's category and commitment. A ParyonUSD loan answers to an NFT of the loan's own category. Neither value changes when the NFT moves from one address to another.</p>
+  <h3>What a pocket does not solve</h3>
+  <ul>
+    <li><strong>Someone still has to build the application's transaction around a pocket coin.</strong> Over WalletConnect an application asks the wallet for its address and leaves the wallet's inputs for the wallet to unlock, so a wallet could give its pocket address and unlock those inputs itself. That is untested; the application's fee would be set for a smaller input, and an application that takes a key hash out of the address would fail. Over WizardConnect an application derives addresses from the public keys the wallet shares and would never find a script address. It would need the wallet to name its addresses, or the wallet to build from a template.</li>
+    <li><strong>Positions with a key inside.</strong> A Cauldron pool or an AnyHedge early exit made with the pocket key is as lost as with any other key.</li>
+    <li><strong>A device found later.</strong> For the main address a completed recovery ends the old device's power. For the pocket it ends only when the contents have been moved, so that move must come first.</li>
+    <li><strong>A thief gains nothing new before recovery completes</strong>, since the owner key on the same device spends everything without delay. The pocket is no weaker than the main address in that period, and no stronger.</li>
+  </ul>
 </section>
 
 <!-- ============================== LIMITS -->
@@ -635,6 +682,7 @@ dl.kv dt { font-weight: 600; } dl.kv dd { margin: 0; color: var(--muted); }
     <li>Moria version 1: <a href="https://gitlab.com/riftenlabs/moria/moria-contract">contract repository</a> (<code>loan.cash</code>, <code>p2nfth.cash</code>, <code>includes/loan.gpp</code>) and <a href="https://docs.riftenlabs.com/moria/general/">general documentation</a></li>
     <li>ParyonUSD: <a href="https://github.com/ParyonUSD/contracts">contract repository</a> (<code>manage.cash</code>, <code>Loan.cash</code>, <code>AddLiquidity.cash</code>, <code>WithdrawFromPool.cash</code>) and <a href="https://paryonusd.com/docs/technical/architecture">architecture page</a></li>
     <li>BCH Bull: the AnyHedge contract, version 0.12, from the <a href="https://www.npmjs.com/package/@generalprotocols/anyhedge-contracts">published contract package</a></li>
+    <li>WalletConnect for Bitcoin Cash: <a href="https://github.com/mainnet-pat/wc2-bch-bcr">signing specification</a></li>
     <li>WizardConnect: <a href="https://docs.riftenlabs.com/wizardconnect/extensions/">extensions</a>. XO: <a href="https://stack.xo.cash/getting-started.html">getting started</a></li>
   </ul>
   <p class="small">Layouts quoted for Moria and ParyonUSD come from the comments and index checks in those files. Whether they tolerate further inputs or outputs beyond the documented ones was not tested.</p>
@@ -969,9 +1017,9 @@ dl.kv dt { font-weight: 600; } dl.kv dd { margin: 0; color: var(--muted); }
           inputs: [{ i: "0", k: "app", t: "Moria", s: "its minting token" }, { i: "1", k: "app", t: "Oracle", s: "price" }, { i: "2", k: "app", t: "Loan", s: "names the borrower NFT" }, { i: "3", k: "wallet", t: "Borrower NFT", s: "at the wallet's address", bad: true }, { i: "?", k: "ctrl", t: "Controller", s: "must be input 0, which is taken", bad: true, ghost: true }],
           outputs: [{ i: "0", k: "app", t: "Moria", s: "" }, { i: "1", k: "app", t: "Oracle", s: "" }, { i: "2", k: "app", t: "Interest", s: "to the protocol" }, { i: "3", k: "wallet", t: "Borrower NFT", s: "anything but Moria's token" }, { i: "4", t: "Collateral", s: "BCH only" }, { i: "5", t: "Change", s: "" }] },
         next: { cap: "The same transaction with the borrower NFT waiting at a pocket address (described below the table). Moria's contracts are unchanged, and the collateral returns to the wallet's main address.",
-          inputs: [{ i: "0", k: "app", t: "Moria", s: "its minting token" }, { i: "1", k: "app", t: "Oracle", s: "price" }, { i: "2", k: "app", t: "Loan", s: "names the borrower NFT" }, { i: "3", k: "wallet", t: "Borrower NFT", s: "pocket: the device's key signs", neu: true }],
+          inputs: [{ i: "0", k: "app", t: "Moria", s: "its minting token" }, { i: "1", k: "app", t: "Oracle", s: "price" }, { i: "2", k: "app", t: "Loan", s: "names the borrower NFT" }, { i: "3", k: "wallet", t: "Borrower NFT", s: "pocket: the pocket key signs", neu: true }],
           outputs: [{ i: "0", k: "app", t: "Moria", s: "" }, { i: "1", k: "app", t: "Oracle", s: "" }, { i: "2", k: "app", t: "Interest", s: "to the protocol" }, { i: "3", k: "wallet", t: "Borrower NFT", s: "back to the pocket" }, { i: "4", k: "wallet", t: "Collateral", s: "to the wallet's address", neu: true }, { i: "5", k: "wallet", t: "Change", s: "to the wallet's address" }] },
-        changes: ["From the wallet: a pocket address for the borrower NFT. Moria itself would not change.", "From Moria, as the cleaner route: the borrower NFT's position given as an argument, as its pay-to-NFT script already does, and one free input and output for a wallet's own contract.", "From this wallet: a controller that takes its position as an argument.", "The loan actions published as a template, so the wallet can describe them and offer repayment without the site."],
+        changes: ["From the wallet: a pocket address for the borrower NFT. Moria's contracts would not change. Its site would still have to build with a coin at a script address, or the wallet would build from a template.", "From Moria, as the cleaner route: the borrower NFT's position given as an argument, as its pay-to-NFT script already does, and one free input and output for a wallet's own contract.", "From this wallet: a controller that takes its position as an argument.", "The loan actions published as a template, so the wallet can describe them and offer repayment without the site."],
         now: ["Moving the NFT out to a plain key, using Moria, and moving it back would work with any wallet. Between the steps the loan belongs to a key that recovery does not cover.", "Whether Moria's transactions tolerate inputs and outputs beyond the documented ones was not tested."],
         src: "Read from loan.cash, p2nfth.cash and includes/loan.gpp in the contract repository." },
       { id: "paryon", name: "ParyonUSD",
@@ -987,9 +1035,9 @@ dl.kv dt { font-weight: 600; } dl.kv dd { margin: 0; color: var(--muted); }
           inputs: [{ i: "0", k: "app", t: "Price contract", s: "" }, { i: "1", k: "app", t: "Loan", s: "27 bytes of state" }, { i: "2", k: "app", t: "Loan sidecar", s: "holds the loan's token id" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "at the wallet's address", bad: true }, { i: "5", k: "wallet", t: "BCH", s: "at the wallet's address", bad: true }, { i: "?", k: "ctrl", t: "Controller", s: "must be input 0, which is taken", bad: true, ghost: true }],
           outputs: [{ i: "0", k: "app", t: "Price contract", s: "" }, { i: "1", k: "app", t: "Loan", s: "new state, more collateral" }, { i: "2", k: "app", t: "Loan sidecar", s: "" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "same address as input 4" }, { i: "5", t: "Change", s: "" }] },
         next: { cap: "The same transaction with the loan key and the BCH waiting at a pocket address. ParyonUSD's contracts are unchanged. The loan key returns to the pocket because the contract sends it back where it came from.",
-          inputs: [{ i: "0", k: "app", t: "Price contract", s: "" }, { i: "1", k: "app", t: "Loan", s: "27 bytes of state" }, { i: "2", k: "app", t: "Loan sidecar", s: "holds the loan's token id" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "pocket: the device's key signs", neu: true }, { i: "5", k: "wallet", t: "BCH", s: "pocket: the device's key signs", neu: true }],
+          inputs: [{ i: "0", k: "app", t: "Price contract", s: "" }, { i: "1", k: "app", t: "Loan", s: "27 bytes of state" }, { i: "2", k: "app", t: "Loan sidecar", s: "holds the loan's token id" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "pocket: the pocket key signs", neu: true }, { i: "5", k: "wallet", t: "BCH", s: "pocket: the pocket key signs", neu: true }],
           outputs: [{ i: "0", k: "app", t: "Price contract", s: "" }, { i: "1", k: "app", t: "Loan", s: "new state, more collateral" }, { i: "2", k: "app", t: "Loan sidecar", s: "" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "back to the same pocket" }, { i: "5", k: "wallet", t: "Change", s: "to the wallet's address", neu: true }] },
-        changes: ["From the wallet: a pocket address for the loan key, the staking receipt and the BCH an action needs. The contracts would not change, which matters because they cannot be changed.", "From the app: accept a wallet whose address is a script, and send withdrawn tokens and collateral to the wallet's main address.", "The loan and pool actions published as a template, so that a wallet can show and repeat them without the app."],
+        changes: ["From the wallet: a pocket address for the loan key, the staking receipt and the BCH an action needs. The contracts would not change, which matters because they cannot be changed. The app asks for signatures over WalletConnect, where a wallet names its own address; whether the app accepts a script address there is untested.", "From the app: accept a wallet whose address is a script, and send withdrawn tokens and collateral to the wallet's main address.", "The loan and pool actions published as a template, so that a wallet can show and repeat them without the app."],
         now: ["As with Moria, an out-and-back through a plain key works with any wallet and leaves a window that recovery does not cover.", "The contracts are immutable, so a change of layout would mean a new deployment."],
         src: "Read from manage.cash, Loan.cash, AddLiquidity.cash and WithdrawFromPool.cash, and the architecture page." },
       { id: "bull", name: "BCH Bull",
@@ -1033,6 +1081,9 @@ dl.kv dt { font-weight: 600; } dl.kv dd { margin: 0; color: var(--muted); }
     APPS.forEach(function (a, i) { var b = h("button", { type: "button" }, a.name); b.addEventListener("click", function () { cur = i; mode = "today"; show(); }); tabs.appendChild(b); });
     Array.prototype.forEach.call(modeSeg.children, function (b) { b.addEventListener("click", function () { mode = b.dataset.m; show(); }); });
     show();
+    drawTx(document.getElementById("pk-dia"), { label: "After recovery the new owner approves one transaction that moves every coin of the old pocket to a new pocket.",
+      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "new owner key signs" }, { i: "1", k: "wallet", t: "Borrower NFT", s: "old pocket, opened by the controller" }, { i: "2", k: "wallet", t: "Loan key NFT", s: "old pocket, opened by the controller" }, { i: "3", k: "wallet", t: "BCH", s: "old pocket, opened by the controller" }],
+      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: "continues unchanged" }, { i: "1", k: "wallet", t: "Borrower NFT", s: "new pocket, same token", neu: true }, { i: "2", k: "wallet", t: "Loan key NFT", s: "new pocket, same token", neu: true }, { i: "3", k: "wallet", t: "BCH", s: "new pocket", neu: true }] });
   })();
 
   /* ---------- contents rail ---------- */
