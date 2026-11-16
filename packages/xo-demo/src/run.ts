@@ -341,7 +341,7 @@ class Lifecycle {
     let coins = await this.owner.coins();
     if (!coins.some((coin) => coin.index === 0)) {
       // The identity is the hash of a transaction whose first output funds the wallet; make such an output.
-      const built = await this.owner.request<Built>('pay', { lockingBytecode: this.owner.coinLockingBytecode, satoshis: sats(total(coins) - COIN_FEE) });
+      const built = await this.owner.request<Built>('pay', { lockingBytecode: this.owner.coinLockingBytecode, satoshis: sats(total(coins) - COIN_FEE - EXTRA_COIN_FEE * BigInt(coins.length - 1)) });
       await this.owner.request('broadcast', { invitationIdentifier: built.invitationIdentifier });
       await this.owner.sees([{ transactionId: built.transactionId, index: 0 }]);
       coins = await this.owner.coins();

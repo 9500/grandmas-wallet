@@ -197,7 +197,7 @@ Only the controller's owner-signed functions can produce the required successor 
 
 ## D10 — Enrollment package and restoration archive v1
 
-**Date:** 16 Nov 2026 · **Status:** implemented and tested against a simulated chain; chipnet run through the XO engine pending
+**Date:** 16 Nov 2026 · **Status:** implemented, tested against a simulated chain, and run once on chipnet through the XO engine (`docs/restoration.md`)
 
 The formats and rules are described in `docs/restoration.md`. The choices made:
 

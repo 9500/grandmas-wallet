@@ -111,6 +111,24 @@ A record is a hint about where to look, never an instruction. A record cannot ma
 
 All are automated tests (`packages/archive/test`, `packages/enrollment/test`, `apps/archive-store/test`, `test/device-loss.test.ts`). X04 is also a command for chipnet through the XO engine: `npm run xo-demo -- device-loss`.
 
+### The run on chipnet
+
+`npm run xo-demo -- device-loss` was run on chipnet on 16 November 2026 (wallet identity `a97bb094031d2dd809fba8174b363e15fb926ba173097616f5e2e5cf528e778f`). Every transaction was built and signed by the XO engine; the [log](device-loss/run-log.md) links each to its invitation.
+
+| Step | Who | Transaction |
+| --- | --- | --- |
+| Create the wallet; make and seal the package | owner | `b7bef16da06d0ab5864e6287bd0b80a2ef849fdf27c8d4463253bc3645992043` |
+| Open a savings jar, after both stores confirmed its record | owner | `61ff4efb9ee517cc8f729ad47b290cc6b54d484de69be401c4c0df37f59cfbb7` |
+| Recovery request to a key made on the new device | recoverer and new device | `adb8067f68e0e729a87dccf9db7487b66ed2f24e9c02166053f3f676082c70de` |
+| Complete recovery after the delay | recoverer | `1d261d7ac43b2fc0e20bff673a06de838fdc3f7ceeacd5d0616a7e3b910939be` |
+| Empty the jar after its time lock | new device | `2f3ae809389c6bfb5b7f8c9e4e73dab71999c79def043b2d64d536286cd1c9f8` |
+
+After the second step the owner's account took no further part. The recoverer opened the package from the link, checked it against the chain, and restored from two local backup stores: funds of 1,903 satoshis and one savings jar of 1,700, result complete. The new device learned the jar's unlock time only from the archive. After emptying the jar it recorded that under its own key and the new owner epoch, and a final restore reported the jar as closed and spent, result complete.
+
+In this run the recoverer's account and the recovery mnemonic in the package are the same mnemonic kept between runs, so that the account's test coins could be reused; a real wallet makes a new one each time. The backup stores ran on the same machine.
+
+The server used must be able to return old transactions (a node with a transaction index). Further servers can be named in `CHIPNET_HISTORY_ENDPOINTS`.
+
 ## Limits
 
 - **Freshness is anchored only where the chain allows.** A position the owner paid for from the wallet is in the controller's history, so its absence from the archive is noticed. A payment to a script address of someone else looks the same and is listed too; the report cannot tell them apart. A position funded entirely from outside the wallet leaves no trace in the controller's history, so a stale archive would hide it.
