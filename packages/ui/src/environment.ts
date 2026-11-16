@@ -37,6 +37,8 @@ export interface ChainConnection {
   chain: AppChain;
   /** Each reachable server by itself, for the monitor. */
   servers: ChainReader[];
+  /** Send a transaction through the first server that takes it. A refusal by the network is returned, not thrown. */
+  broadcast(transactionHex: string): Promise<{ accepted: true; transactionId: string } | { accepted: false; reason: string }>;
 }
 
 /** Connect to the configured servers. One that cannot be reached is left out; at least one is needed. */
@@ -54,7 +56,16 @@ export const connectChain = async (endpoints: string[], secondsPerBlock = 600): 
     headerTime: (height) => first.headerTime(height),
     blocksPerDelayBlock: Math.max(1, Math.round(600 / secondsPerBlock)),
   };
-  return { chain, servers };
+  const broadcast: ChainConnection['broadcast'] = async (transactionHex) => {
+    let refusal: { accepted: false; reason: string } = { accepted: false, reason: 'No server could be reached.' };
+    for (const server of servers) {
+      const result = await server.broadcast(transactionHex).catch((error: unknown) => ({ accepted: false as const, reason: (error as Error).message }));
+      if (result.accepted) return result;
+      refusal = result;
+    }
+    return refusal;
+  };
+  return { chain, servers, broadcast };
 };
 
 /**

@@ -1,5 +1,6 @@
 import type { ComponentChildren } from 'preact';
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import qrcode from 'qrcode-generator';
 
 import type { Environment } from './environment.js';
 
@@ -136,6 +137,29 @@ export const CopyBox = ({ text, open, openLabel }: { text: string; open?: boolea
         )}
       </div>
     </div>
+  );
+};
+
+/** A QR code, drawn as one path. Text of capital letters, digits and a few signs makes a smaller code. */
+export const QrCode = ({ text, size = 220 }: { text: string; size?: number }) => {
+  const path = useMemo(() => {
+    const code = qrcode(0, 'M');
+    code.addData(text, /^[0-9A-Z $%*+\-./:]*$/.test(text) ? 'Alphanumeric' : 'Byte');
+    code.make();
+    const count = code.getModuleCount();
+    let drawn = '';
+    for (let row = 0; row < count; row++) {
+      for (let column = 0; column < count; column++) {
+        if (code.isDark(row, column)) drawn += `M${column + 4} ${row + 4}h1v1h-1z`;
+      }
+    }
+    return { drawn, extent: count + 8 };
+  }, [text]);
+  return (
+    <svg class="qr" role="img" aria-label="QR code of the address below" width={size} height={size} viewBox={`0 0 ${path.extent} ${path.extent}`} shape-rendering="crispEdges">
+      <rect width={path.extent} height={path.extent} fill="#fff" />
+      <path d={path.drawn} fill="#000" />
+    </svg>
   );
 };
 

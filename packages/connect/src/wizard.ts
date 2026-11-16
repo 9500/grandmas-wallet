@@ -12,14 +12,16 @@ import {
 import { type Channel, type XoAdvertisement, type XoMessage, ProtocolError, XO_EXTENSION, isXoMessage, readAdvertisement } from './protocol.js';
 
 /**
- * XO requests over WizardConnect: an encrypted session between an
- * application and a wallet, carried by a relay that sees neither side's
- * messages. The application shows a `wiz://` address; the wallet opens it.
+ * WizardConnect sessions: an encrypted connection between an application
+ * and a wallet, carried by a relay that sees neither side's messages. The
+ * application shows a `wiz://` address; the wallet opens it.
  *
- * Only the session's own machinery is used here: pairing, the two "ready"
- * messages, and custom actions. The wallet offers no key paths, because its
- * funds are not spent by plain signatures; what it offers instead is listed
- * under `xo_v1` in the session's extensions.
+ * An application meets two kinds of wallet. An ordinary one shares the
+ * public keys of its address chains and signs transactions the application
+ * builds. One that speaks XO requests says so under `xo_v1` in the session's
+ * extensions and is asked for actions instead. The application's side below
+ * serves both; the wallet's side is this project's wallet, which offers no
+ * key paths because its funds are not spent by plain signatures.
  */
 
 export type LinkState =
@@ -28,8 +30,6 @@ export type LinkState =
   /** At the relay; the other side has not answered yet. */
   | 'waiting'
   | 'connected'
-  /** The other side does not speak XO requests, or speaks a version this software does not know. */
-  | 'incompatible'
   | 'disconnected';
 
 export interface LinkStatus {
@@ -72,12 +72,38 @@ export interface DappCredentials {
   walletPublicKey?: string;
 }
 
+/** What a wallet offered when it connected. */
+export interface WalletOffer {
+  /** Public keys of the wallet's address chains. Empty for a wallet whose funds are not spent by plain signatures. */
+  paths: { name: string; xpub: string }[];
+  /** Set if the wallet speaks XO requests in a version this software knows. */
+  xo?: XoAdvertisement;
+  /** Why the wallet's XO offer, if it made one, cannot be used. */
+  xoProblem?: string;
+}
+
+/** A request for signatures as it travels: bytes as hex, amounts as `<bigint: Nn>`. */
+export interface WireSignRequest {
+  transaction: unknown;
+  inputPaths: [number, string, number][];
+}
+
+/** The wallet declined to sign, or could not. */
+export class SigningRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SigningRefusedError';
+  }
+}
+
 export interface DappLinkOptions {
   name: string;
+  /** Address of an icon the wallet may show next to the name. */
+  icon?: string;
   relays?: string[];
   /** From an earlier session, to resume it. */
   credentials?: DappCredentials;
-  onStatus(status: LinkStatus, offered?: XoAdvertisement): void;
+  onStatus(status: LinkStatus, offered?: WalletOffer): void;
   /** Called when the credentials change, so that they can be saved. */
   onCredentials?(credentials: DappCredentials): void;
 }
@@ -85,7 +111,15 @@ export interface DappLinkOptions {
 export interface DappLink {
   /** The address the wallet opens to connect. */
   uri: string;
+  /** The same address in the form that makes the smallest QR code. */
+  qrUri: string;
   channel: Channel;
+  /**
+   * Ask an ordinary wallet to sign a transaction. Resolves with the signed transaction as hex once the
+   * user has agreed in the wallet.
+   * @throws SigningRefusedError
+   */
+  sign(request: WireSignRequest): Promise<string>;
   close(): void;
 }
 
@@ -95,6 +129,11 @@ export const openDappLink = (options: DappLinkOptions): DappLink => {
   let walletDiscovered = false;
   let closed = false;
   const { channel, deliver } = channelOver(() => client);
+  const signing = new Map<number, { resolve: (signed: string) => void; reject: (error: Error) => void }>();
+  const abandon = (reason: string): void => {
+    for (const waiting of signing.values()) waiting.reject(new SigningRefusedError(reason));
+    signing.clear();
+  };
 
   const sendReady = async (): Promise<void> => {
     await client?.relay({
@@ -104,6 +143,7 @@ export const openDappLink = (options: DappLinkOptions): DappLink => {
       time: seconds(),
       ...(walletDiscovered ? { selected_protocol: PROTOCOL_NAME } : {}),
       dapp_name: options.name,
+      ...(options.icon === undefined ? {} : { dapp_icon: options.icon }),
       extensions: { chunk: chunkExtensionAdvertisement() },
     } as Parameters<RelayClient['relay']>[0]);
   };
@@ -113,22 +153,38 @@ export const openDappLink = (options: DappLinkOptions): DappLink => {
     if (message.action === RelayMsgAction.WalletReady) {
       client?.setPeerCapabilities({ chunk: peerSupportsChunk(message['extensions'] as Record<string, unknown> | undefined) });
       const peerName = typeof message['wallet_name'] === 'string' ? message['wallet_name'] : 'Wallet';
-      const session = (message['session'] as Record<string, { extensions?: unknown } | undefined> | undefined)?.[PROTOCOL_NAME];
+      const session = (message['session'] as Record<string, { paths?: unknown; extensions?: unknown } | undefined> | undefined)?.[PROTOCOL_NAME];
       const firstContact = !walletDiscovered;
       walletDiscovered = true;
       if (typeof message['public_key'] === 'string') {
         options.onCredentials?.({ privateKey: relay.credentials.privateKey, secret: relay.credentials.secret, walletPublicKey: message['public_key'] });
       }
       if (message['dapp_discovered'] !== true || firstContact) void sendReady().catch(() => undefined);
+      const paths = (Array.isArray(session?.paths) ? session.paths : []).filter(
+        (path): path is { name: string; xpub: string } => typeof (path as { name?: unknown } | null)?.name === 'string' && typeof (path as { xpub?: unknown }).xpub === 'string',
+      );
+      const offer: WalletOffer = { paths: paths.map(({ name, xpub }) => ({ name, xpub })) };
       try {
-        const offered = readAdvertisement(session?.extensions);
-        if (offered === undefined) options.onStatus({ state: 'incompatible', peerName, reason: 'This wallet does not offer XO requests.' });
-        else options.onStatus({ state: 'connected', peerName }, offered);
+        const xo = readAdvertisement(session?.extensions);
+        if (xo !== undefined) offer.xo = xo;
       } catch (error) {
-        options.onStatus({ state: 'incompatible', peerName, reason: error instanceof ProtocolError ? error.message : 'The wallet\'s answer could not be read.' });
+        // An XO offer that cannot be used leaves the wallet an ordinary one, if it shared keys.
+        offer.xoProblem = error instanceof ProtocolError ? error.message : 'The wallet\'s XO offer could not be read.';
       }
+      options.onStatus({ state: 'connected', peerName }, offer);
+    } else if (message.action === RelayMsgAction.SignTransactionResponse) {
+      const waiting = signing.get(message['sequence'] as number);
+      if (waiting === undefined) return;
+      signing.delete(message['sequence'] as number);
+      const { error, signedTransaction } = message as { error?: unknown; signedTransaction?: unknown };
+      if (typeof error === 'string' && error !== '') waiting.reject(new SigningRefusedError(error));
+      else if (typeof signedTransaction === 'string' && signedTransaction !== '') waiting.resolve(signedTransaction);
+      else waiting.reject(new SigningRefusedError('The wallet answered without a signed transaction.'));
+    } else if (message.action === RelayMsgAction.Ping) {
+      void client?.relay({ action: RelayMsgAction.Pong, time: seconds() }).catch(() => undefined);
     } else if (message.action === RelayMsgAction.Disconnect) {
       walletDiscovered = false;
+      abandon('The wallet ended the connection.');
       options.onStatus({ state: 'disconnected', reason: 'The wallet ended the connection.' });
     } else {
       deliver(message);
@@ -162,9 +218,25 @@ export const openDappLink = (options: DappLinkOptions): DappLink => {
 
   return {
     uri: relay.uri,
+    qrUri: relay.qrUri,
     channel,
+    sign: (request) =>
+      new Promise<string>((resolve, reject) => {
+        const current = client;
+        if (current === undefined || !current.isConnected() || !walletDiscovered) {
+          reject(new SigningRefusedError('No wallet is connected.'));
+          return;
+        }
+        const sequence = current.nextSequence();
+        signing.set(sequence, { resolve, reject });
+        current.relay({ action: RelayMsgAction.SignTransactionRequest, time: seconds(), sequence, ...request } as Parameters<RelayClient['relay']>[0]).catch((error: unknown) => {
+          signing.delete(sequence);
+          reject(new SigningRefusedError(`The request could not be sent to the wallet: ${(error as Error).message}`));
+        });
+      }),
     close: () => {
       closed = true;
+      abandon('The connection was closed.');
       const ending = client?.relay({ action: RelayMsgAction.Disconnect, reason: 'user_disconnect', time: seconds() } as Parameters<RelayClient['relay']>[0]);
       void Promise.resolve(ending)
         .catch(() => undefined)

@@ -9,11 +9,17 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@bitauth/libauth": "3.1.0-next.8",
     "@grandmas-wallet/app": "0.0.0",
     "@grandmas-wallet/archive": "0.0.0",
     "@grandmas-wallet/connect": "0.0.0",
+    "@grandmas-wallet/contracts": "0.0.0",
+    "@grandmas-wallet/core": "0.0.0",
     "@grandmas-wallet/templates": "0.0.0",
     "@grandmas-wallet/ui": "0.0.0",
     "preact": "^11.2.0"
+  },
+  "devDependencies": {
+    "@grandmas-wallet/testing": "0.0.0"
   }
 }
