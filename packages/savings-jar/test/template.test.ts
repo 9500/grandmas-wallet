@@ -40,7 +40,7 @@ describe('the Savings Jar application\'s template', () => {
     for (const action of Object.values(actions)) expect(action.name !== undefined && action.description !== undefined).toBe(true);
     expect(Object.fromEntries(Object.entries(variables ?? {}).map(([name, variable]) => [name, variable.type]))).toEqual({
       identity: 'token_category',
-      unlockTime: 'timestamp',
+      unlockTime: 'integer',
       savedSatoshis: 'satoshis',
     });
   });

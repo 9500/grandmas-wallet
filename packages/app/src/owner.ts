@@ -96,12 +96,22 @@ export interface TemplateSummary extends TemplateReference {
   actions: { action: string; name: string; description: string }[];
 }
 
+/** Variable types that hold a number but which the engine reads back from its store as text. */
+const NOT_READ_BACK_AS_GIVEN = new Set(['timestamp']);
+
 /**
  * Read a template an application presents, without taking it in.
- * @throws if it is not a valid XO template
+ * @throws if it is not a valid XO template, or one this wallet could not operate safely
  */
 export const inspectTemplate = (template: unknown): TemplateSummary => {
   const parsed = parseTemplate(template as Parameters<typeof parseTemplate>[0]);
+  // The engine keeps a script's variables as text and reads numbers back only for some types. A value of
+  // another type that was given as a number builds a different script when an output is to be unlocked, so
+  // money put under such a template could not be taken out again by this wallet.
+  const unreadable = Object.entries(parsed.variables ?? {}).filter(([, variable]) => NOT_READ_BACK_AS_GIVEN.has(variable.type ?? ''));
+  if (unreadable.length > 0) {
+    throw new Error(`The template uses a kind of value ("${unreadable[0]?.[1].type}" for "${unreadable[0]?.[0]}") that this wallet's engine cannot yet read back reliably. Money put under it might not come out again.`);
+  }
   return {
     identifier: generateTemplateIdentifier(parsed),
     contentHash: templateContentHash(template as JsonValue),

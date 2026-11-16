@@ -8,7 +8,14 @@ import { Amount, formatTime, shorten } from '@grandmas-wallet/ui';
 
 export const TemplateValue = ({ type, value, identity }: { type: string; value: string | number; identity: string }) => {
   if ((type === 'satoshis' || type === 'token_amount') && /^\d+$/.test(String(value))) return <Amount satoshis={BigInt(value)} />;
-  if (type === 'timestamp' && Number.isInteger(Number(value))) return <span>{formatTime(Number(value))}</span>;
+  // A whole number in the range the network itself reads as a time is shown with the date it would be.
+  if (type === 'integer' && Number.isInteger(Number(value)) && Number(value) >= 500_000_000 && Number(value) < 4_294_967_296) {
+    return (
+      <span>
+        {String(value)} <span class="muted">(as a time: {formatTime(Number(value))})</span>
+      </span>
+    );
+  }
   if (type === 'token_category' && value === identity) return <span>this wallet</span>;
   const text = String(value);
   return <span class={/^[0-9a-f]{16,}$/i.test(text) ? 'mono' : undefined}>{shorten(text, 16, 8)}</span>;

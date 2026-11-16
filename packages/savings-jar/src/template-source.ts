@@ -135,8 +135,9 @@ export const savingsJarTemplate = {
     },
     unlockTime: {
       name: 'Unlock time',
-      description: 'When the jar can be emptied.',
-      type: 'timestamp',
+      description: 'When the jar can be emptied, as a Unix timestamp.',
+      // Not `timestamp`: the engine reads a stored value of that type back as text when it unlocks an output.
+      type: 'integer',
     },
     savedSatoshis: {
       name: 'Amount to save',
