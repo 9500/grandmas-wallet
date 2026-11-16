@@ -92,11 +92,13 @@ packages/
   enrollment/         package schema, HPKE envelope, QR/link encoding
   archive/            record schema, signing, encryption, store adapters, write-before-sign gate
   connect/            WizardConnect XO extension (wallet + dapp sides)
+  app/                wallet, recoverer and new-device actions on an XO account; monitor; links
+  ui/                 shared components, browser storage, configuration
 apps/
-  owner/              owner wallet web UI + monitor
-  bank/               recoverer web UI
-  demo-dapp/          application that requests the demo position action
-  archive-store/      minimal encrypted-blob HTTP store (run as two instances)
+  wallet/             owner wallet web UI + monitor
+  recoverer/          recoverer web UI
+  jar/                application that requests the demo position action
+  archive-store/      minimal encrypted-blob HTTP store
 deploy/               build + hosting configuration per subdomain
 test/                 acceptance suites C*, R*, X*
 docs/                 protocol notes, decisions log, demo script, xo-feedback-notes
@@ -239,12 +241,12 @@ Fallback if B1 finds a blocking engine gap: keep the template as the description
 
 ## 5. Deployment and hosting
 
-Both web UIs are publicly reachable on subdomains of `9500.cash`. The owner wallet and the bank are **separately hosted pages on different FQDNs**. Hostnames below are placeholders until chosen.
+Both web UIs are publicly reachable on subdomains of `9500.cash`. The owner wallet and the bank are **separately hosted pages on different FQDNs**. The services run on the development machine behind a reverse proxy that provides HTTPS; what was built is described in [docs/web-apps.md](docs/web-apps.md).
 
-| Host (placeholder) | Serves | Notes |
+| Host | Serves | Notes |
 | --- | --- | --- |
 | `wallet.9500.cash` | owner wallet SPA | Keys and XO state live in this origin's IndexedDB only. |
-| `recoverer.9500.cash` | bank SPA | Separate origin, so its storage (enrollment packages, recovery mnemonic) is isolated from the wallet by the browser. Also publishes the bank's HPKE public key at a fixed path. |
+| `recoverer.9500.cash` | bank SPA | Separate origin, so its storage (enrollment packages, recovery mnemonic) is isolated from the wallet by the browser. The recoverer's encryption key is made in the visitor's browser and handed to the wallet in a setup link (decision D11), not published at a fixed path. |
 | `jar.9500.cash` | demo dapp | Third origin, so the WizardConnect path is a real cross-site connection; can be taken offline to demonstrate X01. |
 | `store1.9500.cash`, `store2.9500.cash` | archive stores | Instances of `apps/archive-store`: put/get of opaque encrypted records with an acknowledgment. Hold no keys. One is enough; the second shows the optional extra copy. |
 
@@ -259,7 +261,7 @@ Consequences for the implementation:
 - **Public exposure:** chipnet only, with a visible "test network — demo" banner on both sites; no mainnet configuration is shipped. Each app has per-environment config (network, Electrum servers, store URLs, peer hostnames) so local development uses `localhost` ports with the same code.
 - `deploy/` holds the static build output mapping and web-server configuration (cache headers, SPA fallback, a restrictive Content-Security-Policy listing only the Electrum, store and relay endpoints).
 
-**Needed from the project owner before deployment:** the chosen subdomain names, and where they are hosted (the server/provider and how files are published), so `deploy/` can target it.
+**Deployed** with `deploy/install-services.sh`: wallet 8101, recoverer 8102, application 8103, stores 8111 and 8112, plain HTTP on the machine's address.
 
 ### Scope fallbacks
 

@@ -4,7 +4,7 @@ A Bitcoin Cash wallet that can recover access after a lost phone without manual 
 
 Built for BCH Blaze 2026 on the XO stack.
 
-**Status:** early development, chipnet only. The contracts are tested in a virtual machine and have run through the full recovery lifecycle on chipnet, both with this project's own transaction builder and through the XO engine using the project's XO templates. A recoverer can be enrolled with one sealed package, and a replacement device can rebuild the wallet from that package, the chain and an encrypted archive; this is tested against a simulated chain and has been run on chipnet through the XO engine. Nothing has been audited, and there is no wallet user interface yet.
+**Status:** early development, chipnet only. The contracts are tested in a virtual machine and have run through the full recovery lifecycle on chipnet, both with this project's own transaction builder and through the XO engine using the project's XO templates. A recoverer can be enrolled with one sealed package, and a replacement device can rebuild the wallet from that package, the chain and an encrypted archive; this is tested against a simulated chain and has been run on chipnet through the XO engine. The wallet, the recoverer and a small application that uses the wallet run as web pages, tried end to end on chipnet. Nothing has been audited.
 
 ## Documents
 
@@ -14,6 +14,7 @@ Built for BCH Blaze 2026 on the XO stack.
 - [Chipnet run](docs/chipnet-run.md) and its [results](docs/chipnet-log.md)
 - [XO templates, invitations and how to reproduce them](docs/bounty/README.md)
 - [Enrollment and restoration](docs/restoration.md)
+- [The web applications](docs/web-apps.md): what they do, how they talk to each other, how to run them
 - [What was learned about the XO engine](docs/xo-spike.md)
 
 ## Development
@@ -24,6 +25,7 @@ Requires Node 22 or later.
 npm install
 npm run check             # typecheck, lint, tests
 npm run build:contracts   # recompile contracts after editing them
+npm run build:web         # build the three web applications
 ```
 
 ## License

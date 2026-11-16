@@ -1,0 +1,27 @@
+{
+  "name": "@grandmas-wallet/app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./account": "./src/account.ts",
+    "./links": "./src/links.ts"
+  },
+  "dependencies": {
+    "@bitauth/libauth": "3.1.0-next.8",
+    "@grandmas-wallet/archive": "0.0.0",
+    "@grandmas-wallet/chipnet": "0.0.0",
+    "@grandmas-wallet/core": "0.0.0",
+    "@grandmas-wallet/enrollment": "0.0.0",
+    "@grandmas-wallet/templates": "0.0.0",
+    "@xo-cash/engine": "0.1.1-next.18029697917",
+    "@xo-cash/templates": "0.0.12",
+    "@xo-cash/utils": "0.0.10"
+  },
+  "devDependencies": {
+    "@grandmas-wallet/testing": "0.0.0",
+    "fake-indexeddb": "^6.0.0"
+  }
+}

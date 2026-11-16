@@ -213,3 +213,18 @@ The formats and rules are described in `docs/restoration.md`. The choices made:
 **Why completeness is checked by walking the controller's history:** the controller state has no room set aside for an archive checkpoint, and a checkpoint would not list missing positions by itself. Every owner-approved transaction is in the controller's history, so an unspent output to a script address that no record describes can be found without any extra on-chain data. The limits of this are listed in `docs/restoration.md`.
 
 **What a record cannot do:** direct the wallet to an address. For a known kind of position the script is rebuilt from the parameters and the wallet identity and must equal the recorded one.
+
+## D11 — Web applications
+
+**Date:** 16 Nov 2026 · **Status:** implemented and run end to end on chipnet in browsers (`docs/web-apps.md`)
+
+- **Three pages on three addresses**, so that the browser keeps the owner's, the recoverer's and the application's storage apart, and the connection between wallet and application is a real one between sites.
+- **Everything between the pages travels as links**, with the content after `#`. No server of this project sees a package, a request or a key.
+- **The recoverer's encryption key is made in the visitor's browser and handed over in a setup link**, instead of being published at a fixed path on the recoverer's site as first planned. The demo is public, and every visitor has to be able to act as a recoverer. A recoverer with a site of its own would publish the key there; the wallet shows the key's fingerprint either way.
+- **A move to a new device is one XO invitation passed between the recoverer and the device**: the recoverer starts it, the device joins with its key, the recoverer sends it. That costs three links. It is how the device's engine comes to hold its key and to know the controller, and it is XO's own way for two parties to make one transaction.
+- **The wallet sets aside the recoverer's fees when it is created**, at the first ordinary address of the recovery credential, which the wallet can work out. A visitor then funds one address, and a recoverer can act without coins of its own. The amount covers three requests and one completion.
+- **Requests from applications are a WizardConnect extension, `xo_v1`**, using only the session's pairing and custom messages. The wallet advertises templates by identifier and content hash, with the operations it offers for each; an application names one and the user's values. A request is carried out at most once per identifier.
+- **The wallet offers no key paths in a WizardConnect session.** Its funds are spent through the controller, not by plain signatures, so the standard signing request has nothing to work with.
+- **Actions that are not sent release the coins they named.** The engine holds an invitation's inputs for it; without this, one failed attempt left the recoverer's fee account looking empty.
+- **Waiting periods are offered in time only.** A count of blocks stays possible in the contract, but depends on what a network makes of a block: on chipnet with one-minute blocks a delay of 5 was enforced as 50 blocks. Units of 512 seconds mean the same everywhere.
+- **Preact and Vite**, with the XO engine in the page and its Node-only imports replaced by empty stand-ins, as the XO web tool does.

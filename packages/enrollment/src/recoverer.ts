@@ -123,19 +123,41 @@ export const acknowledgeEnrollment = async (signed: SignedMessage, stores: Archi
  */
 export type EnrollmentStatus = { status: 'package-created' } | { status: 'recoverer-confirmed'; receivedAt: number };
 
-/** The owner's view: has the recoverer confirmed this package? */
-export const enrollmentStatus = async (signed: SignedMessage, stores: ArchiveStore[]): Promise<EnrollmentStatus> => {
+/** What the owner's wallet keeps of a package to recognize its acknowledgment; it does not include the recovery credential. */
+export interface PackageReceipt {
+  identity: string;
+  archive: { archiveId: string; contentKey: string };
+  recovererKeyHash: string;
+  /** From `packageHash`. */
+  packageHash: string;
+}
+
+export const receiptOf = (signed: SignedMessage): PackageReceipt => {
   const enrollment = parsePackage(signed.message);
-  const archiveId = hexToBin(enrollment.archive.archiveId);
-  const contentKey = hexToBin(enrollment.archive.contentKey);
-  const { blobs } = await collectBlobs(stores, enrollment.archive.archiveId);
+  return {
+    identity: enrollment.identity,
+    archive: { archiveId: enrollment.archive.archiveId, contentKey: enrollment.archive.contentKey },
+    recovererKeyHash: enrollment.policy.recovererKeyHash,
+    packageHash: packageHash(signed),
+  };
+};
+
+/** The owner's view: has the recoverer confirmed this package? */
+export const enrollmentStatus = (signed: SignedMessage, stores: ArchiveStore[]): Promise<EnrollmentStatus> =>
+  acknowledgmentStatus(receiptOf(signed), stores);
+
+/** The same, from what the owner's wallet keeps after the package has been handed over. */
+export const acknowledgmentStatus = async (receipt: PackageReceipt, stores: ArchiveStore[]): Promise<EnrollmentStatus> => {
+  const archiveId = hexToBin(receipt.archive.archiveId);
+  const contentKey = hexToBin(receipt.archive.contentKey);
+  const { blobs } = await collectBlobs(stores, receipt.archive.archiveId);
   for (const sealed of blobs.values()) {
     try {
       const blob = decodeBlob(unseal(contentKey, archiveId, sealed));
       if (blob.type !== 'acknowledgment' || !verifyMessage(ACKNOWLEDGMENT_PURPOSE, blob.signed)) continue;
-      if (binToHex(keyHashOf(blob.signed.publicKey)) !== enrollment.policy.recovererKeyHash) continue;
+      if (binToHex(keyHashOf(blob.signed.publicKey)) !== receipt.recovererKeyHash) continue;
       const note = JSON.parse(blob.signed.message) as { format?: unknown; identity?: unknown; package?: unknown; receivedAt?: unknown };
-      if (note.format !== ACKNOWLEDGMENT_FORMAT || note.identity !== enrollment.identity || note.package !== packageHash(signed)) continue;
+      if (note.format !== ACKNOWLEDGMENT_FORMAT || note.identity !== receipt.identity || note.package !== receipt.packageHash) continue;
       if (typeof note.receivedAt === 'number') return { status: 'recoverer-confirmed', receivedAt: note.receivedAt };
     } catch {
       // Not an acknowledgment this wallet can read; other blobs are not its concern here.
@@ -143,4 +165,3 @@ export const enrollmentStatus = async (signed: SignedMessage, stores: ArchiveSto
   }
   return { status: 'package-created' };
 };
-
