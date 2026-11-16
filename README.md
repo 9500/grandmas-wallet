@@ -4,7 +4,7 @@ A Bitcoin Cash wallet that can recover access after a lost phone without manual 
 
 Built for BCH Blaze 2026 on the XO stack.
 
-**Status:** early development. The recovery controller, the asset covenant and a demonstration application (Savings Jar) exist as contracts, are tested in a virtual machine, and have been run once through the full recovery lifecycle on chipnet. Nothing has been audited.
+**Status:** early development, chipnet only. The contracts are tested in a virtual machine and have run through the full recovery lifecycle on chipnet, both with this project's own transaction builder and through the XO engine using the project's XO templates. Nothing has been audited, and there is no wallet user interface yet.
 
 ## Documents
 
@@ -12,6 +12,8 @@ Built for BCH Blaze 2026 on the XO stack.
 - [Implementation plan](IMPLEMENTATION_PLAN.md)
 - [Decisions log](docs/decisions.md)
 - [Chipnet run](docs/chipnet-run.md) and its [results](docs/chipnet-log.md)
+- [XO templates, invitations and how to reproduce them](docs/bounty/README.md)
+- [What was learned about the XO engine](docs/xo-spike.md)
 
 ## Development
 

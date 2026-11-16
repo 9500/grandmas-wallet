@@ -162,11 +162,12 @@ const operations: Record<string, (request: Json) => Promise<unknown>> = {
       invitation: string; role: string; generate?: string[]; variables?: Variables; derive?: Record<string, string>;
     };
     const incoming = deserializeInvitation(invitation);
-    const stored = await engine.acceptInvitation(incoming, {
-      roleIdentifier: role,
-      // Keys the role does not generate by itself are created only when asked for, on first use.
-      ...(generate === undefined ? {} : { intent: { action: incoming.actionIdentifier, role, generate } }),
-    });
+    // Keys the role does not generate by itself are created only when asked for, on first use. The role is
+    // then named by the intent; the engine refuses it being given twice.
+    const stored = await engine.acceptInvitation(
+      incoming,
+      generate === undefined ? { roleIdentifier: role } : { intent: { action: incoming.actionIdentifier, role, generate } },
+    );
     const invitationIdentifier = identifierOf(stored);
     const all: Variables = { ...variables };
     for (const [variableIdentifier, secret] of Object.entries(derive ?? {})) all[variableIdentifier] = await keyHash(secret);
