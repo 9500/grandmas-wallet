@@ -1,6 +1,6 @@
 import { type Output, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
-import { ADDRESS_KIND, buildTransaction, controllerScript, decodeControllerState, deriveCredentialKeys, deriveSeedKeys, p2pkhInput, p2pkhLockingBytecode, readControllerHistory, recoverableInput, walletAddress } from '@grandmas-wallet/core';
-import { type OwnerWalletState, OwnerWallet, RecovererWallet, walletTemplateNumbers } from '@grandmas-wallet/app';
+import { type AccountCoin, ADDRESS_KIND, buildTransaction, controllerScript, decodeControllerState, deriveCredentialKeys, deriveSeedKeys, p2pkhInput, p2pkhLockingBytecode, readControllerHistory, recoverableInput, walletAddress } from '@grandmas-wallet/core';
+import { type OwnerWalletState, type Sent, OwnerWallet, RecovererWallet, walletTemplateNumbers } from '@grandmas-wallet/app';
 import { KeyBackend, SimulatedChain, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -93,10 +93,10 @@ describe('a new device takes over', () => {
     // The fee came out of the swept coins, and the token arrived unchanged.
     const after = await wallet.balance();
     expect(after.toSweep).toBe(0n);
-    expect(after.recoverable + 1_000n).toBe(held - swept.transactions[0]!.feeSatoshis);
-    expect(swept.transactions[0]!.feeSatoshis).toBe(BigInt(swept.transactions[0]!.bytes));
-    expect(after.tokens.map((coin) => hex(coin.utxo.output.token!.category))).toEqual([fungible]);
-    expect(after.tokens[0]!.utxo.output.token).toMatchObject({ amount: 250n });
+    expect(after.recoverable + 1_000n).toBe(held - (swept.transactions[0] as Sent).feeSatoshis);
+    expect((swept.transactions[0] as Sent).feeSatoshis).toBe(BigInt((swept.transactions[0] as Sent).bytes));
+    expect(after.tokens.map((coin) => hex((coin.utxo.output.token as NonNullable<Output['token']>).category))).toEqual([fungible]);
+    expect((after.tokens[0] as AccountCoin).utxo.output.token).toMatchObject({ amount: 250n });
     expect(swept.tokens).toEqual([{ category: fungible, meaning: 'unknown' }]);
 
     // Everything is at addresses of the new seed, which the earlier seed's keys do not open.
@@ -154,7 +154,7 @@ describe('a new device takes over', () => {
     expect(swept.tokens).toEqual([{ category, meaning: 'unknown' }]);
     const after = await wallet.balance();
     expect(after.tokens).toHaveLength(1);
-    expect(after.tokens[0]!.utxo.output.token).toEqual({ amount: 0n, category: hexToBin(category), nft: { capability: 'none', commitment: Uint8Array.of(7) } });
+    expect((after.tokens[0] as AccountCoin).utxo.output.token).toEqual({ amount: 0n, category: hexToBin(category), nft: { capability: 'none', commitment: Uint8Array.of(7) } });
     expect(after.toSweep).toBe(0n);
   });
 
@@ -175,7 +175,7 @@ describe('a new device takes over', () => {
     const before = (await wallet.balance()).recoverable;
     const swept = await wallet.sweepEarlier();
     expect(swept.coins).toBe(2);
-    expect((await wallet.balance()).recoverable).toBe(before + 10_000n - swept.transactions[0]!.feeSatoshis);
+    expect((await wallet.balance()).recoverable).toBe(before + 10_000n - (swept.transactions[0] as Sent).feeSatoshis);
   });
 
   it('SW06: a sweep while a request is pending cancels the request', async () => {
@@ -205,7 +205,7 @@ describe('a new device takes over', () => {
     // It cannot pay its own fee, so the largest coin without a token goes with it.
     const swept = await wallet.sweepEarlier({ maximumCoins: 1 });
     expect(swept.transactions.length).toBeGreaterThan(1);
-    const firstTransaction = decodeTransactionBch(hexToBin((await chain.getTransaction(swept.transactions[0]!.transactionId)) as string));
+    const firstTransaction = decodeTransactionBch(hexToBin((await chain.getTransaction((swept.transactions[0] as Sent).transactionId)) as string));
     if (typeof firstTransaction === 'string') throw new Error(firstTransaction);
     expect(firstTransaction.inputs).toHaveLength(3);
     expect(firstTransaction.outputs[1]?.token?.category).toEqual(hexToBin(category));
@@ -227,7 +227,7 @@ describe('a new device takes over', () => {
     const result = await wallet.sendEverything(payee);
     expect(result.transactions).toHaveLength(1);
     expect(result.sentSatoshis).toBe(held + 3_000n - result.feeSatoshis);
-    expect(result.feeSatoshis).toBe(BigInt(result.transactions[0]!.bytes));
+    expect(result.feeSatoshis).toBe(BigInt((result.transactions[0] as Sent).bytes));
     expect(chain.balanceOf(payee)).toBe(result.sentSatoshis);
     expect(await wallet.balance()).toMatchObject({ recoverable: 0n, vault: 0n, toSweep: 0n });
   });
@@ -379,7 +379,7 @@ describe('moving on without a loss', () => {
     // The vault coin never obeyed a key; the first seed's device cannot move it, by any path it has.
     const swept = await third.wallet.sweepEarlier();
     expect(swept.coins).toBe(2);
-    expect(await third.wallet.balance()).toMatchObject({ toSweep: 0n, recoverable: 14_000n - swept.transactions[0]!.feeSatoshis });
+    expect(await third.wallet.balance()).toMatchObject({ toSweep: 0n, recoverable: 14_000n - (swept.transactions[0] as Sent).feeSatoshis });
     expect((await readControllerHistory(chain, identity)).owners).toHaveLength(3);
   });
 });
