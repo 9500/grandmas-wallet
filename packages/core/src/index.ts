@@ -1,6 +1,7 @@
 export * from './addresses.js';
 export * from './allocation.js';
 export * from './builder.js';
+export * from './coins.js';
 export * from './controller.js';
 export * from './discovery.js';
 export * from './genesis.js';
