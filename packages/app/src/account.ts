@@ -311,7 +311,11 @@ export class Account implements WalletBackend {
       await this.engine.executeAction(prepared.invitationIdentifier, { broadcastTransaction: true });
     } catch (error) {
       // The engine can fail while clearing its hold on the coins after the transaction has gone out.
-      if ((error as Error).name !== 'UnspentOutputNotFoundInStoreError') throw error;
+      if ((error as Error).name !== 'UnspentOutputNotFoundInStoreError') {
+        // A transaction the network refused is put aside, so that the coins it named can be used again.
+        await this.discard(prepared.invitationIdentifier);
+        throw error;
+      }
     }
     return prepared.transactionId;
   }

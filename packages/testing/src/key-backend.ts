@@ -200,7 +200,11 @@ export class KeyBackend implements WalletBackend {
     const stored = this.prepared.get(prepared.invitationIdentifier);
     if (stored === undefined) throw new Error('This transaction was not prepared here, or was discarded.');
     const result = await this.chain.broadcast(stored.hex);
-    if (!result.accepted) throw new Error(`The transaction was refused: ${result.reason}`);
+    if (!result.accepted) {
+      // A refused transaction is put aside, so that the coins it named can be used again.
+      await this.discard(prepared.invitationIdentifier);
+      throw new Error(`The transaction was refused: ${result.reason}`);
+    }
     await this.discard(prepared.invitationIdentifier);
     return result.transactionId;
   }

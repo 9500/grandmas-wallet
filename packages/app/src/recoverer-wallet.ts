@@ -71,6 +71,9 @@ export const suggestedAllowance = (feeRate = 1): bigint => {
 };
 
 export class RecovererWallet {
+  /** Coins that transactions of this account have spent since it was opened; a key holder may list one a moment longer. */
+  private readonly spent = new Set<string>();
+
   private constructor(
     private readonly backend: WalletBackend,
     private readonly chain: ChainReader,
@@ -101,8 +104,12 @@ export class RecovererWallet {
     return this.backend.ordinaryAddress();
   }
 
+  private async coins(): Promise<AccountCoin[]> {
+    return (await this.backend.coins()).filter((coin) => !this.spent.has(`${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`));
+  }
+
   private async feeCoins(): Promise<AccountCoin[]> {
-    return (await this.backend.coins()).filter((coin) => coin.template === 'coins' && coin.utxo.output.token === undefined);
+    return (await this.coins()).filter((coin) => coin.template === 'coins' && coin.utxo.output.token === undefined);
   }
 
   private controllerOutput(state: ControllerState): Output {
@@ -116,7 +123,7 @@ export class RecovererWallet {
   private async controller(): Promise<{ coin: AccountCoin; state: ControllerState }> {
     const locking = hex(controllerScript(this.identity).lockingBytecode);
     for (let attempt = 0; attempt < 60; attempt++) {
-      const coin = (await this.backend.coins()).find((candidate) => hex(candidate.utxo.output.lockingBytecode) === locking && candidate.utxo.output.token?.nft !== undefined);
+      const coin = (await this.coins()).find((candidate) => hex(candidate.utxo.output.lockingBytecode) === locking && candidate.utxo.output.token?.nft !== undefined);
       if (coin?.utxo.output.token?.nft !== undefined) return { coin, state: decodeControllerState(coin.utxo.output.token.nft.commitment) };
       await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 0 : 250));
     }
@@ -173,6 +180,7 @@ export class RecovererWallet {
       outputs: [{ outputIdentifier: 'controllerOutput' }, ...(choice.changeSatoshis === undefined ? [] : [{ lockingBytecode: feeAddress, valueSatoshis: choice.changeSatoshis }])],
     });
     await this.backend.send(prepared);
+    for (const spent of [coin, ...payers]) this.spent.add(`${hex(spent.utxo.transactionHash)}:${spent.utxo.index}`);
     return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: choice.remainderSatoshis };
   }
 

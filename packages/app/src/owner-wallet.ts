@@ -7,8 +7,10 @@ import {
   type ControllerState,
   type ControllerUpdate,
   type KeyedAddressKind,
+  type PreparedTransaction,
   type SeedKeys,
   type SpendableCoin,
+  type TransactionRequest,
   type WalletAddress,
   type WalletBackend,
   ADDRESS_KIND,
@@ -138,6 +140,13 @@ const spendable = (coin: AccountCoin, inputBytes: number): SpendableCoin & { coi
 const valueOf = (coins: AccountCoin[]): bigint => coins.reduce((sum, coin) => sum + coin.utxo.output.valueSatoshis, 0n);
 
 export class OwnerWallet {
+  /**
+   * Coins that transactions of this wallet have spent since it was opened. A key holder may go on listing a
+   * coin for a moment after the transaction that spends it was sent; the wallet does not use it again.
+   */
+  private readonly spent = new Set<string>();
+  private readonly preparedInputs = new Map<string, string[]>();
+
   private constructor(
     private readonly backend: WalletBackend,
     private readonly chain: ChainReader,
@@ -164,6 +173,25 @@ export class OwnerWallet {
     await wallet.backend.ordinaryAddress();
     if (wallet.state.identity !== undefined) await wallet.makeKnown();
     return wallet;
+  }
+
+  /** The coins the key holder follows, without those this wallet has already spent. */
+  private async coins(): Promise<AccountCoin[]> {
+    return (await this.backend.coins()).filter((coin) => !this.spent.has(`${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`));
+  }
+
+  /** Have the key holder build, sign and check a transaction, and note which coins it spends. */
+  private async prepareTransaction(request: TransactionRequest): Promise<PreparedTransaction> {
+    const prepared = await this.backend.prepare(request);
+    this.preparedInputs.set(prepared.invitationIdentifier, request.inputs.map(({ coin }) => `${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`));
+    return prepared;
+  }
+
+  /** Send a prepared transaction and remember which coins it spent. */
+  private async sendPrepared(prepared: PreparedTransaction): Promise<void> {
+    await this.backend.send(prepared);
+    for (const place of this.preparedInputs.get(prepared.invitationIdentifier) ?? []) this.spent.add(place);
+    this.preparedInputs.delete(prepared.invitationIdentifier);
   }
 
   private store(change: Partial<OwnerWalletState>): void {
@@ -206,7 +234,7 @@ export class OwnerWallet {
 
   /** Ordinary coins at the funding address. */
   private async fundingCoins(): Promise<AccountCoin[]> {
-    return (await this.backend.coins()).filter((coin) => coin.template === 'coins' && tokenFree(coin));
+    return (await this.coins()).filter((coin) => coin.template === 'coins' && tokenFree(coin));
   }
 
   async fundingAddress(): Promise<Uint8Array> {
@@ -255,10 +283,10 @@ export class OwnerWallet {
   }
 
   /** The wallet's payment to itself: every funding coin to one output at the funding address, which is then output 0. */
-  private async selfPayment(coins: AccountCoin[]): Promise<ReturnType<WalletBackend['prepare']>> {
+  private async selfPayment(coins: AccountCoin[]): Promise<PreparedTransaction> {
     const funding = await this.fundingAddress();
     const bytes = transactionBytes(coins.map(() => INPUT_BYTES.p2pkh), [{ lockingBytecode: funding, valueSatoshis: 0n }]);
-    return this.backend.prepare({
+    return this.prepareTransaction({
       template: 'actions',
       action: 'pay',
       role: 'owner',
@@ -298,7 +326,7 @@ export class OwnerWallet {
         const prepared = await this.selfPayment(coins);
         // The identity is recorded before the transaction that defines it is sent.
         this.store({ identity: prepared.transactionId, creation: { prepareTransactionId: prepared.transactionId, confirmed: false } });
-        await this.backend.send(prepared);
+        await this.sendPrepared(prepared);
       }
     }
 
@@ -311,7 +339,7 @@ export class OwnerWallet {
       if (unspent.length > 0) {
         const prepared = await this.selfPayment(unspent);
         this.store({ identity: prepared.transactionId, creation: { prepareTransactionId: prepared.transactionId, confirmed: false } });
-        await this.backend.send(prepared);
+        await this.sendPrepared(prepared);
       }
     }
     // A coin of the wallet's own last transaction may take a moment to be listed.
@@ -353,7 +381,7 @@ export class OwnerWallet {
     if (left < smallestOutputValue(rest)) {
       throw new InsufficientFundsError(coin.utxo.output.valueSatoshis, fee, coin.utxo.output.valueSatoshis - left + smallestOutputValue(rest), 'the funding coin does not cover the controller, the coin for cancelling, the allowance and the fee.');
     }
-    const prepared = await this.backend.prepare({
+    const prepared = await this.prepareTransaction({
       template: 'controller',
       action: 'create',
       role: 'owner',
@@ -367,7 +395,7 @@ export class OwnerWallet {
     validateGenesis(transaction, hexToBin(prepared.transactionId), identity);
     const { createSeen: _unseen, ...creation } = this.state.creation;
     this.store({ creation: { ...creation, createTransactionId: prepared.transactionId, confirmed: false } });
-    await this.backend.send(prepared);
+    await this.sendPrepared(prepared);
     await this.backend.knowController(identity, 'owner');
     return this.creationStep();
   }
@@ -411,7 +439,7 @@ export class OwnerWallet {
 
   private async controllerCoin(): Promise<{ coin: AccountCoin; state: ControllerState }> {
     const locking = hex(controllerScript(this.identity).lockingBytecode);
-    const coin = await this.waitForCoin(async () => (await this.backend.coins()).find((candidate) => hex(candidate.utxo.output.lockingBytecode) === locking && candidate.utxo.output.token !== undefined));
+    const coin = await this.waitForCoin(async () => (await this.coins()).find((candidate) => hex(candidate.utxo.output.lockingBytecode) === locking && candidate.utxo.output.token !== undefined));
     const commitment = coin.utxo.output.token?.nft?.commitment;
     if (commitment === undefined) throw new Error('The controller carries no state.');
     return { coin, state: decodeControllerState(commitment) };
@@ -419,7 +447,7 @@ export class OwnerWallet {
 
   /** The wallet's coins by where they are. */
   private async sorted(): Promise<{ own: AccountCoin[]; cancelling: AccountCoin[]; vault: AccountCoin[]; funding: AccountCoin[]; tokens: AccountCoin[] }> {
-    const coins = await this.backend.coins();
+    const coins = await this.coins();
     const cancelAt = this.state.cancelCoinNumber === undefined || this.state.identity === undefined ? undefined : hex(this.address(ADDRESS_KIND.change, this.state.cancelCoinNumber).lockingBytecode);
     const controllerAt = this.state.identity === undefined ? undefined : hex(controllerScript(this.identity).lockingBytecode);
     const atAddress = coins.filter((coin) => hex(coin.utxo.output.lockingBytecode) !== controllerAt && coin.template !== 'coins');
@@ -513,14 +541,14 @@ export class OwnerWallet {
       this.store({ allocation: returnNumber(taken.allocation, ADDRESS_KIND.change, taken.number) });
     }
     const chosen = choice.coins.map(({ utxo }) => own.find((coin) => coin.utxo === utxo) as AccountCoin);
-    const prepared = await this.backend.prepare({
+    const prepared = await this.prepareTransaction({
       template: 'actions',
       action: 'pay',
       role: 'owner',
       inputs: [...moving, ...chosen].map((coin) => ({ coin })),
       outputs: [...outputs, ...(choice.changeSatoshis === undefined ? [] : [{ lockingBytecode: changeAddress.lockingBytecode, valueSatoshis: choice.changeSatoshis }])],
     });
-    await this.backend.send(prepared);
+    await this.sendPrepared(prepared);
     return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: choice.remainderSatoshis };
   }
 
@@ -549,7 +577,7 @@ export class OwnerWallet {
     const [payer] = cancelling;
     if (payer === undefined) throw new Error('The wallet holds no coin for cancelling. It cannot cancel until that coin is restored.');
     const next = afterOwnerAuthorize(state);
-    const prepared = await this.backend.prepare({
+    const prepared = await this.prepareTransaction({
       template: 'controller',
       action: 'approve',
       role: 'owner',
@@ -557,7 +585,7 @@ export class OwnerWallet {
       inputs: [{ coin, inputIdentifier: 'approveInput' }, { coin: payer }],
       outputs: [{ outputIdentifier: 'controllerOutput' }],
     });
-    await this.backend.send(prepared);
+    await this.sendPrepared(prepared);
     return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: prepared.feeSatoshis - requiredFee(prepared.bytes, this.feeRate) };
   }
 
@@ -589,7 +617,7 @@ export class OwnerWallet {
     else if ('number' in taken) this.store({ allocation: returnNumber(taken.allocation, ADDRESS_KIND.change, taken.number) });
     if (choice.changeSatoshis !== undefined) await this.makeAddresses(ADDRESS_KIND.change, changeNumber + 1);
     const payers = choice.coins.map(({ utxo }) => own.find((other) => other.utxo === utxo) as AccountCoin);
-    const prepared = await this.backend.prepare({
+    const prepared = await this.prepareTransaction({
       template: 'controller',
       action: 'changeSettings',
       role: 'owner',
@@ -603,7 +631,7 @@ export class OwnerWallet {
       inputs: [{ coin, inputIdentifier: 'changeSettingsInput' }, ...payers.map((other) => ({ coin: other }))],
       outputs: [{ outputIdentifier: 'controllerOutput' }, ...(choice.changeSatoshis === undefined ? [] : [{ lockingBytecode: changeAddress.lockingBytecode, valueSatoshis: choice.changeSatoshis }])],
     });
-    await this.backend.send(prepared);
+    await this.sendPrepared(prepared);
     return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: choice.remainderSatoshis };
   }
 
@@ -629,7 +657,7 @@ export class OwnerWallet {
       let prepared;
       if (withController) {
         const { coin, state } = await this.controllerCoin();
-        prepared = await this.backend.prepare({
+        prepared = await this.prepareTransaction({
           template: 'controller',
           action: 'approve',
           role: 'owner',
@@ -638,9 +666,9 @@ export class OwnerWallet {
           outputs: [{ outputIdentifier: 'controllerOutput' }, { ...destination, valueSatoshis: sent }],
         });
       } else {
-        prepared = await this.backend.prepare({ template: 'actions', action: 'pay', role: 'owner', inputs: coins.map((coin) => ({ coin })), outputs: [{ ...destination, valueSatoshis: sent }] });
+        prepared = await this.prepareTransaction({ template: 'actions', action: 'pay', role: 'owner', inputs: coins.map((coin) => ({ coin })), outputs: [{ ...destination, valueSatoshis: sent }] });
       }
-      await this.backend.send(prepared);
+      await this.sendPrepared(prepared);
       transactions.push({ transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: 0n });
       sentSatoshis += sent;
     };
@@ -707,15 +735,15 @@ export class OwnerWallet {
       const earlier = planSendEverything({ coins: before.map((coin) => spendable(coin, INPUT_BYTES.byKey)), destination, feeRate: this.feeRate });
       const transactions: Sent[] = [];
       for (const part of earlier.parts) {
-        const prepared = await this.backend.prepare({ template: 'actions', action: 'pay', role: 'owner', inputs: part.coins.map((entry) => ({ coin: (entry as ReturnType<typeof spendable>).coin })), outputs: [{ ...destination, valueSatoshis: part.sentSatoshis }] });
-        await this.backend.send(prepared);
+        const prepared = await this.prepareTransaction({ template: 'actions', action: 'pay', role: 'owner', inputs: part.coins.map((entry) => ({ coin: (entry as ReturnType<typeof spendable>).coin })), outputs: [{ ...destination, valueSatoshis: part.sentSatoshis }] });
+        await this.sendPrepared(prepared);
         transactions.push({ transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: 0n });
       }
       const closing = await this.close(toLockingBytecode);
       return { transactions: [...transactions, ...closing.transactions], sentSatoshis: earlier.sentSatoshis + closing.sentSatoshis, feeSatoshis: earlier.feeSatoshis + closing.feeSatoshis, leftOut: closing.leftOut };
     }
     const [part] = plan.parts as [(typeof plan.parts)[number]];
-    const prepared = await this.backend.prepare({
+    const prepared = await this.prepareTransaction({
       template: 'controller',
       action: 'close',
       role: 'owner',
@@ -723,7 +751,7 @@ export class OwnerWallet {
       inputs: [{ coin: controller, inputIdentifier: 'closeInput' }, ...part.coins.map((entry) => ({ coin: (entry as ReturnType<typeof spendable>).coin }))],
       outputs: [{ ...destination, valueSatoshis: part.sentSatoshis }],
     });
-    await this.backend.send(prepared);
+    await this.sendPrepared(prepared);
     return {
       transactions: [{ transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: 0n }],
       sentSatoshis: part.sentSatoshis,
