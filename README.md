@@ -11,6 +11,7 @@ The first design, with its web demonstration and chipnet runs, is on the `main` 
 ## Documents
 
 - [Design](docs/design.html) (open in a browser)
+- [Implementation plan](IMPLEMENTATION_PLAN.md)
 - [Decisions log](docs/decisions.md)
 - What was learned about the XO engine: [trial](docs/xo-spike.md), [signing problem](docs/xo-engine-signing-bug.md), [chipnet header verification](docs/xo-chipnet-header-verification.md), [notes for feedback](docs/xo-feedback-notes.md)
 
