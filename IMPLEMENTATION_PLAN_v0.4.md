@@ -10,11 +10,12 @@ This plan gives the order of work and what must be true before each stage counts
 ## Rules that hold throughout
 
 - **Mainnet-capable code.** Chipnet is where it runs for now; nothing may depend on chipnet. Waiting periods are in time, not blocks.
-- **Test coins are not lost.** Every key, and every viewing-key record, is written to disk in a git-ignored folder before its address is funded. A test that erases a device keeps the test's own copy apart from the device's. Every run ends by returning what it holds, except a token that still opens something. What a run leaves behind is listed in `.xo-demo/leftovers.md`.
+- **Test coins are not lost.** Every key, and every viewing-key record, is written to disk in a git-ignored folder before its address is funded. A test that erases a device keeps the test's own copy apart from the device's. Every run ends by returning what it holds, except a token that still opens something. A run that has no further use for its wallet closes it, so that the controller's value comes back too (proposal section 5.8). What a run leaves behind is listed in `.xo-demo/leftovers.md`.
 - **The wallet knows no application.** Anything the wallet does for an application comes from the application's template. A test fails if wallet or recoverer code names one, or behaves differently for one.
 - **Applications work with ordinary wallets too.** The demonstration applications are checked with Cashonize as well as with this wallet.
 - **No signature before its dependencies are stored.** The wallet releases no signature that depends on a template, a viewing key or a kit that is not yet where the proposal's section 10.5 requires it.
 - **Every transaction is checked before it is signed.** Whoever built it, it passes this project's own script check against the outputs it spends.
+- **Every transaction pays the exact fee.** One check, used by every stage before anything is sent, holds a transaction to the fee rules of the proposal's section 8: the fee is the signed size times the rate, and no output is below its smallest value.
 - **Chain state is not called verified.** Confirmations are taken from the configured servers, which include the user's own node. Until a device checks block headers itself, results say so (proposal section 17).
 - **Each stage ends with `npm run check` passing** and, where the stage says so, a recorded run on chipnet, with compiler and library versions and transaction identifiers. A stage is not done while one of its tests is open; an open one is written down with its reason, not passed over. A test that passes on the simulated chain is run again where a later stage puts it on chipnet or in a browser.
 - **Pushes** happen at the milestones marked below, or when asked.
@@ -49,7 +50,7 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 | Can one invitation carry the controller and several address inputs of the same wallet template, each with its own secret? | This is the sweep (section 11.2). | Yes, or the smallest change that makes it so. |
 | How does a transaction of an application's template take inputs and outputs of the wallet's template, when an invitation is for one template? | Every application action is such a transaction (stages 7 to 9). | The route: by the engine, by a combined template with a fixed identifier, or by our own builder. |
 | Can a new seed, in a new account, take over an identity that another account created, and then sign for its controller and sweep? | This is recovery on the engine (stage 5). | Yes with how, or what our own code has to do. |
-| Do `RecoverableAddress` and `VaultAddress` compile as the proposal gives them, and what does each kind of input cost? | Fees, the allowance, and the "larger transactions" cost. | The earlier trial repeated inside the repository (96 and 75 bytes of rules, approval check first, cashc 0.14.0), with the bytecode kept; sizes of an input spent by key, a swept input and a vault input, measured on transactions in the virtual machine. |
+| Do `RecoverableAddress` and `VaultAddress` compile as the proposal gives them, and what does each kind of input cost? | Fees, what a request and a completion need, and the "larger transactions" cost. | The earlier trial repeated inside the repository (96 and 75 bytes of rules, approval check first, cashc 0.14.0), with the bytecode kept; sizes of an input spent by key, a swept input and a vault input, measured on transactions in the virtual machine. |
 | Which signing type do the wallet's own inputs use? | The engine's `0x61` signatures are invalid with several inputs. | The local fix, a signer of our own, or `0x41`; one answer, tested. |
 | Does the engine's header check work on chipnet with the local fix? | What the wallet may say about confirmations. | Whether the verified height follows the chain with the fix. Not a gate: the rule on chain state above holds either way. |
 | How large can the address ranges be? | The full pass looks up every address of every range for every seed (section 7.7). | Time and number of requests for candidate sizes, against the user's own server and a public one, with any limit on subscriptions. Sizes `N0`, `N1`, `N2` and the interval for repeating the full pass, chosen and written into the proposal. |
@@ -58,16 +59,17 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 
 ## Stage 1 — The two addresses
 
-**Builds:** `RecoverableAddress(tag, keyHash)` with `spend` and `sweep`; `VaultAddress(tag)` with `spend`; their script helpers in `packages/core`; a test wallet that holds coins at such addresses. The controller stays as it is and gains two tests.
+**Builds:** `RecoverableAddress(tag, keyHash)` with `spend` and `sweep`; `VaultAddress(tag)` with `spend`; their script helpers in `packages/core`; a test wallet that holds coins at such addresses. The controller gains `ownerClose` (section 5.8), starting from the trial the proposal reports, and five tests. The transaction builder gains the fee rules of section 8 that do not depend on choosing coins: the smallest value of each output from its own size, the check before sending, and no limit on the fee in satoshis.
 
 **Reads:** `design-1:contracts/asset.cash`, `design-1:packages/core/test/protected.test.ts`, `design-1:packages/core/test/wallet-flow.test.ts`, `design-1:packages/chipnet/src/lifecycle.ts`.
 
 **Exit**
 
-- **CT01–CT12 and AD01–AD13** pass in the virtual machine, with standardness on and under both accepted signing types. CT01–CT10 exist; CT11 (a request that names the current owner) and CT12 (the highest epoch, malformed states) are new.
+- **CT01–CT15, AD01–AD13 and FE01–FE03** pass in the virtual machine, with standardness on and under both accepted signing types. CT01–CT10 exist; CT11 (a request that names the current owner), CT12 (the highest epoch, malformed states) and CT13–CT15 (closing) are new.
+- The sizes of section 5.8 are measured again on the contract as built, and the proposal's figures are corrected where they differ.
 - Each refusal is shown to come from the script that is meant to refuse: the address script for AD04 to AD07, while the controller input alone is satisfied.
 - AD08 is kept as a passing test of known behaviour: the earlier seed spends an unswept coin.
-- A scripted run on chipnet: create a controller, receive at three addresses and a vault address, pay by key, request, cancel, request, complete, sweep to the new owner's addresses, spend the vault coin. The same refusals are observed from the network. The log is committed.
+- A scripted run on chipnet: create a controller, receive at three addresses and a vault address, pay by key, request, cancel, request, complete, sweep to the new owner's addresses, spend the vault coin, and close: the last coins and the controller's value go back in one transaction. The same refusals are observed from the network. The log is committed.
 - **Push.**
 
 ## Stage 2 — Keys, viewing key, giving out and finding addresses
@@ -84,16 +86,16 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 
 ## Stage 3 — Creating a wallet; the wallet on the XO engine
 
-**Builds:** the wallet's XO template with every action of section 13.2 (create, pay, cancel, change settings, sweep, spend from a vault address; request and complete for the recoverer); the account that drives the engine, or the division settled in stage 0; creating a wallet as in section 7.9; receiving, paying, holding tokens.
+**Builds:** the wallet's XO template with every action of section 13.2 (create, pay, cancel, change settings, sweep, spend from a vault address; request and complete for the recoverer); the account that drives the engine, or the division settled in stage 0; creating a wallet as in section 7.9; receiving, paying, holding tokens; choosing coins and sending everything as in section 8; a tool that closes a wallet, with its refusals.
 
 **Reads:** `design-1:packages/templates/src/grandmas-wallet.ts`, `design-1:packages/app/src/account.ts`, `design-1:packages/app/src/owner.ts`, `design-1:packages/xo-demo/src/run.ts`, [docs/xo-spike.md](docs/xo-spike.md).
 
-**Creating a wallet** uses the credential from stage 2: fund the funding address; pay itself if the coin is not an output 0; create the controller with the recovery key hash; check the creation; move the rest; set aside the recoverer's allowance at the fee key's address and the owner's coin for cancelling; wait for confirmation before giving out an address; continue correctly after a stop at any point.
+**Creating a wallet** uses the credential from stage 2: fund the funding address; pay itself if the coin is not an output 0; create the controller with the recovery key hash; check the creation; move the rest; set aside the owner's coin for cancelling and, if the user chose to give one, an allowance at the recoverer's fee address; wait for confirmation before giving out an address; continue correctly after a stop at any point.
 
 **Exit**
 
-- **CR01–CR04** pass.
-- On chipnet, by the route stage 0 settled: create a wallet, receive at fresh addresses, pay with change to a fresh address, receive and send a token.
+- **CR01–CR04 and FE04–FE08** pass.
+- On chipnet, by the route stage 0 settled: create a wallet, receive at fresh addresses, pay with change to a fresh address, receive and send a token, send everything, and close.
 - The template passes the XO validator; a test checks that the scripts in the template are the compiled contracts, byte for byte.
 - The invitations of the run load in the XO debugging tool. What the engine did not build is not presented as an invitation.
 - Recovery is shown as off: nothing in this stage confirms a kit.
@@ -109,7 +111,7 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 - **RC01–RC11, BK01–BK03, BK07, BK08 and OP01** pass.
 - "Recovery is on" appears only with a receipt that matches what was sent and the controller's confirmed state (RC04, RC10).
 - The enrollment message is measured as the link a phone has to read (RC01).
-- The allowance pays for three cancelled requests, a fourth and its completion, at a stated fee rate (RC06).
+- The recoverer pays for three cancelled requests, a fourth and its completion from its fee address, with an allowance and with coins it added itself; with an empty fee address its software says beforehand what is missing (RC06).
 - The interface offered to stage 7 for "this template is stored" exists and is tested without an application.
 
 ## Stage 5 — A new device takes over; a new seed without loss; a new recoverer
@@ -120,14 +122,14 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 
 **Exit**
 
-- **SW01–SW08, MG01–MG08, KV06, BK09 and PV03** pass.
+- **SW01–SW08, MG01–MG08, KV06, BK09, PV03 and FE09** pass.
 - Every step of a recovery, of a move to a new seed and of a replacement is stopped once in a test and continued (MG08). The earlier kit is still usable until the new one is confirmed.
 - The complete course on chipnet, recorded with its transactions (SW02): the device is erased, the new device takes over, finishes the full pass and sweeps.
 - **Push. This is the point at which the branch replaces `main`.** The public sites are not touched by this.
 
 ## Stage 6 — The pages
 
-**Builds:** the wallet page and the recoverer page on the parts above, including: the steps of creating a wallet; "recovery is on" and what it rests on; the vault address; using an address again when a window is full; the coin for cancelling and the allowance; moving to a new phone; replacing the recoverer; the local backup; the alarm; the wallet owned elsewhere.
+**Builds:** the wallet page and the recoverer page on the parts above, including: the steps of creating a wallet; "recovery is on" and what it rests on; the vault address; using an address again when a window is full; the fee of each transaction and sending everything; the coin for cancelling; the recoverer's fee address, what it holds and what it needs; moving to a new phone; replacing the recoverer; the local backup; the alarm; the wallet owned elsewhere.
 
 **Reads:** `design-1:apps/wallet/`, `design-1:apps/recoverer/`, `design-1:scripts/browser-demo.mjs`, `design-1:docs/web-apps.md`, `deploy/`.
 
@@ -191,17 +193,17 @@ Three steps, each worth having without the next.
 
 | Stage | Tests |
 | --- | --- |
-| 1 | CT01–CT12, AD01–AD13 |
+| 1 | CT01–CT15, AD01–AD13, FE01–FE03 |
 | 2 | KV01–KV05, KV07–KV13, PV01, PV02 |
-| 3 | CR01–CR04 |
+| 3 | CR01–CR04, FE04–FE08 |
 | 4 | RC01–RC11, BK01–BK03, BK07, BK08, OP01 |
-| 5 | SW01–SW08, MG01–MG08, KV06, BK09, PV03 |
+| 5 | SW01–SW08, MG01–MG08, KV06, BK09, PV03, FE09 |
 | 6 | OP02, OP03 |
 | 7 | AP01–AP09, AP11–AP15, BK04–BK06, BK10 |
 | 8 | SJ01–SJ06, AP10 |
 | 9 | PY01–PY04 |
 
-All 110 tests of the proposal's section 21 are in this table once.
+All 122 tests of the proposal's section 21 are in this table once.
 
 ## Decisions
 
@@ -215,7 +217,7 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 4 | The viewing key's written form | Stage 2 | Two values in one signed record |
 | 5 | Readable controller state | Settled | Readable, as the controller is |
 | 6 | Waiting period for real use; margin; automatic cancelling | Stage 6 | Time only; length and default open |
-| 7 | Fee amounts and the fee rate they assume | Stage 1 for sizes, stage 3 for amounts | Four requests and one completion; one cancellation |
+| 7 | Fees: the rate; the coin for cancelling; an allowance for the recoverer | Stage 1 for sizes, stage 3 for amounts | One satoshi per byte; one cancellation; an allowance offered and not required, for four requests and one completion |
 | 8 | Messages with the recoverer; how the recoverer knows the user | Stage 4 | As in sections 9 and 11 |
 | 9 | Backup record formats; refusing without a stored template | Stage 4, for stage 7 | Refusing stays the default |
 | 10 | Template extension and recovery declaration | Stage 7; XO's word by stage 10 | The four kinds; a companion document until XO says |
@@ -227,3 +229,4 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 16 | Watching and confidence in the chain | Stage 0, stage 4, stage 6 | The user's own node among the servers; no claim beyond what is shown |
 | 17 | ParyonUSD: telling the team; the licence | Stage 9 | Ask before starting the stage |
 | 18 | When the public sites switch | Stage 6 | After the scripted run passes on them |
+| 19 | Closing a wallet: kept in a released controller, kept out of the interface, or offered | Stage 1 for the contract; stage 10 for a release | In every controller; used by the test runs and a tool; not offered in the interface |

@@ -42,7 +42,7 @@ The recoverer is trusted to name the right new owner **once the waiting period h
 | Area | Requirement or decision |
 | --- | --- |
 | User custody | The seed is generated on the phone and is never given to the recoverer or to an application. It leaves the phone only if the user chooses to make a local backup (section 18). Spending does not need the recoverer. |
-| Recovery authority | The recoverer's key cannot spend a coin of the wallet and cannot shorten the wait. It can only request and, after the waiting period, complete a change of owner. A recoverer who installs a key of its own after a wait that nobody cancelled is then the owner. The fee allowance (section 9.6) is the recoverer's own. |
+| Recovery authority | The recoverer's key cannot spend a coin of the wallet and cannot shorten the wait. It can only request and, after the waiting period, complete a change of owner. A recoverer who installs a key of its own after a wait that nobody cancelled is then the owner. The recoverer pays the fees of its own transactions; coins the owner gives it for that purpose (section 9.6) are the recoverer's own. |
 | Loss detection | The absence of a cancellation is the observable condition. Actual loss cannot be proven. |
 | Destination | The new owner key is named when recovery is requested, not at setup. |
 | User backups | None required. A local backup is possible as an addition (section 18). |
@@ -51,6 +51,8 @@ The recoverer is trusted to name the right new owner **once the waiting period h
 | Finding coins | From the identity and the viewing keys alone, by deriving addresses in order and looking them up. A complete search covers fixed ranges that belong to the address scheme. No list of addresses is kept anywhere. |
 | Viewing key | One for each seed. Held by the phone and the recoverer, with a sealed copy on backup stores. It shows every address and balance of its seed and gives no power to spend. Earlier ones are kept. |
 | Asset support | BCH, fungible CashTokens and NFTs, at the same addresses. |
+| Fees | The lowest fee that nodes relay, worked out exactly from the signed transaction (section 8). |
+| Emptying | Every satoshi that is not under a token can be sent out in one action, as far as the network's smallest output allows (section 8). The owner can also close the controller and take its value; the action is in the script and is not offered in the wallet's ordinary interface (section 5.8). |
 | Application positions | Recoverable when they follow three rules (section 12): authority is a token, the wallet's inputs and outputs are the wallet's business, and the token leads to the position. |
 | Wallet and applications | The wallet knows no application. It builds each transaction itself from the application's XO template. The same application must also work with an ordinary wallet. |
 | Application connections | WizardConnect with an extension, `xo_v1`. |
@@ -63,7 +65,7 @@ The recoverer is trusted to name the right new owner **once the waiting period h
 
 **Owner's device.** Holds the seed, signs payments, watches the controller, cancels unwanted requests. Whoever can use the device can spend at once; recovery is no protection against that.
 
-**Recoverer.** Holds the recovery kit: its key for this wallet, the identity and the viewing key of every seed. It can request and complete a recovery, and it can see every address and balance of the wallet. Its key cannot spend a coin of the wallet, cannot shorten the wait and cannot complete with a key other than the one it requested. The fee allowance is its own to spend. After a wait that nobody cancelled, it can install a key of its own choosing and is then the owner; preventing that is outside the trust model.
+**Recoverer.** Holds the recovery kit: its key for this wallet, the identity and the viewing key of every seed. It can request and complete a recovery, and it can see every address and balance of the wallet. Its key cannot spend a coin of the wallet, cannot shorten the wait and cannot complete with a key other than the one it requested. It pays the fees of its two transactions from coins of its own (section 9.6). After a wait that nobody cancelled, it can install a key of its own choosing and is then the owner; preventing that is outside the trust model.
 
 **New device.** Makes a new seed. Before the request it has no power. After completion it is the owner: it sweeps and spends.
 
@@ -93,13 +95,13 @@ The recoverer is trusted to name the right new owner **once the waiting period h
 
 ### 4.1 Identity and controller
 
-The wallet's **identity** is the token category of one NFT. The coin that holds this NFT is the **controller**. The NFT's commitment is the controller's state. The controller's script accepts four actions and always sends the NFT back to its own address with the next state.
+The wallet's **identity** is the token category of one NFT. The coin that holds this NFT is the **controller**. The NFT's commitment is the controller's state. The controller's script accepts five actions. Four of them send the NFT back to its own address with the next state. The fifth, which only the owner can sign, closes the wallet and destroys the NFT (section 5.8).
 
 The identity is fixed when the controller is created and never changes. The owner key, the recoverer and the waiting period are fields of the state and can change. The identity is public, but it is not written in any address.
 
 The controller's address is specific to the wallet: the script takes the identity as a parameter. A wallet's controller can therefore be found and watched by address, and a notification for that address concerns that wallet only.
 
-The controller carries 1,000 satoshis. A wallet's coins are separate outputs at separate addresses.
+The controller carries 1,000 satoshis; nodes relay no such output below 888. A wallet's coins are separate outputs at separate addresses.
 
 ### 4.2 Two ways into every coin
 
@@ -169,15 +171,19 @@ The state is readable by anyone. A hashed state would not hide it for long: the 
 | `requestRecovery` | Recoverer's key | Active only | Pending with the named proposed owner; nothing else changes | First step of recovery |
 | `finalizeRecovery` | Recoverer's key, after the waiting period | Pending only | Active; the proposed owner becomes the owner; epoch + 1 | Second step of recovery |
 | `ownerUpdate` | Owner's controller key | Active or Pending | Active with the given owner, recoverer and waiting period; epoch + 1 only if the owner changed; any request cleared | Moving to a new seed without the recoverer; changing the recoverer or the waiting period |
+| `ownerClose` | Owner's controller key | Active or Pending | No controller: the NFT is destroyed and the identity ends | Emptying a wallet for good (section 5.8) |
 
-Rules that hold for every action:
+A rule that holds for every action:
+
+- The signature must cover every input and every output. Two signing types are accepted: `0x41` (all inputs and outputs) and `0x61` (the same, plus the amount and script of every spent output). The current XO engine cannot produce a valid `0x61` signature for a transaction with more than one input (decision D8), so `0x41` has to be accepted.
+
+Rules that hold for the four actions that continue the controller:
 
 - The controller is input 0 and its successor is output 0. The transaction version is 2.
 - The successor has the same locking script, the same token category and capability (mutable), the same fungible amount, and at least the same value in satoshis.
-- The signature must cover every input and every output. Two signing types are accepted: `0x41` (all inputs and outputs) and `0x61` (the same, plus the amount and script of every spent output). The current XO engine cannot produce a valid `0x61` signature for a transaction with more than one input (decision D8), so `0x41` has to be accepted.
 - Anyone may attach further inputs and outputs. The signer's signature covers all of them.
 
-The contract is `contracts/controller.cash`: 412 bytes compiled, plus the 33-byte push of the identity.
+The contract is `contracts/controller.cash`. With the four continuing actions it is 412 bytes compiled, plus the 33-byte push of the identity. A trial compilation with `ownerClose` gives 457 bytes.
 
 ### 5.3 Requesting recovery
 
@@ -220,6 +226,32 @@ The contract cannot require any of the preparation. An owner can change keys wit
 A token category is the identifier of the transaction whose output 0 the creating transaction spends. Creating an identity therefore needs a coin of the wallet that is output 0 of its transaction; the wallet makes one by paying itself if it has none (section 7.9).
 
 The controller's script does not check its own first state. Before trusting an identity, a client must check the creating transaction: exactly one output carries a token of the category; it is an NFT with mutable capability and no fungible amount; its commitment is a valid Active state with epoch 0; and it is locked by the controller script for that identity. No minting capability may exist. With a mutable token and a fixed fungible amount, the network's own rules then prevent a second token of the category from ever being created. From there the client follows each spend of the controller to the current state, checking every transition (`packages/core/src/genesis.ts`, `history.ts`).
+
+### 5.8 Closing
+
+`ownerClose` ends an identity. It is signed by the owner's controller key, from Active or Pending. The transaction must have exactly one output, and that output carries no token. The identity NFT therefore has no successor and is destroyed, and the controller's 1,000 satoshis become part of that one output.
+
+A trial of the action (cashc 0.14.0, one satoshi per byte, checked with the network's relay rules in the virtual machine) gave:
+
+| Measured | Result |
+| --- | --- |
+| Controller input | 637 bytes; 592 without the action |
+| Closing with no other input | 1,000 − 681 = 319 satoshis, below the smallest output, so it cannot be sent |
+| Closing together with other coins | Adds 1,000 satoshis and 637 bytes: 363 satoshis more arrive |
+| Every other controller transaction | 45 bytes larger |
+
+The trial refused a closing signed by the recoverer or by another key, one with two outputs, and one that kept the NFT. It accepted a closing while a request was pending.
+
+Consequences:
+
+- **Closing is the last step of emptying a wallet** (section 8). The transaction needs at least one other coin, spent by its key.
+- **A sweep or a vault spend cannot be part of it.** Both require the controller to continue (section 6). What only the controller can move is moved first.
+- **Vault addresses become unspendable for good.** A coin at a vault address when the wallet is closed, or one that arrives there later, is lost. This cannot be designed away: a vault address works only while the identity's token exists, and the controller's value is free only once the token is gone. Moving the token to a plain address instead would keep the vault addresses working and would leave about 860 satoshis under the token.
+- **Coins at an earlier seed's addresses obey only that seed afterwards.** Coins at the current seed's addresses stay spendable by their keys, and the twelve words with the identity still find them.
+- **There is no recovery afterwards, and no way back.**
+- **It gives the holder of the owner's key nothing new to take.** That key can already move every coin and change every setting. The recoverer cannot close, and neither can an earlier owner's key.
+
+The action is part of every controller, so that a wallet can be emptied to the last satoshi and leave nothing on chain; the test runs end this way. The wallet's ordinary interface does not offer it. It is reached through a tool, and whoever holds the owner's key can build the transaction without this software. The tool refuses while a vault coin or a token is held, or before the full pass (section 7.7) has finished for every seed. Whether a released wallet keeps the action, keeps it out of sight or offers it is decision 19.
 
 ## 6. The owner-approval rule
 
@@ -420,7 +452,7 @@ An address needs the identity, and the identity is the identifier of a transacti
 
 1. **Fund.** The user sends coins to the wallet's funding address, an ordinary P2PKH address of the funding key.
 2. **Prepare.** The wallet pays itself, so that it has a coin that is output 0 of its transaction. The identifier of this transaction is the identity. (If the coin received is already output 0 of its transaction, this step is not needed and that transaction's identifier is the identity.)
-3. **Create and move.** A transaction spends that coin and creates the controller, naming the recoverer's key hash and the waiting period. The rest is moved to recoverable addresses in the same transaction or the next, apart from two amounts that are set aside: the recoverer's fee allowance (section 9.6) and a small coin of the owner's that pays for a cancellation (section 8).
+3. **Create and move.** A transaction spends that coin and creates the controller, naming the recoverer's key hash and the waiting period. The rest is moved to recoverable addresses in the same transaction or the next, apart from a small coin of the owner's that is set aside to pay for a cancellation (section 8) and, if the user chooses to give one, an allowance for the recoverer's fees (section 9.6).
 
 The wallet checks the creating transaction as any client would (section 5.7) before it uses the identity. It gives out no address until the transaction that defines the identity and the one that creates the controller are confirmed: if the first were replaced, the identity would be another. If the device stops part-way, it continues from the transactions that exist and does not start a second identity. The interface shows the steps separately (funded, prepared, created, kit sent, recovery confirmed). Coins in the wallet do not by themselves mean that recovery is on.
 
@@ -435,6 +467,27 @@ Two things follow. The funding address is not recoverable; it is shown only unti
 **Application actions.** The wallet builds the transaction from the application's template, adds its own inputs and outputs, and signs with address keys (sections 12 to 14). Tokens that carry authority over a position are held at ordinary addresses.
 
 **Controller transactions.** Cancelling a request, changing settings, sweeping and spending from a vault address spend the controller. The fee is paid by a coin of the wallet, signed by its key. That coin, and its change, are visibly in a transaction with the identity. The wallet keeps a small coin for this purpose and does not mix its change with other coins. Ordinary payments leave that coin alone, and the wallet says so when it is missing (section 17).
+
+**Fees.** The wallet pays the lowest fee that nodes relay and works it out from the transaction itself.
+
+- **Rate.** A setting, one satoshi per byte by default, which is what nodes require. The wallet does not raise it by itself. If a server refuses a transaction for its fee, the wallet says so.
+- **Exact amount.** The fee is the size of the signed transaction in bytes times the rate, rounded up. The size is known before signing: signatures are Schnorr signatures of 65 bytes, public keys are compressed, and every script is fixed. The wallet measures the encoded transaction; it does not add up estimates.
+- **Smallest output.** Nodes relay no output below a value that depends on the output's own size: 546 satoshis for P2PKH, 576 for an address of this wallet without a token, 888 for the controller, and more for an output with a token, according to its token data. The wallet computes this for every output it creates.
+- **Choosing coins.** At a constant rate every coin costs its bytes once, whenever it is spent. What can be saved is the change output: 44 bytes now and about 300 when it is spent. The wallet therefore prefers a choice of coins that needs no change.
+- **A remainder too small to return.** If what is left after the fee is below the smallest change output, the wallet compares leaving it to the fee with adding a coin so that change becomes possible. It takes the cheaper and shows the amount as part of the fee.
+- **A check before sending.** The signed transaction is checked once more: its size is the one worked out, its fee is the required one plus at most such a remainder, and no output is below its smallest value. Otherwise it is not sent. There is no limit on the fee in satoshis, which would stand in the way of a transaction with many inputs.
+
+The same rules apply to controller transactions and to the transactions the wallet builds from an application's template.
+
+**Sending everything.** The wallet offers to send all its Bitcoin Cash to one address.
+
+- **What goes.** Every coin without a token, the coin kept for cancelling included. Everything is paid to the one address, there is no change, and the amount is the total less the exact fee.
+- **Coins that only the controller can move.** Vault coins, and coins at an earlier seed's addresses that are not yet swept, go in the same transaction, with the controller at input 0 and its successor, which keeps its 1,000 satoshis, at output 0. A wallet with more coins than one transaction holds sends several, each with its exact fee.
+- **Tokens.** The satoshis under a token stay with it. They leave when the token is sent, or when the user destroys the token on purpose, which is an action of its own.
+- **When it cannot be done.** Only when the total less the fee is below the smallest value of the destination output. A single P2PKH coin of 546 satoshis leaves 361, which cannot be sent. A wallet needs the smallest output plus the fee: about 900 satoshis in one coin at an address of this wallet, by the estimate of section 7.4, and more when the amount is spread over several coins. Below that the wallet shows the total, the fee and the smallest output, and sends nothing. A coin that costs more to spend than it holds is left out and listed; nodes relay no such coin at the default rate.
+- **What is left.** The controller with its 1,000 satoshis, coins with tokens, and whatever the recoverer holds. The wallet stays usable and recoverable. It says that it cannot cancel until it holds a coin again.
+
+**Closing.** Sending everything with the controller's `ownerClose` in the last transaction also takes the controller's value and ends the identity (section 5.8). It is not offered in the ordinary interface.
 
 **Who can spend what**
 
@@ -460,7 +513,7 @@ The third row is the cost of the design. Completing a recovery does not disarm t
 | Backup content key | Read the backup records | Owner's device, recoverer |
 | Connection keys | One session with one application | Wallet and application |
 
-No value in the second to sixth rows can be turned into a signature for a coin of the wallet. The recoverer's key signs the two recovery transactions, and a fee key that comes with it spends the recoverer's own allowance (section 9.6).
+No value in the second to sixth rows can be turned into a signature for a coin of the wallet. The recoverer's key signs the two recovery transactions, and a fee key that comes with it spends the recoverer's own coins for fees (section 9.6).
 
 ### 9.2 The recoverer's key
 
@@ -479,7 +532,7 @@ Who makes the key is a decision still to be taken (section 22). Two ways:
 
 This proposal takes the first as the default. The credential must be unrelated to the owner's seed: not a key of the owner's tree and not derivable from it. That a device has erased the credential cannot be shown to anyone, so an old device may still hold a copy (section 9.7).
 
-The credential gives two keys, at the same places in its own tree as the owner's controller key and funding key have in the owner's: the **recovery key** at `m / P' / S' / 0' / 0`, whose hash is in the controller, and a **fee key** at `m / P' / S' / 3' / 0`, which holds the fee allowance (section 9.6). They differ so that the allowance address cannot be computed from the controller's state. A recoverer that makes its own key gives the device two key hashes instead of one.
+The credential gives two keys, at the same places in its own tree as the owner's controller key and funding key have in the owner's: the **recovery key** at `m / P' / S' / 0' / 0`, whose hash is in the controller, and a **fee key** at `m / P' / S' / 3' / 0`, whose address holds the coins that pay the recoverer's fees (section 9.6). They differ so that this address cannot be computed from the controller's state. A recoverer that makes its own key gives the device two key hashes instead of one.
 
 ### 9.3 Delivery
 
@@ -498,7 +551,7 @@ Creating the wallet needs only the owner. The recoverer can open the message lat
 | Format, version, network | Unambiguous reading; no use on another network |
 | Identity and the identifier of the transaction that created it | Find and check the wallet. The transaction itself is fetched and checked, not taken from the message. |
 | Version of the controller rules; version of the address scheme; reference to the wallet's template (identifier and content hash) | Choose compatible behaviour |
-| Recovery credential, or a statement that the recoverer holds its own key | Authorize the request and the completion; spend the fee allowance |
+| Recovery credential, or a statement that the recoverer holds its own key | Authorize the request and the completion; pay their fees |
 | Viewing-key record of the current seed, and those of earlier seeds if any | Hand to a new device after completion |
 | Backup stores: addresses, archive identifier, content key; the same for earlier archives | Read the sealed records |
 | Policy as the owner saw it: owner key hash, recoverer key hash, waiting period, who the kit is for, time of making | Compare with the chain. The time is a note, not evidence. |
@@ -527,9 +580,13 @@ A receipt given before a change takes effect, for a new seed or a new recoverer,
 
 ### 9.6 Fees for the recoverer
 
-A request and a completion each need a coin to pay the fee; a controller transaction is about 1,000 bytes. When the wallet is created it sets aside an allowance for the recoverer at an ordinary single-key (P2PKH) address of the recoverer's fee key (section 9.2). The allowance is the recoverer's: it can spend it at any time, and the wallet does not show it as part of the user's balance.
+A request and a completion each need a coin to pay the fee. A controller transaction is about 1,000 bytes, so the two together cost about 2,000 satoshis at one satoshi per byte.
 
-The amount covers four requests and one completion, so that three requests the owner cancels still leave enough for a fourth and its completion. It is worked out from measured transaction sizes and a stated fee rate, with a margin. A recoverer can add coins of its own at any time, and the wallet tops the allowance up after a recovery (section 11.1). An empty allowance does not take away the recoverer's power. It means the recoverer has to bring a coin of its own.
+The recoverer pays them from coins of its own. These are kept at an ordinary single-key (P2PKH) address of the recoverer's fee key (section 9.2). The recoverer's software shows that address, what it holds, and what a request and a completion need. Anyone can send coins there from any wallet.
+
+The owner may give the recoverer an **allowance** when the wallet is created, by sending coins to that address. This is offered, not required. Its only purpose is that a recovery does not wait for the recoverer to obtain Bitcoin Cash; it adds no power, and doing without it takes none away. The suggested amount covers four requests and one completion, so that three requests the owner cancels still leave enough for a fourth and its completion, at measured sizes and the rate of section 8. An allowance, once given, is the recoverer's: it can spend it at any time, the wallet does not show it as part of the user's balance, and it comes back only if the recoverer sends it back.
+
+A recoverer without coins cannot send a request. Its software says so when the wallet is enrolled and whenever it is opened, not only at the moment of a recovery.
 
 The controller's own value cannot be used for fees: the successor must carry at least the same value.
 
@@ -555,7 +612,7 @@ No address of the new seed is given out before step 4 is confirmed. Each step ca
 4. The owner signs `ownerUpdate` with the new recovery key hash. This also clears a pending request.
 5. When the change is confirmed and matches the receipt, the wallet says that recovery is on again. If the controller moved in between, the receipt is prepared again against the new output.
 
-The wallet funds a new allowance for the new recoverer. What is left of the old allowance belongs to the old recoverer. Getting it back takes that recoverer's cooperation and is not counted on.
+The new recoverer pays its fees as the first did (section 9.6), and the owner may give it an allowance. What the old recoverer holds at its fee address is its own. Getting it back takes that recoverer's cooperation and is not counted on.
 
 The earlier recoverer keeps what it was given. Its key no longer works on the controller. It can still see the addresses of the seeds whose viewing keys it holds, including what arrives there later. To end its view of future payments, the owner also moves to a new seed and a new archive and gives those to the new recoverer only. What it has already seen cannot be taken back.
 
@@ -651,7 +708,7 @@ This protects records written from then on. It does not take back what the earli
 6. **Hand over.** The recoverer gives the new device, sealed to the device's encryption key: the identity, the identifier of the creating transaction, the viewing-key record of every earlier seed, the access to earlier archives, and its receipt for the kit as it now stands. The new device checks the identity's history itself and sees its own key as the owner. If something the recoverer should hold is missing, the device says so; it does not report an empty wallet.
 7. **Sweep.** The new device finds the coins and moves them to addresses of its own seed (section 11.2). It starts as soon as the quick pass has found something and goes on until the full pass has finished for every earlier seed. It moves first what is worth most, and it counts a token it does not understand as possibly valuable: such a token may carry authority over a position worth far more than the coin it sits on.
 8. **Understand what the tokens are.** A swept NFT is already under the new owner's control. To show it as "a jar with 0.3 BCH that opens in March", the wallet needs the application's template, from the backup or from the application when the user connects again. Recovery does not wait for this.
-9. **Resume protection.** The new device watches the controller, keeps watching earlier addresses, sets aside a coin for cancelling, and tops up the recoverer's fee allowance. It says that recovery is on once the recoverer's receipt names its viewing-key record.
+9. **Resume protection.** The new device watches the controller, keeps watching earlier addresses, and sets aside a coin for cancelling. If the recoverer paid for the recovery out of an allowance, the owner may give another. It says that recovery is on once the recoverer's receipt names its viewing-key record.
 
 The recoverer never learns the new device's seed. It does have the agreed power to name another key after an uncancelled wait, so identifying the user correctly stays its responsibility.
 
@@ -680,7 +737,7 @@ Rules for the wallet:
 | Party | Holds | Can do | Cannot do |
 | --- | --- | --- | --- |
 | Owner's device | The seed; the identity; the viewing key | Spend, cancel a request, change the recoverer | |
-| Recoverer | Its key for this wallet; the identity; the viewing keys; its fee allowance | Request and complete a recovery. See every address and balance. Spend its own allowance. | Spend a coin of the wallet with its key. Shorten the wait. Complete with a key other than the one requested. |
+| Recoverer | Its key for this wallet; the identity; the viewing keys; coins of its own for fees | Request and complete a recovery, and pay their fees. See every address and balance. | Spend a coin of the wallet with its key. Shorten the wait. Complete with a key other than the one requested. |
 | New device | Its own new seed. After completion: the identity and the earlier viewing keys. | After completion: sweep and spend | Anything before the wait is over |
 | Backup stores | Sealed records | Hand the records back | Read them |
 
@@ -759,8 +816,8 @@ The wallet is itself described by an XO template:
 | Part | Contents |
 | --- | --- |
 | Roles | Owner; recoverer |
-| Scripts | The controller, with its four ways to unlock. The recoverable address, with two (`spend`, `sweep`). The vault address. |
-| Owner actions | Create the wallet; pay; cancel a request; change settings; sweep; spend from a vault address |
+| Scripts | The controller, with its five ways to unlock. The recoverable address, with two (`spend`, `sweep`). The vault address. |
+| Owner actions | Create the wallet; pay; cancel a request; change settings; sweep; spend from a vault address; close the wallet |
 | Recoverer actions | Request recovery; complete recovery |
 
 The wallet's code computes what a template cannot guarantee: the next controller state, each tag, each secret. The template assembles them into transactions; the contracts enforce that they are right. A test checks that the scripts in the template are the compiled contracts, byte for byte.
@@ -1000,8 +1057,9 @@ Anyone can see that a controller exists and read its state. Two measures keep it
 | --- | --- |
 | Creating the wallet | The coins the wallet was funded with, and the first addresses they move to (section 7.9) |
 | Any controller transaction that a wallet coin pays for (cancel, change of settings) | That coin and its change |
-| The recoverer's request and completion | The recoverer's fee coins, which came from the wallet's first coins |
-| Topping up the recoverer's allowance after the recoverer has used it | The coin that pays the top-up |
+| The recoverer's request and completion | The recoverer's fee coins. If they came from an allowance, they lead back to the coin of the wallet that paid it. |
+| Sending everything, when a coin in it needs the controller | Every coin in that transaction, and the address it pays |
+| Closing | Every coin in the closing transaction, and the address it pays |
 | A sweep | Every address swept, and the new addresses the coins go to |
 | Spending from a vault address | That vault address |
 
@@ -1033,6 +1091,8 @@ The recoverer can read the wallet. That is a consequence of asking it to hold wh
 | Owned by a key this device does not hold | A recovery or a change of owner has happened | Stops giving out addresses and says so |
 
 **Cancelling costs a transaction.** Because ordinary use does not cancel, the device must be able to send one: it keeps a small coin for the fee (section 8). If that coin is missing, the wallet says that it cannot cancel and asks for the coin to be restored; it does not go on showing full protection. A phone that is switched on is not thereby watching the chain; background scheduling and notifications on phones need their own validation before any claim of protection is made.
+
+**Fees and emptying.** Before approval the wallet shows the fee of every transaction in satoshis, with any remainder that is too small to return. "Send everything" shows the amount that will arrive, and the three figures when it cannot be done (section 8). Closing a wallet is not in the interface.
 
 **A recovery while the old device still works.** If the user simply has a new phone, the old one moves the wallet with `ownerUpdate` and no waiting, in the order of section 9.7. If a request arrives and the old device is watching, it cancels; the software must not switch that off because a message says the recovery is wanted.
 
@@ -1077,7 +1137,7 @@ An unknown version is refused, never guessed at.
 
 An identity is bound to its controller script from its creation, and every address is bound to its identity. New controller rules therefore mean a new identity, with an enrollment of its own. A wallet moves to it by ordinary payments from its old addresses to addresses of the new identity. Application tokens move the same way, and vault coins are first released by the old controller. The two controllers cannot be in one transaction, since each must be input 0.
 
-The old identity does not end with the move. A vault address that was published, or a payout address stored in a contract, goes on being paid, and only the old controller releases what arrives there. The wallet keeps the old identity's controller, viewing keys, recoverer and watching for as long as something can still arrive, and a change of owner or of recoverer is made on both identities. An identity is not retired because its balance is zero.
+The old identity does not end with the move. A vault address that was published, or a payout address stored in a contract, goes on being paid, and only the old controller releases what arrives there. The wallet keeps the old identity's controller, viewing keys, recoverer and watching for as long as something can still arrive, and a change of owner or of recoverer is made on both identities. An identity is not retired because its balance is zero. Closing it (section 5.8) ends it for good and makes its vault addresses unspendable, so an old identity is closed only when nothing can arrive there any more.
 
 ## 19. Security and operational boundaries
 
@@ -1099,6 +1159,9 @@ The old identity does not end with the move. A vault address that was published,
 | The owner changes keys without the recoverer's receipt | Possible on chain. The wallet shows recovery as off until the recoverer confirms. |
 | A range of addresses is used up | The wallet uses addresses again, or the owner moves to a new seed. Spending is not affected. |
 | The owner's coin for cancelling is gone | The wallet says that it cannot cancel until the coin is restored |
+| The recoverer has no coins for fees | It cannot send a request. Its software says so beforehand, and anyone can send coins to its fee address. |
+| A wallet holds less than the smallest output plus the fee | It cannot be emptied. The wallet shows the total, the fee and the smallest output. |
+| The owner's key closes the wallet | The identity ends. Vault addresses are unspendable for good, coins at an earlier seed's addresses obey only that seed, and there is no recovery. Neither the recoverer's key nor an earlier owner's key can do this. |
 | Backup store is compromised or withholds | Nothing readable, nothing spendable. Templates and labels may be missing; coins and tokens are not affected. |
 | A record is forged by someone who knows the content key | Refused: it is not signed by an owner's key |
 | The holder of an earlier seed signs a new record | Genuine as to who signed it; it says nothing of when. It replaces no viewing-key record that a receipt names and makes no template trusted. |
@@ -1124,6 +1187,7 @@ The old identity does not end with the move. A vault address that was published,
 9. Applications have to be reached through a template; front ends that build transactions from the wallet's public keys cannot serve it.
 10. A complete search looks up every address of fixed ranges, for every seed the wallet has had, and a seed has a fixed number of fresh addresses.
 11. An address that outlives its controller's rules keeps the old identity in service.
+12. The closing action makes every controller transaction 45 bytes larger, and closing turns the identity's vault addresses into addresses nobody can spend from.
 
 ## 20. Implementation approach and status
 
@@ -1131,7 +1195,8 @@ The implementation uses XO's TypeScript packages, libauth for keys, transactions
 
 | Item | Status |
 | --- | --- |
-| Recovery controller | Implemented; tested in the virtual machine; run through request, cancellation, completion and refusals on chipnet |
+| Recovery controller | Implemented; tested in the virtual machine; run through request, cancellation, completion and refusals on chipnet. The closing action is proposed: a trial was compiled and run in the virtual machine (section 5.8) and is not in the repository. |
+| Fees and sending everything | Proposed. The transaction builder already sets the fee from the signed size. It uses one smallest value for every output and a fixed limit on the fee in satoshis; both change (section 8). |
 | Owner-approval rule | Written; without tests on the working branch until an address contract uses it |
 | Reading and checking a controller's history; several servers read as one | Implemented and tested |
 | Waiting-period calculation; watching for requests | Implemented and tested |
@@ -1169,6 +1234,9 @@ These are tests an implementation must pass. Except where the status table above
 | CT10 | An identity whose creation has a minting token, two tokens or a wrong script | The client refuses the identity |
 | CT11 | A request names the key that is already the owner; a sweep is attached to the request, then to its completion | Refused both times: the completion raises the epoch even when the key is the same |
 | CT12 | The highest epoch; a state of the wrong length; a field out of range | The counter fails and does not start again; malformed states are refused |
+| CT13 | The owner closes, from Active and from Pending, in a transaction with one output that carries no token | Accepted; no token of the identity exists afterwards; the controller's value is part of the output |
+| CT14 | A closing signed by the recoverer, by another key or by an earlier owner's key; with two outputs; with an output that carries a token | Refused |
+| CT15 | A sweep or a vault spend in a closing transaction; after closing, a vault coin, a swept coin and a coin spent by its key | Refused; the first two can no longer be moved; the third is accepted |
 | **Addresses** | | |
 | AD01 | A coin is spent by its key, with no controller in the transaction | Accepted |
 | AD02 | The same with another key | Refused |
@@ -1186,7 +1254,7 @@ These are tests an implementation must pass. Except where the status table above
 | **Creating a wallet** | | |
 | CR01 | The funding coin is output 0 of its transaction; it is another output | No self-payment in the first case, one in the second; the identity is the right transaction's identifier in both |
 | CR02 | The preparing or creating transaction is replaced or reorganized away; the device stops between steps | No address is given out before confirmation; the device continues from the transactions that exist and makes no second identity |
-| CR03 | The creating transaction and what follows it | A valid identity (section 5.7); every satoshi accounted for; the recoverer's allowance at the fee key's address and the owner's coin for cancelling set aside |
+| CR03 | The creating transaction and what follows it | A valid identity (section 5.7); every satoshi accounted for; the owner's coin for cancelling set aside; an allowance at the recoverer's fee address when the user gave one, and none otherwise |
 | CR04 | A wallet that the recoverer has not yet confirmed; a later payment to the funding address | Recovery is shown as off; the payment is shown with a warning that it is not recoverable |
 | **Keys, viewing key, addresses** | | |
 | KV01 | Quick pass from identity and viewing key, for a wallet with used addresses, gaps within the window, emptied addresses and a vault coin | Every coin, token and NFT is found, with its secret |
@@ -1207,8 +1275,8 @@ These are tests an implementation must pass. Except where the status table above
 | RC02 | An enrollment message for another network, changed, not signed by the owner, for a wallet not on chain, or not matching the state | Refused by the recoverer |
 | RC03 | Every path to spending or sweeping a coin of the wallet, tried with everything the recoverer holds, before and during a wait | All refused. After an uncancelled wait to a key of the recoverer's own, that key is the owner and can sweep: the stated limit of the trust model. |
 | RC04 | A kit is sent and no receipt exists; a receipt for another message, without the recovery key, or not matching the controller's state | "Recovery is on" is not shown; the receipt does not count |
-| RC05 | Two wallets with the same recoverer | No key hash in common on chain; neither allowance address can be computed from a controller's state |
-| RC06 | Three requests cancelled, then a fourth request and its completion | The recoverer pays all five fees from its allowance at the stated fee rate |
+| RC05 | Two wallets with the same recoverer | No key hash in common on chain; neither fee address can be computed from a controller's state |
+| RC06 | Three requests cancelled, then a fourth request and its completion: with an allowance, with coins the recoverer added itself, and with an empty fee address | The recoverer pays all five fees from its fee address at the stated rate in the first two cases; in the third its software says what is missing, beforehand, and goes on once coins arrive |
 | RC07 | Order of handing over viewing keys in a recovery | The new device's record reaches the recoverer before the request, without the device knowing the identity; earlier ones reach the new device only after completion |
 | RC08 | A request to an unknown key, shown by only one of several servers; a request to the device's own key | Alarm; no alarm |
 | RC09 | A request or cancellation is reorganized away or replaced | Status is rebuilt from the chain; a request that is seen unconfirmed warns and is not reported as confirmed |
@@ -1218,7 +1286,7 @@ These are tests an implementation must pass. Except where the status table above
 | MG01 | A move to a new seed by `ownerUpdate`, then a sweep | The recoverer's prepared receipt comes first; no waiting period; afterwards the earlier seed can move nothing that was swept |
 | MG02 | The new device is lost right after a move to a new seed, and right after a recovery completes | The recoverer already holds its viewing key and archive access; another recovery succeeds |
 | MG03 | The recoverer is replaced while a request is pending | The request is cleared; the earlier recoverer's key can neither request nor complete |
-| MG04 | The recoverer is replaced while its allowance is unspent | The new recoverer gets an allowance of its own; the old one is not counted as available |
+| MG04 | The recoverer is replaced while it still holds coins for fees | What the old recoverer holds is not counted as available; the new one has a fee address of its own, with an allowance only if the user gives one |
 | MG05 | The device sees, confirmed and on more than one server, that another key owns the wallet | It stops giving out addresses and taking on actions and offers to move unswept coins out; it offers nothing for vault coins |
 | MG06 | Two recoveries, then first payments to an ordinary and to a vault address of the first seed | Both are found with the first seed's viewing key and swept by the current owner; only the ordinary one could also have been spent by the first seed |
 | MG07 | A move to a new identity while a vault address of the old one can still be paid | The old identity stays watched and recoverable; it is not shown as retired |
@@ -1271,6 +1339,16 @@ These are tests an implementation must pass. Except where the status table above
 | PY02 | The same from an XO template through the wallet and a front end of this project | Works |
 | PY03 | The device is lost with a loan open | The new device sweeps the loan key, finds the loan, and repays or closes it |
 | PY04 | Managing with and without a repayment; closing; change outputs | Accepted in the layouts of section 15.2; the repaid PUSD and, on closing, the loan's NFT are burned as the contract requires |
+| **Fees and emptying** | | |
+| FE01 | A payment by key with and without change, a payment of tokens, and each controller action, built at the stated rate | The fee is the signed size times the rate, exactly; the size worked out before signing is the signed size |
+| FE02 | An output of each kind (P2PKH, an address of the wallet, with a fungible token, with an NFT, the controller) at its smallest value and one satoshi below | The smallest value follows from each output's own size; the wallet builds no output below it; the network's relay rules accept the first and refuse the second |
+| FE03 | A transaction whose fee is above the required one by more than a remainder too small to return; a transaction with several hundred inputs | The first is not sent; the second is built, and no limit in satoshis stands in its way |
+| FE04 | A payment for which some choice of coins needs no change | Made without a change output |
+| FE05 | What is left after the fee is below the smallest change output | The wallet takes the cheaper of leaving it to the fee and adding a coin, and shows the amount; nothing goes to the fee unseen |
+| FE06 | Sending everything from a wallet with coins at ordinary addresses and at a vault address, coins with tokens, and more coins than one transaction holds | No coin without a token is left besides the controller; what arrives is the total less the exact fees; coins with tokens are untouched; the wallet says that it cannot cancel |
+| FE07 | Sending everything when the total less the fee is below the smallest value of the destination output | Nothing is sent; the total, the fee and the smallest output are shown |
+| FE08 | Closing after everything else was sent; closing tried while a vault coin or a token is held, or before the full pass has finished | The address paid receives every satoshi, the controller's included, less the exact fee, and nothing of the identity is left on chain; the tool refuses in the other cases |
+| FE09 | Sending everything after a recovery, with coins at earlier addresses not yet swept | They are included, through the controller |
 | **Privacy** | | |
 | PV01 | Everything on chain for a wallet that has not been swept | No value shared between its addresses, or between an address and the identity; a spend by key shows the kind of address and nothing of the wallet |
 | PV02 | After a sweep of some addresses | The secrets of the others cannot be computed from what was shown |
@@ -1298,7 +1376,7 @@ Each has a proposed answer, which implementation follows unless the owner says o
 | 4 | **The viewing key's written form** | Two values in one signed record |
 | 5 | **Readable controller state** | Settled by the controller that exists: readable, with a recoverer key per wallet. Open again only with new controller rules. |
 | 6 | **The waiting period for real use,** the margin for cancelling, and whether cancelling is automatic by default | Time only; the length and the default are open |
-| 7 | **Fee amounts.** The recoverer's allowance, the owner's coin for cancelling, the fee rate they assume | Four requests and one completion; one cancellation; amounts from measured sizes |
+| 7 | **Fees.** The rate; the owner's coin for cancelling; whether the owner gives the recoverer an allowance, and how much | One satoshi per byte; one cancellation; an allowance offered and not required, for four requests and one completion; amounts from measured sizes |
 | 8 | **Messages with the recoverer:** enrollment, takeover, update, hand-over and receipts, and how the recoverer establishes who the user is | As in sections 9 and 11; the last is the recoverer's own process |
 | 9 | **Backup:** record formats; whether refusing an action without a stored template stays the default; no commitment on chain | Refusing stays the default |
 | 10 | **Template extension:** the names and kinds of wallet-bound outputs, the recovery declaration with its check of a companion, and whether they enter XO's schema or stay a companion document | The four kinds of section 13.3; the rest is for XO to say |
@@ -1310,6 +1388,7 @@ Each has a proposed answer, which implementation follows unless the owner says o
 | 16 | **Watching and confidence in the chain:** monitoring on phones; checking headers; the user's own node | The user's own node among the servers; no claim of verified chain state or of protection on phones before each is shown |
 | 17 | **ParyonUSD:** telling the team; the missing licence | Ask the owner before the stage starts |
 | 18 | **When the public demonstration switches** to this design | After the scripted run passes on the public addresses |
+| 19 | **Closing a wallet:** whether a released wallet keeps the action in the controller, keeps it out of the interface, or offers it | In every controller; used by the test runs and a tool; not offered in the interface |
 
 The first engineering checkpoint is the two address contracts passing AD01–AD13, because those tests establish that the recoverer's key never gains spending power and state the cost of the earlier seed exactly.
 
