@@ -56,7 +56,7 @@ const allTransitions: [string, Spend][] = [
 ];
 
 describe('permitted transitions', () => {
-  it('owner authorizes a transaction without the recoverer (C01)', () => {
+  it('CT01: owner authorizes a transaction without the recoverer', () => {
     expectAccepted(authorize);
   });
 
@@ -64,12 +64,12 @@ describe('permitted transitions', () => {
     expectAccepted(claim);
   });
 
-  it('owner cancels a pending claim (C05, C10)', () => {
+  it('CT04: owner cancels a pending claim', () => {
     expectAccepted(cancel);
     expect(afterOwnerAuthorize(pendingState)).toEqual(activeState);
   });
 
-  it('recoverer finalizes after the delay and installs the proposed owner (C11)', () => {
+  it('CT07: recoverer finalizes after the delay and installs the proposed owner', () => {
     expectAccepted(finalize);
     const next = afterFinalizeRecovery(pendingState);
     expect(next.ownerKeyHash).toEqual(newOwner.keyHash);
@@ -97,7 +97,7 @@ describe('permitted transitions', () => {
     expect(afterOwnerUpdate(activeState, update).ownerEpoch).toBe(0);
   });
 
-  it('owner update cancels a pending claim', () => {
+  it('CT04: owner update cancels a pending claim', () => {
     const update = { recovererKeyHash: stranger.keyHash };
     expectAccepted({ ...rotate, state: pendingState, action: { kind: 'ownerUpdate', update } });
     expect(afterOwnerUpdate(pendingState, update).status).toBe('active');
@@ -159,7 +159,7 @@ describe('authority', () => {
     expectChangeRejected(cancel, { signer: newOwner });
   });
 
-  it('rejects the old owner after a completed recovery (C12)', () => {
+  it('rejects the old owner after a completed recovery', () => {
     const recovered = afterFinalizeRecovery(pendingState);
     expectChangeRejected({ ...authorize, state: recovered, signer: newOwner }, { signer: owner });
     expectChangeRejected(
@@ -168,7 +168,7 @@ describe('authority', () => {
     );
   });
 
-  it('accepts a signature over all inputs and outputs, with or without the spent outputs', () => {
+  it('CT09: accepts a signature over all inputs and outputs, with or without the spent outputs', () => {
     for (const signingType of [0x41, 0x61]) {
       for (const [, spend] of allTransitions) {
         expectAccepted({ ...spend, signingType });
@@ -176,7 +176,7 @@ describe('authority', () => {
     }
   });
 
-  it('rejects signatures that do not cover every input and output', () => {
+  it('CT09: rejects signatures that do not cover every input and output', () => {
     // 0x42 NONE, 0x43 SINGLE, 0xc1 ALL|ANYONECANPAY, 0x62 NONE|UTXOS, 0x63 SINGLE|UTXOS, 0xc3 SINGLE|ANYONECANPAY
     for (const signingType of [0x42, 0x43, 0xc1, 0x62, 0x63, 0xc3]) {
       for (const [, spend] of allTransitions) {
@@ -186,8 +186,8 @@ describe('authority', () => {
   });
 });
 
-describe('challenge delay (C03, C04)', () => {
-  it('rejects finalization before the delay has passed', () => {
+describe('challenge delay', () => {
+  it('CT02: rejects finalization before the delay has passed', () => {
     expectChangeRejected(finalize, { sequence: 2 });
     expectChangeRejected(finalize, { sequence: 0 });
   });
@@ -200,22 +200,22 @@ describe('challenge delay (C03, C04)', () => {
     });
   });
 
-  it('rejects a sequence number with relative locktime disabled', () => {
+  it('CT03: rejects a sequence number with relative locktime disabled', () => {
     expectChangeRejected(finalize, { sequence: 0x80000003 });
     expectChangeRejected(finalize, { sequence: 0xffffffff });
   });
 
-  it('rejects a time-based sequence for a block-based delay, and the reverse', () => {
+  it('CT03: rejects a time-based sequence for a block-based delay, and the reverse', () => {
     expectChangeRejected(finalize, { sequence: 0x400000 | 0xffff });
     const timed: Spend = { ...finalize, state: { ...pendingState, challengeDelay: { unit: 'time512', value: 10 } } };
     expectChangeRejected(timed, { sequence: 0xffff });
   });
 
-  it('rejects a transaction version that does not enforce relative locktime', () => {
+  it('CT03: rejects a transaction version that does not enforce relative locktime', () => {
     expectChangeRejected(finalize, { version: 1 });
   });
 
-  it('rejects any other transaction version for every transition', () => {
+  it('CT03: rejects any other transaction version for every transition', () => {
     for (const [, spend] of allTransitions) {
       expectChangeRejected(spend, { version: 1 });
       expectChangeRejected(spend, { version: 3 });
@@ -223,8 +223,8 @@ describe('challenge delay (C03, C04)', () => {
   });
 });
 
-describe('pending claim is fixed (C06)', () => {
-  it('rejects a second claim while one is pending', () => {
+describe('pending claim is fixed', () => {
+  it('CT05: rejects a second claim while one is pending', () => {
     expectRejected({
       ...claim,
       state: pendingState,
@@ -233,11 +233,11 @@ describe('pending claim is fixed (C06)', () => {
     });
   });
 
-  it('rejects re-issuing the same claim, which would restart nothing but churn the controller', () => {
+  it('CT05: rejects re-issuing the same claim, which would restart nothing but churn the controller', () => {
     expectRejected({ ...claim, state: pendingState, nextCommitment: encodeControllerState(pendingState) });
   });
 
-  it('rejects finalization that installs a different owner than the claim named', () => {
+  it('CT05: rejects finalization that installs a different owner than the claim named', () => {
     const next = afterFinalizeRecovery(pendingState);
     expectChangeRejected(finalize, {
       nextCommitment: encodeControllerState({ ...next, ownerKeyHash: stranger.keyHash }),
@@ -247,7 +247,7 @@ describe('pending claim is fixed (C06)', () => {
     });
   });
 
-  it('rejects finalization that also changes the recoverer, delay, or epoch step', () => {
+  it('CT07: rejects finalization that also changes the recoverer, delay, or epoch step', () => {
     const next = afterFinalizeRecovery(pendingState);
     for (const changed of [
       { ...next, recovererKeyHash: stranger.keyHash },
@@ -296,7 +296,7 @@ describe('pending claim is fixed (C06)', () => {
 });
 
 describe('owner transitions keep their limits', () => {
-  it('rejects an owner authorization that changes any state field', () => {
+  it('CT06: rejects an owner authorization that changes any state field', () => {
     for (const changed of [
       { ...activeState, ownerKeyHash: stranger.keyHash },
       { ...activeState, recovererKeyHash: stranger.keyHash },
@@ -350,21 +350,21 @@ describe('owner transitions keep their limits', () => {
   });
 });
 
-describe('identity and continuity (C09)', () => {
+describe('identity and continuity', () => {
   const successorOf = (spend: Spend) => {
     const successor = build(spend).transaction.outputs[0];
     if (successor?.token?.nft === undefined) throw new Error('missing successor');
     return { ...successor, token: successor.token, nft: successor.token.nft };
   };
 
-  it('rejects a successor paid to a different script', () => {
+  it('CT06: rejects a successor paid to a different script', () => {
     for (const [, spend] of allTransitions) {
       const { token, valueSatoshis } = successorOf(spend);
       expectChangeRejected(spend, { controllerSuccessor: { lockingBytecode: anyoneCanSpend, valueSatoshis, token } });
     }
   });
 
-  it('rejects a successor without the identity token', () => {
+  it('CT06: rejects a successor without the identity token', () => {
     for (const [, spend] of allTransitions) {
       expectChangeRejected(spend, {
         controllerSuccessor: { lockingBytecode: controller.lockingBytecode, valueSatoshis: CONTROLLER_VALUE },
@@ -372,13 +372,13 @@ describe('identity and continuity (C09)', () => {
     }
   });
 
-  it('rejects dropping the controller output', () => {
+  it('CT06: rejects dropping the controller output', () => {
     for (const [, spend] of allTransitions) {
       expectChangeRejected(spend, { controllerSuccessor: null });
     }
   });
 
-  it('rejects downgrading the identity token to immutable', () => {
+  it('CT06: rejects downgrading the identity token to immutable', () => {
     for (const [, spend] of allTransitions) {
       const { lockingBytecode, valueSatoshis, token, nft } = successorOf(spend);
       expectChangeRejected(spend, {
@@ -387,7 +387,7 @@ describe('identity and continuity (C09)', () => {
     }
   });
 
-  it('rejects moving the identity token to a later output', () => {
+  it('CT06: rejects moving the identity token to a later output', () => {
     for (const [, spend] of allTransitions) {
       const successor = build(spend).transaction.outputs[0];
       if (successor === undefined) throw new Error('missing successor');
@@ -398,13 +398,13 @@ describe('identity and continuity (C09)', () => {
     }
   });
 
-  it('rejects a controller that is not the first input', () => {
+  it('CT06: rejects a controller that is not the first input', () => {
     for (const [, spend] of allTransitions) {
       expectChangeRejected(spend, { controllerSecond: true });
     }
   });
 
-  it('rejects a controller UTXO without a token, or with a fungible-only or immutable token', () => {
+  it('CT06: rejects a controller UTXO without a token, or with a fungible-only or immutable token', () => {
     const commitment = encodeControllerState(activeState);
     const base = { lockingBytecode: controller.lockingBytecode, valueSatoshis: CONTROLLER_VALUE };
     const sources = [
@@ -417,7 +417,7 @@ describe('identity and continuity (C09)', () => {
     }
   });
 
-  it('rejects the identity token of another wallet at this wallet\'s controller address', () => {
+  it('CT06: rejects the identity token of another wallet at this wallet\'s controller address', () => {
     const otherIdentity = new Uint8Array(32).fill(0x66);
     for (const [, spend] of allTransitions) {
       const misplaced = (commitment: Uint8Array) => ({
@@ -440,7 +440,7 @@ describe('identity and continuity (C09)', () => {
     expect(() => controllerScript(new Uint8Array(31))).toThrow();
   });
 
-  it('rejects an unknown state version (X02)', () => {
+  it('rejects an unknown state version', () => {
     for (const [, spend] of allTransitions) {
       const inputCommitment = encodeControllerState(spend.state);
       inputCommitment[0] = 0x02;
@@ -472,8 +472,8 @@ describe('identity and continuity (C09)', () => {
   });
 });
 
-describe('controller value (C14)', () => {
-  it('rejects any transition that lowers the controller value', () => {
+describe('controller value', () => {
+  it('CT08: rejects any transition that lowers the controller value', () => {
     for (const [, spend] of allTransitions) {
       const successor = build(spend).transaction.outputs[0];
       if (successor === undefined) throw new Error('missing successor');

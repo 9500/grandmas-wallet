@@ -49,7 +49,7 @@ const setup = (autoCancel = false) => {
   return { chain, wallet, first, second, monitor, seen, cancellations, errors, clock };
 };
 
-describe('watching for recovery requests (C13)', () => {
+describe('watching for recovery requests', () => {
   it('is quiet for a wallet nobody has asked for', async () => {
     const { monitor, seen } = setup();
     expect(await monitor.check()).toEqual({ kind: 'quiet' });

@@ -102,7 +102,7 @@ describe('challenge delay', () => {
 describe('rejected commitments', () => {
   const encoded = (): Uint8Array => encodeControllerState(pending);
 
-  it('rejects unknown versions before anything else (X02)', () => {
+  it('rejects unknown versions before anything else', () => {
     for (const version of [0x00, 0x02, 0xff]) {
       const bytes = encoded();
       bytes[0] = version;

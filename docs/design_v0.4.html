@@ -542,7 +542,7 @@ contract VaultAddress(bytes32 tag) {
     <li><strong>What is left:</strong> the controller, coins with tokens, and whatever the recoverer holds. The wallet stays usable and recoverable, and says that it cannot cancel until it holds a coin again.</li>
   </ul>
   <h3>Closing</h3>
-  <p>Sending everything with <code>ownerClose</code> in the last transaction also takes the controller's value and ends the identity. A trial gave these figures at one satoshi per byte:</p>
+  <p>Sending everything with <code>ownerClose</code> in the last transaction also takes the controller's value and ends the identity. Measured at one satoshi per byte:</p>
   <div class="scroll">
   <table>
     <tr><th>Measured</th><th>Result</th></tr>

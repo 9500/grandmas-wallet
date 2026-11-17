@@ -183,7 +183,7 @@ Rules that hold for the four actions that continue the controller:
 - The successor has the same locking script, the same token category and capability (mutable), the same fungible amount, and at least the same value in satoshis.
 - Anyone may attach further inputs and outputs. The signer's signature covers all of them.
 
-The contract is `contracts/controller.cash`. With the four continuing actions it is 412 bytes compiled, plus the 33-byte push of the identity. A trial compilation with `ownerClose` gives 457 bytes.
+The contract is `contracts/controller.cash`: 457 bytes compiled, plus the 33-byte push of the identity. Without `ownerClose` it was 412 bytes.
 
 ### 5.3 Requesting recovery
 
@@ -231,7 +231,7 @@ The controller's script does not check its own first state. Before trusting an i
 
 `ownerClose` ends an identity. It is signed by the owner's controller key, from Active or Pending. The transaction must have exactly one output, and that output carries no token. The identity NFT therefore has no successor and is destroyed, and the controller's 1,000 satoshis become part of that one output.
 
-A trial of the action (cashc 0.14.0, one satoshi per byte, checked with the network's relay rules in the virtual machine) gave:
+Measured on the contract (cashc 0.14.0, one satoshi per byte, checked with the network's relay rules in the virtual machine and on a local node):
 
 | Measured | Result |
 | --- | --- |
@@ -240,7 +240,7 @@ A trial of the action (cashc 0.14.0, one satoshi per byte, checked with the netw
 | Closing together with other coins | Adds 1,000 satoshis and 637 bytes: 363 satoshis more arrive |
 | Every other controller transaction | 45 bytes larger |
 
-The trial refused a closing signed by the recoverer or by another key, one with two outputs, and one that kept the NFT. It accepted a closing while a request was pending.
+A closing signed by the recoverer, by another key or by an earlier owner is refused, as is one with two outputs or one that keeps the NFT. A closing while a request is pending is accepted (tests CT13 to CT15).
 
 Consequences:
 
@@ -1220,14 +1220,14 @@ The implementation uses XO's TypeScript packages, libauth for keys, transactions
 
 | Item | Status |
 | --- | --- |
-| Recovery controller | Implemented; tested in the virtual machine; run through request, cancellation, completion and refusals on chipnet. The closing action is proposed: a trial was compiled and run in the virtual machine (section 5.8) and is not in the repository. |
-| Fees and sending everything | Proposed. The transaction builder already sets the fee from the signed size. It uses one smallest value for every output and a fixed limit on the fee in satoshis; both change (section 8). |
+| Recovery controller | Implemented with its five actions; tested in the virtual machine (CT01 to CT15). The four continuing actions ran on chipnet for the first design; the closing action has run on a local node. |
+| Fees and sending everything | The transaction builder pays the exact fee, computes the smallest value of each output and checks a transaction before it is sent (FE01 to FE03). Choosing coins and sending everything from a wallet are proposed. |
 | Owner-approval rule | Written; without tests on the working branch until an address contract uses it |
 | Reading and checking a controller's history; several servers read as one | Implemented and tested |
 | Waiting-period calculation; watching for requests | Implemented and tested |
 | Sealing to the recoverer; signing; encrypted stores and the store server | Implemented and tested |
 | WizardConnect transport and `xo_v1` messages | Implemented and tested with an earlier form of the announcement |
-| Recoverable address, vault address | Proposed. A trial compiled both as given here, measured every kind of input and ran a wallet's life in the virtual machine and on a local node, with the refusals of AD02 and AD04 to AD06 (`docs/address-contracts-trial.md`). The trial's code is under `spikes/`; the contracts and their tests are stage 1. |
+| Recoverable address, vault address | Implemented (`contracts/recoverableAddress.cash`, `contracts/vaultAddress.cash`); tested in the virtual machine (AD01 to AD13), with each refusal shown to come from the script meant to refuse. A trial ran a wallet's life on a local node (`docs/address-contracts-trial.md`). |
 | Derivation, viewing key, giving out and finding addresses | Proposed. The engine's key tree is established and reproduced by this project's code (`docs/xo-engine-stage0-trials.md`); the sizes of the ranges are proposed from measurement (`docs/address-ranges-trial.md`). |
 | Creating a wallet as in section 7.9 | Proposed |
 | Recovery kit, receipts, takeover and update messages, sweep, moving to a new seed, replacing the recoverer | Proposed |
