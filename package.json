@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
     "check": "npm run typecheck && npm run lint && npm run test",
-    "build:contracts": "npm run build -w @grandmas-wallet/contracts"
+    "build:contracts": "npm run build -w @grandmas-wallet/contracts",
+    "chipnet": "npm run chipnet -w @grandmas-wallet/chipnet --"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

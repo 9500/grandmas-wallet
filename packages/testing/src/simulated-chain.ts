@@ -29,8 +29,11 @@ export class SimulatedChain implements ChainReader {
     this.history.set(script, (this.history.get(script) ?? new Set<string>()).add(transactionId));
   }
 
-  /** Put coins at a script, as output 0 of a new transaction. Returns that transaction's identifier. */
-  fund(lockingBytecode: Uint8Array, valueSatoshis: bigint): string {
+  /**
+   * Put coins at a script, as an output of a new transaction. Returns that transaction's identifier.
+   * @param outputIndex - the position of the output; the outputs before it carry data only
+   */
+  fund(lockingBytecode: Uint8Array, valueSatoshis: bigint, outputIndex = 0): string {
     const encoded = encodeTransactionBch({
       version: 2,
       locktime: 0,
@@ -42,11 +45,14 @@ export class SimulatedChain implements ChainReader {
           unlockingBytecode: new Uint8Array(0),
         },
       ],
-      outputs: [{ lockingBytecode, valueSatoshis }],
+      outputs: [
+        ...Array.from({ length: outputIndex }, () => ({ lockingBytecode: Uint8Array.of(0x6a), valueSatoshis: 0n })),
+        { lockingBytecode, valueSatoshis },
+      ],
     });
     const transactionId = binToHex(hashTransactionUiOrder(encoded));
     this.transactions.set(transactionId, binToHex(encoded));
-    this.unspent.set(`${transactionId}:0`, { output: { lockingBytecode, valueSatoshis }, createdMs: this.nowMs });
+    this.unspent.set(`${transactionId}:${outputIndex}`, { output: { lockingBytecode, valueSatoshis }, createdMs: this.nowMs });
     this.remember(lockingBytecode, transactionId);
     return transactionId;
   }

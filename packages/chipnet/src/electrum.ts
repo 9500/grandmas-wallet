@@ -3,9 +3,17 @@ import { ElectrumClient, type ElectrumClientEvents } from '@electrum-cash/networ
 import { ElectrumWebSocket } from '@electrum-cash/web-socket';
 
 /**
- * A minimal Electrum connection for the chipnet run: unspent outputs for a
+ * A minimal Electrum connection for the chain runs: unspent outputs for a
  * script, transaction lookup, broadcast, and chain tip.
  */
+
+/** The token an unspent output carries, as the server reports it. */
+export interface UnspentToken {
+  /** Token category, in the byte order shown by explorers. */
+  category: string;
+  amount: bigint;
+  nft?: { capability: 'none' | 'mutable' | 'minting'; commitment: string };
+}
 
 export interface UnspentEntry {
   transactionId: string;
@@ -14,7 +22,30 @@ export interface UnspentEntry {
   /** 0 while unconfirmed. */
   height: number;
   hasToken: boolean;
+  token?: UnspentToken;
 }
+
+/**
+ * Which unspent outputs to list. Fulcrum leaves outputs that carry tokens out of the list for a client of
+ * a protocol version below 1.5 unless it is asked for them, so the choice is always stated in the request.
+ * - `include` (the default): every output, with its token data.
+ * - `exclude`: outputs without tokens only, which is what choosing a coin for a fee wants.
+ * - `only`: outputs with tokens only.
+ */
+export type TokenFilter = 'include' | 'exclude' | 'only';
+const TOKEN_FILTER_ARGUMENT: Record<TokenFilter, string> = { include: 'include_tokens', exclude: 'exclude_tokens', only: 'tokens_only' };
+
+interface ServerTokenData {
+  category: string;
+  amount: string | number;
+  nft?: { capability: 'none' | 'mutable' | 'minting'; commitment: string };
+}
+
+const unspentToken = (data: ServerTokenData): UnspentToken => ({
+  category: data.category,
+  amount: BigInt(data.amount),
+  ...(data.nft === undefined ? {} : { nft: { capability: data.nft.capability, commitment: data.nft.commitment } }),
+});
 
 export type BroadcastResult = { accepted: true; transactionId: string } | { accepted: false; reason: string };
 
@@ -96,16 +127,24 @@ export class Electrum {
     return headerTime(await this.call<string>('blockchain.block.header', height));
   }
 
-  async listUnspent(lockingBytecode: Uint8Array): Promise<UnspentEntry[]> {
-    const entries = await this.call<
-      { tx_hash: string; tx_pos: number; value: number; height: number; token_data?: unknown }[]
-    >('blockchain.scripthash.listunspent', scriptHash(lockingBytecode));
+  /** The block header at a height, as hex. Two servers on the same chain return the same one. */
+  async header(height: number): Promise<string> {
+    return this.call<string>('blockchain.block.header', height);
+  }
+
+  async listUnspent(lockingBytecode: Uint8Array, tokens: TokenFilter = 'include'): Promise<UnspentEntry[]> {
+    const entries = await this.call<{ tx_hash: string; tx_pos: number; value: number; height: number; token_data?: ServerTokenData }[]>(
+      'blockchain.scripthash.listunspent',
+      scriptHash(lockingBytecode),
+      TOKEN_FILTER_ARGUMENT[tokens],
+    );
     return entries.map((entry) => ({
       transactionId: entry.tx_hash,
       index: entry.tx_pos,
       valueSatoshis: BigInt(entry.value),
       height: entry.height,
       hasToken: entry.token_data !== undefined,
+      ...(entry.token_data === undefined ? {} : { token: unspentToken(entry.token_data) }),
     }));
   }
 
