@@ -2,6 +2,7 @@
 // environment's configuration file, so that one build runs anywhere.
 //
 // usage: node deploy/serve.mjs --root apps/wallet/dist --config deploy/config/local.json --host 127.0.0.1 --port 8101
+import { execFileSync } from 'node:child_process';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
@@ -20,6 +21,15 @@ if (!existsSync(join(root, 'index.html'))) {
   process.exit(1);
 }
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
+// What is being served: the checkout and its commit when the server started, for checking a deployment from outside.
+const version = (() => {
+  try {
+    const git = (...parameters) => execFileSync('git', parameters, { cwd: root, encoding: 'utf8' }).trim();
+    return { commit: git('rev-parse', '--short', 'HEAD'), branch: git('rev-parse', '--abbrev-ref', 'HEAD'), network: config.network, startedAt: new Date().toISOString() };
+  } catch {
+    return { commit: 'unknown', network: config.network, startedAt: new Date().toISOString() };
+  }
+})();
 
 // The Electrum servers the XO engine connects to by itself on this network.
 const ENGINE_SERVERS = { chipnet: ['wss://chipnet.imaginary.cash:50004', 'wss://chipnet.bch.ninja:50004'] };
@@ -62,6 +72,10 @@ const server = createServer((request, response) => {
   const path = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname);
   if (path === '/config.json') {
     response.writeHead(200, { ...headers, 'content-type': TYPES['.json'], 'cache-control': 'no-store' }).end(JSON.stringify(config));
+    return;
+  }
+  if (path === '/version.json') {
+    response.writeHead(200, { ...headers, 'content-type': TYPES['.json'], 'cache-control': 'no-store' }).end(JSON.stringify(version));
     return;
   }
   const requested = normalize(join(root, path));

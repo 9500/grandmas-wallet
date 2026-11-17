@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Runs the three web applications and the backup stores as services of the current user.
+# Runs the web pages and the backup stores as services of the current user.
 #
 # usage: deploy/install-services.sh <address to listen on> [configuration file] [number of stores]
 #   deploy/install-services.sh 192.168.88.112 deploy/config/production.json 2
 #
 # Each service listens on plain HTTP; a reverse proxy in front provides HTTPS. Ports:
 #   8101 wallet, 8102 recoverer, 8103 savings jar application, 8111 and up backup stores.
-# The applications must have been built first: npm run build:web
+# The pages must have been built first: deploy/preview.sh build
+# Where an application of this design is not built yet, a page saying so is served in its place.
 set -euo pipefail
 
 HOST="${1:?address to listen on}"
@@ -49,7 +50,8 @@ UNIT
 
 unit wallet "wallet page" deploy/serve.mjs --root apps/wallet/dist --config "$CONFIG" --host "$HOST" --port 8101
 unit recoverer "recoverer page" deploy/serve.mjs --root apps/recoverer/dist --config "$CONFIG" --host "$HOST" --port 8102
-unit jar "savings jar application" deploy/serve.mjs --root apps/jar/dist --config "$CONFIG" --host "$HOST" --port 8103
+if [ -d "$ROOT/apps/jar/src" ] && [ -f "$ROOT/apps/jar/dist/index.html" ]; then JAR_ROOT=apps/jar/dist; else JAR_ROOT=deploy/placeholder/jar; fi
+unit jar "savings jar application" deploy/serve.mjs --root "$JAR_ROOT" --config "$CONFIG" --host "$HOST" --port 8103
 NAMES=(wallet recoverer jar)
 for number in $(seq 1 "$STORES"); do
   unit "store$number" "backup store $number" --import tsx apps/archive-store/src/cli.ts \
