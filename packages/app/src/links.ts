@@ -25,16 +25,23 @@ const pipe = async (bytes: Uint8Array, through: CompressionStream | Decompressio
 
 /** The field names used in links, one per kind of content. */
 export type LinkField =
-  /** Recoverer to wallet: the recoverer's encryption key and name. */
+  /** Recoverer to a wallet or a new device: the recoverer's name, its page and its encryption key. Not secret. */
   | 'recoverer'
-  /** Recoverer to a new device: the wallet to take over and the recovery request to join. */
-  | 'restore'
-  /** New device to recoverer: the request with the new owner key named. */
-  | 'join'
-  /** Recoverer to new device: the request as sent. */
-  | 'requested'
+  /** New device to recoverer: the sealed takeover message. Readable only with the recoverer's key. */
+  | 'takeover'
+  /** Recoverer to new device, after completion: the sealed hand-over. Readable only with the device's answer key. */
+  | 'handover'
+  /** Owner's device to recoverer: a sealed update message, before a move to a new seed or a new waiting period. */
+  | 'update'
+  /** New device to the old device, for a move to a new seed: its key hash, viewing-key record and new archive. */
+  | 'prepare'
+  /** Old device to the new device, directly: the identity and every viewing-key record so far. Whoever reads it can watch the wallet. */
+  | 'move'
   /** Application to wallet: a connection offer. */
   | 'connect';
+
+/** Every kind of link, the sealed recovery kit (`enroll`, made by the enrollment package) included. */
+export const LINK_FIELDS = ['recoverer', 'enroll', 'takeover', 'handover', 'update', 'prepare', 'move', 'connect'] as const;
 
 export const makeLink = async (page: string, field: LinkField, content: unknown): Promise<string> => {
   const packed = await pipe(new TextEncoder().encode(JSON.stringify(content)), new CompressionStream('deflate-raw'));
@@ -62,5 +69,5 @@ export const readLink = async <T>(text: string, field: LinkField): Promise<T | u
 export const linkKind = (text: string): LinkField | 'enroll' | undefined => {
   const fragment = text.includes('#') ? text.slice(text.indexOf('#') + 1) : text.trim();
   const parameters = new URLSearchParams(fragment);
-  return (['recoverer', 'restore', 'join', 'requested', 'connect', 'enroll'] as const).find((field) => parameters.has(field));
+  return LINK_FIELDS.find((field) => parameters.has(field));
 };

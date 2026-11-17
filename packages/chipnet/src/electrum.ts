@@ -1,4 +1,4 @@
-import { binToHex, hexToBin, sha256 } from '@bitauth/libauth';
+import { binToHex, hash256, hexToBin, sha256 } from '@bitauth/libauth';
 import { ElectrumClient, type ElectrumClientEvents } from '@electrum-cash/network';
 import { ElectrumWebSocket } from '@electrum-cash/web-socket';
 
@@ -125,6 +125,15 @@ export class Electrum {
 
   async headerTime(height: number): Promise<number> {
     return headerTime(await this.call<string>('blockchain.block.header', height));
+  }
+
+  /**
+   * A block as a starting point for checking headers: its hash, and the root of the header tree up to it,
+   * as the server states it.
+   */
+  async checkpoint(height: number): Promise<{ height: number; blockHash: string; merkleRoot: string }> {
+    const { header, root } = await this.call<{ header: string; root: string }>('blockchain.block.header', height, height);
+    return { height, blockHash: binToHex(hash256(hexToBin(header)).reverse()), merkleRoot: root };
   }
 
   /** The block header at a height, as hex. Two servers on the same chain return the same one. */
