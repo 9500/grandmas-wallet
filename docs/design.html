@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grandma's Wallet Clean-Slate Design</title>
+<title>Grandma's Wallet Design</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -200,49 +200,54 @@ pre.code .c { color: var(--muted); }
 .addr .h { font-weight: 600; font-size: 14px; }
 .addr .s { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; }
 .coins { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; }
-.coin { font-size: 12.5px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); }
+.coin { font-size: 12.5px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); white-space: nowrap; }
 .coin.nft { border-color: var(--app); color: var(--app); }
 .coin.none { border-style: dashed; color: var(--muted); }
 .verdict.warn { color: var(--recoverer); }
 .log li.warn { --c: var(--recoverer); }
-.state { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--c); color: var(--c); white-space: nowrap; }
-.state.built { --c: var(--good); } .state.prop { --c: var(--identity); } .state.open { --c: var(--recoverer); }
 .rule { border-left: 4px solid var(--app); }
 .rule h4 { margin: 0 0 6px; font: 700 16px var(--font-display); }
 .rule p { font-size: 14.5px; margin-bottom: 6px; }
-h3 .state { vertical-align: 3px; margin-left: 6px; }
+.tree { display: grid; gap: 8px; margin: 14px 0; }
+.tree .row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 8px; background: var(--surface); }
+.tree .row .k { font-weight: 600; font-size: 14.5px; }
+.tree .row .k small { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.tree .row .v { font-size: 14.5px; }
+@media (max-width: 560px) { .tree .row { grid-template-columns: minmax(0, 1fr); } }
+#pv-rows td:first-child { white-space: nowrap; font-weight: 600; }
 </style>
 </head>
 <body>
 <div class="page">
 <nav class="rail" aria-label="Contents">
-  <div class="brand">Grandma's Wallet<br><span class="small">clean-slate design</span></div>
+  <div class="brand">Grandma's Wallet</div>
   <ol>
-    <li><a href="#idea">The proposal</a></li>
+    <li><a href="#idea">The design</a></li>
     <li><a href="#controller">Identity and controller</a></li>
+    <li><a href="#keys">Keys and addresses</a></li>
     <li><a href="#address">The recoverable address</a></li>
     <li><a href="#life">A wallet's life</a></li>
     <li><a href="#recovery">Recovery flow</a></li>
+    <li><a href="#privacy">What others can see</a></li>
     <li><a href="#rules">Rules for applications</a></li>
     <li><a href="#templates">Template extension</a></li>
     <li><a href="#connect">Talking to applications</a></li>
-    <li><a href="#jar">The new Savings Jar</a></li>
+    <li><a href="#jar">Savings Jar</a></li>
     <li><a href="#paryon">ParyonUSD</a></li>
     <li><a href="#apps">Other applications</a></li>
-    <li><a href="#privacy">Privacy later</a></li>
-    <li><a href="#changes">What changes</a></li>
+    <li><a href="#choices">Design choices</a></li>
     <li><a href="#limits">Costs and open points</a></li>
   </ol>
 </nav>
 
 <main>
 <header class="top">
-  <h1>Grandma's Wallet, clean-slate design</h1>
-  <p class="lede">A Bitcoin Cash wallet whose key can be replaced by a trusted recoverer after a public waiting period. In this design the key is the everyday path and the controller is the recovery path only. Applications give authority to a token in the wallet, so recovering an application position is the same as moving a coin.</p>
+  <h1>Grandma's Wallet</h1>
+  <p class="lede">A Bitcoin Cash wallet whose keys can be replaced by a trusted recoverer after a public waiting period. Every coin has its own address and key, as in an ordinary HD wallet. A single controller on chain can release any of them to a new owner. Applications give authority to a token in the wallet, so recovering an application position is the same as moving a coin.</p>
   <div class="chips">
-    <span class="chip">Design proposal</span>
+    <span class="chip">Design</span>
     <span class="chip">17 November 2026</span>
-    <span class="chip">Controller and vault are built; the rest is not</span>
+    <span class="chip">Not audited</span>
   </div>
   <div class="legend" aria-label="Colours used on this page">
     <span style="--c: var(--identity)">Identity and controller</span>
@@ -250,101 +255,124 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     <span style="--c: var(--recoverer)">Recoverer</span>
     <span style="--c: var(--app)">Application</span>
   </div>
-  <p class="small" style="margin-top:14px">Each part is marked <span class="state built">built</span> when it exists and ran on chipnet, <span class="state prop">proposed</span> when it is designed here and not written, and <span class="state open">open</span> when it depends on something not yet checked.</p>
 </header>
 
 <!-- ============================== IDEA -->
 <section id="idea">
-  <h2>The proposal</h2>
-  <p>Every address of the wallet can be spent in two ways. The owner's key spends it directly, like any single-key wallet. The wallet's controller can also release it, and the controller obeys whoever owns the wallet's identity today. Recovery changes the owner of the identity. The new owner then moves every coin and token to an address of the new key.</p>
+  <h2>The design</h2>
+  <p>Every address of the wallet can be spent in two ways. Its own key spends it directly, like any single-key address. The wallet's controller can also release it, and the controller obeys whoever owns the wallet's identity today. Recovery changes the owner of the identity. The new owner then moves every coin and token to addresses of its own keys.</p>
   <div class="widget">
     <div class="wtitle"><span>Two ways into every coin</span><button type="button" id="idea-btn" class="primary">Lose the phone</button></div>
     <figure class="scroll">
-      <svg id="idea-svg" class="dia" viewBox="0 0 720 236" role="img" aria-label="The owner key spends the wallet's coins directly. The controller can sweep them for the identity's current owner. The recoverer can replace the owner after a wait. Applications see only tokens.">
+      <svg id="idea-svg" class="dia" viewBox="0 0 720 236" role="img" aria-label="The owner's keys spend the wallet's coins directly. The controller can sweep them for the identity's current owner. The recoverer can replace the owner after a wait. Applications see only tokens.">
         <defs><marker id="ia" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="d-arrow"/></marker></defs>
-        <g class="slot k-wallet" id="idea-key"><rect class="d-slot" x="4" y="40" width="190" height="56" rx="6"/><text class="d-title" x="16" y="64" id="idea-key-t">Owner key A</text><text class="d-sub" x="16" y="81" id="idea-key-s">on the phone</text></g>
+        <g class="slot k-wallet" id="idea-key"><rect class="d-slot" x="4" y="40" width="190" height="56" rx="6"/><text class="d-title" x="16" y="64">Owner's seed A</text><text class="d-sub" x="16" y="81" id="idea-key-s">address keys, on the phone</text></g>
         <g id="idea-w1"><path class="d-wire" d="M194 68 L267 68" marker-end="url(#ia)"/></g>
         <text class="d-sub" x="231" y="59" text-anchor="middle">signs</text>
         <g class="slot k-wallet"><rect class="d-slot" x="270" y="12" width="180" height="212" rx="6"/></g>
-        <text class="ptitle" x="284" y="36">Wallet address</text>
-        <text class="d-sub" x="284" y="53" id="idea-addr-s">made for key A</text>
+        <text class="ptitle" x="284" y="36">Wallet addresses</text>
+        <text class="d-sub" x="284" y="53" id="idea-addr-s">one per coin, from seed A</text>
         <g class="slot"><rect class="d-slot" x="284" y="66" width="152" height="30" rx="5"/><text class="d-title" x="296" y="86">BCH and tokens</text></g>
         <g class="slot k-app"><rect class="d-slot" x="284" y="104" width="152" height="30" rx="5"/><text class="d-title" x="296" y="124">Jar key NFT</text></g>
         <g class="slot k-app"><rect class="d-slot" x="284" y="142" width="152" height="30" rx="5"/><text class="d-title" x="296" y="162">Loan key NFT</text></g>
-        <text class="st" x="284" y="204" id="idea-st">spent with key A alone</text>
-        <g class="slot k-ctrl"><rect class="d-slot" x="526" y="40" width="190" height="56" rx="6"/><text class="d-title" x="538" y="64">Controller</text><text class="d-sub" x="538" y="81" id="idea-ctrl-s">identity NFT · owner: key A</text></g>
+        <text class="st" x="284" y="204" id="idea-st">each spent by its own key</text>
+        <g class="slot k-ctrl"><rect class="d-slot" x="526" y="40" width="190" height="56" rx="6"/><text class="d-title" x="538" y="64">Controller</text><text class="d-sub" x="538" y="81" id="idea-ctrl-s">identity NFT · owner: seed A</text></g>
         <path class="d-wire" d="M526 68 L453 68" marker-end="url(#ia)"/>
         <text class="d-sub" x="489" y="59" text-anchor="middle">sweeps</text>
-        <g class="slot k-rec"><rect class="d-slot" x="526" y="150" width="190" height="56" rx="6"/><text class="d-title" x="538" y="174">Recoverer</text><text class="d-sub" x="538" y="191">replaces the key after a wait</text></g>
+        <g class="slot k-rec"><rect class="d-slot" x="526" y="150" width="190" height="56" rx="6"/><text class="d-title" x="538" y="174">Recoverer</text><text class="d-sub" x="538" y="191">replaces the owner after a wait</text></g>
         <path class="d-wire" d="M621 150 L621 99" marker-end="url(#ia)"/>
         <g class="slot k-app"><rect class="d-slot" x="4" y="150" width="190" height="56" rx="6"/><text class="d-title" x="16" y="174">Applications</text><text class="d-sub" x="16" y="191">see tokens, not the controller</text></g>
         <path class="d-wire" d="M194 178 L240 178 L240 138 L267 138" marker-end="url(#ia)"/>
       </svg>
-      <figcaption id="idea-cap">Day to day, key A signs and the controller is not involved. Applications deal with tokens at the wallet's address and know nothing about recovery.</figcaption>
+      <figcaption id="idea-cap">Day to day, each coin is spent by its own key and the controller is not involved. Applications deal with tokens at the wallet's addresses and know nothing about recovery.</figcaption>
     </figure>
   </div>
 
-  <h3>The four parts</h3>
+  <h3>The parts</h3>
   <div class="grid2">
-    <div class="card by" style="--c: var(--identity)"><span class="tag">1 · Wallet</span><p style="margin:6px 0 0"><strong>Controller.</strong> One coin holding the identity NFT. Its state names the owner key, the recoverer key and the waiting period. Unchanged from the current build.</p></div>
-    <div class="card by" style="--c: var(--owner)"><span class="tag">2 · Wallet</span><p style="margin:6px 0 0"><strong>Recoverable address.</strong> A script with a key path for every day and a controller path for recovery. A second address kind, the vault, has the controller path only and never changes.</p></div>
-    <div class="card by" style="--c: var(--app)"><span class="tag">3 · Applications</span><p style="margin:6px 0 0"><strong>Three rules.</strong> Authority is a token. The wallet's inputs and outputs are the wallet's business. The template says what a token means.</p></div>
-    <div class="card by" style="--c: var(--app)"><span class="tag">4 · Connection</span><p style="margin:6px 0 0"><strong>The wallet builds the transaction</strong> from the application's XO template, over a WizardConnect session with the <code>xo_v1</code> extension.</p></div>
+    <div class="card by" style="--c: var(--identity)"><span class="tag">Wallet</span><p style="margin:6px 0 0"><strong>Controller.</strong> One coin holding the identity NFT. Its state names the owner's controller key, the recoverer's key and the waiting period. It moves only for recovery, sweeps and the vault.</p></div>
+    <div class="card by" style="--c: var(--owner)"><span class="tag">Wallet</span><p style="margin:6px 0 0"><strong>Recoverable addresses.</strong> One per coin, each with its own key for every day and a hidden link to the identity for recovery. A second kind, the vault address, has no key and never changes.</p></div>
+    <div class="card by" style="--c: var(--recoverer)"><span class="tag">Recovery</span><p style="margin:6px 0 0"><strong>Recoverer and viewing key.</strong> The recoverer can replace the owner after the waiting period. It also keeps the viewing key, which lets a new device find every address. Neither lets it spend.</p></div>
+    <div class="card by" style="--c: var(--app)"><span class="tag">Applications</span><p style="margin:6px 0 0"><strong>Three rules and a connection.</strong> Authority is a token. The wallet's inputs and outputs are the wallet's business. The template says what a token means. The wallet builds each transaction from the application's XO template.</p></div>
   </div>
-
-  <h3>Why this and not the current build</h3>
-  <p>The current build puts the controller into every transaction. That made each application carry the wallet's identity, fixed the controller at input 0 of every application transaction, allowed one action at a time, and made all of the wallet's activity visible at one coin. Three of the four applications we studied could not fit. In this design an everyday transaction is an ordinary one, and the controller appears only when the wallet is set up, recovered or swept.</p>
 </section>
 
 <!-- ============================== CONTROLLER -->
 <section id="controller">
-  <h2>Identity and controller <span class="state built">built</span></h2>
-  <p>The wallet's identity is the token category of one NFT. The coin that holds this NFT is the controller. The NFT's commitment is the controller's state, 69 bytes that anyone can read on chain. The controller's script accepts four actions and always sends the NFT back to itself with the next state.</p>
+  <h2>Identity and controller</h2>
+  <p>The wallet's identity is the token category of one NFT. The coin that holds this NFT is the controller. The NFT's commitment is the controller's state, 69 bytes. The controller's script accepts four actions and always sends the NFT back to itself with the next state.</p>
   <div class="scroll">
   <table>
-    <tr><th>Action</th><th>Signed by</th><th>What it does</th><th>Used in this design for</th></tr>
-    <tr><td><code>ownerAuthorize</code></td><td>Owner key</td><td>Continues the controller unchanged as Active. Cancels a pending request.</td><td>Sweeps, spending from the vault, cancelling a request</td></tr>
-    <tr><td><code>requestRecovery</code></td><td>Recoverer key</td><td>Marks the state Pending and names the proposed new owner key. The waiting period starts.</td><td>The first step of recovery</td></tr>
-    <tr><td><code>finalizeRecovery</code></td><td>Recoverer key</td><td>Only after the waiting period. Installs exactly the proposed key and raises the epoch by one.</td><td>The second step of recovery</td></tr>
-    <tr><td><code>ownerUpdate</code></td><td>Owner key</td><td>Replaces the owner key, the recoverer or the waiting period.</td><td>Moving to a new key without the recoverer, changing recoverer</td></tr>
+    <tr><th>Action</th><th>Signed by</th><th>What it does</th><th>Used for</th></tr>
+    <tr><td><code>ownerAuthorize</code></td><td>Owner's controller key</td><td>Continues the controller unchanged as Active. Cancels a pending request.</td><td>Sweeps, spending from the vault, cancelling a request</td></tr>
+    <tr><td><code>requestRecovery</code></td><td>Recoverer's key</td><td>Marks the state Pending and names the proposed new owner key. The waiting period starts.</td><td>The first step of recovery</td></tr>
+    <tr><td><code>finalizeRecovery</code></td><td>Recoverer's key</td><td>Only after the waiting period. Installs exactly the proposed key and raises the epoch by one.</td><td>The second step of recovery</td></tr>
+    <tr><td><code>ownerUpdate</code></td><td>Owner's controller key</td><td>Replaces the owner key, the recoverer or the waiting period.</td><td>Moving to a new seed without the recoverer; changing the recoverer</td></tr>
   </table>
   </div>
-  <p style="margin-top:14px">Two properties carry the whole scheme:</p>
+  <p style="margin-top:14px">Rules that hold for every action: the controller is input 0 and output 0 of its transaction, the NFT and the coin's value continue, and the signature must cover every input and output.</p>
+  <h3>Two properties carry the scheme</h3>
   <ul>
     <li><strong>The waiting period is enforced by the network.</strong> It is a relative time lock on the controller's own coin. Nobody can shorten it.</li>
-    <li><strong>The recoverer never gains spending power.</strong> Coins released through the controller require it to continue unchanged, with the same owner and no request pending. A request leaves a claim pending and a completion changes the owner, so neither can carry coins with it.</li>
+    <li><strong>The recoverer never gains spending power.</strong> A coin released through the controller requires the controller to continue unchanged, with the same owner and no request pending. A request leaves a claim pending and a completion changes the owner, so neither can carry coins with it. This check is one shared function, <code>ownerApproves(identity)</code>, used by every address script.</li>
   </ul>
-  <p>The controller's script, its 69-byte state and the approval check used by coins (<code>ownerApproves</code>) stay exactly as built. What changes is how often the controller is used. The simulator under <a href="#life">A wallet's life</a> shows the state byte by byte.</p>
+<pre class="code">function ownerApproves(bytes32 identity) {
+    <span class="c">// Input 0 is this identity's controller.</span>
+    require(tx.inputs[0].tokenCategory == identity + 0x01);
+    bytes state = tx.inputs[0].nftCommitment;
+    require(state.length == 69);
+    require(state.split(1)[0] == 0x01);
+    <span class="c">// It continues as Active with the same owner, epoch, recoverer and delay.</span>
+    require(tx.outputs[0].tokenCategory == identity + 0x01);
+    require(tx.outputs[0].nftCommitment == 0x0100 + state.slice(2, 49) + bytes20(0));
+}</pre>
+  <p>Only the owner-signed <code>ownerAuthorize</code> can produce that successor. The owner's signature on the controller, which covers the whole transaction, is therefore what approves the release. The simulator under <a href="#life">A wallet's life</a> shows the state byte by byte.</p>
+</section>
+
+<!-- ============================== KEYS -->
+<section id="keys">
+  <h2>Keys and addresses</h2>
+  <p>The wallet works like an HD wallet. One seed on the phone gives a key for every address, and every coin can sit at its own address. What is added is a second, hidden way into each address, and a viewing key that lets someone other than the phone find the addresses again.</p>
+  <div class="tree">
+    <div class="row" style="--c: var(--owner)"><div class="k">Seed<small>on the phone only</small></div><div class="v">Gives the <strong>address keys</strong>, one per address, and the <strong>controller key</strong>, a key of its own that is never used for an address. Losing the phone loses the seed.</div></div>
+    <div class="row" style="--c: var(--recoverer)"><div class="k">Viewing key<small>on the phone and with the recoverer</small></div><div class="v">Two values. The <strong>extended public key</strong> of the address chain gives every address's public key. The <strong>blinding seed</strong> gives every address's secret: <code>secret<sub>i</sub> = hash256(blinding seed ‖ i)</code>. It can find every coin. It cannot spend one.</div></div>
+    <div class="row" style="--c: var(--identity)"><div class="k">Identity<small>public, on chain</small></div><div class="v">The token category of the controller's NFT. It is not written in any address.</div></div>
+    <div class="row" style="--c: var(--owner)"><div class="k">Address <em>i</em><small>one per coin</small></div><div class="v"><code>tag<sub>i</sub> = hash256(identity ‖ secret<sub>i</sub>)</code><br><code>P2SH32( RecoverableAddress(tag<sub>i</sub>, hash160(public key<sub>i</sub>)) )</code><br>The tag ties the address to the identity without showing it.</div></div>
+    <div class="row" style="--c: var(--identity)"><div class="k">Vault address <em>j</em><small>no key, never changes</small></div><div class="v"><code>P2SH32( VaultAddress(tag<sub>j</sub>) )</code>, with its own secret from the same blinding seed. It does not depend on any key, so it stays valid through every recovery.</div></div>
+  </div>
+  <h3>Finding everything again</h3>
+  <p>A device that holds the identity and the viewing key restores the wallet the way any HD wallet is restored: it derives address 0, 1, 2 and so on, looks each up on chain, and stops after a run of unused ones. For each address it finds it also has the secret, which is what the recovery path needs. No list of addresses has to be kept anywhere.</p>
+  <p>After a recovery the new device has a new seed and a new viewing key. It gives the new viewing key to the recoverer before the waiting period starts, so the wallet is never without a recovery path. Earlier viewing keys are kept: they find payments that still arrive at earlier addresses.</p>
 </section>
 
 <!-- ============================== ADDRESS -->
 <section id="address">
-  <h2>The recoverable address <span class="state prop">proposed</span></h2>
-  <p>This is the wallet's ordinary address. It is a script address (P2SH32) with two ways to spend. In our earlier discussion it was called the pocket.</p>
-<pre class="code">contract RecoverableAddress(bytes32 identity, bytes20 keyHash) {
+  <h2>The recoverable address</h2>
+  <p>A script address (P2SH32) with two ways to spend.</p>
+<pre class="code">contract RecoverableAddress(bytes32 tag, bytes20 keyHash) {
     <span class="c">// Everyday path: the key this address was made for.</span>
     function spend(pubkey pk, sig s) {
         require(hash160(pk) == keyHash);
         require(checkSig(s, pk));
     }
     <span class="c">// Recovery path: whoever owns the identity today, through the controller.</span>
-    function sweep() {
+    function sweep(bytes32 identity, bytes32 addressSecret) {
+        require(hash256(identity + addressSecret) == tag);
+        ownerApproves(identity);
+    }
+}
+
+contract VaultAddress(bytes32 tag) {
+    <span class="c">// No key. Only the identity's current owner, through the controller.</span>
+    function spend(bytes32 identity, bytes32 addressSecret) {
+        require(hash256(identity + addressSecret) == tag);
         ownerApproves(identity);
     }
 }</pre>
   <div class="grid2">
-    <div class="card by" style="--c: var(--owner)"><strong>Spending address</strong><p class="small" style="margin:6px 0 0">The script above. One address per owner key in version 1. Used for everything the wallet does with applications. It changes when the owner key changes.</p></div>
-    <div class="card by" style="--c: var(--identity)"><strong>Vault address</strong> <span class="state built">built</span><p class="small" style="margin:6px 0 0">The existing <code>Asset(identity)</code> script: controller path only. It never changes, so it suits a published receiving address or a payout that arrives long after it was agreed. Spending from it needs the controller at input 0.</p></div>
+    <div class="card by" style="--c: var(--owner)"><strong>Recoverable address</strong><p class="small" style="margin:6px 0 0">The wallet's ordinary address, a fresh one for each coin, token and change output. Used for everything the wallet does with applications. After a recovery its contents are swept to addresses of the new seed.</p></div>
+    <div class="card by" style="--c: var(--identity)"><strong>Vault address</strong><p class="small" style="margin:6px 0 0">For an address that must outlive a key change: one given out to be paid at any time, or a payout agreed long before it arrives. Spending from it needs the controller at input 0, so coins are moved from the vault to an ordinary address before use.</p></div>
   </div>
-
-  <h3>Everything is found from the identity</h3>
-  <dl class="kv">
-    <dt>Controller address</dt><dd><code>P2SH32( RecoveryController(identity) )</code></dd>
-    <dt>Owner keys so far</dt><dd>Read from the controller's history: every state names the owner key hash of its epoch.</dd>
-    <dt>Spending addresses</dt><dd><code>P2SH32( RecoverableAddress(identity, ownerKeyHash) )</code>, one per epoch</dd>
-    <dt>Vault address</dt><dd><code>P2SH32( Asset(identity) )</code></dd>
-  </dl>
-  <p style="margin-top:12px">A new device that knows only the identity can therefore list every coin and token the wallet has ever been able to hold. No backup file is needed for that.</p>
 
   <div class="widget">
     <div class="wtitle"><span>Which transactions the network accepts</span></div>
@@ -357,20 +385,20 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
   <h3>Who can spend what</h3>
   <div class="scroll">
   <table>
-    <tr><th>Who</th><th>Current address</th><th>Earlier addresses</th><th>Vault</th></tr>
-    <tr><td>Owner, current key</td><td>Yes, by signature</td><td>Yes, through the controller</td><td>Yes, through the controller</td></tr>
+    <tr><th>Who</th><th>Addresses of the current seed</th><th>Addresses of an earlier seed</th><th>Vault addresses</th></tr>
+    <tr><td>Owner, current seed</td><td>Yes, by signature</td><td>Yes, through the controller</td><td>Yes, through the controller</td></tr>
     <tr><td>Recoverer</td><td>No</td><td>No</td><td>No</td></tr>
-    <tr><td>An earlier owner key</td><td>No</td><td>Yes, until the coin is swept</td><td>No</td></tr>
+    <tr><td>Holder of an earlier seed</td><td>No</td><td>Yes, until the coin is swept</td><td>No</td></tr>
     <tr><td>Application</td><td colspan="3">Never holds a key. It gets what the owner signs for, one transaction at a time.</td></tr>
   </table>
   </div>
-  <div class="note"><p><strong>The cost of this design is in the third row.</strong> A coin left at an earlier address still obeys that address's key. In the current build the old key dies the moment recovery completes. Here it dies coin by coin, as the new device sweeps. See <a href="#limits">Costs and open points</a>.</p></div>
+  <div class="note"><p><strong>The price of the design is in the third row.</strong> A coin left at an earlier address still obeys that address's key. Completing a recovery does not disarm the earlier seed by itself; sweeping does, coin by coin. The new device sweeps as soon as recovery completes. See <a href="#limits">Costs and open points</a>.</p></div>
 </section>
 
 <!-- ============================== LIFE -->
 <section id="life">
   <h2>A wallet's life</h2>
-  <p>Press the actions in any order. The strip shows the controller's 69 bytes; press a field to read what it is for. The cards show where the coins and tokens sit.</p>
+  <p>Press the actions in any order. The strip shows the controller's 69 bytes; press a field to read what it is for. The cards show where the coins and tokens sit. Each one is at its own address; the cards group them by the seed their addresses were made from.</p>
   <div class="widget">
     <div class="wtitle"><span>Controller and addresses</span><button type="button" id="sim-reset">Start over</button></div>
     <div class="facts" id="sim-facts"></div>
@@ -380,47 +408,75 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     <div class="actions" id="sim-actions"></div>
     <ul class="log" id="sim-log" aria-live="polite"></ul>
   </div>
-  <p class="small">Things to try: complete a recovery and use the loan before sweeping. Complete a recovery and let the earlier key act before the sweep. Request a recovery, then pay someone, and see that the request stays pending.</p>
+  <p class="small">Things to try: complete a recovery and use the loan before sweeping. Complete a recovery and let the earlier seed act before the sweep. Request a recovery, then pay someone, and see that the request stays pending.</p>
 </section>
 
 <!-- ============================== RECOVERY -->
 <section id="recovery">
   <h2>Recovery flow</h2>
-  <p>The first three steps are as built. Step 4 is new. Step 5 is where applications come back.</p>
   <ol class="timeline">
-    <li><span class="dot" style="--c: var(--recoverer)">1</span><div><h4>Request <span class="state built">built</span></h4><span class="who" style="--c: var(--recoverer)">Recoverer, with the new device</span><p>The new device makes a key and gives its hash to the recoverer. The recoverer signs <code>requestRecovery</code> naming that key. The controller is now Pending, on chain, for anyone to see.</p></div></li>
-    <li><span class="dot" style="--c: var(--owner)">2</span><div><h4>Wait, and the owner's chance to refuse <span class="state built">built</span></h4><span class="who" style="--c: var(--owner)">Owner, if the phone is not lost</span><p>The wallet watches its controller. If a request appears that the owner did not ask for, the owner cancels it with one signature. In this design paying someone no longer cancels a request by the way, because payments do not touch the controller. The cancel is its own action, by hand or automatic.</p></div></li>
-    <li><span class="dot" style="--c: var(--recoverer)">3</span><div><h4>Complete <span class="state built">built</span></h4><span class="who" style="--c: var(--recoverer)">Recoverer</span><p>After the waiting period the recoverer signs <code>finalizeRecovery</code>. The proposed key becomes the owner and the epoch goes up. No coin has moved.</p></div></li>
-    <li><span class="dot" style="--c: var(--owner)">4</span><div><h4>Sweep <span class="state prop">proposed</span></h4><span class="who" style="--c: var(--owner)">New device</span><p>The new device reads the controller's history, works out every earlier address and lists what is there. It moves all of it to the address of its own key in transactions that carry the controller, signed by the new key with <code>ownerAuthorize</code>. Coins, fungible tokens and NFTs move the same way. The fee comes out of the swept coins.</p></div></li>
-    <li><span class="dot" style="--c: var(--app)">5</span><div><h4>Understand what the tokens are <span class="state prop">proposed</span></h4><span class="who" style="--c: var(--app)">New device, with the applications' templates</span><p>A swept NFT is already under the new owner's control. To show it as "a jar with 0.3 BCH that opens in March" the wallet needs the application's template, from its backup or from the application when the user connects again. Recovery does not wait for this.</p></div></li>
+    <li><span class="dot" style="--c: var(--owner)">0</span><div><h4>Setup, while all is well</h4><span class="who" style="--c: var(--owner)">Owner and recoverer</span><p>The wallet creates its controller, naming the recoverer's key and the waiting period. It gives the recoverer a recovery kit, sealed to the recoverer: the identity and the viewing key. The recoverer checks the kit against the chain.</p></div></li>
+    <li><span class="dot" style="--c: var(--recoverer)">1</span><div><h4>Request</h4><span class="who" style="--c: var(--recoverer)">Recoverer, with the new device</span><p>The new device makes a new seed. It gives the recoverer the hash of its controller key and its own viewing key. The recoverer signs <code>requestRecovery</code> naming that key. The controller is now Pending, on chain.</p></div></li>
+    <li><span class="dot" style="--c: var(--owner)">2</span><div><h4>Wait, and the owner's chance to refuse</h4><span class="who" style="--c: var(--owner)">Owner, if the phone is not lost</span><p>The wallet watches its controller. If a request appears that the owner did not ask for, the owner cancels it with one signature of the controller key. Ordinary payments do not touch the controller, so they do not cancel a request. The cancel is an action of its own, by hand or automatic.</p></div></li>
+    <li><span class="dot" style="--c: var(--recoverer)">3</span><div><h4>Complete</h4><span class="who" style="--c: var(--recoverer)">Recoverer</span><p>After the waiting period the recoverer signs <code>finalizeRecovery</code>. The proposed key becomes the owner and the epoch goes up. No coin has moved. The recoverer now hands the earlier viewing key to the new device.</p></div></li>
+    <li><span class="dot" style="--c: var(--owner)">4</span><div><h4>Sweep</h4><span class="who" style="--c: var(--owner)">New device</span><p>With the identity and the earlier viewing key the new device finds every address in use. It moves what is there to addresses of its own seed, in transactions that carry the controller, signed with <code>ownerAuthorize</code>. Each swept input shows the identity and its address secret. Coins, fungible tokens and NFTs move the same way. The fee comes out of the swept coins.</p></div></li>
+    <li><span class="dot" style="--c: var(--app)">5</span><div><h4>Understand what the tokens are</h4><span class="who" style="--c: var(--app)">New device, with the applications' templates</span><p>A swept NFT is already under the new owner's control. To show it as "a jar with 0.3 BCH that opens in March" the wallet needs the application's template, from its backup or from the application when the user connects again. Recovery does not wait for this.</p></div></li>
   </ol>
 
-  <h3>What each party needs</h3>
+  <h3>What each party holds and can do</h3>
   <div class="scroll">
   <table>
     <tr><th>Party</th><th>Holds</th><th>Can do</th><th>Cannot do</th></tr>
-    <tr><td>Owner's device</td><td>The owner key; the identity</td><td>Spend, cancel a request, change the recoverer</td><td></td></tr>
-    <tr><td>Recoverer</td><td>The recoverer key; the identity</td><td>Request and complete a recovery. See the wallet's coins, which are public in version 1.</td><td>Spend anything. Shorten the wait. Complete with a key other than the one requested.</td></tr>
-    <tr><td>New device</td><td>Its own new key; the identity, told by the recoverer</td><td>After completion: sweep and spend</td><td>Anything before the wait is over</td></tr>
-    <tr><td>Backup stores</td><td>Sealed records: trusted templates, labels</td><td>Hand the records back</td><td>Read them. They are no longer needed to find coins or positions.</td></tr>
+    <tr><td>Owner's device</td><td>The seed; the identity; the viewing key</td><td>Spend, cancel a request, change the recoverer</td><td></td></tr>
+    <tr><td>Recoverer</td><td>Its key for this wallet; the identity; the viewing key</td><td>Request and complete a recovery. See every address and balance of the wallet.</td><td>Spend anything. Shorten the wait. Complete with a key other than the one requested.</td></tr>
+    <tr><td>New device</td><td>Its own new seed. After completion: the identity and the earlier viewing key.</td><td>After completion: sweep and spend</td><td>Anything before the wait is over</td></tr>
+    <tr><td>Backup stores</td><td>Sealed records: a second copy of the viewing key, trusted templates, labels</td><td>Hand the records back</td><td>Read them</td></tr>
   </table>
   </div>
-  <div class="note"><p><strong>What the waiting period does and does not protect.</strong> It protects against a recoverer who acts without being asked, as long as the owner notices in time. A recoverer who names their own key and is not cancelled gets the wallet. It does not protect against a thief who can use the owner's phone: such a thief can spend at once, in this design as in any wallet.</p></div>
+  <div class="note"><p><strong>What the waiting period does and does not protect.</strong> It protects against a recoverer who acts without being asked, as long as the owner notices in time. A recoverer who names their own key and is not cancelled gets the wallet. It does not protect against a thief who can use the owner's phone: such a thief can spend at once, as with any wallet.</p></div>
+</section>
+
+<!-- ============================== PRIVACY -->
+<section id="privacy">
+  <h2>What others can see</h2>
+  <p>Addresses are not linked to each other or to the identity until the wallet is recovered. Choose who is looking.</p>
+  <div class="widget">
+    <div class="wtitle"><span>The same six addresses, seen by</span>
+      <button type="button" id="pv-after" aria-pressed="false">Show after a recovery sweep</button>
+    </div>
+    <div class="seg" id="pv-seg" role="group" aria-label="Who is looking">
+      <button type="button" data-k="owner" aria-pressed="false">Owner's phone</button>
+      <button type="button" data-k="rec" aria-pressed="false">Recoverer</button>
+      <button type="button" data-k="jar" aria-pressed="false">Savings Jar</button>
+      <button type="button" data-k="py" aria-pressed="false">ParyonUSD</button>
+      <button type="button" data-k="chain" aria-pressed="true">Anyone watching the chain</button>
+    </div>
+    <div class="scroll" style="margin-top:12px"><table id="pv-rows"></table></div>
+    <p class="small" id="pv-cap" style="margin:12px 0 0; max-width:76ch"></p>
+  </div>
+  <h3>The controller is readable on purpose</h3>
+  <p>Anyone can see that a controller exists, and read its state. It is not linked to any address until a sweep. Hiding the state behind a hash would gain little: every transaction of the controller has to show the state to the script, so it would become public the first time the controller is used. Two simple measures do more:</p>
+  <ul>
+    <li><strong>The recoverer uses a different key for every wallet.</strong> Two wallets with the same recoverer then show nothing in common.</li>
+    <li><strong>The owner's controller key is used for nothing else.</strong> It never appears in an address.</li>
+  </ul>
+  <h3>What a recovery reveals</h3>
+  <p>A sweep has the controller as its first input and shows the identity in every swept input. Everything the wallet held at that moment is tied together, in public. Coins received afterwards at new addresses are unlinked again. Limiting this would take several controllers, each covering part of the addresses. Hiding it fully would take a zero-knowledge proof checked in script, which Bitcoin Cash cannot practically do today as far as we know. Neither is part of this design; both remain possible, because applications never see the identity or the controller.</p>
 </section>
 
 <!-- ============================== RULES -->
 <section id="rules">
-  <h2>Rules for applications <span class="state prop">proposed</span></h2>
+  <h2>Rules for applications</h2>
   <p>An application that follows these three rules is recoverable by this wallet, and by any other wallet that implements the same scheme, without knowing that recovery exists.</p>
   <div class="grid3">
     <div class="card rule"><span class="tag">Rule 1</span><h4>Authority is a token</h4><p>Whoever may act on a position is whoever spends its ownership NFT in the same transaction. Payouts go to an address the wallet supplied.</p><p class="small">No user key or key hash inside an application contract. A key cannot be replaced; a token can be moved.</p></div>
-    <div class="card rule"><span class="tag">Rule 2</span><h4>The wallet's parts are the wallet's business</h4><p>The application does not assume the wallet's inputs are P2PKH or have a fixed size. Tokens and change go to an address the wallet names.</p><p class="small">"Back to the address it came from" is fine: after a sweep that is the new address.</p></div>
+    <div class="card rule"><span class="tag">Rule 2</span><h4>The wallet's parts are the wallet's business</h4><p>The application does not assume the wallet's inputs are P2PKH or have a fixed size. Tokens and change go to an address the wallet names.</p><p class="small">"Back to the address it came from" is acceptable: after a sweep that is a new address.</p></div>
     <div class="card rule"><span class="tag">Rule 3</span><h4>The token leads to the position</h4><p>From the NFT alone (its category and commitment) and the template, a wallet can find the position on chain and list the actions it offers.</p><p class="small">No application server and no private note is needed to find a position again.</p></div>
   </div>
   <h3>Why these are enough</h3>
   <ul>
     <li><strong>Recovery never touches an application contract.</strong> The sweep moves the NFT from one wallet address to another. The position stays where it is.</li>
-    <li><strong>The application's transaction layout is untouched.</strong> The controller is not in application transactions, so fixed input positions do not collide with it.</li>
+    <li><strong>The application's transaction layout is its own.</strong> The controller is not in application transactions, so an application may fix its input and output positions as it likes.</li>
     <li><strong>A wallet can recover what it does not understand.</strong> An NFT of an unknown application is swept like any coin. Its meaning can be learned later.</li>
     <li><strong>The rules are checkable.</strong> Each can be tested against a contract's source and a template, so a conformance checker is possible.</li>
   </ul>
@@ -429,21 +485,21 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
 
 <!-- ============================== TEMPLATES -->
 <section id="templates">
-  <h2>Template extension <span class="state open">open</span></h2>
-  <p>An XO template already describes an application's roles, actions, transactions, inputs, outputs and scripts. The engine builds every transaction from it. Two things are missing for recovery: a way to say that an output is locked by whatever address the wallet chooses, and a way to say what a token means. The fragments below are sketches. The field names are proposals and have not been checked against the XO schema or discussed with its authors.</p>
+  <h2>Template extension</h2>
+  <p>An XO template describes an application's roles, actions, transactions, inputs, outputs and scripts, and the engine builds every transaction from it. Two things are missing for recovery: a way to say that an output is locked by whatever address the wallet chooses, and a way to say what a token means. The fragments below are sketches. The field names are proposals; they have not been checked against the XO schema or discussed with its authors.</p>
 
   <h3>1. An output the wallet locks</h3>
 <pre class="code">"outputs": {
   "jarKeyOutput": {
     "name": "Jar key",
     "description": "The token that opens this jar. Keep it in the wallet.",
-    "lockingScript": { "wallet": "receive" },        <span class="c">// proposed: the wallet's own address</span>
+    "lockingScript": { "wallet": "receive" },        <span class="c">// a fresh address of the wallet's choosing</span>
     "valueSatoshis": 1000,
     "token": { "category": "$(&lt;keyCategory&gt;)",
                "nft": { "capability": "none", "commitment": "$(&lt;unlockTime&gt;)" } }
   }
 }</pre>
-  <p>Today a template names a locking script for every output. Here the template leaves it to the wallet. The same marker on an input says "any coin of the wallet", with no assumption about its script.</p>
+  <p>A template normally names a locking script for every output. Here it leaves the script to the wallet. The same marker on an input says "any coin of the wallet", with no assumption about its script.</p>
 
   <h3>2. What a token means</h3>
 <pre class="code">"recovery": {
@@ -477,12 +533,12 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     }
   }
 }</pre>
-  <p>ParyonUSD keeps a small sidecar coin next to each loan, carrying the loan key's category. The wallet finds the unspent sidecar with that category; the loan is the output before it in the same transaction. This reading comes from the borrowing and manage contracts and has not been run.</p>
+  <p>ParyonUSD keeps a small sidecar coin next to each loan, carrying the loan key's category. The wallet finds the unspent sidecar with that category; the loan is the output before it in the same transaction. This reading comes from Paryon's borrowing and manage contracts and has not been run.</p>
 
   <h3>4. The wallet's own template</h3>
-  <p>The wallet's template gains the recoverable address as a locking script with two unlocking scripts, <code>spend</code> and <code>sweep</code>, and a <code>sweep</code> action whose first input and output are the controller. The existing <code>approve</code> action remains for the vault.</p>
+  <p>The wallet is itself described by an XO template. It holds the controller with its four actions, the recoverable address as a locking script with two unlocking scripts (<code>spend</code> and <code>sweep</code>), the vault address, and a <code>sweep</code> action whose first input and output are the controller.</p>
 
-  <div class="note"><p><strong>How a wallet ties a token to a template without a backup.</strong> The backup keeps one line per token saying which template made it. If the backup is gone, the wallet can test a token against a template the user trusts: rebuild the position's address from the token and look for that address in the transaction that created the token. Proposed, not built.</p></div>
+  <div class="note"><p><strong>Tying a token to a template without a backup.</strong> The backup keeps one line per token saying which template made it. If the backup is gone, the wallet can test a token against a template the user trusts: rebuild the position's address from the token and look for that address in the transaction that created the token.</p></div>
 </section>
 
 <!-- ============================== CONNECT -->
@@ -498,12 +554,12 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     </div>
     <figure class="scroll"><div id="cx-dia"></div><figcaption id="cx-cap"></figcaption></figure>
   </div>
-  <p>The ordinary flow cannot serve this wallet. It hands the application the wallet's public keys, and the application derives P2PKH addresses from them and builds the transaction itself. This wallet's address is a script. We checked the live front ends of Moria and ParyonUSD on 16 November 2026: both refuse any wallet address that is not P2PKH, over WalletConnect as well.</p>
+  <p>The ordinary flow cannot serve this wallet. It hands the application the wallet's public keys, and the application derives P2PKH addresses from them and builds the transaction itself. This wallet's addresses are scripts that cannot be derived from public keys alone. The live front ends of Moria and ParyonUSD, read on 16 November 2026, both refuse any wallet address that is not P2PKH, over WalletConnect as well.</p>
 
-  <h3>The <code>xo_v1</code> extension <span class="state built">version 2 built</span> <span class="state prop">version 3 proposed</span></h3>
-  <p>A wallet announces the extension in the session. Nothing in it names an application.</p>
-<pre class="code">{ "xo_v1": { "version": 3, "network": "chipnet",
-    "profiles":  ["recoverable-app-v1"],           <span class="c">// proposed: the rules this wallet relies on</span>
+  <h3>The <code>xo_v1</code> extension</h3>
+  <p>A wallet announces the extension in the WizardConnect session. Nothing in it names an application.</p>
+<pre class="code">{ "xo_v1": { "version": 1, "network": "chipnet",
+    "profiles":  ["recoverable-app-v1"],           <span class="c">// the application rules this wallet relies on</span>
     "bindings":  ["receive", "change"],            <span class="c">// values the wallet fills in itself</span>
     "templates": [{ "identifier": "…", "contentHash": "…" }] } }</pre>
   <div class="scroll">
@@ -516,20 +572,22 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     <tr><td><code>xo_positions_request</code> / <code>xo_positions</code></td><td>both</td><td>Which tokens of this template does the wallet hold? Answered only for a template the user trusts.</td></tr>
   </table>
   </div>
-  <h3>What changes from version 2</h3>
+  <h3>Rules the wallet follows</h3>
   <ul>
-    <li><strong>No identity binding.</strong> Version 2 let the application ask the wallet to fill its identity into the application's script. Applications no longer see the identity at all.</li>
-    <li><strong>A position is a token.</strong> The wallet reports the NFTs it holds under a template, read from the chain, where version 2 reported records from its backup.</li>
-    <li><strong>The wallet signs with the address key.</strong> Version 2 wrapped every action in the wallet's <code>approve</code> action around the controller. That wrapping goes away for application actions.</li>
+    <li><strong>An unknown template is shown to the user</strong> with its name, description and actions, and is trusted only on their word.</li>
+    <li><strong>The user sees two things before approving:</strong> the action in the template's words, and the wallet's own figures from the transaction it built. The application cannot influence the second.</li>
+    <li><strong>A request is carried out at most once.</strong> It is identified by its <code>id</code>; a repeat gets the stored outcome.</li>
+    <li><strong>The application is never told the identity.</strong> It learns the addresses that appear in its own transactions and nothing else.</li>
+    <li><strong>A position is a token.</strong> The wallet answers a positions request from the NFTs it holds on chain.</li>
+    <li><strong>The wallet signs with the address keys.</strong> The controller is not part of an application's transaction.</li>
   </ul>
-  <p>The rules the wallet follows stay: an unknown template is shown to the user and trusted only on their word; a request is carried out at most once per <code>id</code>; the user sees the template's wording next to the wallet's own figures from the built transaction.</p>
-  <div class="note"><p><strong>This is the part that most needs XO.</strong> XO has invitations and a sync client but no protocol between a website and a wallet. <code>xo_v1</code> is our own. A standard would best come from XO, or as a WizardConnect extension both projects agree on.</p></div>
+  <div class="note"><p><strong>This is the part that most needs XO.</strong> XO has invitations and a sync client but no protocol between a website and a wallet. A standard would best come from XO, or as a WizardConnect extension that both projects agree on.</p></div>
 </section>
 
 <!-- ============================== JAR -->
 <section id="jar">
-  <h2>The new Savings Jar <span class="state prop">proposed</span></h2>
-  <p>A jar holds savings until a date. Today there are two jar contracts: one bound to the wallet's identity for Grandma's Wallet and one bound to a key for ordinary wallets. In this design there is one, and it knows neither.</p>
+  <h2>Savings Jar</h2>
+  <p>The demonstration application. A jar holds savings until a date. Anyone can pay in. After the date, whoever holds the jar's key NFT can empty it. The jar's contract knows nothing about wallets, keys or recovery.</p>
 <pre class="code">contract SavingsJar(bytes32 keyCategory, int unlockTime) {
     <span class="c">// Deposits are ordinary payments to the jar's address.</span>
     function withdraw(int keyInput) {
@@ -551,13 +609,13 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     <div class="verdict" id="jar-verdict"></div>
   </div>
   <p>The jar trusts the category. Only the transaction that opens the jar can create tokens of it, and the wallet builds that transaction from the template with exactly one NFT. A wallet that made two keys for one jar would only have two keys to its own jar.</p>
-  <p>Work this needs in the wallet: actions that create a token. The current build refuses them. Creating a category also needs a wallet coin that is output 0 of its transaction, so the wallet may first have to make one by paying itself.</p>
+  <p>What this asks of the wallet: it must carry out template actions that create a token. Creating a category needs a wallet coin that is output 0 of its transaction, so the wallet may first have to make one by paying itself.</p>
 </section>
 
 <!-- ============================== PARYON -->
 <section id="paryon">
-  <h2>ParyonUSD <span class="state open">open</span></h2>
-  <p>ParyonUSD lends its dollar token, PUSD, against BCH collateral. Each loan is managed by whoever holds its loan key NFT. That is rule 1 already, on chain, in contracts we would not change. The plan is to write our own front end and XO template for it and to show a real loan surviving a recovery on Paryon's chipnet deployment.</p>
+  <h2>ParyonUSD</h2>
+  <p>ParyonUSD lends its dollar token, PUSD, against BCH collateral. Each loan is managed by whoever holds its loan key NFT. That is rule 1 already, on chain, in contracts that need no change. The plan is a front end and an XO template of our own for it, and a real loan surviving a recovery on Paryon's chipnet deployment.</p>
   <div class="widget">
     <div class="wtitle"><span>A loan, from the wallet's side</span></div>
     <div class="seg" id="py-seg" role="group" aria-label="Paryon transaction"></div>
@@ -581,108 +639,56 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     </ul></div>
     <div><h4>Not checked</h4><ul>
       <li>Nothing has been sent. No loan was opened from a script address.</li>
-      <li>Whether an XO template can express a transaction with four Paryon contract inputs and seven fixed outputs, with the wallet supplying only its own parts. This is the main risk, and it is the claim the demo is meant to prove.</li>
+      <li>Whether an XO template can express a transaction with four Paryon contract inputs and seven fixed outputs, with the wallet supplying only its own parts. This is the main risk, and it is the claim the demonstration is meant to prove.</li>
       <li>The other 21 contracts (interest, redemption, liquidation, staking) were not read for this purpose.</li>
-      <li>Paryon's transaction-building library is not public. We write ours from the contracts.</li>
+      <li>Paryon's transaction-building library is not public. Ours is written from the contracts.</li>
     </ul></div>
   </div>
-  <div class="note"><p><strong>Before any front end:</strong> open, manage and close one loan on chipnet from a recoverable address with a plain script. That settles whether the contracts accept this wallet. It needs about 0.5 test BCH. Paryon's contracts repository states no licence, so we would depend on the npm package without copying it, and telling the Paryon team would be sensible.</p></div>
+  <div class="note"><p><strong>Before any front end:</strong> open, manage and close one loan on chipnet from a recoverable address with a plain script. That settles whether the contracts accept this wallet. It needs about 0.5 test BCH. Paryon's contracts repository states no licence, so the npm package is used as a dependency and not copied, and telling the Paryon team would be sensible.</p></div>
+  <p class="small">One consequence for privacy: managing a loan returns the loan key to the address it left, so the key stays at one address for the life of the loan. That address is known to anyone who looks at the loan, and to nobody as part of this wallet.</p>
 </section>
 
 <!-- ============================== APPS -->
 <section id="apps">
   <h2>Other applications</h2>
-  <p>Where the applications we studied stand against the three rules. Contract findings are from their published sources; none was run with this wallet.</p>
+  <p>Where four existing applications stand against the three rules. Contract findings are from their published sources; none was run with this wallet.</p>
   <div class="scroll">
   <table>
     <tr><th>Application</th><th>Rule 1 · Authority</th><th>Rule 2 · Wallet's parts</th><th>What it would take</th></tr>
     <tr><td><strong>ParyonUSD</strong></td><td><span class="pill ok">Met</span> Loan key NFT; staking receipt NFT</td><td><span class="pill part">Front end</span> P2PKH wallets only</td><td>An XO template and a front end. No contract change found necessary.</td></tr>
     <tr><td><strong>Moria</strong></td><td><span class="pill ok">Met</span> Borrower NFT, named in the loan by its hash</td><td><span class="pill part">Front end</span> P2PKH wallets only</td><td>The same. Its chipnet deployment was not checked.</td></tr>
     <tr><td><strong>Cauldron</strong></td><td><span class="pill no">Not met</span> A pool is opened by a key hash written into it</td><td><span class="pill ok">Met</span> for trades, which fit any position</td><td>A pool variant whose withdrawal follows a token. A contract change.</td></tr>
-    <tr><td><strong>BCH Bull (AnyHedge)</strong></td><td><span class="pill part">Partly</span> Payout goes to any script, so to the vault address. Early exit needs two fixed keys.</td><td><span class="pill unk">Not studied</span></td><td>Payout at maturity survives recovery as it is. Early exit needs authority by token or by address.</td></tr>
+    <tr><td><strong>BCH Bull (AnyHedge)</strong></td><td><span class="pill part">Partly</span> Payout goes to any script, so to a vault address. Early exit needs two fixed keys.</td><td><span class="pill unk">Not studied</span></td><td>Payout at maturity survives recovery as it is. Early exit needs authority by token or by address.</td></tr>
   </table>
   </div>
   <p style="margin-top:14px">Trading on Cauldron holds no position, so it needs only rule 2 and a template. The pattern across the four: applications that already use an ownership NFT need a front end; applications that wrote a key into a contract need a contract variant.</p>
 </section>
 
-<!-- ============================== PRIVACY -->
-<section id="privacy">
-  <h2>Privacy later</h2>
-  <p>Version 1 is no more private than a wallet with one address. The design keeps the door open for a version 2 that is, without changing the controller, the recovery flow or the application rules.</p>
-  <div class="grid2">
-    <div class="card"><span class="tag">Version 1 · for the hackathon</span>
-      <ul style="margin-top:8px">
-        <li>One address per owner key.</li>
-        <li>The identity is written in the address script, visible when a coin is spent.</li>
-        <li>The controller's state is readable: owner key hash, recoverer key hash, delay.</li>
-        <li>A new device needs only the identity.</li>
-      </ul></div>
-    <div class="card"><span class="tag">Version 2 · later</span>
-      <ul style="margin-top:8px">
-        <li>A fresh key per address, from one seed.</li>
-        <li>Each address carries <code>hash(identity ‖ address secret)</code>. The identity shows only in a sweep.</li>
-        <li>The controller's state is a hash. It moves only at recovery.</li>
-        <li>A new device needs the identity and a viewing secret that the recoverer keeps.</li>
-      </ul></div>
-  </div>
-<pre class="code">contract RecoverableAddressV2(bytes32 tag, bytes20 keyHash) {
-    function spend(pubkey pk, sig s) { <span class="c">/* as before */</span> }
-    function sweep(bytes32 identity, bytes32 addressSecret) {
-        require(hash256(identity + addressSecret) == tag);
-        ownerApproves(identity);
-    }
-}</pre>
-  <h3>What keeps version 2 possible</h3>
-  <ul>
-    <li><strong>Applications never see the identity or the controller.</strong> The rules speak only of tokens and of addresses the wallet supplies, so a change of address scheme is invisible to them.</li>
-    <li><strong>The address script has a version.</strong> A wallet can hold coins at addresses of both versions and sweep both.</li>
-    <li><strong>The controller is off the everyday path.</strong> In version 1 it already appears only at setup, recovery, sweeps and vault spending.</li>
-  </ul>
-  <p>What version 2 would still show: a sweep ties the swept addresses to one identity. Several controllers, each covering part of the addresses, limit that. Hiding it fully needs a zero-knowledge proof checked in script, which Bitcoin Cash cannot practically do today as far as we know.</p>
-</section>
-
-<!-- ============================== CHANGES -->
-<section id="changes">
-  <h2>What changes, what stays</h2>
+<!-- ============================== CHOICES -->
+<section id="choices">
+  <h2>Design choices</h2>
   <div class="scroll">
   <table>
-    <tr><th></th><th>Current build</th><th>This design</th></tr>
-    <tr><td>Everyday spend</td><td>Controller and approval in every transaction</td><td>One signature, no controller</td></tr>
-    <tr><td>What an application must know</td><td>The wallet's identity, inside its own contract</td><td>Nothing. Authority is a token.</td></tr>
-    <tr><td>Application transaction layout</td><td>Controller at input 0 and output 0, always</td><td>The application's own layout</td></tr>
-    <tr><td>Several actions at once</td><td>One at a time: there is one controller coin</td><td>Independent</td></tr>
-    <tr><td>Two such wallets in one transaction</td><td>Impossible</td><td>Possible</td></tr>
-    <tr><td>At recovery</td><td>Nothing moves. The old key stops working at once.</td><td>Coins and tokens are swept. The old key stops working for each coin as it is swept.</td></tr>
-    <tr><td>Receiving address</td><td>Never changes</td><td>Changes with the owner key. The vault address never changes.</td></tr>
-    <tr><td>Cancelling a request</td><td>Any payment cancels it</td><td>A cancel of its own, by hand or automatic</td></tr>
-    <tr><td>Seen on chain</td><td>Every transaction passes through the controller</td><td>The controller at setup, recovery, sweeps and vault spending</td></tr>
-    <tr><td>Finding everything on a new device</td><td>Identity, plus the backup for application positions</td><td>Identity alone for coins and tokens. A template for their meaning.</td></tr>
+    <tr><th>Choice</th><th>Alternative</th><th>Why this way</th></tr>
+    <tr><td>The controller stays out of everyday transactions</td><td>Every spend passes through the controller, so a key change takes effect at once and nothing has to move</td><td>That alternative puts one coin into every transaction of the wallet. All activity becomes linkable, only one action can be in flight, two such wallets cannot share a transaction, and every application has to make room for the controller at a fixed position.</td></tr>
+    <tr><td>Authority is a token</td><td>The application's contract names the wallet's identity and checks the controller itself</td><td>The application would have to know this scheme and carry its code. A token is something existing applications already use, and it moves with an ordinary transfer.</td></tr>
+    <tr><td>The wallet builds the transaction</td><td>The application builds it from the wallet's public keys and the wallet signs</td><td>The application would have to understand the wallet's scripts. With a template the wallet knows what it is signing and the application needs no knowledge of the wallet.</td></tr>
+    <tr><td>One address per coin, identity hidden in a tag</td><td>One address for the whole wallet, with the identity in its script</td><td>A single address makes the wallet as traceable as an account number. The tag costs one hash and one secret per address.</td></tr>
+    <tr><td>The recoverer keeps the viewing key</td><td>The new device finds addresses from public data alone</td><td>Addresses that can be found from public data can be found by everyone. The recoverer is already trusted with the wallet's future.</td></tr>
+    <tr><td>Readable controller state</td><td>A hashed state</td><td>The state is shown whenever the controller is used. A key per wallet for the recoverer removes the one field that could link wallets.</td></tr>
+    <tr><td>A vault address beside the ordinary ones</td><td>Only key-bearing addresses</td><td>Some payments arrive long after the address was given out. A key-bearing address goes stale at recovery; a vault address does not.</td></tr>
   </table>
   </div>
 
-  <h3>What happens to what is built</h3>
-  <div class="scroll">
-  <table>
-    <tr><th>Part</th><th>Fate</th></tr>
-    <tr><td>Controller contract and its state</td><td>Kept unchanged</td></tr>
-    <tr><td><code>ownerApproves</code> and the <code>Asset</code> covenant</td><td>Kept. <code>Asset</code> becomes the vault; <code>ownerApproves</code> also guards the sweep path.</td></tr>
-    <tr><td>Recoverer page, request and completion, the monitor</td><td>Kept</td></tr>
-    <tr><td>Wallet template</td><td>Gains the recoverable address and a sweep action. <code>approve</code> stays for the vault.</td></tr>
-    <tr><td>Backup stores</td><td>Kept for templates and labels. No longer the only record of positions.</td></tr>
-    <tr><td><code>xo_v1</code></td><td>Version 3, as described above</td></tr>
-    <tr><td>Savings Jar contracts and template</td><td>Replaced by the one jar with a key NFT</td></tr>
-    <tr><td>Taking over on a new device</td><td>Gains the sweep</td></tr>
-  </table>
-  </div>
-
-  <h3>Order of work</h3>
+  <h3>Parts, in the order they depend on each other</h3>
   <ol class="steps">
-    <li><div><strong>The recoverable address.</strong> Contract and tests: both paths, the sweep, and every refusal shown on this page.</div></li>
-    <li><div><strong>Wallet on the key path.</strong> Receive at the recoverable address, pay with the key, keep the vault.</div></li>
-    <li><div><strong>Sweep on a new device.</strong> Addresses from the controller's history; coins and tokens moved after completion.</div></li>
-    <li><div><strong>Token-creating actions in the wallet,</strong> including the output-0 coin a new category needs.</div></li>
-    <li><div><strong>The new Savings Jar,</strong> its template with the recovery declaration, checked with Grandma's Wallet and with an ordinary wallet.</div></li>
-    <li><div><strong><code>xo_v1</code> version 3.</strong></div></li>
+    <li><div><strong>The controller</strong> and <code>ownerApproves</code>.</div></li>
+    <li><div><strong>The recoverable address and the vault address.</strong> Contracts and tests: both paths, the sweep, and every refusal shown on this page.</div></li>
+    <li><div><strong>The wallet's keys.</strong> Seed, address chain, viewing key; receiving and paying.</div></li>
+    <li><div><strong>The recoverer.</strong> Recovery kit, request, completion; the owner's monitor and cancel.</div></li>
+    <li><div><strong>The sweep on a new device.</strong> Finding addresses from the viewing key; moving coins and tokens.</div></li>
+    <li><div><strong>Applications.</strong> The <code>xo_v1</code> extension; building from an application's template; actions that create tokens.</div></li>
+    <li><div><strong>Savings Jar,</strong> with its template and recovery declaration, checked with this wallet and with an ordinary wallet.</div></li>
     <li><div><strong>ParyonUSD.</strong> First a loan from a script address by plain script. Then the template and the front end. Then the recovery of a live loan.</div></li>
     <li><div><strong>Two short specifications for XO:</strong> the recoverable address, and the three application rules as a template profile.</div></li>
   </ol>
@@ -693,11 +699,13 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
   <h2>Costs and open points</h2>
   <h3>Costs of the design</h3>
   <ul>
-    <li><strong>An earlier key works until the sweep.</strong> Someone who later finds the lost phone can take a coin that was not swept. The new device should sweep as soon as recovery completes. During the waiting period itself the old key works in the current build as well.</li>
-    <li><strong>Payments to an earlier address.</strong> A coin sent to an old address after recovery can be moved by the new owner through the controller, and also by the earlier key. People who pay the wallet need the new address, or the vault address, which does not change.</li>
-    <li><strong>The address changes at recovery.</strong> So does every "send it back where it came from" in an application: it refers to the new address only after the sweep.</li>
-    <li><strong>The sweep links addresses.</strong> In version 1 they are public anyway.</li>
-    <li><strong>A request is not cancelled by ordinary use.</strong> The owner's device has to notice it. The monitor runs only while the wallet page is open, as today.</li>
+    <li><strong>An earlier seed works until the sweep.</strong> Someone who later finds the lost phone can take a coin that was not swept. The new device sweeps as soon as recovery completes.</li>
+    <li><strong>Payments to an earlier address.</strong> A coin sent to an old address after recovery can be moved by the new owner through the controller, and also by the earlier seed. People who pay the wallet need a new address, or a vault address, which does not go stale.</li>
+    <li><strong>The recoverer can read the wallet.</strong> The viewing key shows every address and balance. It gives no power to spend.</li>
+    <li><strong>The viewing key is needed to recover.</strong> Without it the new owner cannot find the addresses or show their secrets. It is kept by the recoverer and, sealed, in the backup stores.</li>
+    <li><strong>A recovery is public.</strong> The sweep ties together everything the wallet held.</li>
+    <li><strong>A request is not cancelled by ordinary use.</strong> The owner's device has to notice it and cancel.</li>
+    <li><strong>Larger transactions.</strong> Spending a script address costs more bytes than P2PKH. Not measured.</li>
   </ul>
   <h3>Open points</h3>
   <ul>
@@ -705,15 +713,15 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     <li><strong>The template extension.</strong> Whether "the wallet's own address" and the recovery declaration belong in the XO schema or in a companion document is for XO to say.</li>
     <li><strong>Application state that is not on chain.</strong> Accounts opened by signing a message with a key, or state kept on a server, are outside these rules.</li>
     <li><strong>Positions that change without the wallet.</strong> A liquidated or redeemed loan leaves the wallet holding a key to nothing. The template's way of finding the position has to cope with "not found".</li>
-    <li><strong>Size and fee of a script-address spend</strong> compared with P2PKH: not measured.</li>
-    <li><strong>None of the contracts is audited.</strong></li>
+    <li><strong>The extended public key and a leaked address key.</strong> As in any HD wallet, the two together give every key of the chain. The viewing key must stay away from anyone who could also obtain one of the wallet's private keys.</li>
+    <li><strong>None of this is audited.</strong></li>
   </ul>
   <h3>Sources</h3>
   <ul class="small">
-    <li>This repository: <code>contracts/controller.cash</code>, <code>contracts/asset.cash</code>, <code>contracts/lib/authorization.cash</code>, <code>docs/web-apps.md</code>, and the chipnet runs of 16 November 2026 recorded there.</li>
-    <li>ParyonUSD: npm package <code>@paryonusd/contracts</code> 1.1.0; the live front end and its chipnet deployment.</li>
-    <li>Moria, Cauldron and AnyHedge: their published contract sources, as summarised on the earlier architecture page.</li>
-    <li>XO: its guide and template format as used in this repository.</li>
+    <li>ParyonUSD: npm package <code>@paryonusd/contracts</code> 1.1.0; its live front end and chipnet deployment.</li>
+    <li>Moria, Cauldron and AnyHedge: their published contract sources and, for Moria, its live front end.</li>
+    <li>WizardConnect and WalletConnect for Bitcoin Cash: their published protocol descriptions.</li>
+    <li>XO: its guide and template format.</li>
   </ul>
 </section>
 </main>
@@ -817,6 +825,8 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     list.forEach(function (sc, i) { var b = h("button", { type: "button" }, sc.name); b.addEventListener("click", function () { show(i); }); seg.appendChild(b); });
     show(0);
   }
+  var C_SAME = "Active, same owner and settings";
+  var SWEEP = "sweep: identity + address secret";
 
   /* ---------- the idea ---------- */
   (function () {
@@ -827,52 +837,51 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
       btn.textContent = lost ? "Give the phone back" : "Lose the phone";
       document.getElementById("idea-key").classList.toggle("lost", lost);
       document.querySelectorAll("#idea-w1 path").forEach(function (p) { p.classList.toggle("wire-bad", lost); });
-      set("idea-key-s", lost ? "gone with the phone" : "on the phone");
-      set("idea-ctrl-s", lost ? "identity NFT · owner: key B" : "identity NFT · owner: key A");
-      set("idea-addr-s", lost ? "swept to key B's address" : "made for key A");
-      set("idea-st", lost ? "spent with key B alone" : "spent with key A alone");
+      set("idea-key-s", lost ? "gone with the phone" : "address keys, on the phone");
+      set("idea-ctrl-s", lost ? "identity NFT · owner: seed B" : "identity NFT · owner: seed A");
+      set("idea-addr-s", lost ? "swept to addresses of seed B" : "one per coin, from seed A");
       set("idea-cap", lost
-        ? "The recoverer asked for key B, the waiting period passed, and the controller now names key B as owner. The new phone swept the coins and both NFTs through the controller to an address made for key B. The jar and the loan did not move; their keys did."
-        : "Day to day, key A signs and the controller is not involved. Applications deal with tokens at the wallet's address and know nothing about recovery.");
+        ? "The recoverer asked for the new phone's key, the waiting period passed, and the controller now names seed B as owner. The new phone found the addresses with the viewing key and swept the coins and both NFTs through the controller to addresses of seed B. The jar and the loan did not move; their keys did."
+        : "Day to day, each coin is spent by its own key and the controller is not involved. Applications deal with tokens at the wallet's addresses and know nothing about recovery.");
     });
   })();
 
   /* ---------- address scenarios ---------- */
   txTabs("ap", [
     { name: "Everyday payment", kind: "ok",
-      inputs: [{ i: "0", k: "wallet", t: "Wallet coin", s: "key A signs: spend" }],
-      outputs: [{ i: "0", t: "Payment", s: "to anyone" }, { i: "1", k: "wallet", t: "Change", s: "back to key A's address" }],
-      checks: [[1, "Address script: the key matches the hash in the address and the signature is valid."], [1, "The controller is not in the transaction."]],
+      inputs: [{ i: "0", k: "wallet", t: "Wallet coin", s: "its address key signs: spend" }],
+      outputs: [{ i: "0", t: "Payment", s: "to anyone" }, { i: "1", k: "wallet", t: "Change", s: "to a fresh address of the wallet" }],
+      checks: [[1, "Address script: the key matches the hash in the address and the signature is valid."], [1, "The controller is not in the transaction. The identity is not shown."]],
       verdict: "Accepted. A single-signature spend from a script address." },
     { name: "Sweep after recovery", kind: "ok",
-      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "key B signs: ownerAuthorize" }, { i: "1", k: "wallet", t: "Coin at key A's address", s: "sweep path, no signature" }, { i: "2", k: "app", t: "Loan key at key A's address", s: "sweep path, no signature" }],
-      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: "Active, same owner and settings" }, { i: "1", k: "wallet", t: "Coin at key B's address", s: "less the fee", neu: true }, { i: "2", k: "app", t: "Loan key NFT", s: "at key B's address", neu: true }],
-      checks: [[1, "Controller: key B matches the owner hash, and its signature covers every input and output."], [1, "Each swept coin: input 0 is this identity's controller."], [1, "Each swept coin: the controller continues unchanged, with no request pending."]],
-      verdict: "Accepted. Key A signed nothing." },
+      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "new owner signs: ownerAuthorize" }, { i: "1", k: "wallet", t: "Coin at an earlier address", s: SWEEP }, { i: "2", k: "app", t: "Loan key, earlier address", s: SWEEP }],
+      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: C_SAME }, { i: "1", k: "wallet", t: "Coin at a new address", s: "less the fee", neu: true }, { i: "2", k: "app", t: "Loan key NFT", s: "at a new address", neu: true }],
+      checks: [[1, "Controller: the new owner's controller key matches the owner hash, and its signature covers every input and output."], [1, "Each swept coin: the identity and address secret shown hash to the tag in its address."], [1, "Each swept coin: input 0 is that identity's controller, continuing unchanged with no request pending."]],
+      verdict: "Accepted. No key of the earlier seed signed anything." },
     { name: "Spend from the vault", kind: "ok",
-      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "owner signs: ownerAuthorize" }, { i: "1", k: "wallet", t: "Vault coin", s: "no key, no signature" }],
-      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: "Active, same owner and settings" }, { i: "1", k: "wallet", t: "Coin at the current address", s: "ready for everyday use" }],
-      checks: [[1, "Controller: the owner's signature covers the whole transaction."], [1, "Vault coin: input 0 is this identity's controller, continuing unchanged."]],
-      verdict: "Accepted. This is the current build's only way to spend, kept for the vault." },
+      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "owner signs: ownerAuthorize" }, { i: "1", k: "wallet", t: "Vault coin", s: "identity + address secret, no key" }],
+      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: C_SAME }, { i: "1", k: "wallet", t: "Coin at an ordinary address", s: "ready for everyday use" }],
+      checks: [[1, "Controller: the owner's signature covers the whole transaction."], [1, "Vault coin: the identity and secret match its tag; input 0 is the controller, continuing unchanged."]],
+      verdict: "Accepted. The vault address itself never changes." },
     { name: "Recoverer completes and reaches", kind: "no",
-      inputs: [{ i: "0", k: "rec", t: "Controller", s: "recoverer signs: finalizeRecovery" }, { i: "1", k: "wallet", t: "Coin at key A's address", s: "refuses this transaction", bad: true }],
+      inputs: [{ i: "0", k: "rec", t: "Controller", s: "recoverer signs: finalizeRecovery" }, { i: "1", k: "wallet", t: "Wallet coin", s: "refuses this transaction", bad: true }],
       outputs: [{ i: "0", k: "rec", t: "Controller", s: "Active, new owner, next epoch" }, { i: "1", t: "To the recoverer", s: "never happens", bad: true }],
-      checks: [[1, "Controller: the waiting period has passed; the named key is installed."], [0, "Coin: the controller must continue with the same owner and epoch. Both changed."]],
+      checks: [[1, "Controller: the waiting period has passed; the named key is installed."], [1, "Coin: the recoverer holds the viewing key, so it can show the identity and the secret."], [0, "Coin: the controller must continue with the same owner and epoch. Both changed."]],
       verdict: "Refused by the network. Only the installed owner sweeps, in a later transaction." },
-    { name: "Earlier key, coin not swept", kind: "warn",
-      inputs: [{ i: "0", k: "wallet", t: "Coin at key A's address", s: "key A signs: spend" }],
-      outputs: [{ i: "0", t: "To whoever holds key A", s: "" }],
+    { name: "Earlier seed, coin not swept", kind: "warn",
+      inputs: [{ i: "0", k: "wallet", t: "Coin at an earlier address", s: "its old address key signs: spend" }],
+      outputs: [{ i: "0", t: "To the old seed's holder", s: "" }],
       checks: [[1, "Address script: the key matches the hash in this address."]],
       verdict: "Accepted. A coin left at an earlier address still obeys that address's key. The sweep closes this." },
-    { name: "Earlier key, after the sweep", kind: "no",
-      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "key A signs: ownerAuthorize", bad: true }, { i: "1", k: "wallet", t: "Coin at key B's address", s: "would follow the controller" }],
-      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: "Active, same owner and settings" }, { i: "1", t: "To whoever holds key A", s: "never happens", bad: true }],
-      checks: [[0, "Controller: key A's hash is not the owner hash in the state."], [0, "Key path: the address was made for key B."]],
+    { name: "Earlier seed, after the sweep", kind: "no",
+      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "old controller key signs", bad: true }, { i: "1", k: "wallet", t: "Coin at a new address", s: "would follow the controller" }],
+      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: C_SAME }, { i: "1", t: "To the old seed's holder", s: "never happens", bad: true }],
+      checks: [[0, "Controller: the old key's hash is not the owner hash in the state."], [0, "Key path: the address was made for a key of the new seed."]],
       verdict: "Refused by the network, either way." },
     { name: "A forged controller", kind: "no",
       inputs: [{ i: "0", t: "Look-alike token", s: "another category, same bytes inside", bad: true }, { i: "1", k: "wallet", t: "Wallet coin", s: "refuses this transaction", bad: true }],
       outputs: [{ i: "0", t: "Look-alike token", s: "continues as it pleases" }, { i: "1", t: "To the forger", s: "never happens", bad: true }],
-      checks: [[0, "Coin: input 0 does not carry this identity's token."]],
+      checks: [[0, "Coin: the forger's category does not hash to the tag, and the real identity's token is not at input 0."]],
       verdict: "Refused by the network. The identity is a token category, which cannot be copied." }
   ]);
 
@@ -880,16 +889,16 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
   (function () {
     var s, picked = "owner", last = {};
     var FIELDS = [
-      { id: "version", n: "version", len: 1, w: 8, about: "Which controller rules this state belongs to. Coins check it, so a later controller with other rules cannot pass for this one." },
+      { id: "version", n: "version", len: 1, w: 8, about: "Which controller rules this state belongs to. Address scripts check it, so a controller with other rules cannot pass for this one." },
       { id: "status", n: "status", len: 1, w: 8, about: "00 while the wallet is Active, 01 while a recovery request is Pending. The sweep path and the vault refuse to open unless the controller continues as Active." },
-      { id: "epoch", n: "owner epoch", len: 4, w: 12, about: "Counts owner keys, starting at 0. It goes up when recovery completes or the owner moves to a new key. Each epoch has its own spending address." },
-      { id: "owner", n: "owner key hash", len: 20, w: 15, about: "The hash of the key that owns the identity today. It approves sweeps and vault spending. The current spending address is made from this same hash, which is how a new device finds every address from the controller's history." },
-      { id: "rec", n: "recoverer key hash", len: 20, w: 16, about: "The hash of the key that may request and complete recovery. It cannot approve spending." },
+      { id: "epoch", n: "owner epoch", len: 4, w: 12, about: "Counts owners, starting at 0. It goes up when recovery completes or the owner moves to a new seed." },
+      { id: "owner", n: "owner key hash", len: 20, w: 15, about: "The hash of the owner's controller key, a key from the owner's seed that is used for nothing else. It approves sweeps and vault spending, and cancels requests. It appears in no address." },
+      { id: "rec", n: "recoverer key hash", len: 20, w: 16, about: "The hash of the key that may request and complete recovery. It cannot approve spending. The recoverer uses a different key for every wallet, so this field links no two wallets." },
       { id: "delay", n: "delay", len: 3, w: 8, about: "The waiting period as a relative lock on the controller's own coin. 010040 means one unit of 512 seconds, counted by the network." },
-      { id: "prop", n: "proposed owner", len: 20, w: 15, about: "All zero while Active. While Pending, the hash of the key the recoverer asked for. Completion installs exactly this key." }
+      { id: "prop", n: "proposed owner", len: 20, w: 15, about: "All zero while Active. While Pending, the hash of the controller key the recoverer asked for. Completion installs exactly this key." }
     ];
     function L(n) { return String.fromCharCode(65 + (n % 26)); }
-    function cur() { return s.keys[s.epoch]; }
+    function cur() { return s.seeds[s.epoch]; }
     function bch(a) { return (a / 10).toFixed(1) + " BCH"; }
     function bchAt(at) { return s.coins.filter(function (c) { return c.t === "bch" && c.at === at; })[0]; }
     function addBch(at, amt) { var c = bchAt(at); if (c) c.amt += amt; else s.coins.push({ t: "bch", amt: amt, at: at }); }
@@ -899,53 +908,53 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     function clearReq() { s.pending = false; s.prop = null; s.aged = false; }
     function say(kind, text) { s.log.unshift({ kind: kind, text: text }); if (s.log.length > 6) s.log.pop(); }
     function reset() {
-      s = { pending: false, epoch: 0, keys: [0], nextKey: 1, prop: null, aged: false, log: [],
+      s = { pending: false, epoch: 0, seeds: [0], nextSeed: 1, prop: null, aged: false, log: [],
         coins: [{ t: "bch", amt: 8, at: 0 }, { t: "nft", label: "Jar key NFT", at: 0 }, { t: "nft", label: "Loan key NFT", at: 0 }, { t: "bch", amt: 2, at: "vault" }] };
       last = values();
-      say("info", "A new wallet. Key A owns it, the recoverer holds key R, the waiting period is 512 seconds.");
+      say("info", "A new wallet. Seed A owns it, the recoverer holds key R and the viewing key, the waiting period is 512 seconds.");
       render();
     }
     function values() {
       return {
         version: "01", status: s.pending ? "01" : "00", epoch: s.epoch.toString(16).padStart(2, "0") + "000000",
-        owner: "hash(key " + L(cur()) + ")", rec: "hash(key R)", delay: "010040",
-        prop: s.prop === null ? "00…00" : "hash(key " + L(s.prop) + ")"
+        owner: "hash(key of " + L(cur()) + ")", rec: "hash(key R)", delay: "010040",
+        prop: s.prop === null ? "00…00" : "hash(key of " + L(s.prop) + ")"
       };
     }
     var ACTIONS = [
       { who: "owner", label: "Owner pays 0.1 BCH", run: function () {
           var c = bchAt(s.epoch);
-          if (!c) { say("no", "No coins at the current address. Sweep the earlier address or move the vault coin out first."); return; }
+          if (!c) { say("no", "No coins at addresses of the current seed. Sweep the earlier addresses or move the vault coin out first."); return; }
           c.amt -= 1; if (c.amt === 0) drop(c);
-          say("ok", "Key " + L(cur()) + " signed a payment. The controller was not in the transaction." + (s.pending ? " The request is still pending: paying does not cancel it." : ""));
+          say("ok", "An address key of seed " + L(cur()) + " signed a payment. The change went to a fresh address. The controller was not in the transaction." + (s.pending ? " The request is still pending: paying does not cancel it." : ""));
         } },
       { who: "owner", label: "Owner adds collateral to the loan", run: function () {
           var k = s.coins.filter(function (c) { return c.label === "Loan key NFT"; })[0];
           if (!k) { say("no", "The loan key is gone. Whoever holds it now controls the loan."); return; }
-          if (k.at !== s.epoch) { say("no", "Not possible yet. The loan key is still at key " + L(s.keys[k.at]) + "'s address, and the application's transaction has no place for the controller. Sweep first."); return; }
-          say("ok", "Key " + L(cur()) + " spent the loan key in the application's transaction and got it back at the same address. No controller.");
+          if (k.at !== s.epoch) { say("no", "Not possible yet. The loan key is still at an address of seed " + L(s.seeds[k.at]) + ", and the application's transaction has no place for the controller. Sweep first."); return; }
+          say("ok", "A key of seed " + L(cur()) + " spent the loan key in the application's transaction and got it back at the same address. No controller.");
         } },
       { who: "owner", label: "Owner cancels the request", off: function () { return !s.pending; }, run: function () {
-          clearReq(); say("ok", "Key " + L(cur()) + " signed the controller once. The request has no effect any more.");
+          clearReq(); say("ok", "The controller key of seed " + L(cur()) + " signed once. The request has no effect any more.");
         } },
       { who: "owner", label: "Owner sweeps earlier addresses", off: function () { return earlier().length === 0; }, run: function () {
           var list = earlier(), what = names(list), wasPending = s.pending;
           list.forEach(function (c) { if (c.t === "bch") { drop(c); addBch(s.epoch, c.amt); } else c.at = s.epoch; });
           clearReq();
-          say("ok", "Key " + L(cur()) + " approved a sweep through the controller. Moved to its address: " + what + "." + (wasPending ? " The same signature cancelled the pending request." : ""));
+          say("ok", "The new device found the earlier addresses with the viewing key and swept them through the controller, showing the identity and each address's secret. Moved to addresses of seed " + L(cur()) + ": " + what + "." + (wasPending ? " The same signature cancelled the pending request." : ""));
         } },
       { who: "owner", label: "Owner moves the vault coin out", off: function () { return !bchAt("vault"); }, run: function () {
           var c = bchAt("vault"), wasPending = s.pending; drop(c); addBch(s.epoch, c.amt); clearReq();
-          say("ok", "Controller at input 0, signed by key " + L(cur()) + ". The vault coin is now at the current address." + (wasPending ? " The pending request was cancelled by the same step." : ""));
+          say("ok", "Controller at input 0, signed by the controller key of seed " + L(cur()) + ". The vault coin is now at an ordinary address." + (wasPending ? " The pending request was cancelled by the same step." : ""));
         } },
-      { who: "owner", label: "Owner moves to a new key", run: function () {
-          var k = s.nextKey++; s.keys.push(k); s.epoch++; clearReq();
-          say("ok", "The owner moved the identity to key " + L(k) + " without the recoverer. Epoch " + s.epoch + ". The wallet has a new address; what sits at the earlier one waits for a sweep.");
+      { who: "owner", label: "Owner moves to a new seed", run: function () {
+          var k = s.nextSeed++; s.seeds.push(k); s.epoch++; clearReq();
+          say("ok", "The owner moved the identity to seed " + L(k) + " without the recoverer, and gave the recoverer the new viewing key. Epoch " + s.epoch + ". What sits at earlier addresses waits for a sweep.");
         } },
       { who: "recoverer", label: "Recoverer requests recovery", run: function () {
           if (s.pending) { say("no", "Refused. A request can be opened only when none is pending."); return; }
-          s.pending = true; s.prop = s.nextKey; s.aged = false;
-          say("ok", "The recoverer asked to hand the identity to key " + L(s.prop) + ". The waiting period starts now, on chain, for everyone to see.");
+          s.pending = true; s.prop = s.nextSeed; s.aged = false;
+          say("ok", "A new device made seed " + L(s.prop) + ". The recoverer asked to hand the identity to its controller key. The waiting period starts now, on chain.");
         } },
       { who: "chain", label: "Let the waiting period pass", off: function () { return !s.pending || s.aged; }, run: function () {
           s.aged = true; say("info", "512 seconds passed by the network's clock. Nobody cancelled.");
@@ -953,23 +962,23 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
       { who: "recoverer", label: "Recoverer completes recovery", run: function () {
           if (!s.pending) { say("no", "Refused. No request is pending."); return; }
           if (!s.aged) { say("no", "Refused by the network. The controller's coin is not yet older than the waiting period."); return; }
-          var old = cur(); s.keys.push(s.prop); s.nextKey = s.prop + 1; s.epoch++; clearReq();
-          say("ok", "Recovery completed. Key " + L(cur()) + " owns the identity, epoch " + s.epoch + ". Nothing has moved yet: coins and tokens still sit at key " + L(old) + "'s address.");
+          var old = cur(); s.seeds.push(s.prop); s.nextSeed = s.prop + 1; s.epoch++; clearReq();
+          say("ok", "Recovery completed. Seed " + L(cur()) + " owns the identity, epoch " + s.epoch + ". Nothing has moved yet: coins and tokens still sit at addresses of seed " + L(old) + ".");
         } },
       { who: "recoverer", label: "Recoverer reaches for the funds", run: function () {
-          if (!s.pending) say("no", "Refused. Attached to a request, the coins see a controller that continues as Pending. The sweep path requires one with no request pending.");
+          if (!s.pending) say("no", "Refused. The recoverer can show the identity and the secrets, but attached to a request the coins see a controller that continues as Pending. The sweep path requires one with no request pending.");
           else if (!s.aged) say("no", "Refused. A completion is not yet allowed, and the coins would refuse to ride along with one anyway.");
           else say("no", "Refused. Attached to a completion, the coins see a controller with a new owner and epoch. They require both unchanged.");
         } },
-      { who: "old", label: "An earlier key tries to spend", off: function () { return s.epoch === 0; }, run: function () {
+      { who: "old", label: "An earlier seed tries to spend", off: function () { return s.epoch === 0; }, run: function () {
           var list = earlier();
-          if (list.length === 0) { say("no", "Refused. Nothing is left at the earlier addresses, and the controller does not accept that key."); return; }
+          if (list.length === 0) { say("no", "Refused. Nothing is left at the earlier addresses, and the controller does not accept that seed's key."); return; }
           var what = names(list); list.forEach(drop);
-          say("warn", "Accepted by the network. The earlier key still opens the address made for it, and took what was left there: " + what + ". This is why the new device sweeps as soon as recovery completes.");
+          say("warn", "Accepted by the network. The earlier seed's keys still open the addresses made for them, and took what was left there: " + what + ". This is why the new device sweeps as soon as recovery completes.");
         } },
       { who: "other", label: "Someone pays an earlier address", off: function () { return s.epoch === 0; }, run: function () {
           addBch(0, 1);
-          say("info", "0.1 BCH arrived at key A's address. The current owner can sweep it through the controller. Key A can also still spend it.");
+          say("info", "0.1 BCH arrived at an address of seed A. The current owner can sweep it through the controller. Seed A can also still spend it.");
         } }
     ];
     var COLORS = { owner: "var(--owner)", recoverer: "var(--recoverer)", chain: "var(--identity)", old: "var(--bad)", other: "var(--muted)" };
@@ -977,8 +986,8 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
       var v = values();
       var facts = document.getElementById("sim-facts"); facts.replaceChildren();
       [["Status", s.pending ? (s.aged ? "Pending, wait is over" : "Pending, waiting") : "Active"],
-       ["Owner", "key " + L(cur())], ["Epoch", String(s.epoch)],
-       ["Proposed owner", s.prop === null ? "none" : "key " + L(s.prop)],
+       ["Owner", "seed " + L(cur())], ["Epoch", String(s.epoch)],
+       ["Proposed owner", s.prop === null ? "none" : "seed " + L(s.prop)],
        ["Waiting for a sweep", String(earlier().length)]].forEach(function (f) {
         var d = h("div", { class: "fact" }); d.appendChild(h("div", { class: "k" }, f[0])); d.appendChild(h("div", { class: "v" }, f[1])); facts.appendChild(d);
       });
@@ -1004,8 +1013,8 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
         d.appendChild(row); addrs.appendChild(d);
       }
       for (var e = s.epoch; e >= 0; e--) {
-        if (e === s.epoch) card("Address of key " + L(s.keys[e]), "current · spent by signature", "var(--owner)", e);
-        else card("Address of key " + L(s.keys[e]), "earlier · key " + L(s.keys[e]) + " still works here", "var(--bad)", e);
+        if (e === s.epoch) card("Addresses of seed " + L(s.seeds[e]), "current · each spent by its own key", "var(--owner)", e);
+        else card("Addresses of seed " + L(s.seeds[e]), "earlier · seed " + L(s.seeds[e]) + "'s keys still work here", "var(--bad)", e);
       }
       card("Vault address", "never changes · controller only", "var(--identity)", "vault");
 
@@ -1021,6 +1030,55 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
     }
     document.getElementById("sim-reset").addEventListener("click", reset);
     reset();
+  })();
+
+  /* ---------- who sees what ---------- */
+  (function () {
+    var ROWS = [
+      { a: "Address 0", c: "0.5 BCH" },
+      { a: "Address 1", c: "Jar key NFT", nft: true, jar: true },
+      { a: "Address 2", c: "Loan key NFT", nft: true, py: true },
+      { a: "Address 3", c: "120 PUSD", py: true },
+      { a: "Address 4", c: "0.3 BCH" },
+      { a: "Vault address", c: "0.2 BCH", vault: true }
+    ];
+    var CAPS = {
+      owner: "The phone holds the seed. It derives every address key and the controller key.",
+      rec: "The recoverer holds the viewing key, so it can list every address and balance. It holds no address key and cannot spend. Choose a recoverer you would let read your bank statement.",
+      jar: "An application sees the addresses that appear in its own transactions, as with any wallet. It is not told the identity and cannot link the wallet's other addresses.",
+      py: "ParyonUSD sees the address the loan key sits at and the address the borrowed PUSD went to. It is not told the identity and cannot link the wallet's other addresses.",
+      chain: "Each address is a script address with an opaque tag. Spending one shows that it is a recoverable address, and nothing about which wallet it belongs to.",
+      after: "A sweep shows the identity and each address's secret, and has the controller as its first input. Everything swept is tied to the wallet from then on, for anyone. Coins received afterwards at new addresses are unlinked again. A vault address shows its link only when it is spent."
+    };
+    var who = "chain", after = false;
+    var seg = document.getElementById("pv-seg"), btn = document.getElementById("pv-after");
+    function verdict(r) {
+      if (who === "owner") return ["ok", r.vault ? "can spend, through the controller" : "holds the key"];
+      if (who === "rec") return ["part", "sees it, cannot spend"];
+      if (after && !r.vault) return ["no", "linked to the wallet by the sweep"];
+      if (who === "jar" && r.jar) return ["part", "saw it in a jar transaction"];
+      if (who === "py" && r.py) return ["part", "saw it in a loan transaction"];
+      if (who === "chain") return ["unk", r.vault ? "a script address, not linked" : "one script address among many"];
+      return ["unk", "does not know it is this wallet's"];
+    }
+    function render() {
+      Array.prototype.forEach.call(seg.children, function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-k") === who)); });
+      btn.setAttribute("aria-pressed", String(after));
+      btn.textContent = after ? "Show before any recovery" : "Show after a recovery sweep";
+      var t = document.getElementById("pv-rows"); t.replaceChildren();
+      var head = h("tr"); ["Address", "Holds", "What this viewer knows"].forEach(function (x) { head.appendChild(h("th", {}, x)); }); t.appendChild(head);
+      ROWS.forEach(function (r) {
+        var tr = h("tr"), v = verdict(r);
+        tr.appendChild(h("td", {}, r.a));
+        var td = h("td"); td.appendChild(h("span", { class: "coin" + (r.nft ? " nft" : "") }, r.c)); tr.appendChild(td);
+        var td2 = h("td"); td2.appendChild(h("span", { class: "pill " + v[0] }, v[1])); tr.appendChild(td2);
+        t.appendChild(tr);
+      });
+      document.getElementById("pv-cap").textContent = (after && who !== "owner" && who !== "rec") ? CAPS.after : CAPS[who];
+    }
+    Array.prototype.forEach.call(seg.children, function (b) { b.addEventListener("click", function () { who = b.getAttribute("data-k"); render(); }); });
+    btn.addEventListener("click", function () { after = !after; render(); });
+    render();
   })();
 
   /* ---------- connection ---------- */
@@ -1039,7 +1097,7 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
           { from: 0, to: 2, label: "sends it" }
         ] },
       xo: { label: "With xo_v1 the application names a template action; the wallet builds, shows, signs and sends the transaction.",
-        cap: "The same WizardConnect session, carrying XO requests (blue). The application never learns the wallet's addresses beyond what the transaction shows, and never needs to know what kind of script the wallet uses.",
+        cap: "The same WizardConnect session, carrying XO requests (blue). The application learns only the addresses that appear in its own transactions, and never needs to know what kind of script the wallet uses.",
         steps: [
           { from: 1, to: 0, label: "xo_v1: profiles, trusted templates", xo: true },
           { from: 0, to: 1, label: "xo_action_request: template, action", xo: true },
@@ -1047,7 +1105,7 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
           { from: 1, to: 2, label: "looks up the coins the action names" },
           { self: 1, label: "builds from the template, adds its coins" },
           { self: 1, label: "template's words + wallet's own figures" },
-          { self: 1, label: "user approves; address key signs" },
+          { self: 1, label: "user approves; address keys sign" },
           { from: 1, to: 2, label: "sends it" },
           { from: 1, to: 0, label: "xo_action_result: tx, tokens received", xo: true }
         ] }
@@ -1063,11 +1121,12 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
   })();
 
   /* ---------- jar ---------- */
+  var KEYSIG = "its address key signs: spend";
   txTabs("jar", [
     { name: "Open a jar", kind: "ok",
       inputs: [{ i: "0", k: "wallet", t: "Wallet coin (an output 0)", s: "its txid becomes the new category" }, { i: "1", k: "wallet", t: "Wallet coin", s: "the savings and the fee" }],
-      outputs: [{ i: "0", k: "app", t: "Jar key NFT", s: "commitment = unlock time", neu: "new" }, { i: "1", k: "app", t: "Savings jar", s: "SavingsJar(category, unlock time)" }, { i: "2", k: "wallet", t: "Change", s: "to the wallet's address" }],
-      checks: [[1, "Network: a new token category may be created from an input that is output 0 of its transaction."], [1, "Wallet: built from the template; exactly one NFT of the category is created."], [1, "The jar's script is not run. Paying into an address needs no permission."]],
+      outputs: [{ i: "0", k: "app", t: "Jar key NFT", s: "commitment = unlock time", neu: "new" }, { i: "1", k: "app", t: "Savings jar", s: "SavingsJar(category, unlock time)" }, { i: "2", k: "wallet", t: "Change", s: "to a fresh address of the wallet" }],
+      checks: [[1, "Network: a new token category may be created from an input that is output 0 of its transaction."], [1, "Wallet: built from the template; exactly one NFT of the category is created, at a fresh address of the wallet."], [1, "The jar's script is not run. Paying into an address needs no permission."]],
       verdict: "Accepted. The wallet now holds the only key to this jar." },
     { name: "Pay in", kind: "ok",
       inputs: [{ i: "0", t: "Anyone's coin", s: "any wallet" }],
@@ -1075,47 +1134,47 @@ h3 .state { vertical-align: 3px; margin-left: 6px; }
       checks: [[1, "An ordinary payment. The key NFT is not involved."]],
       verdict: "Accepted. Grandchildren can pay in too." },
     { name: "Empty the jar", kind: "ok",
-      inputs: [{ i: "0", k: "app", t: "Savings jar", s: "no signature: points at input 1" }, { i: "1", k: "app", t: "Jar key NFT", s: "the wallet's key signs: spend" }],
-      outputs: [{ i: "0", k: "wallet", t: "Savings", s: "to the wallet's address" }, { i: "1", k: "app", t: "Jar key NFT", s: "back to the wallet, or burned" }],
+      inputs: [{ i: "0", k: "app", t: "Savings jar", s: "no signature: points at input 1" }, { i: "1", k: "app", t: "Jar key NFT", s: KEYSIG }],
+      outputs: [{ i: "0", k: "wallet", t: "Savings", s: "to an address of the wallet" }, { i: "1", k: "app", t: "Jar key NFT", s: "back to the wallet, or burned" }],
       checks: [[1, "Jar: the input it points at carries a token of the jar's key category."], [1, "Jar: the transaction's lock time is at or after the unlock time."], [1, "Wallet address: the key signature is valid."]],
       verdict: "Accepted. No controller, in any wallet." },
     { name: "Too early", kind: "no",
-      inputs: [{ i: "0", k: "app", t: "Savings jar", s: "refuses this transaction", bad: true }, { i: "1", k: "app", t: "Jar key NFT", s: "the wallet's key signs: spend" }],
+      inputs: [{ i: "0", k: "app", t: "Savings jar", s: "refuses this transaction", bad: true }, { i: "1", k: "app", t: "Jar key NFT", s: KEYSIG }],
       outputs: [{ i: "0", k: "wallet", t: "Savings", s: "never happens", bad: true }, { i: "1", k: "app", t: "Jar key NFT", s: "" }],
       checks: [[1, "Jar: the key is present."], [0, "Jar: the unlock time has not passed."]],
       verdict: "Refused by the network. A new owner changes who can empty the jar, never when." },
     { name: "After recovery", kind: "ok",
-      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "key B signs: ownerAuthorize" }, { i: "1", k: "app", t: "Jar key at key A's address", s: "sweep path, no signature" }],
-      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: "Active, same owner and settings" }, { i: "1", k: "app", t: "Jar key NFT", s: "at key B's address", neu: true }],
+      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "new owner signs: ownerAuthorize" }, { i: "1", k: "app", t: "Jar key, earlier address", s: SWEEP }],
+      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: C_SAME }, { i: "1", k: "app", t: "Jar key NFT", s: "at a new address", neu: true }],
       checks: [[1, "The jar is not in this transaction and does not move."], [1, "The new device rebuilds the jar's address from the key's category and commitment, and finds the savings."]],
-      verdict: "Accepted. From here key B empties the jar as in \"Empty the jar\"." }
+      verdict: "Accepted. From here the new owner empties the jar as in \"Empty the jar\"." }
   ]);
 
   /* ---------- paryon ---------- */
   txTabs("py", [
     { name: "1 · Make a loan key", kind: "ok",
       inputs: [{ i: "0", k: "wallet", t: "Wallet coin (an output 0)", s: "its txid becomes the new category" }, { i: "1", k: "app", t: "Loan key factory", s: "" }, { i: "2", k: "wallet", t: "Wallet coin", s: "the fee" }],
-      outputs: [{ i: "0", k: "wallet", t: "Plain output", s: "no token; reserved for token metadata" }, { i: "1", k: "app", t: "Loan key factory", s: "recreated" }, { i: "2", k: "app", t: "Origin enforcer", s: "minting NFT of the new category" }, { i: "3", k: "app", t: "Origin proof", s: "proves the factory made it" }, { i: "4", k: "wallet", t: "Change", s: "to the wallet's address" }],
+      outputs: [{ i: "0", k: "wallet", t: "Plain output", s: "no token; reserved for token metadata" }, { i: "1", k: "app", t: "Loan key factory", s: "recreated" }, { i: "2", k: "app", t: "Origin enforcer", s: "minting NFT of the new category" }, { i: "3", k: "app", t: "Origin proof", s: "proves the factory made it" }, { i: "4", k: "wallet", t: "Change", s: "to a fresh address of the wallet" }],
       checks: [[1, "Factory: input 0 is output 0 of its transaction; the factory sits at input 1."], [1, "Factory: outputs 2 and 3 go to Paryon's own scripts. At most 6 outputs."], [1, "Nothing is said about the script of the wallet's inputs."]],
       verdict: "Expected to be accepted from a script address. Not yet run." },
     { name: "2 · Borrow", kind: "ok",
-      inputs: [{ i: "0", k: "app", t: "Borrowing", s: "holds the PUSD supply" }, { i: "1", k: "app", t: "Price contract", s: "the oracle's BCH price" }, { i: "2", k: "app", t: "Origin enforcer", s: "from step 1" }, { i: "3", k: "app", t: "Origin proof", s: "from step 1" }, { i: "4", k: "wallet", t: "Collateral", s: "the wallet's key signs: spend" }],
-      outputs: [{ i: "0", k: "app", t: "Borrowing", s: "recreated" }, { i: "1", k: "app", t: "Price contract", s: "recreated" }, { i: "2", k: "app", t: "Loan", s: "collateral and the loan's state" }, { i: "3", k: "app", t: "Loan sidecar", s: "carries the loan key's category" }, { i: "4", k: "app", t: "Borrowing fee", s: "0.25% in BCH" }, { i: "5", k: "wallet", t: "Loan key NFT", s: "address not checked: the wallet's", neu: "wallet's choice" }, { i: "6", k: "wallet", t: "Borrowed PUSD", s: "address not checked: the wallet's", neu: "wallet's choice" }, { i: "7", k: "wallet", t: "Change", s: "to the wallet's address" }],
+      inputs: [{ i: "0", k: "app", t: "Borrowing", s: "holds the PUSD supply" }, { i: "1", k: "app", t: "Price contract", s: "the oracle's BCH price" }, { i: "2", k: "app", t: "Origin enforcer", s: "from step 1" }, { i: "3", k: "app", t: "Origin proof", s: "from step 1" }, { i: "4", k: "wallet", t: "Collateral", s: KEYSIG }],
+      outputs: [{ i: "0", k: "app", t: "Borrowing", s: "recreated" }, { i: "1", k: "app", t: "Price contract", s: "recreated" }, { i: "2", k: "app", t: "Loan", s: "collateral and the loan's state" }, { i: "3", k: "app", t: "Loan sidecar", s: "carries the loan key's category" }, { i: "4", k: "app", t: "Borrowing fee", s: "0.25% in BCH" }, { i: "5", k: "wallet", t: "Loan key NFT", s: "address not checked: the wallet's", neu: "wallet's choice" }, { i: "6", k: "wallet", t: "Borrowed PUSD", s: "address not checked: the wallet's", neu: "wallet's choice" }, { i: "7", k: "wallet", t: "Change", s: "to a fresh address of the wallet" }],
       checks: [[1, "Borrowing: it sits at input 0; outputs 0 to 4 go to Paryon's scripts with exact amounts."], [1, "Borrowing: at least 100 PUSD, collateral at least 110% at the oracle price."], [1, "Borrowing: outputs 5 and 6 are checked for category, amount and 1,000 satoshis. Their address is free."], [1, "The controller is not needed and is not here."]],
       verdict: "Expected to be accepted with the loan key at a recoverable address. Not yet run." },
     { name: "3 · Add collateral or repay", kind: "ok",
-      inputs: [{ i: "0", k: "app", t: "Price contract", s: "" }, { i: "1", k: "app", t: "Loan", s: "" }, { i: "2", k: "app", t: "Loan sidecar", s: "" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "the wallet's key signs: spend" }, { i: "5", k: "wallet", t: "Wallet coin", s: "collateral or the fee" }, { i: "6", k: "wallet", t: "PUSD to repay", s: "only when repaying" }],
-      outputs: [{ i: "0", k: "app", t: "Price contract", s: "recreated" }, { i: "1", k: "app", t: "Loan", s: "new debt and collateral" }, { i: "2", k: "app", t: "Loan sidecar", s: "recreated" }, { i: "3", k: "app", t: "Manage function", s: "recreated" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "must return to the address it left" }, { i: "5", t: "Burned PUSD", s: "only when repaying" }, { i: "6", k: "wallet", t: "Change", s: "to the wallet's address" }],
+      inputs: [{ i: "0", k: "app", t: "Price contract", s: "" }, { i: "1", k: "app", t: "Loan", s: "" }, { i: "2", k: "app", t: "Loan sidecar", s: "" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key NFT", s: KEYSIG }, { i: "5", k: "wallet", t: "Wallet coin", s: "collateral or the fee" }, { i: "6", k: "wallet", t: "PUSD to repay", s: "only when repaying" }],
+      outputs: [{ i: "0", k: "app", t: "Price contract", s: "recreated" }, { i: "1", k: "app", t: "Loan", s: "new debt and collateral" }, { i: "2", k: "app", t: "Loan sidecar", s: "recreated" }, { i: "3", k: "app", t: "Manage function", s: "recreated" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "must return to the address it left" }, { i: "5", t: "Burned PUSD", s: "only when repaying" }, { i: "6", k: "wallet", t: "Change", s: "to a fresh address of the wallet" }],
       checks: [[1, "Manage: input 4 carries the loan key whose category the sidecar names."], [1, "Manage: the loan key returns to the same address, with the same value."], [1, "Wallet address: the key signature is valid."]],
       verdict: "Expected to be accepted. Not yet run." },
     { name: "4 · After recovery", kind: "ok",
-      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "key B signs: ownerAuthorize" }, { i: "1", k: "app", t: "Loan key at key A's address", s: "sweep path, no signature" }, { i: "2", k: "wallet", t: "PUSD at key A's address", s: "sweep path, no signature" }],
-      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: "Active, same owner and settings" }, { i: "1", k: "app", t: "Loan key NFT", s: "at key B's address", neu: true }, { i: "2", k: "wallet", t: "PUSD", s: "at key B's address", neu: true }],
-      checks: [[1, "No Paryon contract is in this transaction. The loan, its collateral and its sidecar stay where they are."], [1, "From the next transaction on, key B manages the loan as in step 3."]],
+      inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "new owner signs: ownerAuthorize" }, { i: "1", k: "app", t: "Loan key, earlier address", s: SWEEP }, { i: "2", k: "wallet", t: "PUSD at an earlier address", s: SWEEP }],
+      outputs: [{ i: "0", k: "ctrl", t: "Controller", s: C_SAME }, { i: "1", k: "app", t: "Loan key NFT", s: "at a new address", neu: true }, { i: "2", k: "wallet", t: "PUSD", s: "at a new address", neu: true }],
+      checks: [[1, "No Paryon contract is in this transaction. The loan, its collateral and its sidecar stay where they are."], [1, "From the next transaction on, the new owner manages the loan as in step 3."]],
       verdict: "A token transfer like any other. Paryon cannot tell that a recovery happened." },
     { name: "Why the sweep comes first", kind: "no",
-      inputs: [{ i: "0", k: "app", t: "Price contract", s: "Paryon requires it at input 0" }, { i: "1", k: "app", t: "Loan", s: "" }, { i: "2", k: "app", t: "Loan sidecar", s: "" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key at key A's address", s: "needs the controller at input 0", bad: true }],
-      outputs: [{ i: "0", k: "app", t: "Price contract", s: "" }, { i: "1", k: "app", t: "Loan", s: "" }, { i: "2", k: "app", t: "Loan sidecar", s: "" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "would return to key A's address", bad: true }],
+      inputs: [{ i: "0", k: "app", t: "Price contract", s: "Paryon requires it at input 0" }, { i: "1", k: "app", t: "Loan", s: "" }, { i: "2", k: "app", t: "Loan sidecar", s: "" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key, earlier address", s: "needs the controller at input 0", bad: true }],
+      outputs: [{ i: "0", k: "app", t: "Price contract", s: "" }, { i: "1", k: "app", t: "Loan", s: "" }, { i: "2", k: "app", t: "Loan sidecar", s: "" }, { i: "3", k: "app", t: "Manage function", s: "" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "would return to the earlier address", bad: true }],
       checks: [[0, "Sweep path: input 0 is not the wallet's controller."], [0, "Even if it were, the key would go back to the earlier address."]],
       verdict: "Refused. The new owner sweeps the key first, then uses the loan with an ordinary signature." }
   ]);
