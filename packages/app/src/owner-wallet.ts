@@ -5,6 +5,7 @@ import {
   type ChainReader,
   type ChallengeDelay,
   type ControllerState,
+  type ControllerUpdate,
   type KeyedAddressKind,
   type SeedKeys,
   type SpendableCoin,
@@ -14,10 +15,12 @@ import {
   INPUT_BYTES,
   InsufficientFundsError,
   afterOwnerAuthorize,
+  afterOwnerUpdate,
   chooseCoins,
   controllerScript,
   decodeControllerState,
   emptyAllocation,
+  encodeChallengeDelay,
   encodeControllerState,
   keepNumber,
   markUsed,
@@ -52,6 +55,13 @@ export interface OwnerWalletState {
     /** The wallet's payment to itself that made a coin that is output 0, when one was needed. */
     prepareTransactionId?: string;
     createTransactionId?: string;
+    /**
+     * The servers have shown the transaction that defines the identity, or the one that creates the
+     * controller. A transaction that was seen and is no longer there was replaced or undone; one that was
+     * never seen may still be on its way, or may never have been sent.
+     */
+    identitySeen?: boolean;
+    createSeen?: boolean;
     /** Both the transaction that defines the identity and the one that creates the controller are in a block. */
     confirmed: boolean;
   };
@@ -210,33 +220,61 @@ export class OwnerWallet {
   }
 
   /**
-   * Where the creation stands, read from the chain. A transaction of the creation that is no longer there
-   * (replaced, or in a block that was undone) is forgotten, which is safe: no address is given out before
-   * both are confirmed.
+   * Where the creation stands, read from the chain. A transaction of the creation that the servers showed
+   * and no longer show (replaced, or in a block that was undone) is forgotten, which is safe: no address is
+   * given out before both are confirmed. One they have not shown yet is kept: it may be on its way.
    */
   async creationStep(): Promise<CreationStep> {
-    const { creation } = this.state;
-    const funding = await this.fundingAddress();
-    if (this.state.identity !== undefined && !creation.confirmed) {
-      const definedIn = await this.seen(this.state.identity, funding);
+    if (this.state.identity !== undefined && !this.state.creation.confirmed) {
+      const { creation } = this.state;
+      const definedIn = await this.seen(this.state.identity, await this.fundingAddress());
       const createdIn = creation.createTransactionId === undefined ? 'missing' : await this.seen(creation.createTransactionId, controllerScript(this.identity).lockingBytecode);
-      if (definedIn === 'missing') {
+      if (definedIn === 'missing' && creation.identitySeen === true) {
         // The transaction that defined the identity is gone, and the identity with it.
-        this.store({ creation: { confirmed: false }, allocation: emptyAllocation() });
         const { identity: _gone, cancelCoinNumber: _coin, firstCoinNumber: _first, ...rest } = this.state;
-        this.state = rest;
+        this.state = { ...rest, creation: { confirmed: false }, allocation: emptyAllocation() };
         this.save(this.state);
-      } else if (createdIn === 'missing' && creation.createTransactionId !== undefined) {
-        const { createTransactionId: _gone, ...rest } = creation;
-        this.store({ creation: rest });
-      } else if (definedIn === 'confirmed' && createdIn === 'confirmed') {
-        this.store({ creation: { ...creation, confirmed: true } });
+      } else if (createdIn === 'missing' && creation.createSeen === true) {
+        const { createTransactionId: _gone, createSeen: _seen, ...rest } = creation;
+        this.store({ creation: { ...rest, identitySeen: definedIn !== 'missing' || creation.identitySeen === true } });
+      } else {
+        this.store({
+          creation: {
+            ...creation,
+            ...(definedIn !== 'missing' ? { identitySeen: true } : {}),
+            ...(createdIn !== 'missing' ? { createSeen: true } : {}),
+            confirmed: definedIn === 'confirmed' && createdIn === 'confirmed',
+          },
+        });
       }
     }
     if (this.state.creation.confirmed) return 'confirmed';
     if (this.state.creation.createTransactionId !== undefined) return 'created';
     if (this.state.identity !== undefined) return 'prepared';
     return (await this.fundingCoins()).length > 0 ? 'funded' : 'not funded';
+  }
+
+  /** The wallet's payment to itself: every funding coin to one output at the funding address, which is then output 0. */
+  private async selfPayment(coins: AccountCoin[]): Promise<ReturnType<WalletBackend['prepare']>> {
+    const funding = await this.fundingAddress();
+    const bytes = transactionBytes(coins.map(() => INPUT_BYTES.p2pkh), [{ lockingBytecode: funding, valueSatoshis: 0n }]);
+    return this.backend.prepare({
+      template: 'actions',
+      action: 'pay',
+      role: 'owner',
+      inputs: coins.map((coin) => ({ coin })),
+      outputs: [{ lockingBytecode: funding, valueSatoshis: valueOf(coins) - requiredFee(bytes, this.feeRate) }],
+    });
+  }
+
+  /** The coin that defines the identity: output 0 of the identity's transaction, at the funding address. */
+  private async identityCoin(attempts: number): Promise<AccountCoin | undefined> {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const coin = (await this.fundingCoins()).find((candidate) => hex(candidate.utxo.transactionHash) === this.state.identity && candidate.utxo.index === 0);
+      if (coin !== undefined) return coin;
+      if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return undefined;
   }
 
   /**
@@ -246,83 +284,92 @@ export class OwnerWallet {
    * @returns where the creation stands afterwards
    */
   async create(options: CreateOptions): Promise<CreationStep> {
-    let step = await this.creationStep();
+    const step = await this.creationStep();
     if (step === 'not funded') throw new Error('The funding address holds no coin yet.');
+    if (step === 'confirmed') return step;
 
     if (step === 'funded') {
       const coins = await this.fundingCoins();
       // A token category is the transaction whose output 0 is spent: the wallet needs a coin that is output 0.
       const first = coins.find((coin) => coin.utxo.index === 0);
       if (first !== undefined) {
-        this.store({ identity: hex(first.utxo.transactionHash) });
+        this.store({ identity: hex(first.utxo.transactionHash), creation: { identitySeen: true, confirmed: false } });
       } else {
-        const funding = await this.fundingAddress();
-        const inputs = coins.map((coin) => ({ coin }));
-        const bytes = transactionBytes(coins.map(() => INPUT_BYTES.p2pkh), [{ lockingBytecode: funding, valueSatoshis: 0n }]);
-        const prepared = await this.backend.prepare({
-          template: 'actions',
-          action: 'pay',
-          role: 'owner',
-          inputs,
-          outputs: [{ lockingBytecode: funding, valueSatoshis: valueOf(coins) - requiredFee(bytes, this.feeRate) }],
-        });
+        const prepared = await this.selfPayment(coins);
         // The identity is recorded before the transaction that defines it is sent.
         this.store({ identity: prepared.transactionId, creation: { prepareTransactionId: prepared.transactionId, confirmed: false } });
         await this.backend.send(prepared);
       }
-      step = 'prepared';
     }
 
-    if (step === 'prepared') {
-      const identity = this.identity;
-      const coin = await this.waitForCoin(async () => (await this.fundingCoins()).find((candidate) => hex(candidate.utxo.transactionHash) === this.state.identity && candidate.utxo.index === 0));
-      const owner = await this.backend.controllerKey('owner');
-      const first: ControllerState = { version: 1, status: 'active', ownerEpoch: 0, ownerKeyHash: owner.keyHash, recovererKeyHash: options.recovererKeyHash, challengeDelay: options.challengeDelay };
-      const controller = this.controllerOutput(first);
-
-      // The coin for cancelling and the rest go to change addresses, which exist as soon as the identity does.
-      // A device that stopped after taking the two numbers uses the same ones again.
-      if (this.state.cancelCoinNumber === undefined || this.state.firstCoinNumber === undefined) {
-        let allocation = this.state.allocation;
-        const taken: number[] = [];
-        for (let count = 0; count < 2; count++) {
-          const next = takeNumber(allocation, ADDRESS_KIND.change);
-          if (!('number' in next)) throw new Error('No change address is free for the wallet\'s first coins.');
-          allocation = keepNumber(next.allocation, ADDRESS_KIND.change, next.number);
-          taken.push(next.number);
-        }
-        this.store({ allocation, cancelCoinNumber: taken[0] as number, firstCoinNumber: taken[1] as number });
+    // The identity is known. What is still to be sent is sent; a transaction that is on its way is left alone.
+    let coin = await this.identityCoin(1);
+    if (coin === undefined && this.state.creation.prepareTransactionId !== undefined && this.state.creation.identitySeen !== true && this.state.creation.createTransactionId === undefined) {
+      // The payment to itself was recorded and the servers have not shown it. If the coins it spends are
+      // still there, the device stopped before sending it; the same coins give the same transaction again.
+      const unspent = (await this.fundingCoins()).filter((candidate) => hex(candidate.utxo.transactionHash) !== this.state.identity);
+      if (unspent.length > 0) {
+        const prepared = await this.selfPayment(unspent);
+        this.store({ identity: prepared.transactionId, creation: { prepareTransactionId: prepared.transactionId, confirmed: false } });
+        await this.backend.send(prepared);
       }
-      const cancelNumber = this.state.cancelCoinNumber as number;
-      const restNumber = this.state.firstCoinNumber as number;
-      await this.makeAddresses(ADDRESS_KIND.change, this.state.allocation[ADDRESS_KIND.change].next);
-      const cancelling = { lockingBytecode: this.address(ADDRESS_KIND.change, cancelNumber).lockingBytecode, valueSatoshis: this.cancellationCost() };
-      const allowance = options.allowance === undefined ? [] : [{ lockingBytecode: options.allowance.feeLockingBytecode, valueSatoshis: options.allowance.satoshis }];
-      const rest = { lockingBytecode: this.address(ADDRESS_KIND.change, restNumber).lockingBytecode, valueSatoshis: 0n };
-      const outputs = [controller, cancelling, ...allowance, rest];
-      const fee = requiredFee(transactionBytes([INPUT_BYTES.p2pkh], outputs), this.feeRate);
-      const left = coin.utxo.output.valueSatoshis - outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n) - fee;
-      if (left < smallestOutputValue(rest)) {
-        throw new InsufficientFundsError(coin.utxo.output.valueSatoshis, fee, coin.utxo.output.valueSatoshis - left + smallestOutputValue(rest), 'the funding coin does not cover the controller, the coin for cancelling, the allowance and the fee.');
-      }
-      const prepared = await this.backend.prepare({
-        template: 'controller',
-        action: 'create',
-        role: 'owner',
-        variables: { identity: hex(identity), nextState: hex(encodeControllerState(first)) },
-        inputs: [{ coin }],
-        outputs: [{ outputIdentifier: 'controllerOutput' }, cancelling, ...allowance, { ...rest, valueSatoshis: left }],
-      });
-      // The creation is checked as any client would check it, before it is sent and before the identity is used.
-      const transaction = decodeTransactionBch(hexToBin(prepared.transactionHex));
-      if (typeof transaction === 'string') throw new Error(transaction);
-      validateGenesis(transaction, hexToBin(prepared.transactionId), identity);
-      this.store({ creation: { ...this.state.creation, createTransactionId: prepared.transactionId, confirmed: false } });
-      await this.backend.send(prepared);
-      await this.backend.knowController(identity, 'owner');
-      step = 'created';
     }
-    return step === 'created' ? this.creationStep() : step;
+    // A coin of the wallet's own last transaction may take a moment to be listed.
+    if (coin === undefined) coin = await this.identityCoin(this.state.creation.createTransactionId === undefined ? 40 : 2);
+    if (coin === undefined) {
+      // The coin is spent: the creating transaction has been sent and is on its way, or is there already.
+      if (this.state.creation.createTransactionId === undefined) throw new Error('The coin that defines the wallet\'s identity was not found.');
+      await this.backend.knowController(this.identity, 'owner');
+      return this.creationStep();
+    }
+
+    const identity = this.identity;
+    const owner = await this.backend.controllerKey('owner');
+    const first: ControllerState = { version: 1, status: 'active', ownerEpoch: 0, ownerKeyHash: owner.keyHash, recovererKeyHash: options.recovererKeyHash, challengeDelay: options.challengeDelay };
+    const controller = this.controllerOutput(first);
+
+    // The coin for cancelling and the rest go to change addresses, which exist as soon as the identity does.
+    // A device that stopped after taking the two numbers uses the same ones again.
+    if (this.state.cancelCoinNumber === undefined || this.state.firstCoinNumber === undefined) {
+      let allocation = this.state.allocation;
+      const taken: number[] = [];
+      for (let count = 0; count < 2; count++) {
+        const next = takeNumber(allocation, ADDRESS_KIND.change);
+        if (!('number' in next)) throw new Error('No change address is free for the wallet\'s first coins.');
+        allocation = keepNumber(next.allocation, ADDRESS_KIND.change, next.number);
+        taken.push(next.number);
+      }
+      this.store({ allocation, cancelCoinNumber: taken[0] as number, firstCoinNumber: taken[1] as number });
+    }
+    const cancelNumber = this.state.cancelCoinNumber as number;
+    const restNumber = this.state.firstCoinNumber as number;
+    await this.makeAddresses(ADDRESS_KIND.change, this.state.allocation[ADDRESS_KIND.change].next);
+    const cancelling = { lockingBytecode: this.address(ADDRESS_KIND.change, cancelNumber).lockingBytecode, valueSatoshis: this.cancellationCost() };
+    const allowance = options.allowance === undefined ? [] : [{ lockingBytecode: options.allowance.feeLockingBytecode, valueSatoshis: options.allowance.satoshis }];
+    const rest = { lockingBytecode: this.address(ADDRESS_KIND.change, restNumber).lockingBytecode, valueSatoshis: 0n };
+    const outputs = [controller, cancelling, ...allowance, rest];
+    const fee = requiredFee(transactionBytes([INPUT_BYTES.p2pkh], outputs), this.feeRate);
+    const left = coin.utxo.output.valueSatoshis - outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n) - fee;
+    if (left < smallestOutputValue(rest)) {
+      throw new InsufficientFundsError(coin.utxo.output.valueSatoshis, fee, coin.utxo.output.valueSatoshis - left + smallestOutputValue(rest), 'the funding coin does not cover the controller, the coin for cancelling, the allowance and the fee.');
+    }
+    const prepared = await this.backend.prepare({
+      template: 'controller',
+      action: 'create',
+      role: 'owner',
+      variables: { identity: hex(identity), nextState: hex(encodeControllerState(first)) },
+      inputs: [{ coin }],
+      outputs: [{ outputIdentifier: 'controllerOutput' }, cancelling, ...allowance, { ...rest, valueSatoshis: left }],
+    });
+    // The creation is checked as any client would check it, before it is sent and before the identity is used.
+    const transaction = decodeTransactionBch(hexToBin(prepared.transactionHex));
+    if (typeof transaction === 'string') throw new Error(transaction);
+    validateGenesis(transaction, hexToBin(prepared.transactionId), identity);
+    const { createSeen: _unseen, ...creation } = this.state.creation;
+    this.store({ creation: { ...creation, createTransactionId: prepared.transactionId, confirmed: false } });
+    await this.backend.send(prepared);
+    await this.backend.knowController(identity, 'owner');
+    return this.creationStep();
   }
 
   /** A coin the backend is about to see: it may take a moment after a transaction of the wallet's own. */
@@ -512,6 +559,52 @@ export class OwnerWallet {
     });
     await this.backend.send(prepared);
     return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: prepared.feeSatoshis - requiredFee(prepared.bytes, this.feeRate) };
+  }
+
+  /**
+   * Change the wallet's settings (proposal section 5.6): the owner key, the recoverer or the waiting period,
+   * with the owner's signature alone and at once. Any pending request is cleared. A coin of the wallet pays
+   * the fee, and its change returns to a change address.
+   *
+   * The preparation around a change (the recoverer's receipt before a new seed or a new recoverer takes
+   * effect, section 9.7) is the caller's: the contract cannot require it.
+   */
+  async changeSettings(update: ControllerUpdate): Promise<Sent> {
+    this.requireCreated();
+    const { coin, state } = await this.controllerCoin();
+    const next = afterOwnerUpdate(state, update);
+    const delay = encodeChallengeDelay(next.challengeDelay);
+    const { own } = await this.sorted();
+    const taken = takeNumber(this.state.allocation, ADDRESS_KIND.change);
+    const changeNumber = 'number' in taken ? taken.number : taken.refused.offer;
+    const changeAddress = this.address(ADDRESS_KIND.change, changeNumber);
+    const choice = chooseCoins({
+      available: own.map((other) => spendable(other, INPUT_BYTES.byKey)),
+      fixedInputs: [{ utxo: coin.utxo, inputBytes: INPUT_BYTES.controllerUpdate }],
+      outputs: [this.controllerOutput(next)],
+      changeLockingBytecode: changeAddress.lockingBytecode,
+      feeRate: this.feeRate,
+    });
+    if (choice.changeSatoshis !== undefined && 'number' in taken) this.store({ allocation: keepNumber(taken.allocation, ADDRESS_KIND.change, taken.number) });
+    else if ('number' in taken) this.store({ allocation: returnNumber(taken.allocation, ADDRESS_KIND.change, taken.number) });
+    if (choice.changeSatoshis !== undefined) await this.makeAddresses(ADDRESS_KIND.change, changeNumber + 1);
+    const payers = choice.coins.map(({ utxo }) => own.find((other) => other.utxo === utxo) as AccountCoin);
+    const prepared = await this.backend.prepare({
+      template: 'controller',
+      action: 'changeSettings',
+      role: 'owner',
+      variables: {
+        identity: hex(this.identity),
+        nextState: hex(encodeControllerState(next)),
+        newOwnerKeyHash: hex(next.ownerKeyHash),
+        newRecovererKeyHash: hex(next.recovererKeyHash),
+        newDelay: hex(Uint8Array.of(delay & 0xff, (delay >> 8) & 0xff, (delay >> 16) & 0xff)),
+      },
+      inputs: [{ coin, inputIdentifier: 'changeSettingsInput' }, ...payers.map((other) => ({ coin: other }))],
+      outputs: [{ outputIdentifier: 'controllerOutput' }, ...(choice.changeSatoshis === undefined ? [] : [{ lockingBytecode: changeAddress.lockingBytecode, valueSatoshis: choice.changeSatoshis }])],
+    });
+    await this.backend.send(prepared);
+    return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: choice.remainderSatoshis };
   }
 
   // ---------------------------------------------------------------- sending everything, closing

@@ -19,6 +19,9 @@ import { generateTemplateIdentifier, parseTemplate } from '@xo-cash/utils';
  * The fourth template holds no key and may change: the wallet's actions, the address of an earlier seed
  * and the vault address.
  *
+ * The controller template and the two address templates are final. A test fixes their identifiers
+ * (`test/templates.test.ts`); it fails on any change to them.
+ *
  * A template can only join text. What it cannot work out (the controller's next state, each tag, each
  * secret) the wallet's code supplies, and the contracts enforce that it is right.
  */

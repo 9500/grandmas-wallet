@@ -58,6 +58,7 @@ const hex = binToHex;
 export class Account implements WalletBackend {
   /** The invitation the controller key was made for: the handle by which the engine finds that key again. */
   private keyInvitation: Partial<Record<Role, string>> = {};
+  private ordinary: Uint8Array | undefined;
 
   private constructor(
     private readonly engine: Engine,
@@ -122,21 +123,39 @@ export class Account implements WalletBackend {
   async controllerKey(role: Role): Promise<{ publicKey: Uint8Array; keyHash: Uint8Array }> {
     const { secret, action } = KEY_OF_ROLE[role];
     if (this.keyInvitation[role] === undefined) {
-      const stored = await this.engine.createInvitation({
-        templateIdentifier: this.templates.controller,
-        actionIdentifier: action,
-        intent: intentFor('controller', action, role),
-      } as Parameters<Engine['createInvitation']>[0]);
+      // An engine whose state was kept has the invitation already; a second one would make a second key.
+      const existing = (await this.engine.listInvitations())
+        .filter(({ invitation }) => invitation.templateIdentifier === this.templates.controller && invitation.actionIdentifier === action)
+        .sort((a, b) => (a.createdAtTimestampMs ?? 0) - (b.createdAtTimestampMs ?? 0))[0];
+      const stored =
+        existing ??
+        (await this.engine.createInvitation({
+          templateIdentifier: this.templates.controller,
+          actionIdentifier: action,
+          intent: intentFor('controller', action, role),
+        } as Parameters<Engine['createInvitation']>[0]));
       this.keyInvitation[role] = stored.invitation.invitationIdentifier;
     }
-    const [first] = await this.secretsOf('controller', secret);
-    if (first === undefined || first.number !== 0) throw new Error('The controller key is not the first key of its template.');
+    const [first, ...others] = await this.secretsOf('controller', secret);
+    if (first === undefined || first.number !== 0 || others.length > 0) {
+      throw new Error('This account holds more than one controller key, or not the first key of the controller template. The engine would sign with the wrong one; the account has to start from an empty state.');
+    }
     return { publicKey: first.publicKey, keyHash: hash160(first.publicKey) };
   }
 
-  /** The account's address for ordinary coins: the funding address of an owner, the fee address of a recoverer. */
+  /**
+   * The account's address for ordinary coins: the funding address of an owner, the fee address of a
+   * recoverer. It is the address of the first key under the standard wallet template. The engine would make
+   * a new address at every asking, so the first one is kept.
+   */
   async ordinaryAddress(): Promise<Uint8Array> {
-    return hexToBin(await this.engine.generateLockingBytecodeFromDefaultPolicy('receive'));
+    if (this.ordinary === undefined) {
+      const existing = (await this.engine.listScriptHashes())
+        .filter((entry) => entry.templateIdentifier === this.templates.coins)
+        .sort((a, b) => (a.addedAtTimestampMs ?? 0) - (b.addedAtTimestampMs ?? 0));
+      this.ordinary = hexToBin(existing[0]?.lockingBytecode ?? (await this.engine.generateLockingBytecodeFromDefaultPolicy('receive')));
+    }
+    return this.ordinary;
   }
 
   /**
@@ -231,18 +250,30 @@ export class Account implements WalletBackend {
    */
   async prepare(request: TransactionRequest): Promise<PreparedTransaction> {
     const variables = Object.entries(request.variables ?? {}).map(([variableIdentifier, value]) => ({ variableIdentifier, roleIdentifier: request.role, value }));
-    const stored = await this.engine.createInvitation({
-      templateIdentifier: this.templates[request.template],
-      actionIdentifier: request.action,
-      intent: intentFor(request.template, request.action, request.role),
-      variables,
-      inputs: request.inputs.map(({ coin, inputIdentifier }) => ({
-        outpointTransactionHash: coin.utxo.transactionHash,
-        outpointIndex: coin.utxo.index,
-        ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
-      })),
-    } as Parameters<Engine['createInvitation']>[0]);
-    const { invitationIdentifier } = stored.invitation;
+    const inputs = request.inputs.map(({ coin, inputIdentifier }) => ({
+      outpointTransactionHash: coin.utxo.transactionHash,
+      outpointIndex: coin.utxo.index,
+      ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
+    }));
+    // The engine unlocks a script with the key of the invitation that first made the script known. The
+    // action that makes the controller key must therefore be carried out in the invitation the key was made
+    // for: a new invitation for it would make a second key, and the controller would later be signed with that.
+    const makesKey = request.template === 'controller' && request.action === KEY_OF_ROLE[request.role].action;
+    let invitationIdentifier: string;
+    if (makesKey) {
+      await this.controllerKey(request.role);
+      invitationIdentifier = this.keyInvitation[request.role] as string;
+      await this.engine.appendInvitation(invitationIdentifier, { variables, inputs } as unknown as Parameters<Engine['appendInvitation']>[1]);
+    } else {
+      const stored = await this.engine.createInvitation({
+        templateIdentifier: this.templates[request.template],
+        actionIdentifier: request.action,
+        intent: intentFor(request.template, request.action, request.role),
+        variables,
+        inputs,
+      } as Parameters<Engine['createInvitation']>[0]);
+      invitationIdentifier = stored.invitation.invitationIdentifier;
+    }
     try {
       await this.engine.appendInvitation(invitationIdentifier, { outputs: request.outputs } as unknown as Parameters<Engine['appendInvitation']>[1]);
       for (const index of await this.engine.listOwnInputIndexes(invitationIdentifier)) await this.engine.signInvitation(invitationIdentifier, index);
@@ -256,7 +287,9 @@ export class Account implements WalletBackend {
       );
       if (transaction.inputs.length !== request.inputs.length || !spendsWhatWasAsked) throw new Error('The engine built a transaction with other inputs than the ones asked for.');
       const check = checkBeforeSending({ transaction, sourceOutputs });
-      if (check !== true) throw new Error(`The transaction fails the check before sending: ${check}`);
+      if (check !== true) {
+        throw new Error(`The transaction fails the check before sending: ${check}`, { cause: { transactionHex: builtTransaction.serializedTransaction, sourceOutputs } });
+      }
       const inputTotal = sourceOutputs.reduce((sum, output) => sum + output.valueSatoshis, 0n);
       const outputTotal = transaction.outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n);
       return {

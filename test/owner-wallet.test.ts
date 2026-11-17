@@ -317,6 +317,22 @@ describe('paying', () => {
   });
 });
 
+describe('changing settings', () => {
+  it('the owner replaces the recoverer and the waiting period at once; a coin of the wallet pays, with change', async () => {
+    const { chain, wallet } = await walletWith(10_000n);
+    const identity = hexToBin(wallet.stored.identity as string);
+    const other = testKey(0x55).keyHash;
+    const sent = await wallet.changeSettings({ recovererKeyHash: other, challengeDelay: { unit: 'time512', value: 3 } });
+    // The controller changing its settings, one coin by its key, the controller and the change: 1,181 bytes.
+    expect(sent).toMatchObject({ bytes: 1_181, feeSatoshis: 1_181n, remainderSatoshis: 0n });
+    const history = await readControllerHistory(chain, identity);
+    expect(history.transitions.map((step) => step.kind)).toEqual(['ownerUpdate']);
+    expect(history.current.state).toMatchObject({ recovererKeyHash: other, challengeDelay: { unit: 'time512', value: 3 }, ownerEpoch: 0, status: 'active' });
+    // The coin for cancelling was left alone.
+    expect(await wallet.canCancel()).toBe(true);
+  });
+});
+
 describe('sending everything', () => {
   it('FE06: every coin without a token goes, from ordinary and vault addresses, in as many transactions as it takes', async () => {
     const { chain, wallet } = await walletWith(10_000n, 30_000n);
