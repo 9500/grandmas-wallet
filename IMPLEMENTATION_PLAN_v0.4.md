@@ -117,14 +117,13 @@ Still open from stage 0: the pages against the local node, which stage 6 tries, 
 
 ## Stage 2 — Keys, viewing key, giving out and finding addresses
 
-**Builds:** the controller template and the two address templates in their final, unchanging form, since their content fixes the keys; a library for: the engine's key tree in our own code (controller key, the two address nodes and their extended public keys, funding key), checked against the engine's keys, and the blinding seed; the recovery credential with its recovery key and fee key; the viewing-key record with its signature and a text form; secret, tag and address for kind and number; the counters, the windows and the ranges; the quick pass and the full pass over a chain, with progress that survives an interruption; watching.
+**Builds:** a library for: the engine's key tree in our own code (controller key, the two address nodes and their extended public keys, funding key), checked against the engine's keys, and the blinding seed; the recovery credential with its recovery key and fee key; the viewing-key record with its signature and a text form; secret, tag and address for kind and number; the counters, the windows and the ranges; the quick pass and the full pass over a chain, with progress that survives an interruption; watching.
 
 **Reads:** `design-1:apps/jar/src/plain.ts` (scanning an HD wallet), `packages/core/src/xo-keys.ts`.
 
 **Exit**
 
 - **KV01–KV05, KV07–KV13, PV01 and PV02** pass.
-- A test fixes the identifiers of the controller template and the two address templates, so that an accidental change to one fails the build.
 - Test vectors (words, kinds, numbers, expected keys, secrets, tags and addresses) are in a file that the specification of stage 10 can cite.
 - The sizes chosen in stage 0 are in the code as constants of the scheme version, and KV13 records what the full pass costs with them. The full pass uses history lookups in batches of no more than 300, not subscriptions.
 
@@ -139,6 +138,7 @@ Still open from stage 0: the pages against the local node, which stage 6 tries, 
 **Exit**
 
 - **CR01–CR04 and FE04–FE08** pass.
+- The controller template and the two address templates are in their final form, after every action has run through the engine with them. A test fixes their identifiers, so that an accidental change to one fails the build. Wallets made before this point are for tests only.
 - On the local node, by the route stage 0 settled: create a wallet, receive at fresh addresses, pay with change to a fresh address, receive and send a token, send everything, and close. The same steps go to chipnet as part of run B.
 - The template passes the XO validator; a test checks that the scripts in the template are the compiled contracts, byte for byte.
 - The invitations of the run load in the XO debugging tool. What the engine did not build is not presented as an invitation.
@@ -256,7 +256,7 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 
 | No. | Decision | Needed by | Default |
 | --- | --- | --- | --- |
-| 1 | Derivation: the key tree; the number `B`; the record's encoding | Tree settled in stage 0; the rest in stage 2 | The XO engine's tree, with templates that do not change |
+| 1 | Derivation: the key tree; the number `B`; the record's encoding | Settled in stages 0 and 2; the templates' final form in stage 3 | The XO engine's tree, with templates that do not change |
 | 2 | Address chains, windows, range sizes, interval of the full pass | Proposed in stage 0, for stage 2 | Windows of 20, 5 and 5; 10,000, 10,000 and 1,000; once a week and after the events of section 7.7 |
 | 3 | Who makes the recoverer's key | Stage 2 | The owner's device |
 | 4 | The viewing key's written form | Stage 2 | The two extended public keys and the blinding seed in one signed record |

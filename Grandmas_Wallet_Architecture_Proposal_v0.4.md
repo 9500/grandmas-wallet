@@ -314,7 +314,7 @@ This is the key tree of the XO engine, which signs with no other key (`docs/xo-e
 - `T` is the template's number: the first four bytes of the template's identifier, read as a little-endian number of 31 bits. `C` is the number of the controller template, `A0` and `A1` those of the two address templates, `W` that of XO's standard single-key wallet template (section 13.2).
 - The third step, `0'`, is the engine's place for signing keys.
 - `n` counts up from 0 for the template. The engine hands the numbers out in order, without gaps.
-- `B` is a number of this scheme, to be fixed, taken from outside the numbers XO uses at the third step.
+- `B` is 1,651,272,046, the bytes of "blin" read as a number. It is this scheme's own and lies outside the numbers XO uses at the third step.
 
 Requirements behind the layout:
 
@@ -1228,7 +1228,7 @@ The implementation uses XO's TypeScript packages, libauth for keys, transactions
 | Sealing to the recoverer; signing; encrypted stores and the store server | Implemented and tested |
 | WizardConnect transport and `xo_v1` messages | Implemented and tested with an earlier form of the announcement |
 | Recoverable address, vault address | Implemented (`contracts/recoverableAddress.cash`, `contracts/vaultAddress.cash`); tested in the virtual machine (AD01 to AD13), with each refusal shown to come from the script meant to refuse. A trial ran a wallet's life on a local node (`docs/address-contracts-trial.md`). |
-| Derivation, viewing key, giving out and finding addresses | Proposed. The engine's key tree is established and reproduced by this project's code (`docs/xo-engine-stage0-trials.md`); the sizes of the ranges are proposed from measurement (`docs/address-ranges-trial.md`). |
+| Derivation, viewing key, giving out and finding addresses | Implemented and tested (KV01 to KV05, KV07 to KV12, PV01, PV02), with test vectors in `test/vectors/`. The wallet's own derivation gives the keys the engine makes. The cost of the full pass on real servers (KV13) is still to be recorded. |
 | Creating a wallet as in section 7.9 | Proposed |
 | Recovery kit, receipts, takeover and update messages, sweep, moving to a new seed, replacing the recoverer | Proposed |
 | Backup records as in section 10 | Proposed |
@@ -1396,7 +1396,7 @@ Each has a proposed answer, which implementation follows unless the owner says o
 
 | No. | Decision | Proposed |
 | --- | --- | --- |
-| 1 | **Derivation.** The key tree; the number `B` for the blinding seed; the encoding of the viewing-key record | Settled as to the tree: the XO engine's, with templates that do not change (sections 7.2 and 9.2). `B` and the encoding in stage 2. |
+| 1 | **Derivation.** The key tree; the number `B` for the blinding seed; the encoding of the viewing-key record | Settled: the XO engine's tree, with templates that do not change (sections 7.2 and 9.2); `B` as in section 7.2; the record as canonical JSON signed by the controller key, with a one-line text form (`packages/archive/src/viewing-key.ts`). |
 | 2 | **Address chains and ranges.** Two kinds of ordinary address and one of vault address; the windows; the sizes `N0`, `N1`, `N2`; how often the full pass is repeated | Windows of 20, 5 and 5; `N0` = 10,000, `N1` = 10,000, `N2` = 1,000; the full pass once a week and after the events of section 7.7 |
 | 3 | **Who makes the recoverer's key** | The owner's device |
 | 4 | **The viewing key's written form** | The two extended public keys and the blinding seed in one signed record |
