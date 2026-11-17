@@ -19,10 +19,10 @@ import { Electrum } from '../packages/chipnet/src/electrum.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const cli = (...parameters: string[]): string => execFileSync(`${root}deploy/regtest/regtest.sh`, ['cli', ...parameters], { encoding: 'utf8' }).trim();
-const BURN = 'bchreg:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq7kuxzp';
 const burnAddress = (): string => {
   const made = lockingBytecodeToCashAddress({ prefix: 'bchreg', bytecode: hexToBin(`76a914${'00'.repeat(20)}88ac`) });
-  return typeof made === 'string' ? BURN : made.address;
+  if (typeof made === 'string') throw new Error(made);
+  return made.address;
 };
 const mine = (blocks: number, to = burnAddress()): void => void cli('generatetoaddress', String(blocks), to);
 
