@@ -306,8 +306,8 @@ contract RecoverableAddress(bytes32 tag, bytes20 keyHash) {
     }
     // Recovery path: whoever owns the identity today, through the controller.
     function sweep(bytes32 identity, bytes32 addressSecret) {
-        require(hash256(identity + addressSecret) == tag);
         ownerApproves(identity);
+        require(hash256(identity + addressSecret) == tag);
     }
 }
 ```
@@ -320,7 +320,8 @@ Notes for implementation:
 - **`sweep` proves knowledge of the secret and names the identity.** The identity cannot be substituted: `ownerApproves` compares it, with one byte appended, to a 33-byte token category, which fixes its length at 32 bytes, so the 64 hashed bytes cannot be split another way.
 - **The sweep path is open to the current owner at any time,** not only after a recovery. It is also how a coin that arrives at an earlier address later is collected.
 - **A sweep publishes the identity and the secret of each address it empties.** After that, anyone can see that the address belongs to this identity. Only the owner can still use the path.
-- **Sizes are not measured yet.** A script address costs more bytes to spend than P2PKH, and its outputs have a higher minimum value than P2PKH outputs. Measuring both is part of the first trials.
+- **The tag check comes last** in each function, because the compiler requires a function to end on a check of its own.
+- **Sizes.** A trial compilation gives 96 bytes of rules for the recoverable address and 75 for the vault address; with the tag and key hash the scripts are 150 and 108 bytes. From those sizes, an input spent by its key is about 300 bytes and a swept input about 260, against about 140 for P2PKH. These are computed, not measured on transactions, and the scripts are untested. Outputs at a script address also have a higher minimum value than P2PKH outputs.
 
 ### 7.5 The vault address
 
@@ -328,8 +329,8 @@ Notes for implementation:
 contract VaultAddress(bytes32 tag) {
     // No key. Only the identity's current owner, through the controller.
     function spend(bytes32 identity, bytes32 addressSecret) {
-        require(hash256(identity + addressSecret) == tag);
         ownerApproves(identity);
+        require(hash256(identity + addressSecret) == tag);
     }
 }
 ```
@@ -372,7 +373,9 @@ A device that holds the identity and a viewing key restores the wallet the way a
 
 The device then knows, for each coin, the address's secret, which is what the controller path needs. With the seed as well, it knows the key.
 
-A wallet in use keeps watching the addresses it has used, including those of earlier seeds, because a payer may use an old address again.
+The wallet never gives out an address more than the gap limit past the last one that was used. Without this rule a later scan, which keeps no list, could stop before an address that was given out and paid afterwards.
+
+A wallet in use keeps watching the addresses it has used and the gap beyond them, including those of earlier seeds, because a payer may use an old address again. A coin that arrives at an earlier address after a recovery is collected through the controller path like any swept coin (section 11.2). Until it is collected, the earlier seed's key spends it too. This is not what the vault address is for: a vault address has no key at all, so nothing sent to it ever obeys an earlier seed (section 7.5).
 
 ### 7.8 How this differs from an HD wallet
 
@@ -1016,7 +1019,7 @@ An identity is bound to its controller script from its creation, and every addre
 4. The viewing key is needed to recover.
 5. A recovery is public: the sweep ties together what the wallet held.
 6. A request is not cancelled by ordinary use. The device has to notice it and cancel.
-7. Transactions are larger than with P2PKH. Not measured yet.
+7. Transactions are larger than with P2PKH: about twice the bytes per input, by an estimate from the script sizes.
 8. The wallet's first coins can be traced to the creation of its identity.
 9. Applications have to be reached through a template; front ends that build transactions from the wallet's public keys cannot serve it.
 
