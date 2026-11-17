@@ -1,21 +1,18 @@
 # Grandma's Wallet
 
-A Bitcoin Cash wallet that can recover access after a lost phone without manual backups. A trusted recoverer (the "bank") can replace the wallet's owner key only after an on-chain claim and an uncontested challenge period; the existing wallet can cancel the claim at any time before that.
+A Bitcoin Cash wallet that can recover access after a lost phone without manual backups. Every address of the wallet has its own key for everyday use and a second way to spend through the wallet's controller on chain. A trusted recoverer can replace the wallet's owner key only after a request that has stayed unchallenged on chain for a waiting period; the owner can cancel the request at any time before that. The new device then moves the wallet's coins and tokens to addresses of its own.
 
 Built for BCH Blaze 2026 on the XO stack.
 
-**Status:** early development, chipnet only. The contracts are tested in a virtual machine and have run through the full recovery lifecycle on chipnet, both with this project's own transaction builder and through the XO engine using the project's XO templates. A recoverer can be enrolled with one sealed package, and a replacement device can rebuild the wallet from that package, the chain and an encrypted archive; this is tested against a simulated chain and has been run on chipnet through the XO engine. The wallet, the recoverer and a small application run as web pages, tried end to end on chipnet. The wallet has no code for any application: an application presents its XO template, the user decides whether to trust it, and the wallet carries out the template's actions. The same application also works with ordinary wallets over WizardConnect, checked with Cashonize. Nothing has been audited.
+**Status:** this branch is being rebuilt to the design in [docs/design.html](docs/design.html). It holds the parts that the design uses as they are: the controller contract and its tests, reading and checking a controller's history from the chain, access to chipnet servers, the waiting-period calculation and the recovery alarm, sealing and backup stores, the WizardConnect message set, and the page components. The addresses, the wallet, the recoverer and the applications are not here yet. Nothing has been audited.
+
+The first design, with its web demonstration and chipnet runs, is on the `main` branch and at the tag `design-1`.
 
 ## Documents
 
-- [Architecture proposal v0.1](Grandmas_Wallet_Architecture_Proposal_v0.1.md)
-- [Implementation plan](IMPLEMENTATION_PLAN.md)
+- [Design](docs/design.html) (open in a browser)
 - [Decisions log](docs/decisions.md)
-- [Chipnet run](docs/chipnet-run.md) and its [results](docs/chipnet-log.md)
-- [XO templates, invitations and how to reproduce them](docs/bounty/README.md)
-- [Enrollment and restoration](docs/restoration.md)
-- [The web applications](docs/web-apps.md): what they do, how they talk to each other, how to run them
-- [What was learned about the XO engine](docs/xo-spike.md)
+- What was learned about the XO engine: [trial](docs/xo-spike.md), [signing problem](docs/xo-engine-signing-bug.md), [chipnet header verification](docs/xo-chipnet-header-verification.md), [notes for feedback](docs/xo-feedback-notes.md)
 
 ## Development
 
@@ -25,7 +22,6 @@ Requires Node 22 or later.
 npm install
 npm run check             # typecheck, lint, tests
 npm run build:contracts   # recompile contracts after editing them
-npm run build:web         # build the three web applications
 ```
 
 ## License

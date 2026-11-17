@@ -2,6 +2,8 @@
 
 **Date:** 15 Nov 2026 · **Status:** done. The unmodified XO engine runs the whole recovery lifecycle with our contracts on chipnet, once the contracts accept the plain "all inputs and outputs" signing type (decision D8). One engine defect was found, fixed locally to confirm the diagnosis, and written up for the XO team (`docs/xo-engine-signing-bug.md`).
 
+The engine fixes and the difficulty check this note cites are kept under `spikes/xo-engine/`. The trial's other scripts and templates are in the repository at the tag `design-1`.
+
 ## Answers so far
 
 | Question | Answer | Evidence |

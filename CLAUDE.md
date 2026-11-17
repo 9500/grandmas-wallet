@@ -2,8 +2,9 @@
 
 Bitcoin Cash wallet with on-chain, challenge-period key recovery, built on the XO stack.
 
-- Design: [Grandmas_Wallet_Architecture_Proposal_v0.1.md](Grandmas_Wallet_Architecture_Proposal_v0.1.md)
-- Work order and exit criteria: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
+- Design: [docs/design.html](docs/design.html)
+- Work order and exit criteria: IMPLEMENTATION_PLAN.md (not yet written for this design)
+- The first design is at the tag `design-1`. Parts that are rewritten for this design start from the files there (`git show design-1:<path>`).
 
 # Workflow
 
