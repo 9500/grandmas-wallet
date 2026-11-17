@@ -1,6 +1,6 @@
 # Stage 2: record of the acceptance tests
 
-Made by `node scripts/test-record.mjs 2 KV01-KV05 KV07-KV12 PV01-PV02` at revision `08047e0` with changes not yet committed.
+Made by `node scripts/test-record.mjs 2 KV01-KV05 KV07-KV12 PV01-PV02` at revision `60081e6`.
 All tests of the repository: 265 passed, 0 failed, of 265.
 
 | No. | Test, as the proposal states it | Expected | Tests that carry the number | Result |
