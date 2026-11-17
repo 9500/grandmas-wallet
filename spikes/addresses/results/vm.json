@@ -1,0 +1,384 @@
+{
+  "scripts": {
+    "recoverable address, rules": 96,
+    "recoverable address, with tag and key hash": 150,
+    "vault address, rules": 75,
+    "vault address, with tag": 108,
+    "controller with ownerClose, rules": 457,
+    "controller with ownerClose, with identity": 490
+  },
+  "inputs": {
+    "spent by key": 296,
+    "swept": 260,
+    "vault": 217,
+    "controller ownerAuthorize": 637,
+    "controller requestRecovery": 658,
+    "controller finalizeRecovery": 637,
+    "controller ownerUpdate": 683,
+    "controller ownerClose": 637,
+    "P2PKH": 141
+  },
+  "transactions": [
+    {
+      "label": "payment by key, one input, change",
+      "bytes": 384,
+      "fee": 384,
+      "inputs": [
+        "spent by key 296"
+      ],
+      "outputs": [
+        34,
+        44
+      ],
+      "note": ""
+    },
+    {
+      "label": "payment by key, one input, no change",
+      "bytes": 340,
+      "fee": 340,
+      "inputs": [
+        "spent by key 296"
+      ],
+      "outputs": [
+        34
+      ],
+      "note": ""
+    },
+    {
+      "label": "for comparison: P2PKH payment, one input, P2PKH change",
+      "bytes": 219,
+      "fee": 219,
+      "inputs": [
+        "P2PKH 141"
+      ],
+      "outputs": [
+        34,
+        34
+      ],
+      "note": ""
+    },
+    {
+      "label": "sweep of 1 coin into one output",
+      "bytes": 1099,
+      "fee": 1099,
+      "inputs": [
+        "controller ownerAuthorize 637",
+        "swept 260"
+      ],
+      "outputs": [
+        148,
+        44
+      ],
+      "note": ""
+    },
+    {
+      "label": "sweep of 5 coins into one output",
+      "bytes": 2139,
+      "fee": 2139,
+      "inputs": [
+        "controller ownerAuthorize 637",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260"
+      ],
+      "outputs": [
+        148,
+        44
+      ],
+      "note": ""
+    },
+    {
+      "label": "sweep of 20 coins into one output",
+      "bytes": 6039,
+      "fee": 6039,
+      "inputs": [
+        "controller ownerAuthorize 637",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260"
+      ],
+      "outputs": [
+        148,
+        44
+      ],
+      "note": ""
+    },
+    {
+      "label": "sweep of 5 coins and a vault coin, one output each",
+      "bytes": 2576,
+      "fee": 2576,
+      "inputs": [
+        "controller ownerAuthorize 637",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "swept 260",
+        "vault 217"
+      ],
+      "outputs": [
+        148,
+        44,
+        44,
+        44,
+        44,
+        44,
+        44
+      ],
+      "note": ""
+    },
+    {
+      "label": "spend from a vault address to a P2PKH address",
+      "bytes": 1046,
+      "fee": 1046,
+      "inputs": [
+        "controller ownerAuthorize 637",
+        "vault 217"
+      ],
+      "outputs": [
+        148,
+        34
+      ],
+      "note": ""
+    },
+    {
+      "label": "cancel, fee from a coin of the wallet, change",
+      "bytes": 1135,
+      "fee": 1135,
+      "inputs": [
+        "controller ownerAuthorize 637",
+        "spent by key 296"
+      ],
+      "outputs": [
+        148,
+        44
+      ],
+      "note": ""
+    },
+    {
+      "label": "change of settings (ownerUpdate), fee from a coin of the wallet, change",
+      "bytes": 1181,
+      "fee": 1181,
+      "inputs": [
+        "controller ownerUpdate 683",
+        "spent by key 296"
+      ],
+      "outputs": [
+        148,
+        44
+      ],
+      "note": ""
+    },
+    {
+      "label": "request, fee from the recoverer's P2PKH coin, change",
+      "bytes": 991,
+      "fee": 991,
+      "inputs": [
+        "controller requestRecovery 658",
+        "P2PKH 141"
+      ],
+      "outputs": [
+        148,
+        34
+      ],
+      "note": ""
+    },
+    {
+      "label": "completion, fee from the recoverer's P2PKH coin, change",
+      "bytes": 970,
+      "fee": 970,
+      "inputs": [
+        "controller finalizeRecovery 637",
+        "P2PKH 141"
+      ],
+      "outputs": [
+        148,
+        34
+      ],
+      "note": "the virtual machine does not check that the wait has passed"
+    },
+    {
+      "label": "close with one coin of the wallet, to a P2PKH address",
+      "bytes": 977,
+      "fee": 977,
+      "inputs": [
+        "controller ownerClose 637",
+        "spent by key 296"
+      ],
+      "outputs": [
+        34
+      ],
+      "note": ""
+    },
+    {
+      "label": "payment by key, one input, change (signing type 0x41)",
+      "bytes": 384,
+      "fee": 384,
+      "inputs": [
+        "spent by key 296"
+      ],
+      "outputs": [
+        34,
+        44
+      ],
+      "note": ""
+    }
+  ],
+  "refusals": [
+    {
+      "id": "AD01",
+      "label": "a coin spent by its key, no controller in the transaction",
+      "refused": false,
+      "reason": "accepted"
+    },
+    {
+      "id": "AD02",
+      "label": "the same with another key",
+      "refused": true,
+      "byInput": 0,
+      "expectedInput": 0,
+      "reason": "Program failed an OP_VERIFY operation."
+    },
+    {
+      "id": "AD03",
+      "label": "two coins and a vault coin swept with the owner's approval",
+      "refused": false,
+      "reason": "accepted"
+    },
+    {
+      "id": "AD04",
+      "label": "a sweep with the wrong secret",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Unsuccessful evaluation: completed with a non-truthy value on top of the stack. Top stack item: \"\"."
+    },
+    {
+      "id": "AD04",
+      "label": "a sweep that names another identity",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Program failed an OP_VERIFY operation."
+    },
+    {
+      "id": "AD04",
+      "label": "a vault spend with the wrong secret",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Unsuccessful evaluation: completed with a non-truthy value on top of the stack. Top stack item: \"\"."
+    },
+    {
+      "id": "AD05",
+      "label": "a sweep attached to a request",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Program failed an OP_VERIFY operation."
+    },
+    {
+      "id": "AD05",
+      "label": "a sweep attached to a completion",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Program failed an OP_VERIFY operation."
+    },
+    {
+      "id": "AD05",
+      "label": "a vault spend attached to a request",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Program failed an OP_VERIFY operation."
+    },
+    {
+      "id": "AD06",
+      "label": "the controller not at input 0",
+      "refused": true,
+      "byInput": 0,
+      "expectedInput": 0,
+      "reason": "Program failed an OP_VERIFY operation."
+    },
+    {
+      "id": "AD06",
+      "label": "another wallet's controller, the sweep naming this wallet",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Program failed an OP_VERIFY operation."
+    },
+    {
+      "id": "AD06",
+      "label": "another wallet's controller, the sweep naming that wallet",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Unsuccessful evaluation: completed with a non-truthy value on top of the stack. Top stack item: \"\"."
+    },
+    {
+      "id": "AD06",
+      "label": "a successor with a changed owner",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Program failed an OP_VERIFY operation."
+    },
+    {
+      "id": "AD06",
+      "label": "a successor with a changed recoverer",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Program failed an OP_VERIFY operation."
+    },
+    {
+      "id": "AD06",
+      "label": "a successor with a changed waiting period",
+      "refused": true,
+      "byInput": 1,
+      "expectedInput": 1,
+      "reason": "Program failed an OP_VERIFY operation."
+    },
+    {
+      "id": "AD12",
+      "label": "a sweep beside an ownerUpdate that changes nothing",
+      "refused": false,
+      "reason": "accepted"
+    }
+  ],
+  "outputs": {
+    "P2PKH output": {
+      "bytes": 34,
+      "smallest": 546
+    },
+    "output at an address of the wallet (P2SH32)": {
+      "bytes": 44,
+      "smallest": 576
+    },
+    "controller output": {
+      "bytes": 148,
+      "smallest": 888
+    }
+  }
+}

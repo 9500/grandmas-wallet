@@ -1,0 +1,12 @@
+pragma cashscript ^0.14.0;
+
+import "../../contracts/lib/authorization.cash";
+
+// Trial of the vault address, as the proposal's section 7.5 gives it.
+contract VaultAddress(bytes32 tag) {
+    // No key. Only the identity's current owner, through the controller.
+    function spend(bytes32 identity, bytes32 addressSecret) {
+        ownerApproves(identity);
+        require(hash256(identity + addressSecret) == tag);
+    }
+}

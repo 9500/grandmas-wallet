@@ -28,12 +28,12 @@ Runs on chipnet take long, because blocks and waiting periods take their real ti
 | Level | What it is | When |
 | --- | --- | --- |
 | Simulated chain | `packages/testing`: this project's own script check, and a clock the test controls | Every change |
-| Local node | Bitcoin Cash Node 29.2.0 in regtest mode with Fulcrum 2.1.4, reachable from this machine only, with the relay rules of the public networks. Blocks are made on demand and the test sets the clock, so a waiting period takes no time. Blocks can be undone. | Every run script before it goes to chipnet; the replaced and reorganized transactions of CR02 |
+| Local node | Bitcoin Cash Node 29.2.0 in regtest mode with Fulcrum 2.1.4, reachable from this machine only, with the relay rules of the public networks. Blocks are made on demand and the test sets the clock, so a waiting period takes no time. Blocks can be undone. Set up and driven by `deploy/regtest/regtest.sh`; it runs as two services of the current user ([docs/local-node.md](docs/local-node.md)). | Every run script before it goes to chipnet; the replaced and reorganized transactions of CR02 |
 | Chipnet | The public test network | The five runs below, once each |
 
-**What was shown on the local node (17 November 2026).** A controller was created, a recovery requested, refused before its time, completed after it, and the wallet closed, in about one second. The node gave the same verdicts as this project's own check: a fee one satoshi short was refused, as were an output below its smallest value and a closing by the wrong key. Its `testmempoolaccept` call, which tries a transaction without sending it, answered as sending did.
+**What was shown on the local node (17 November 2026).** One wallet's life of nineteen transactions (receiving, paying by key, a request, a cancellation, a request, a completion with the clock moved, a sweep, a vault spend, a closing) got the same verdict from the node as from this project's own check. A completion was refused at 511 seconds of chain time and accepted at 512. Fulcrum announced each transaction within 1.4 seconds, followed chains of unconfirmed transactions, and followed blocks being undone with a transaction replaced. The node's `testmempoolaccept` call, which tries a transaction without sending it, answered as sending did. The XO engine runs against it too.
 
-**Two sets of rules.** The local node runs mainnet's rules by default. According to the node's settings, chipnet has run the tentative upgrade of May 2027 since 15 November 2026. A run script passes on the local node under both before it goes to chipnet. The local node is also the only place where the code is shown to run under mainnet's rules.
+**Mainnet's rules only.** The local node runs mainnet's rules. Chipnet has run the tentative upgrade of May 2027, with one-minute blocks, since 15 November 2026 (`docs/xo-chipnet-header-verification.md`); that is why time locks pass sooner there than they will on mainnet. The released node has no code for that upgrade, so the local node cannot run chipnet's rules; that would take the build chipnet's nodes run. For this wallet the difference is how often blocks come, and nothing in the wallet may depend on it. The local node is the only place where the code is shown to run under mainnet's rules.
 
 **Chipnet runs**
 
@@ -47,7 +47,7 @@ Runs on chipnet take long, because blocks and waiting periods take their real ti
 
 **How a chipnet run is prepared and carried out**
 
-- **One script, three chains.** The script that runs on chipnet has passed on the simulated chain and on the local node; only the network settings differ.
+- **One script, three chains.** The script that runs on chipnet has passed on the simulated chain and on the local node; only the network settings differ. A script sets the local node's clock from the chain when it starts and reads the reference time of a waiting period from the node.
 - **A check before starting.** Coins for the whole run are at hand; the servers agree on the tip of the chain; a deployment the run depends on is alive. The first transaction of each chain is built against the outputs that exist and tried with `testmempoolaccept` on the user's node. For ParyonUSD, which cannot be rehearsed on the local node, every transaction is first built against Paryon's live outputs and checked without sending.
 - **Each step is written to disk** before and after it is sent, so a run that stops continues from where it stopped. The first design's run script worked this way (`design-1:packages/chipnet/src/lifecycle.ts`).
 - **Trouble with a server is retried. A refusal that was not expected stops the run** and keeps its state. The fix is made and tried on the local node, and the run continues.
@@ -88,15 +88,20 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 | Do `RecoverableAddress` and `VaultAddress` compile as the proposal gives them, and what does each kind of input cost? | Fees, what a request and a completion need, and the "larger transactions" cost. | The earlier trial repeated inside the repository (96 and 75 bytes of rules, approval check first, cashc 0.14.0), with the bytecode kept; sizes of an input spent by key, a swept input and a vault input, measured on transactions in the virtual machine. |
 | Which signing type do the wallet's own inputs use? | The engine's `0x61` signatures are invalid with several inputs. | The local fix, a signer of our own, or `0x41`; one answer, tested. |
 | Does the engine's header check work on chipnet with the local fix? | What the wallet may say about confirmations. | Whether the verified height follows the chain with the fix. Not a gate: the rule on chain state above holds either way. |
-| Does the local node stand in for chipnet in every respect the runs need? | Every chipnet run is rehearsed on it. | What was shown is under "Where tests run". Still to show: Fulcrum's notifications and unconfirmed chains, undoing blocks, the rules of the 2027 upgrade, and whether the XO engine and the pages can be pointed at it. Scripts in `deploy/` start and stop it. |
-| What does the tentative upgrade of May 2027 change for this wallet? | Chipnet runs it already; mainnet does not. | The changes read from the node's release notes, and what in the wallet depends on them. Nothing may depend on a rule mainnet does not have. |
+| Does the local node stand in for chipnet in every respect the runs need? | Every chipnet run is rehearsed on it. | What was shown is under "Where tests run", with Fulcrum's notifications, unconfirmed chains, undone blocks and the XO engine. Scripts in `deploy/` start and stop it. |
 | How large can the address ranges be? | The full pass looks up every address of every range for every seed (section 7.7). | Time and number of requests for candidate sizes, against the user's own server and a public one, with any limit on subscriptions. Sizes `N0`, `N1`, `N2` and the interval for repeating the full pass, chosen and written into the proposal. |
 
-**Exit:** each question has an answer in writing, and decisions 1, 2 and 12 of the proposal are settled. If the engine cannot hold the wallet's addresses, stage 3 uses our own builder for address inputs and the engine for the controller and for application templates. This plan and the proposal are amended before stage 1 starts where an answer changes them.
+**Exit:** each question has an answer in writing, and decisions 1, 2 and 12 of the proposal are settled. This plan and the proposal are amended before stage 1 starts where an answer changes them.
+
+**Answered (17 November 2026).** The questions about the engine, in [docs/xo-engine-stage0-trials.md](docs/xo-engine-stage0-trials.md): the unmodified engine holds the wallet's addresses, carries the sweep, combines templates in one invitation and lets a new seed take over. It signs only with keys of its own tree, so the proposal's section 7.2 now gives that tree, with the controller and the two kinds of address in templates of their own that never change (decision 1). The division of work is in the proposal's section 13.2 (decision 12). Inputs the engine signs use `0x41`. The engine runs against the local node.
+
+The address contracts, in [docs/address-contracts-trial.md](docs/address-contracts-trial.md): both compile as the proposal gives them, and the measured sizes are now in the proposal's sections 7.4, 8 and 9.6. The local node, in [docs/local-node.md](docs/local-node.md): it stands in for chipnet for everything a run needs except chipnet's own block timing. The address ranges, in [docs/address-ranges-trial.md](docs/address-ranges-trial.md): `N0` = 10,000, `N1` = 10,000, `N2` = 1,000, with the full pass once a week and after a takeover, a restore, a reorganization or a dropped transaction (decision 2, as proposed).
+
+Still open from stage 0: the pages against the local node, which stage 6 tries, and chipnet's rules on the local node.
 
 ## Stage 1 — The two addresses
 
-**Builds:** `RecoverableAddress(tag, keyHash)` with `spend` and `sweep`; `VaultAddress(tag)` with `spend`; their script helpers in `packages/core`; a test wallet that holds coins at such addresses. The controller gains `ownerClose` (section 5.8), starting from the trial the proposal reports, and five tests. The transaction builder gains the fee rules of section 8 that do not depend on choosing coins: the smallest value of each output from its own size, the check before sending, and no limit on the fee in satoshis.
+**Builds:** `RecoverableAddress(tag, keyHash)` with `spend` and `sweep`; `VaultAddress(tag)` with `spend`; their script helpers in `packages/core`; a test wallet that holds coins at such addresses. The controller gains `ownerClose` (section 5.8), starting from the trial the proposal reports, and five tests. The transaction builder gains the fee rules of section 8 that do not depend on choosing coins: the smallest value of each output from its own size, the check before sending, and no limit on the fee in satoshis. The server client in `packages/chipnet` is corrected so that it lists outputs that carry tokens: it negotiates an older protocol version, for which Fulcrum leaves them out ([docs/local-node.md](docs/local-node.md)). It connects over WebSocket only, which is what run scripts use.
 
 **Reads:** `design-1:contracts/asset.cash`, `design-1:packages/core/test/protected.test.ts`, `design-1:packages/core/test/wallet-flow.test.ts`, `design-1:packages/chipnet/src/lifecycle.ts`.
 
@@ -112,19 +117,20 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 
 ## Stage 2 — Keys, viewing key, giving out and finding addresses
 
-**Builds:** a library for: seed to controller key, address node, blinding seed and funding key; the recovery credential with its recovery key and fee key; the viewing-key record with its signature and a text form; secret, tag and address for kind and number; the counters, the windows and the ranges; the quick pass and the full pass over a chain, with progress that survives an interruption; watching.
+**Builds:** the controller template and the two address templates in their final, unchanging form, since their content fixes the keys; a library for: the engine's key tree in our own code (controller key, the two address nodes and their extended public keys, funding key), checked against the engine's keys, and the blinding seed; the recovery credential with its recovery key and fee key; the viewing-key record with its signature and a text form; secret, tag and address for kind and number; the counters, the windows and the ranges; the quick pass and the full pass over a chain, with progress that survives an interruption; watching.
 
 **Reads:** `design-1:apps/jar/src/plain.ts` (scanning an HD wallet), `packages/core/src/xo-keys.ts`.
 
 **Exit**
 
 - **KV01–KV05, KV07–KV13, PV01 and PV02** pass.
+- A test fixes the identifiers of the controller template and the two address templates, so that an accidental change to one fails the build.
 - Test vectors (words, kinds, numbers, expected keys, secrets, tags and addresses) are in a file that the specification of stage 10 can cite.
-- The sizes chosen in stage 0 are in the code as constants of the scheme version, and KV13 records what the full pass costs with them.
+- The sizes chosen in stage 0 are in the code as constants of the scheme version, and KV13 records what the full pass costs with them. The full pass uses history lookups in batches of no more than 300, not subscriptions.
 
 ## Stage 3 — Creating a wallet; the wallet on the XO engine
 
-**Builds:** the wallet's XO template with every action of section 13.2 (create, pay, cancel, change settings, sweep, spend from a vault address; request and complete for the recoverer); the account that drives the engine, or the division settled in stage 0; creating a wallet as in section 7.9; receiving, paying, holding tokens; choosing coins and sending everything as in section 8; a tool that closes a wallet, with its refusals.
+**Builds:** the wallet's XO templates of section 13.2 with every action (create, pay, cancel, change settings, sweep, spend from a vault address, close; request and complete for the recoverer); the account that drives the engine, with the division of work of section 13.2; creating a wallet as in section 7.9; receiving, paying, holding tokens; choosing coins and sending everything as in section 8; a tool that closes a wallet, with its refusals.
 
 **Reads:** `design-1:packages/templates/src/grandmas-wallet.ts`, `design-1:packages/app/src/account.ts`, `design-1:packages/app/src/owner.ts`, `design-1:packages/xo-demo/src/run.ts`, [docs/xo-spike.md](docs/xo-spike.md).
 
@@ -250,10 +256,10 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 
 | No. | Decision | Needed by | Default |
 | --- | --- | --- | --- |
-| 1 | Derivation: the constant `S`, paths, encodings, engine or own code | Stage 0, for stage 2 | As in sections 7.2 and 9.2 |
-| 2 | Address chains, windows, range sizes, interval of the full pass | Stage 0, for stage 2 | Windows of 20, 5 and 5; sizes from the trial |
+| 1 | Derivation: the key tree; the number `B`; the record's encoding | Tree settled in stage 0; the rest in stage 2 | The XO engine's tree, with templates that do not change |
+| 2 | Address chains, windows, range sizes, interval of the full pass | Proposed in stage 0, for stage 2 | Windows of 20, 5 and 5; 10,000, 10,000 and 1,000; once a week and after the events of section 7.7 |
 | 3 | Who makes the recoverer's key | Stage 2 | The owner's device |
-| 4 | The viewing key's written form | Stage 2 | Two values in one signed record |
+| 4 | The viewing key's written form | Stage 2 | The two extended public keys and the blinding seed in one signed record |
 | 5 | Readable controller state | Settled | Readable, as the controller is |
 | 6 | Waiting period for real use; margin; automatic cancelling | Stage 6 | Time only; length and default open |
 | 7 | Fees: the rate; the coin for cancelling; an allowance for the recoverer | Stage 1 for sizes, stage 3 for amounts | One satoshi per byte; one cancellation; an allowance offered and not required, for four requests and one completion |
@@ -261,7 +267,7 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 9 | Backup record formats; refusing without a stored template | Stage 4, for stage 7 | Refusing stays the default |
 | 10 | Template extension and recovery declaration | Stage 7; XO's word by stage 10 | The four kinds; a companion document until XO says |
 | 11 | `xo_v1` as an extension or a protocol of XO's | Stage 7; others' word by stage 10 | This project's extension |
-| 12 | Division between the engine and our own code | Stage 0 | From the trials |
+| 12 | Division between the engine and our own code | Settled in stage 0 | The proposal's section 13.2 |
 | 13 | Sweep policy | Stage 5 | Most valuable first, unknown tokens counted as valuable |
 | 14 | Local backup: offered, and in what form | Stage 5, for stage 6 | Offered, as in section 18.1 |
 | 15 | Upgrade policy; how long an old identity is kept | Stage 10 | A new identity; the old one kept while something can arrive |

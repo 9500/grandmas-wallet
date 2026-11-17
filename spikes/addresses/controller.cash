@@ -1,0 +1,151 @@
+pragma cashscript ^0.14.0;
+
+// Grandma's Wallet recovery controller, scheme v1.
+//
+// The controller UTXO carries the wallet's identity NFT (mutable capability).
+// The NFT commitment holds the controller state (69 bytes):
+//
+//   [0]      version            0x01
+//   [1]      status             0x00 Active, 0x01 Pending
+//   [2..6]   owner epoch        4 bytes, little-endian
+//   [6..26]  owner key hash     hash160
+//   [26..46] recoverer key hash hash160
+//   [46..49] challenge delay    BIP68 relative locktime, 3 bytes, little-endian
+//   [49..69] proposed owner     hash160, all zero when Active
+//
+// Transaction layout for every function:
+//   Inputs:  00-controller, 01+ anything (fee funding, protected assets)
+//   Outputs: 00-controller, 01+ anything
+//
+// The contract is constructed with the wallet identity: the token category of
+// the identity NFT, in the byte order contracts see. Each wallet therefore has
+// its own controller address, and only that wallet's identity NFT can act as
+// the controller at that address.
+// The initial state is not validated here; clients must validate the genesis
+// transaction before trusting an identity.
+
+bytes20 constant NO_PROPOSED_OWNER = 0x0000000000000000000000000000000000000000;
+
+// Accepted signing types. Both cover every input and every output of the
+// transaction, so a signature cannot be moved to another transaction or have
+// outputs changed.
+//   0x41  SIGHASH_ALL | SIGHASH_FORKID
+//   0x61  SIGHASH_ALL | SIGHASH_UTXOS | SIGHASH_FORKID, which also covers the
+//         amount and script of every spent output
+bytes1 constant SIGHASH_ALL = 0x41;
+bytes1 constant SIGHASH_ALL_UTXOS = 0x61;
+
+// Checks that hold for every transition: position, continuity of the
+// covenant and its identity token, and preservation of the controller value.
+// Returns the current state.
+function continuedController(bytes32 identity) returns (bytes) {
+    require(this.activeInputIndex == 0);
+    require(tx.version == 2);
+
+    bytes state = tx.inputs[0].nftCommitment;
+    require(state.length == 69);
+    require(state.split(1)[0] == 0x01);
+
+    // The controller must carry this wallet's identity NFT, with mutable capability.
+    require(tx.inputs[0].tokenCategory == identity + 0x01);
+
+    require(tx.outputs[0].lockingBytecode == tx.inputs[0].lockingBytecode);
+    require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory);
+    require(tx.outputs[0].tokenAmount == tx.inputs[0].tokenAmount);
+    require(tx.outputs[0].value >= tx.inputs[0].value);
+
+    return state;
+}
+
+// Checks that `pk` is the key whose hash160 is `keyHash` and that `s` commits
+// to the whole transaction. The signature itself is verified by the caller.
+function authorizedKey(bytes keyHash, pubkey pk, sig s) {
+    require(hash160(pk) == keyHash);
+    bytes signingType = bytes(s).split(bytes(s).length - 1)[1];
+    require(signingType == SIGHASH_ALL || signingType == SIGHASH_ALL_UTXOS);
+}
+
+contract RecoveryController(bytes32 identity) {
+    // Owner approves a transaction. The controller continues as Active with
+    // the same owner, recoverer and delay. If a recovery claim was pending,
+    // it is cancelled.
+    function ownerAuthorize(pubkey ownerPk, sig ownerSig) {
+        bytes state = continuedController(identity);
+        authorizedKey(state.slice(6, 26), ownerPk, ownerSig);
+        require(checkSig(ownerSig, ownerPk));
+
+        require(tx.outputs[0].nftCommitment == 0x0100 + state.slice(2, 49) + NO_PROPOSED_OWNER);
+    }
+
+    // Recoverer opens a claim naming the proposed new owner. Only possible
+    // when no claim is pending. The challenge delay starts with the new
+    // controller output.
+    function requestRecovery(pubkey recovererPk, sig recovererSig, bytes20 proposedOwner) {
+        bytes state = continuedController(identity);
+        require(state.slice(1, 2) == 0x00);
+        authorizedKey(state.slice(26, 46), recovererPk, recovererSig);
+        require(checkSig(recovererSig, recovererPk));
+
+        require(proposedOwner != NO_PROPOSED_OWNER);
+        require(tx.outputs[0].nftCommitment == 0x0101 + state.slice(2, 49) + proposedOwner);
+    }
+
+    // Recoverer completes a claim after the challenge delay. Installs exactly
+    // the proposed owner named by the pending claim and starts a new epoch.
+    function finalizeRecovery(pubkey recovererPk, sig recovererSig) {
+        bytes state = continuedController(identity);
+        require(state.slice(1, 2) == 0x01);
+        authorizedKey(state.slice(26, 46), recovererPk, recovererSig);
+        require(checkSig(recovererSig, recovererPk));
+
+        require(this.age >= int(state.slice(46, 49)));
+
+        int nextEpoch = int(state.slice(2, 6)) + 1;
+        require(
+            tx.outputs[0].nftCommitment ==
+                0x0100 + toPaddedBytes(nextEpoch, 4) + state.slice(49, 69) + state.slice(26, 49) + NO_PROPOSED_OWNER
+        );
+    }
+
+    // Owner replaces the owner key, the recoverer, or the challenge delay.
+    // Any pending claim is cancelled. Changing the owner starts a new epoch.
+    function ownerUpdate(pubkey ownerPk, sig ownerSig, bytes20 newOwner, bytes20 newRecoverer, bytes3 newDelay) {
+        bytes state = continuedController(identity);
+        bytes currentOwner = state.slice(6, 26);
+        authorizedKey(currentOwner, ownerPk, ownerSig);
+        require(checkSig(ownerSig, ownerPk));
+
+        require(newOwner != NO_PROPOSED_OWNER);
+        require(newRecoverer != NO_PROPOSED_OWNER);
+
+        // A valid delay uses only the BIP68 type flag (bit 22) and value
+        // (low 16 bits), and its value is not zero.
+        require((newDelay & 0x0000bf) == 0x000000);
+        require(newDelay.split(2)[0] != 0x0000);
+
+        int epoch = int(state.slice(2, 6));
+        if (newOwner != currentOwner) {
+            epoch = epoch + 1;
+        }
+
+        require(
+            tx.outputs[0].nftCommitment ==
+                0x0100 + toPaddedBytes(epoch, 4) + newOwner + newRecoverer + newDelay + NO_PROPOSED_OWNER
+        );
+    }
+
+    // Owner closes the wallet. The identity NFT is destroyed and the
+    // controller's value is released: the transaction has one output and it
+    // carries no token.
+    function ownerClose(pubkey ownerPk, sig ownerSig) {
+        bytes state = tx.inputs[this.activeInputIndex].nftCommitment;
+        require(state.length == 69);
+        require(state.split(1)[0] == 0x01);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == identity + 0x01);
+        authorizedKey(state.slice(6, 26), ownerPk, ownerSig);
+        require(checkSig(ownerSig, ownerPk));
+
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].tokenCategory == 0x);
+    }
+}

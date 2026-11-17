@@ -300,25 +300,32 @@ The design uses the HD wallet primitives unchanged: BIP39 for the words, BIP32 f
 
 ### 7.2 What is derived
 
-| Derived value | Proposed place in the tree | Used for |
+| Derived value | Place in the tree | Used for |
 | --- | --- | --- |
-| Controller key | `m / P' / S' / 0' / 0` | The owner entry in the controller. Nothing else. |
-| Address node | `m / P' / S' / 1'` | Parent of every address key |
-| Address key (*c*, *i*) | address node `/ c / i`, both steps not hardened | The key of one address. *c* = 0 for addresses given out to be paid, 1 for change and for outputs the wallet names in application transactions. *i* counts from 0. |
-| Blinding seed | SHA-256 of the private key at `m / P' / S' / 2'` | Source of every address secret |
-| Funding key | `m / P' / S' / 3' / 0` | An ordinary P2PKH address used only to create the wallet (section 7.9) |
+| Controller key | `m / P' / C' / 0' / 0` | The owner entry in the controller. Nothing else. |
+| Address node of kind *c* | `m / P' / A`*c*`' / 0'` | Parent of every address key of that kind. *c* = 0 for addresses given out to be paid, 1 for change and for outputs the wallet names in application transactions. |
+| Address key (*c*, *i*) | address node of kind *c* `/ i`, not hardened | The key of one address. *i* counts from 0. |
+| Blinding seed | SHA-256 of the private key at `m / P' / A0' / B'` | Source of every address secret |
+| Funding key | `m / P' / W' / 0' / 0` | An ordinary P2PKH address used only to create the wallet (section 7.9) |
 
-`P` is XO's purpose number: 2415 on mainnet, 42415 on test networks, so keys differ between networks. `S` is a constant for this scheme, to be fixed (section 22).
+This is the key tree of the XO engine, which signs with no other key (`docs/xo-engine-stage0-trials.md`). The engine places every key of a template at `m / P' / T' / 0' / n`:
 
-Requirements behind the layout, which hold whatever numbers are chosen:
+- `P` is XO's purpose number: 2415 on mainnet, 42415 on test networks, so keys differ between networks.
+- `T` is the template's number: the first four bytes of the template's identifier, read as a little-endian number of 31 bits. `C` is the number of the controller template, `A0` and `A1` those of the two address templates, `W` that of XO's standard single-key wallet template (section 13.2).
+- The third step, `0'`, is the engine's place for signing keys.
+- `n` counts up from 0 for the template. The engine hands the numbers out in order, without gaps.
+- `B` is a number of this scheme, to be fixed, taken from outside the numbers XO uses at the third step.
 
-- **Address keys are plain children of one node**, so one extended public key gives every address's public key and no private key.
+Requirements behind the layout:
+
+- **Address keys of one kind are plain children of one node**, so one extended public key for each kind gives the public key of every address of that kind and no private key.
 - **The index is a counter.** A new device finds addresses by trying 0, 1, 2 and so on.
-- **The controller key is not on the address chain** and cannot be worked out from the viewing key, even together with address private keys.
-- **The blinding seed and the keys are independent.** Neither can be worked out from the other.
-- **Everything follows from the twelve words and the network.** Nothing random is added later.
+- **The controller key is not on an address chain** and cannot be worked out from the viewing key, even together with address private keys. It is under a template of its own, a hardened step away.
+- **The blinding seed and the keys are independent.** Neither can be worked out from the other. The engine does not know the blinding seed; the wallet's own code derives it.
+- **Everything follows from the twelve words, the network and the templates.** Nothing random is added later.
+- **The templates that hold keys never change.** A template's number follows from its content, so a changed template gives other keys. The controller template is fixed by the version of the controller rules, and the two address templates, which differ in one word, by the version of the address scheme (section 18.3). XO's standard wallet template is used at a pinned version.
 
-Whether the XO engine can be made to use these keys is not known. The addresses the engine made for ordinary coins could not be reproduced with a counter from 0 (indices 0 to 59 were tried). How the engine chooses the index, and whether the wallet can choose instead, is one of the first trials in the plan. If it cannot, the wallet's coins are handled by this project's own code beside the engine.
+The wallet's own code derives the same public keys as the engine, for the viewing-key record and for the recoverer's credential (section 9.2). This was checked against the engine's keys.
 
 ### 7.3 Address secrets and tags
 
@@ -363,7 +370,7 @@ Notes for implementation:
 - **The sweep path is open to the current owner at any time,** not only after a recovery. It is also how a coin that arrives at an earlier address later is collected.
 - **A sweep publishes the identity and the secret of each address it empties.** After that, anyone can see that the address belongs to this identity. Only the owner can still use the path.
 - **The tag check comes last** in each function, because the compiler requires a function to end on a check of its own.
-- **Sizes.** A trial compilation with cashc 0.14.0 gives 96 bytes of rules for the recoverable address and 75 for the vault address; with the tag and key hash the scripts are 150 and 108 bytes. From those sizes, an input spent by its key is about 300 bytes and a swept input about 260, against about 140 for P2PKH. These are computed, not measured on transactions, and the scripts are untested. Outputs at a script address also have a higher minimum value than P2PKH outputs.
+- **Sizes.** Compiled with cashc 0.14.0, the rules are 96 bytes for the recoverable address and 75 for the vault address; with the tag and key hash the scripts are 150 and 108 bytes. Measured on signed transactions that pass the network's relay rules, an input spent by its key is 296 bytes, a swept input 260 and a vault input 217, against 141 for P2PKH. A payment by key with one input is 340 bytes without change and 384 with it; a sweep is 1,099 bytes for one coin, 2,139 for five and 6,039 for twenty (`docs/address-contracts-trial.md`). Outputs at a script address also have a higher minimum value than P2PKH outputs.
 
 ### 7.5 The vault address
 
@@ -389,26 +396,26 @@ Consequences:
 
 ### 7.6 The viewing key
 
-The viewing key is two values, computed on the phone from the seed when the wallet is created:
+The viewing key is the extended public keys of the two address nodes and the blinding seed, computed on the phone from the seed when the wallet is created:
 
 | Value | Form | Gives |
 | --- | --- | --- |
-| Extended public key of the address node | Standard BIP32 text, 111 characters, `xpub…` on mainnet and `tpub…` on test networks | The public key of every address |
+| Extended public key of each of the two address nodes | Standard BIP32 text, 111 characters each, `xpub…` on mainnet and `tpub…` on test networks | The public key of every address of its kind |
 | Blinding seed | 32 bytes | The secret of every address and vault address |
 
 Together with the identity they give every address of the seed, and so every balance and the whole history. They give no power to spend: there is no private key in them, and the controller path needs the owner's signature. Neither value alone gives an ordinary address. The blinding seed with the identity does give the vault addresses, which have no key.
 
-A viewing key is passed on as a **viewing-key record**: the two values, the network, the version of the address scheme (which fixes the scripts, the paths and the ranges of section 7.7), and the controller public key of the same seed. The record is signed with that controller key, which shows that whoever made it holds the key. The hash of the record names it in receipts (section 9.5). Nothing in it depends on the identity, so a new device can make one before it is told which wallet it is taking over.
+A viewing key is passed on as a **viewing-key record**: these values, the network, the version of the address scheme (which fixes the scripts, the paths and the ranges of section 7.7), and the controller public key of the same seed. The record is signed with that controller key, which shows that whoever made it holds the key. The hash of the record names it in receipts (section 9.5). Nothing in it depends on the identity, so a new device can make one before it is told which wallet it is taking over.
 
 The viewing key is held by the phone, by the recoverer inside the recovery kit, and as a sealed copy on backup stores. **Without it a new owner cannot find the addresses or show their secrets, so it is as necessary for recovery as the recoverer's key.**
 
 Each seed has its own viewing key. After a recovery, or a move to a new seed, the wallet has a new seed and a new viewing key, and every earlier one is kept without a time limit: earlier viewing keys find coins that still arrive at earlier addresses, and they open the earlier seeds' vault addresses.
 
-One property is inherited from BIP32 and must be respected: an extended public key together with the private key of any one of its children gives the private keys of all of them. The viewing key must stay away from anyone who could also obtain a private key of the wallet.
+One property is inherited from BIP32 and must be respected: an extended public key together with the private key of any one of its children gives the private keys of all of them, which here means every address key of that kind. The viewing key must stay away from anyone who could also obtain a private key of the wallet.
 
 ### 7.7 Giving out addresses and finding coins
 
-**Ranges.** The address scheme fixes how many addresses of each kind a seed has: `N0` given out, `N1` change and application outputs, `N2` vault. Valid numbers are 0 to `N` − 1. The three sizes are constants of the scheme version, the same for every wallet and every seed, so nothing about them has to be stored or delivered. They are still to be fixed, from measurement (section 22): large enough for many years of use, small enough that looking up every address of a range is practical.
+**Ranges.** The address scheme fixes how many addresses of each kind a seed has: `N0` given out, `N1` change and application outputs, `N2` vault. Valid numbers are 0 to `N` − 1. The three sizes are constants of the scheme version, the same for every wallet and every seed, so nothing about them has to be stored or delivered. The sizes proposed from measurement are `N0` = 10,000, `N1` = 10,000 and `N2` = 1,000 (`docs/address-ranges-trial.md`): nearly three fresh addresses a day for ten years, and a full pass of 21,000 addresses for a seed in a few seconds on the user's own server and an estimated 16 seconds on a distant public one. A later version of the scheme can widen a range and leave every address where it is; it cannot narrow one.
 
 **Giving out.** The wallet keeps a counter for each kind and gives out the next number, within two limits:
 
@@ -428,7 +435,9 @@ For every address with history the device lists what is unspent there, with its 
 
 A wallet is reported as fully found only after the full pass has finished for every seed it has had. Until then the device says that the search is still running. If a server does not answer, or servers disagree, or a viewing key is missing, the result is "incomplete" with the reason, never "empty". A pass that is interrupted continues where it stopped.
 
-**Watching.** A wallet in use watches every address that has history and the window beyond the last used one, for the current seed and for every earlier seed, because a payer may use an old address again. It repeats the full pass for every seed from time to time; how often is still to be decided. A coin that arrives at an earlier address after a recovery is collected through the controller path like any swept coin (section 11.2). Until it is collected, the earlier seed's key spends it too. This is not what the vault address is for: a vault address has no key at all, so nothing sent to it ever obeys an earlier seed (section 7.5).
+**Watching.** A wallet in use watches every address that has history and the window beyond the last used one, for the current seed and for every earlier seed, because a payer may use an old address again. It repeats the full pass for every seed once a week, and at once after it takes over a wallet or is restored, after it sees a reorganization or one of its own transactions dropped, and when the user asks. A coin that arrives at an earlier address after a recovery is collected through the controller path like any swept coin (section 11.2). Until it is collected, the earlier seed's key spends it too. This is not what the vault address is for: a vault address has no key at all, so nothing sent to it ever obeys an earlier seed (section 7.5).
+
+**Making addresses known again.** The engine hands out key numbers in order, so a device that restores a seed makes its addresses again from number 0 upward, each with its tag, up to the last used one and the window beyond it. A trial measured 16 ms an address: about three minutes for 10,000. Addresses of an earlier seed and vault addresses hold no key of the device and are made known singly, as they are found.
 
 No record per payment or per address is needed for any of this. What must not be lost is the identity and the viewing key of every seed.
 
@@ -466,14 +475,14 @@ Two things follow. The funding address is not recoverable; it is shown only unti
 
 **Application actions.** The wallet builds the transaction from the application's template, adds its own inputs and outputs, and signs with address keys (sections 12 to 14). Tokens that carry authority over a position are held at ordinary addresses.
 
-**Controller transactions.** Cancelling a request, changing settings, sweeping and spending from a vault address spend the controller. The fee is paid by a coin of the wallet, signed by its key. That coin, and its change, are visibly in a transaction with the identity. The wallet keeps a small coin for this purpose and does not mix its change with other coins. Ordinary payments leave that coin alone, and the wallet says so when it is missing (section 17).
+**Controller transactions.** Cancelling a request, changing settings, sweeping and spending from a vault address spend the controller. The fee is paid by a coin of the wallet, signed by its key. That coin, and its change, are visibly in a transaction with the identity. The wallet keeps a small coin for this purpose and does not mix its change with other coins. A cancellation paid this way is 1,091 bytes without change, which is the least that coin may hold at one satoshi per byte. Ordinary payments leave that coin alone, and the wallet says so when it is missing (section 17).
 
 **Fees.** The wallet pays the lowest fee that nodes relay and works it out from the transaction itself.
 
 - **Rate.** A setting, one satoshi per byte by default, which is what nodes require. The wallet does not raise it by itself. If a server refuses a transaction for its fee, the wallet says so.
 - **Exact amount.** The fee is the size of the signed transaction in bytes times the rate, rounded up. The size is known before signing: signatures are Schnorr signatures of 65 bytes, public keys are compressed, and every script is fixed. The wallet measures the encoded transaction; it does not add up estimates.
 - **Smallest output.** Nodes relay no output below a value that depends on the output's own size: 546 satoshis for P2PKH, 576 for an address of this wallet without a token, 888 for the controller, and more for an output with a token, according to its token data. The wallet computes this for every output it creates.
-- **Choosing coins.** At a constant rate every coin costs its bytes once, whenever it is spent. What can be saved is the change output: 44 bytes now and about 300 when it is spent. The wallet therefore prefers a choice of coins that needs no change.
+- **Choosing coins.** At a constant rate every coin costs its bytes once, whenever it is spent. What can be saved is the change output: 44 bytes now and 296 when it is spent. The wallet therefore prefers a choice of coins that needs no change.
 - **A remainder too small to return.** If what is left after the fee is below the smallest change output, the wallet compares leaving it to the fee with adding a coin so that change becomes possible. It takes the cheaper and shows the amount as part of the fee.
 - **A check before sending.** The signed transaction is checked once more: its size is the one worked out, its fee is the required one plus at most such a remainder, and no output is below its smallest value. Otherwise it is not sent. There is no limit on the fee in satoshis, which would stand in the way of a transaction with many inputs.
 
@@ -484,7 +493,7 @@ The same rules apply to controller transactions and to the transactions the wall
 - **What goes.** Every coin without a token, the coin kept for cancelling included. Everything is paid to the one address, there is no change, and the amount is the total less the exact fee.
 - **Coins that only the controller can move.** Vault coins, and coins at an earlier seed's addresses that are not yet swept, go in the same transaction, with the controller at input 0 and its successor, which keeps its 1,000 satoshis, at output 0. A wallet with more coins than one transaction holds sends several, each with its exact fee.
 - **Tokens.** The satoshis under a token stay with it. They leave when the token is sent, or when the user destroys the token on purpose, which is an action of its own.
-- **When it cannot be done.** Only when the total less the fee is below the smallest value of the destination output. A single P2PKH coin of 546 satoshis leaves 361, which cannot be sent. A wallet needs the smallest output plus the fee: about 900 satoshis in one coin at an address of this wallet, by the estimate of section 7.4, and more when the amount is spread over several coins. Below that the wallet shows the total, the fee and the smallest output, and sends nothing. A coin that costs more to spend than it holds is left out and listed; nodes relay no such coin at the default rate.
+- **When it cannot be done.** Only when the total less the fee is below the smallest value of the destination output. A single P2PKH coin of 546 satoshis leaves 361, which cannot be sent. A wallet needs the smallest output plus the fee: 886 satoshis in one coin at an address of this wallet (a payment of 340 bytes and an output of 546 satoshis), and more when the amount is spread over several coins. Below that the wallet shows the total, the fee and the smallest output, and sends nothing. A coin that costs more to spend than it holds is left out and listed; nodes relay no such coin at the default rate.
 - **What is left.** The controller with its 1,000 satoshis, coins with tokens, and whatever the recoverer holds. The wallet stays usable and recoverable. It says that it cannot cancel until it holds a coin again.
 
 **Closing.** Sending everything with the controller's `ownerClose` in the last transaction also takes the controller's value and ends the identity (section 5.8). It is not offered in the ordinary interface.
@@ -532,7 +541,7 @@ Who makes the key is a decision still to be taken (section 22). Two ways:
 
 This proposal takes the first as the default. The credential must be unrelated to the owner's seed: not a key of the owner's tree and not derivable from it. That a device has erased the credential cannot be shown to anyone, so an old device may still hold a copy (section 9.7).
 
-The credential gives two keys, at the same places in its own tree as the owner's controller key and funding key have in the owner's: the **recovery key** at `m / P' / S' / 0' / 0`, whose hash is in the controller, and a **fee key** at `m / P' / S' / 3' / 0`, whose address holds the coins that pay the recoverer's fees (section 9.6). They differ so that this address cannot be computed from the controller's state. A recoverer that makes its own key gives the device two key hashes instead of one.
+The credential gives two keys, at the same places in its own tree as the owner's controller key and funding key have in the owner's: the **recovery key** at `m / P' / C' / 0' / 0`, whose hash is in the controller, and a **fee key** at `m / P' / W' / 0' / 0`, whose address holds the coins that pay the recoverer's fees (section 9.6). They differ so that this address cannot be computed from the controller's state. A recoverer that makes its own key gives the device two key hashes instead of one.
 
 ### 9.3 Delivery
 
@@ -550,7 +559,7 @@ Creating the wallet needs only the owner. The recoverer can open the message lat
 | --- | --- |
 | Format, version, network | Unambiguous reading; no use on another network |
 | Identity and the identifier of the transaction that created it | Find and check the wallet. The transaction itself is fetched and checked, not taken from the message. |
-| Version of the controller rules; version of the address scheme; reference to the wallet's template (identifier and content hash) | Choose compatible behaviour |
+| Version of the controller rules; version of the address scheme; references to the wallet's templates (identifier and content hash of each) | Choose compatible behaviour |
 | Recovery credential, or a statement that the recoverer holds its own key | Authorize the request and the completion; pay their fees |
 | Viewing-key record of the current seed, and those of earlier seeds if any | Hand to a new device after completion |
 | Backup stores: addresses, archive identifier, content key; the same for earlier archives | Read the sealed records |
@@ -580,7 +589,7 @@ A receipt given before a change takes effect, for a new seed or a new recoverer,
 
 ### 9.6 Fees for the recoverer
 
-A request and a completion each need a coin to pay the fee. A controller transaction is about 1,000 bytes, so the two together cost about 2,000 satoshis at one satoshi per byte.
+A request and a completion each need a coin to pay the fee. Paid by one P2PKH coin with change, a request is 991 bytes and a completion 970, so the two together cost about 2,000 satoshis at one satoshi per byte.
 
 The recoverer pays them from coins of its own. These are kept at an ordinary single-key (P2PKH) address of the recoverer's fee key (section 9.2). The recoverer's software shows that address, what it holds, and what a request and a completion need. Anyone can send coins there from any wallet.
 
@@ -798,10 +807,12 @@ From the engine's documentation and this project's trials (`docs/xo-spike.md` an
 
 - A template is JSON with roles, actions, transactions, inputs, outputs, locking scripts, variables and scripts in CashASM. Compiled contract bytecode has to be carried into the template; CashScript artifacts are not consumed directly.
 - Template inputs can set a sequence number, and transactions a version and a lock time, so relative and absolute time locks can be expressed.
-- Keys are derived per template from the account's twelve words, under `m/2415'` (mainnet) or `m/42415'` (test networks). A secret in a template is a derivation index, not a key; the engine cannot import a key.
+- Keys are derived per template from the account's twelve words, at `m / P' / T' / 0' / n` (section 7.2). A secret in a template is a derivation index, not a key; the engine cannot import a key, and it signs with no other.
+- A template's defaults name a locking script, the keys to make and the variables the caller supplies. From them the engine makes one script per call, with a new key and the caller's values, follows it, and keeps the values for the spend. A script can also take a key hash as a variable, for a key the account does not hold.
+- Only one engine can be open in a process or a page.
 - An account can hold only one role that has a follow-up action. Owner and recoverer are separate accounts.
 - The validator rejects properties it does not know, at every level.
-- Parties to one invitation must have imported the identical template. An invitation is for one template.
+- Parties to one invitation must have imported the identical template. An invitation is for one template; it accepts inputs that the account holds under other templates, unlocked as their own scripts say, and outputs to scripts of other templates.
 - A template's identifier depends on the order of its fields, so a template is kept as the text it arrived in.
 - The engine cannot produce a valid `0x61` signature for a transaction with more than one input.
 - A template variable of type `timestamp` is read back as text when unlocking later, so it cannot be used in a script that is unlocked later.
@@ -809,28 +820,38 @@ From the engine's documentation and this project's trials (`docs/xo-spike.md` an
 - Block header verification on chipnet fails after the switch to one-minute blocks; the engine still works, with errors logged (`docs/xo-chipnet-header-verification.md`). While it fails, what the engine reports as confirmed rests on the servers alone. A local fix is in `spikes/xo-engine/patches/chipnet-faster-blocks.mjs`.
 - The engine releases the coins an invitation named only when told; an action that is not sent must release them.
 
-### 13.2 The wallet's own template
+### 13.2 The wallet's own templates
 
-The wallet is itself described by an XO template:
+The wallet is itself described by XO templates. They are separate because the engine derives a template's keys under the template's number (section 7.2): keys that must not share a branch are in different templates, and a template that holds keys can never change.
 
-| Part | Contents |
+| Template | Contents | Keys | May change |
+| --- | --- | --- | --- |
+| Controller | The controller script with its five ways to unlock. Owner actions: create the wallet; approve (the controller continues, with whatever inputs and outputs the transaction also has: cancelling, sweeping, spending from a vault address); change settings; close. Recoverer actions: request recovery; complete recovery. | The owner's controller key; in the recoverer's account, the recovery key | No. Fixed by the version of the controller rules. |
+| Addresses given out | The recoverable address, unlocked by its key | Address keys of kind 0 | No. Fixed by the version of the address scheme. |
+| Change | The same, differing in one word | Address keys of kind 1 | No. Fixed by the version of the address scheme. |
+| Wallet actions | Paying from the wallet's addresses. The recoverable address of an earlier seed, which takes its key hash as a value and can only be swept. The vault address. | None | Yes |
+| XO's standard wallet | Ordinary single-key coins: the funding address, the recoverer's fee address | The funding key; the fee key | Pinned version |
+
+Roles are owner and recoverer, in separate accounts.
+
+The wallet's code computes what a template cannot guarantee: the next controller state, each tag, each secret. The templates assemble them into transactions; the contracts enforce that they are right. A test checks that the scripts in the templates are the compiled contracts, byte for byte.
+
+**What the trials of stage 0 showed,** each through the unmodified engine and accepted by a node with the public networks' relay rules (`docs/xo-engine-stage0-trials.md`):
+
+- one script per address, with the wallet's tag and the engine's next key, followed by the engine and equal to what the wallet's own code computes;
+- an address of an earlier seed, followed and swept without its key;
+- a payment by key; a sweep of several coins in one invitation, each unlocked with its own secret;
+- one invitation with inputs and outputs of two templates, which is how an application's transaction takes the wallet's coins;
+- a new seed, in an account with no history, taking over an identity that another account created, and sweeping.
+
+**Division of work**
+
+| The engine | The wallet's own code |
 | --- | --- |
-| Roles | Owner; recoverer |
-| Scripts | The controller, with its five ways to unlock. The recoverable address, with two (`spend`, `sweep`). The vault address. |
-| Owner actions | Create the wallet; pay; cancel a request; change settings; sweep; spend from a vault address; close the wallet |
-| Recoverer actions | Request recovery; complete recovery |
-
-The wallet's code computes what a template cannot guarantee: the next controller state, each tag, each secret. The template assembles them into transactions; the contracts enforce that they are right. A test checks that the scripts in the template are the compiled contracts, byte for byte.
-
-Five things are not known and are the first trials in the plan:
-
-- whether the engine can hold many addresses of one script with different tags and keys;
-- whether it can use the keys of section 7.2;
-- whether one invitation can carry the controller and many swept inputs;
-- how a transaction of an application's template takes inputs and outputs of the wallet's template, since an invitation is for one template;
-- whether a new seed, in a new account, can take over an identity that another account created.
-
-Where the answer is no, the wallet's own code does that part, and what it builds is not called an invitation.
+| Keys and signatures | Secrets, tags and the controller's next state |
+| One script per address; following them; listing coins | Finding addresses: the quick and the full pass, over a server connection of its own. What is found is then made known to the engine. |
+| Building each transaction from a template, the wallet's and an application's | Choosing coins, the exact fee and the change (section 8) |
+| Invitations as the record of what was done | The script check before anything is sent |
 
 ### 13.3 What an application's template needs to say
 
@@ -901,12 +922,14 @@ Until the declaration is part of XO's schema it travels as a document beside the
 
 - Outputs and inputs bound to the wallet, as above.
 - Actions that create a token category, with the wallet supplying the coin that defines it.
-- A transaction that combines an application's template with inputs and outputs of the wallet's template.
+- A transaction that combines an application's template with inputs and outputs of the wallet's templates.
 - Many addresses of one script, with keys chosen by a counter.
 - Taking over an existing identity with a new seed.
 - Valid `0x61` signatures for transactions with several inputs.
 
-Where the engine cannot do one of these, the wallet does it in its own code and uses the engine for the rest. The outcome for each item is written down before the stages that depend on it begin. Code of the wallet that fills such a gap works from the template and the kinds of wallet-bound output, and names no application. Every transaction, whoever built it, passes this project's own script check against the outputs it spends before a signature leaves the wallet.
+Stage 0 showed the third, fourth and fifth, with the wallet's own templates on both sides of the third; an application's template of a third party is tested in stage 7. The first two are the extension proposed above. The last is not available: inputs the engine signs use `0x41`.
+
+Where the engine cannot do one of these, the wallet does it in its own code and uses the engine for the rest. Code of the wallet that fills such a gap works from the template and the kinds of wallet-bound output, and names no application. Every transaction, whoever built it, passes this project's own script check against the outputs it spends before a signature leaves the wallet.
 
 ### 13.5 Limits
 
@@ -1127,6 +1150,7 @@ The recoverer's role is a key and the kit. Nothing requires a business. A second
 | Controller rules (state version byte) | Who can start a recovery, the wait, completion |
 | Owner-approval rule | How an address recognises the owner's approval |
 | Address scripts and derivation | How addresses, secrets and tags are made |
+| Controller template; the two address templates | Every key under them (section 7.2). A change to one is a new version of the controller rules or of the address scheme. |
 | Recovery kit | Fields, sealing |
 | Backup records | Formats |
 | Application profile (`recoverable-app-v1`) | The three rules and the recovery declaration |
@@ -1182,12 +1206,13 @@ The old identity does not end with the move. A vault address that was published,
 4. The viewing key of every seed is needed to recover, and the recoverer has to keep each one.
 5. A recovery is public: the sweep ties together what the wallet held.
 6. A request is not cancelled by ordinary use. The device has to notice it and cancel.
-7. Transactions are larger than with P2PKH: about twice the bytes per input, by an estimate from the script sizes.
+7. Transactions are larger than with P2PKH: 296 bytes for an input spent by its key against 141.
 8. The wallet's first coins can be traced to the creation of its identity.
 9. Applications have to be reached through a template; front ends that build transactions from the wallet's public keys cannot serve it.
 10. A complete search looks up every address of fixed ranges, for every seed the wallet has had, and a seed has a fixed number of fresh addresses.
 11. An address that outlives its controller's rules keeps the old identity in service.
 12. The closing action makes every controller transaction 45 bytes larger, and closing turns the identity's vault addresses into addresses nobody can spend from.
+13. The templates that hold keys can never change. A change means other keys: a new seed's worth of addresses, or a new identity.
 
 ## 20. Implementation approach and status
 
@@ -1202,12 +1227,13 @@ The implementation uses XO's TypeScript packages, libauth for keys, transactions
 | Waiting-period calculation; watching for requests | Implemented and tested |
 | Sealing to the recoverer; signing; encrypted stores and the store server | Implemented and tested |
 | WizardConnect transport and `xo_v1` messages | Implemented and tested with an earlier form of the announcement |
-| Recoverable address, vault address | Proposed. A trial compilation was made (section 7.4); it is not in the repository and nothing was tested. |
-| Derivation, viewing key, giving out and finding addresses | Proposed; the sizes of the ranges need measurement |
+| Recoverable address, vault address | Proposed. A trial compiled both as given here, measured every kind of input and ran a wallet's life in the virtual machine and on a local node, with the refusals of AD02 and AD04 to AD06 (`docs/address-contracts-trial.md`). The trial's code is under `spikes/`; the contracts and their tests are stage 1. |
+| Derivation, viewing key, giving out and finding addresses | Proposed. The engine's key tree is established and reproduced by this project's code (`docs/xo-engine-stage0-trials.md`); the sizes of the ranges are proposed from measurement (`docs/address-ranges-trial.md`). |
 | Creating a wallet as in section 7.9 | Proposed |
 | Recovery kit, receipts, takeover and update messages, sweep, moving to a new seed, replacing the recoverer | Proposed |
 | Backup records as in section 10 | Proposed |
-| Wallet template; application templates with wallet-bound outputs; recovery declaration | Proposed; depends on trials with the engine |
+| The wallet's templates | Proposed. Trial templates ran creation, addresses, a payment by key, a sweep and a takeover by a new seed through the engine on a local node. |
+| Application templates with wallet-bound outputs; recovery declaration | Proposed |
 | Savings Jar with a key NFT | Proposed |
 | ParyonUSD template and front end | Proposed; contracts read, nothing run |
 
@@ -1263,7 +1289,7 @@ These are tests an implementation must pass. Except where the status table above
 | KV04 | Either half of the viewing key without the other | No ordinary address can be derived. The blinding seed with the identity gives the vault addresses. Neither spends. |
 | KV05 | Test vectors: words, indices, expected keys, secrets, tags, addresses | Reproduced exactly |
 | KV06 | The twelve words and the identity on another device; the same for a wallet that has had earlier seeds | The same wallet, with no controller transaction. In the second case earlier addresses are found when the earlier viewing-key records are supplied, and the device says that they are not covered when they are not. |
-| KV07 | The extended public key together with one address private key | Every address key of that seed follows. The controller key does not; the paths are as specified. |
+| KV07 | An extended public key of the viewing key together with one address private key of its kind | Every address key of that kind follows. The keys of the other kind and the controller key do not; the paths are as specified, and the wallet's own derivation gives the engine's public keys. |
 | KV08 | The windows: a 21st unused address to give out, a 6th unused change address, a 6th unused vault address; two requests at once | Not given: an earlier address is offered, or the wallet waits. No number is given twice or past a limit. |
 | KV09 | An action abandoned before its address was shown; after it was shown; after a signature left the wallet | The number is used again only in the first case; in the others the address stays watched |
 | KV10 | A payment to an address beyond the window, given out after a transaction that was later reorganized away | Missed by the quick pass and found by the full pass; the wallet is not reported as fully found before the full pass ends |
@@ -1370,10 +1396,10 @@ Each has a proposed answer, which implementation follows unless the owner says o
 
 | No. | Decision | Proposed |
 | --- | --- | --- |
-| 1 | **Derivation.** The constant `S`, the exact paths (the credential's included), the encoding of the viewing-key record, and whether the XO engine derives these keys or the wallet's own code does | As in sections 7.2 and 9.2; the last part after the trials |
-| 2 | **Address chains and ranges.** Two kinds of ordinary address and one of vault address; the windows; the sizes `N0`, `N1`, `N2`; how often the full pass is repeated | Windows of 20, 5 and 5; sizes and interval from measurement |
+| 1 | **Derivation.** The key tree; the number `B` for the blinding seed; the encoding of the viewing-key record | Settled as to the tree: the XO engine's, with templates that do not change (sections 7.2 and 9.2). `B` and the encoding in stage 2. |
+| 2 | **Address chains and ranges.** Two kinds of ordinary address and one of vault address; the windows; the sizes `N0`, `N1`, `N2`; how often the full pass is repeated | Windows of 20, 5 and 5; `N0` = 10,000, `N1` = 10,000, `N2` = 1,000; the full pass once a week and after the events of section 7.7 |
 | 3 | **Who makes the recoverer's key** | The owner's device |
-| 4 | **The viewing key's written form** | Two values in one signed record |
+| 4 | **The viewing key's written form** | The two extended public keys and the blinding seed in one signed record |
 | 5 | **Readable controller state** | Settled by the controller that exists: readable, with a recoverer key per wallet. Open again only with new controller rules. |
 | 6 | **The waiting period for real use,** the margin for cancelling, and whether cancelling is automatic by default | Time only; the length and the default are open |
 | 7 | **Fees.** The rate; the owner's coin for cancelling; whether the owner gives the recoverer an allowance, and how much | One satoshi per byte; one cancellation; an allowance offered and not required, for four requests and one completion; amounts from measured sizes |
@@ -1381,7 +1407,7 @@ Each has a proposed answer, which implementation follows unless the owner says o
 | 9 | **Backup:** record formats; whether refusing an action without a stored template stays the default; no commitment on chain | Refusing stays the default |
 | 10 | **Template extension:** the names and kinds of wallet-bound outputs, the recovery declaration with its check of a companion, and whether they enter XO's schema or stay a companion document | The four kinds of section 13.3; the rest is for XO to say |
 | 11 | **`xo_v1`:** a WizardConnect extension or a protocol of XO's | This project's extension until XO and WizardConnect say |
-| 12 | **Division of work between the engine and the wallet's own code** | After the trials |
+| 12 | **Division of work between the engine and the wallet's own code** | Settled: section 13.2 |
 | 13 | **Sweep policy:** order, size of parts, how outputs are grouped | Most valuable first, unknown tokens counted as valuable |
 | 14 | **Local backup:** whether the wallet offers it, and in what form | Offered as the user's choice, in the form of section 18.1 |
 | 15 | **Upgrade policy** for controller rules, and how long an old identity is kept | A new identity; the old one kept while something can still arrive |

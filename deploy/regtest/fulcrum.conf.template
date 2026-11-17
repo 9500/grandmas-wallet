@@ -1,0 +1,12 @@
+# Fulcrum on the local test chain.
+# Written to <folder>/fulcrum/fulcrum.conf by deploy/regtest/regtest.sh setup.
+datadir = @DIR@/fulcrum/data
+bitcoind = 127.0.0.1:@RPC_PORT@
+rpcuser = regtest
+rpcpassword = @PASSWORD@
+tcp = 127.0.0.1:@TCP_PORT@
+ws = 127.0.0.1:@WS_PORT@
+polltime = 1
+peering = false
+announce = false
+db_mem = 64

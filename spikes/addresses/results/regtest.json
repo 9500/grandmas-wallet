@@ -1,0 +1,194 @@
+{
+  "date": "2026-11-17T19:48:30.582Z",
+  "node": "/Bitcoin Cash Node:29.2.0/",
+  "blocks": 116,
+  "secondsOfRealTime": 0.209,
+  "left": {
+    "controller": false,
+    "closingOutput": true,
+    "closingOutputSatoshis": 180273
+  },
+  "steps": [
+    {
+      "label": "create the controller",
+      "bytes": 333,
+      "fee": 333,
+      "txid": "127f49afaf1b445857e5845a2bf2c89ccced84e53cfdaae045ddea7dc52aa15b",
+      "vm": "accepted",
+      "dryRun": "allowed",
+      "node": "accepted",
+      "ok": true
+    },
+    {
+      "label": "receive at three addresses, a vault address, and fee coins",
+      "bytes": 439,
+      "fee": 439,
+      "txid": "0a9a9ec576a38b214428f5b1ec4b2de8bd11bc03000ec654235db1ca4714cc1b",
+      "vm": "accepted",
+      "dryRun": "allowed",
+      "node": "accepted",
+      "ok": true
+    },
+    {
+      "label": "pay by key, signed by another key (AD02)",
+      "bytes": 384,
+      "fee": 384,
+      "vm": "error in evaluating input index 0: Program failed an OP_VERIFY operation.",
+      "dryRun": "16: mandatory-script-verify-flag-failed (Script failed an OP_EQUALVERIFY operation)",
+      "node": "mandatory-script-verify-flag-failed (Script failed an OP_EQUALVERIFY operation) (code 16)",
+      "ok": true
+    },
+    {
+      "label": "pay by key, with change to a fresh address",
+      "bytes": 384,
+      "fee": 384,
+      "txid": "8a31a96c95ab4f0eb1f7e8682289acd8b761999b5da555730008cd8acf9a3bcf",
+      "vm": "accepted",
+      "dryRun": "allowed",
+      "node": "accepted",
+      "ok": true
+    },
+    {
+      "label": "request with a sweep attached (AD05)",
+      "bytes": 1110,
+      "fee": 1110,
+      "vm": "error in evaluating input index 1: Program failed an OP_VERIFY operation.",
+      "dryRun": "16: mandatory-script-verify-flag-failed (Script failed an OP_EQUALVERIFY operation)",
+      "node": "mandatory-script-verify-flag-failed (Script failed an OP_EQUALVERIFY operation) (code 16)",
+      "ok": true
+    },
+    {
+      "label": "request recovery to a key of a stranger",
+      "bytes": 991,
+      "fee": 991,
+      "txid": "b649e7c150d015442b1dc9cb61e40bb2d44ffafcbb4a23f32f9d307c1a820a0b",
+      "vm": "accepted",
+      "dryRun": "allowed",
+      "node": "accepted",
+      "ok": true
+    },
+    {
+      "label": "cancel, fee from the wallet's coin kept for it",
+      "bytes": 1135,
+      "fee": 1135,
+      "txid": "f72dfebac149557deae26bbc13f7b205fcc24d3bc47e2fd68acb1125e42cc1e4",
+      "vm": "accepted",
+      "dryRun": "allowed",
+      "node": "accepted",
+      "ok": true
+    },
+    {
+      "label": "request recovery to the new device's key",
+      "bytes": 991,
+      "fee": 991,
+      "txid": "a4851ac7f61ed6cc25ae87537d5e12da22f9c615b724c4db75dd5ecf68626d32",
+      "vm": "accepted",
+      "dryRun": "allowed",
+      "node": "accepted",
+      "ok": true
+    },
+    {
+      "label": "complete right after the request",
+      "bytes": 970,
+      "fee": 970,
+      "vm": "accepted",
+      "dryRun": "64: non-BIP68-final",
+      "node": "non-BIP68-final (code 64)",
+      "ok": true
+    },
+    {
+      "label": "complete at median time 511 seconds after the reference",
+      "bytes": 970,
+      "fee": 970,
+      "vm": "accepted",
+      "dryRun": "64: non-BIP68-final",
+      "node": "non-BIP68-final (code 64)",
+      "ok": true
+    },
+    {
+      "label": "complete at median time 512 seconds after the reference",
+      "bytes": 970,
+      "fee": 970,
+      "txid": "0ebf6407c1d6ebdf4d8e8fc77b4ae4625213447e4247146266c353c9f37eb18b",
+      "vm": "accepted",
+      "dryRun": "allowed",
+      "node": "accepted",
+      "ok": true
+    },
+    {
+      "label": "sweep approved by the earlier owner's key (AD07)",
+      "bytes": 1099,
+      "fee": 1099,
+      "vm": "error in evaluating input index 0: Program failed an OP_VERIFY operation.",
+      "dryRun": "16: mandatory-script-verify-flag-failed (Script failed an OP_EQUALVERIFY operation)",
+      "node": "mandatory-script-verify-flag-failed (Script failed an OP_EQUALVERIFY operation) (code 16)",
+      "ok": true
+    },
+    {
+      "label": "sweep with a wrong secret (AD04)",
+      "bytes": 1099,
+      "fee": 1099,
+      "vm": "error in evaluating input index 1: Unsuccessful evaluation: completed with a non-truthy value on top of the stack. Top stack item: \"\".",
+      "dryRun": "16: mandatory-script-verify-flag-failed (Script evaluated without error but finished with a false/empty top stack element)",
+      "node": "mandatory-script-verify-flag-failed (Script evaluated without error but finished with a false/empty top stack element) (code 16)",
+      "ok": true
+    },
+    {
+      "label": "sweep four coins to an address of the new seed",
+      "bytes": 1879,
+      "fee": 1879,
+      "txid": "4ebb333b8b585eb1c82464341157c4736b91a31565edc5763a0f87cb14d1f969",
+      "vm": "accepted",
+      "dryRun": "allowed",
+      "node": "accepted",
+      "ok": true
+    },
+    {
+      "label": "spend the vault coin, signed for by the earlier owner (AD09)",
+      "bytes": 1056,
+      "fee": 1056,
+      "vm": "error in evaluating input index 0: Program failed an OP_VERIFY operation.",
+      "dryRun": "16: mandatory-script-verify-flag-failed (Script failed an OP_EQUALVERIFY operation)",
+      "node": "mandatory-script-verify-flag-failed (Script failed an OP_EQUALVERIFY operation) (code 16)",
+      "ok": true
+    },
+    {
+      "label": "spend the vault coin to an address of the new seed",
+      "bytes": 1056,
+      "fee": 1056,
+      "txid": "691ffe9460924a44817c5c07fb93202a91cc0f1e0710e288d5aee77a948aca8e",
+      "vm": "accepted",
+      "dryRun": "allowed",
+      "node": "accepted",
+      "ok": true
+    },
+    {
+      "label": "close with nothing else in the transaction",
+      "bytes": 681,
+      "fee": 681,
+      "vm": "standard transactions may not have dust outputs. Transaction output 0 must have a value of at least 546 satoshis. Current value: 319",
+      "dryRun": "64: dust",
+      "node": "dust (code 64)",
+      "ok": true
+    },
+    {
+      "label": "close signed by the recoverer",
+      "bytes": 1273,
+      "fee": 1273,
+      "vm": "error in evaluating input index 0: Program failed an OP_VERIFY operation.",
+      "dryRun": "16: mandatory-script-verify-flag-failed (Script failed an OP_EQUALVERIFY operation)",
+      "node": "mandatory-script-verify-flag-failed (Script failed an OP_EQUALVERIFY operation) (code 16)",
+      "ok": true
+    },
+    {
+      "label": "close: the last coins and the controller's value in one output",
+      "bytes": 1273,
+      "fee": 1273,
+      "txid": "e8323d7e746d52f41182db6cef4db1d0c54c59de5caf763dbf48197f4806f227",
+      "vm": "accepted",
+      "dryRun": "allowed",
+      "node": "accepted",
+      "ok": true
+    }
+  ]
+}

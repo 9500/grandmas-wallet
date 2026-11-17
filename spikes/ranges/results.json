@@ -1,0 +1,78 @@
+{
+  "derive": {
+    "count": 20000,
+    "ms": 2623,
+    "msPerThousand": 131,
+    "date": "2026-11-17T19:41:26.173Z"
+  },
+  "ws://127.0.0.1:60403 full": {
+    "software": "Fulcrum 2.1.4",
+    "roundTripMs": 0.3,
+    "runs": {
+      "1000": {
+        "oneAtATime": 245,
+        "window20": 35,
+        "window100": 21,
+        "window500": 24,
+        "batch100": 26,
+        "batch300": 22,
+        "subscribe100": 26
+      },
+      "10000": {
+        "window20": 27,
+        "window100": 20,
+        "window500": 19,
+        "batch100": 22,
+        "batch300": 21,
+        "subscribe100": 17
+      },
+      "100000": {
+        "window20": 25,
+        "window100": 19,
+        "window500": 18,
+        "batch100": 24,
+        "batch300": 23,
+        "subscribe100": 19
+      }
+    },
+    "date": "2026-11-17T19:45:20.555Z"
+  },
+  "ws://127.0.0.1:60403 limit": {
+    "software": "Fulcrum 2.1.4",
+    "roundTripMs": 0.2,
+    "subscriptionsAccepted": 120000,
+    "date": "2026-11-17T19:44:05.549Z"
+  },
+  "wss://chipnet.9500.cash:443 full": {
+    "software": "Fulcrum 2.1.4",
+    "roundTripMs": 14.2,
+    "runs": {
+      "1000": {
+        "oneAtATime": 14662,
+        "window20": 747,
+        "window100": 170,
+        "window500": 52,
+        "batch100": 169,
+        "batch300": 81,
+        "subscribe100": 169
+      },
+      "10000": {
+        "window20": 760,
+        "window100": 177,
+        "window500": 42,
+        "batch100": 176,
+        "batch300": 77,
+        "subscribe100": 169
+      }
+    },
+    "date": "2026-11-17T19:45:25.530Z"
+  },
+  "wss://chipnet.imaginary.cash:50004 polite": {
+    "software": "Fulcrum 2.1.4",
+    "roundTripMs": 218.3,
+    "history20": 12917,
+    "historyBatch100": 2154,
+    "subscribe10": 22170,
+    "date": "2026-11-17T19:45:06.845Z"
+  }
+}
