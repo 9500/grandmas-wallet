@@ -2,6 +2,7 @@
 // environment's configuration file, so that one build runs anywhere.
 //
 // usage: node deploy/serve.mjs --root apps/wallet/dist --config deploy/config/local.json --host 127.0.0.1 --port 8101
+//        [--version <file>]   a record of what was released, shown at /version.json
 import { execFileSync } from 'node:child_process';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -17,17 +18,21 @@ const configPath = resolve(argument('config', 'deploy/config/local.json'));
 const host = argument('host', '127.0.0.1');
 const port = Number(argument('port', '8080'));
 if (!existsSync(join(root, 'index.html'))) {
-  console.error(`No index.html in ${root}. Build the applications first: npm run build:web`);
+  console.error(`No index.html in ${root}. Build the applications first: deploy/preview.sh build`);
   process.exit(1);
 }
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
-// What is being served: the checkout and its commit when the server started, for checking a deployment from outside.
+// What is being served, for checking a deployment from outside: the record written when the pages were
+// released if there is one, and otherwise the checkout and its commit when the server started.
 const version = (() => {
+  const startedAt = new Date().toISOString();
+  const released = argument('version', undefined);
+  if (released !== undefined) return { ...JSON.parse(readFileSync(resolve(released), 'utf8')), network: config.network, startedAt };
   try {
     const git = (...parameters) => execFileSync('git', parameters, { cwd: root, encoding: 'utf8' }).trim();
-    return { commit: git('rev-parse', '--short', 'HEAD'), branch: git('rev-parse', '--abbrev-ref', 'HEAD'), network: config.network, startedAt: new Date().toISOString() };
+    return { commit: git('rev-parse', '--short', 'HEAD'), branch: git('rev-parse', '--abbrev-ref', 'HEAD'), network: config.network, startedAt };
   } catch {
-    return { commit: 'unknown', network: config.network, startedAt: new Date().toISOString() };
+    return { commit: 'unknown', network: config.network, startedAt };
   }
 })();
 
