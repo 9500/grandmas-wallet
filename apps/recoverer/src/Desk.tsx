@@ -1,0 +1,271 @@
+import { binToHex, hexToBin } from '@bitauth/libauth';
+import { type FeeView, type RecovererView, type RequestTiming, RecovererWallet, completeTakeover, describeDelay, feeView, requestTiming, viewAsRecoverer } from '@grandmas-wallet/app';
+import { makeLink } from '@grandmas-wallet/app/links';
+import { keyFingerprint, recoveryKeyOf } from '@grandmas-wallet/enrollment';
+import { Amount, Button, Card, Field, Fingerprint, HandOff, KeyValues, More, Notice, PageHead, Sat, Status, TaskStatus, TextInput, formatDuration, formatTime, lockingBytecodeOfAddress, plainError, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
+import { useEffect, useState } from 'preact/hooks';
+
+import { type Looked, type Session, credentialAccount, openWalletPage, saveWallet, wallets } from './session.js';
+
+/**
+ * One wallet the recoverer looks after (proposal sections 9.6 and 11.1): where its controller stands, the
+ * fee coins, a saved takeover request, the request, the end of the waiting period, the completion and the
+ * hand-over. The page's engine is this wallet's credential account; another wallet loads the page again.
+ */
+export const Desk = ({ session, identity, looked: first, toast }: { session: Session; identity: string; looked: Looked; toast: (text: string) => void }) => {
+  const [looked, setLooked] = useState<Looked>(first);
+  const [recoverer, setRecoverer] = useState<RecovererWallet | undefined>();
+  const [opening, setOpening] = useState<string | undefined>('Opening this wallet\'s account');
+  const [view, setView] = useState<RecovererView | undefined>();
+  const [timing, setTiming] = useState<RequestTiming | undefined>();
+  const [fees, setFees] = useState<FeeView | undefined>();
+  const task = useTask();
+  const { kit } = looked.kept;
+  const update = (next: Looked) => {
+    saveWallet(identity, next);
+    setLooked(next);
+  };
+
+  useEffect(() => {
+    if (!('words' in kit.credential)) {
+      setOpening('This kit says you hold your own key for this wallet; this page holds keys made from a credential only.');
+      return;
+    }
+    credentialAccount(session, kit.credential.words)
+      .then(async (account) => {
+        const options = { backend: account, chain: session.chain, identity: hexToBin(identity) };
+        // A recoverer the wallet does not name cannot act on it, and can still send its fee coins on.
+        const named = (await viewAsRecoverer(session.chain, looked.kept)).standing.kind !== 'not named';
+        return named ? RecovererWallet.open({ ...options, genesisTransactionId: kit.creationTransactionId }) : RecovererWallet.unnamed(options);
+      })
+      .then(
+        (opened) => {
+          setRecoverer(opened);
+          setOpening(undefined);
+        },
+        (error: unknown) => setOpening(plainError(error)),
+      );
+  }, []);
+
+  useEvery(
+    10_000,
+    async () => {
+      const current = wallets()[identity] ?? looked;
+      const seen = await viewAsRecoverer(session.chain, current.kept);
+      setView(seen);
+      setTiming(seen.standing.kind === 'requested' ? await requestTiming(session.chain, hexToBin(identity), seen.history, session.environment.secondsPerBlock) : undefined);
+      setFees(await feeView(session.chain, current.kept));
+      // After the completion, the hand-over is made as soon as the chain shows it confirmed.
+      if (seen.takenOver && current.handOverLink === undefined && current.kept.pending !== undefined && seen.history.currentConfirmed && task.busy === undefined) {
+        await task.run('handover', async (progress) => {
+          progress('Making the hand-over for the new phone');
+          const handed = await completeTakeover({ kept: current.kept, chain: session.chain, recoveryKey: recoveryKeyOf(current.kept.kit), storeAt: session.storeAt, save: (next) => saveWallet(identity, { ...current, kept: next }) });
+          const link = await makeLink(session.environment.walletUrl, 'handover', { sealed: binToHex(handed.sealed) });
+          update({ ...current, kept: handed.kept, handOverLink: link });
+          toast('The hand-over link is ready.');
+        });
+      }
+    },
+    [recoverer],
+  );
+
+  const request = () =>
+    task.run('request', async (progress) => {
+      if (recoverer === undefined || looked.kept.pending === undefined) return;
+      progress('Signing and sending the request');
+      const proposed = looked.kept.pending.proposedKeyHash;
+      const sent = await recoverer.request(hexToBin(proposed));
+      update({ ...looked, requested: { proposedKeyHash: proposed, transactionId: sent.transactionId } });
+      toast('The request is sent. The waiting period starts when it is in a block.');
+    });
+
+  const complete = () =>
+    task.run('complete', async (progress) => {
+      if (recoverer === undefined) return;
+      progress('Signing and sending the completion');
+      await recoverer.complete();
+      toast('The wallet is moved. The hand-over follows once the network confirms it.');
+    });
+
+  const state = view?.history.current.state;
+  const standing = view?.standing;
+  const mine = looked.requested !== undefined && standing?.kind === 'requested' && standing.proposedKeyHash === looked.requested.proposedKeyHash;
+  const refused = looked.requested !== undefined && standing?.kind === 'quiet' && !view?.takenOver;
+  const name = looked.label || 'this wallet';
+  return (
+    <div class="stack">
+      <div>
+        <button type="button" class="link" onClick={() => openWalletPage(undefined)}>
+          ‹ All wallets
+        </button>
+      </div>
+      <PageHead title={looked.label || 'Unnamed wallet'}>
+        <span class="mono">{shorten(identity, 12, 8)}</span>
+      </PageHead>
+      {opening !== undefined && <Notice tone={task.error === undefined && /^Opening/.test(opening) ? 'wait' : 'warn'} busy={/^Opening/.test(opening)}>{/^Opening/.test(opening) ? `${opening}. The page checks the chain's block headers first.` : opening}</Notice>}
+      <div class="grid two">
+        <div class="stack">
+          <Card title="Where the wallet stands">
+            {standing === undefined ? (
+              <Status tone="wait" title="Reading the chain" />
+            ) : standing.kind === 'quiet' ? (
+              <Status tone="good" title={view?.takenOver === true ? 'Moved to the new phone' : 'Nothing is asked'}>
+                {view?.takenOver === true ? 'The new phone\'s key owns the wallet.' : refused ? 'The owner\'s phone refused your request. If the owner asked for it, they need to keep their old phone from refusing, or use it to move the wallet themselves.' : 'The owner\'s phone is in charge.'}
+              </Status>
+            ) : standing.kind === 'requested' ? (
+              <Status tone="warn" title={mine ? 'Your request is waiting' : 'A request is waiting that this page did not send'}>
+                <p>
+                  To the key <span class="mono">{keyFingerprint(standing.proposedKeyHash)}</span>.{' '}
+                  {timing === undefined
+                    ? ''
+                    : timing.eligibility.ready
+                      ? 'The waiting period has passed.'
+                      : timing.eligibility.waitingFor === 'confirmation'
+                        ? 'The waiting period starts when the request is in a block.'
+                        : `The waiting period ends in about ${formatDuration(timing.secondsLeft ?? 0)}${timing.endsAt === undefined ? '' : `, when the chain's clock passes ${formatTime(timing.endsAt)}`}.`}
+                </p>
+                <p>Until then the owner's phone can refuse it. You can close this page and come back to complete.</p>
+                {!mine && <p>If you did not send it, your credential for this wallet may be in other hands. Tell the owner.</p>}
+              </Status>
+            ) : standing.kind === 'not named' ? (
+              <Status title={looked.asNewRecoverer === true ? 'Waiting for the owner to name you' : 'The wallet no longer names you'}>
+                {looked.asNewRecoverer === true ? 'Your receipt is prepared. Once the owner\'s phone makes the change, you are this wallet\'s recoverer.' : 'The owner chose another recoverer. You keep what you were given; your key no longer works on the wallet.'}
+              </Status>
+            ) : (
+              <Status title="Closed">The owner closed this wallet.</Status>
+            )}
+            {state !== undefined && (
+              <>
+                <div class="actions" />
+                <KeyValues
+                  entries={[
+                    ['Owner\'s key', <span class="mono">{keyFingerprint(state.ownerKeyHash)}</span>],
+                    ['Waiting period', describeDelay(state.challengeDelay)],
+                    ['Your key for it', <span class="mono">{keyFingerprint(binToHex(recoveryKeyOf(looked.kept.kit).keyHash))}</span>],
+                    ['Phones it has had', String(view?.history.owners.length ?? 1)],
+                  ]}
+                />
+              </>
+            )}
+            {standing?.kind === 'requested' && mine && (
+              <div class="actions">
+                <Button task={task} name="complete" disabled={recoverer === undefined || timing?.eligibility.ready !== true} onClick={() => void complete()}>
+                  Complete the move
+                </Button>
+              </div>
+            )}
+            <TaskStatus task={task} name="complete" />
+          </Card>
+
+          {looked.kept.pending !== undefined && standing?.kind === 'quiet' && view?.takenOver !== true && (
+            <Card title="A saved takeover request" tone="warn">
+              <div class="stack-s">
+                <p>The new phone's key:</p>
+                <Fingerprint value={keyFingerprint(looked.kept.pending.proposedKeyHash)} />
+                <p class="small muted">Before you go on, be sure that the person asking is {name === 'this wallet' ? 'the wallet\'s owner' : `the owner of ${name}`} and that their new phone shows this fingerprint. Your request is public; the owner's phone, if it still works, can refuse it during the waiting period.</p>
+                {fees !== undefined && fees.holds < fees.request && (
+                  <Notice tone="bad">
+                    The fee address holds <Sat satoshis={fees.holds} />; a request costs <Sat satoshis={fees.request} />. Send coins to it first.
+                  </Notice>
+                )}
+                <TaskStatus task={task} name="request" />
+                <div class="actions">
+                  <Button task={task} name="request" disabled={recoverer === undefined || (fees !== undefined && fees.holds < fees.request)} onClick={() => void request()}>
+                    {refused ? 'Ask the network again' : 'Ask the network to move the wallet'}
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {looked.handOverLink !== undefined && standing?.kind !== 'not named' && (
+            <Card title="Send this to the new phone" tone="good">
+              <HandOff text={looked.handOverLink} qrLabel="QR code of the hand-over link" copyLabel="Copy link" testId="handover-link">
+                <p>It is sealed to the new phone: only it can open it. It tells the phone which wallet it now owns and how to find the coins.</p>
+              </HandOff>
+            </Card>
+          )}
+          <TaskStatus task={task} name="handover" />
+        </div>
+        <div class="stack">
+          <FeeCard fees={fees} named={standing?.kind !== 'not named' || looked.asNewRecoverer === true} />
+          <ReturnFees recoverer={recoverer} session={session} toast={toast} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/** The recoverer's fee coins: what the address holds, what a recovery needs (section 9.6). */
+const FeeCard = ({ fees, named }: { fees: FeeView | undefined; named: boolean }) => {
+  if (fees === undefined) return <Card title="Fee coins"><p class="muted">Reading…</p></Card>;
+  const missing = fees.missing;
+  // A recoverer the wallet no longer names has nothing to pay for; what the address holds is still its own.
+  if (!named) {
+    return (
+      <Card title="Fee coins">
+        <KeyValues entries={[['Holds', <Amount satoshis={fees.holds} exact />]]} />
+        <p class="small muted">These coins are yours. You can send them elsewhere below.</p>
+      </Card>
+    );
+  }
+  return (
+    <Card title="Fee coins" aside={missing === 0n ? <span class="pill good">Enough</span> : <span class="pill warn">Not enough</span>}>
+      <KeyValues
+        entries={[
+          ['Holds', <Amount satoshis={fees.holds} exact />],
+          ['A request', <Sat satoshis={fees.request} />],
+          ['A completion', <Sat satoshis={fees.completion} />],
+          ...(missing > 0n ? ([[<strong>Missing</strong>, <strong><Sat satoshis={missing} /></strong>]] as [preact.ComponentChildren, preact.ComponentChildren][]) : []),
+        ]}
+      />
+      <More summary="The fee address">
+        <HandOff text={fees.address} qrLabel="QR code of the fee address" copyLabel="Copy address" testId="fee-address" />
+        <p class="small muted">Anyone can send coins here, from any wallet. They are yours and pay for nothing but a request and a completion.</p>
+      </More>
+    </Card>
+  );
+};
+
+/** Sending the fee coins elsewhere: an allowance given back, or when the recoverer no longer serves the wallet. */
+const ReturnFees = ({ recoverer, session, toast }: { recoverer: RecovererWallet | undefined; session: Session; toast: (text: string) => void }) => {
+  const [to, setTo] = useState('');
+  const [error, setError] = useState<string | undefined>();
+  const task = useTask();
+  if (recoverer === undefined) return null;
+  return (
+    <Card flat>
+      <More summary="Send the fee coins elsewhere">
+        <p class="small muted">The coins are yours. Nothing obliges you to give an allowance back, and without fee coins you cannot act for this wallet.</p>
+        <Field label="To" id="return-to" error={error}>
+          <TextInput id="return-to" value={to} onInput={setTo} invalid={error !== undefined} />
+        </Field>
+        <TaskStatus task={task} name="return" />
+        <div>
+          <Button
+            kind="secondary"
+            task={task}
+            name="return"
+            disabled={to.trim() === ''}
+            onClick={() =>
+              void task.run('return', async () => {
+                let locking: Uint8Array;
+                try {
+                  locking = lockingBytecodeOfAddress(to, session.network);
+                  setError(undefined);
+                } catch (problem) {
+                  setError((problem as Error).message);
+                  return;
+                }
+                const sent = await recoverer.returnFeeCoins(locking);
+                toast(sent === undefined ? 'The fee address holds too little to send on.' : `Sent; the fee was ${sent.feeSatoshis} satoshis.`);
+              })
+            }
+          >
+            Send them
+          </Button>
+        </div>
+      </More>
+    </Card>
+  );
+};
