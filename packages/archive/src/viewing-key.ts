@@ -39,19 +39,26 @@ export interface ViewingKeyRecord {
   hash: string;
 }
 
-const body = (keys: Pick<SeedKeys, 'network' | 'viewingKey' | 'controllerKey'>): JsonValue => ({
-  format: VIEWING_KEY_RECORD_FORMAT,
-  version: VIEWING_KEY_RECORD_VERSION,
-  network: keys.network,
-  addressScheme: ADDRESS_SCHEME_VERSION,
-  addressNodes: { givenOut: keys.viewingKey.addressNodes.givenOut, change: keys.viewingKey.addressNodes.change },
-  blindingSeed: binToHex(keys.viewingKey.blindingSeed),
-  controllerPublicKey: binToHex(keys.controllerKey.publicKey),
-});
+/**
+ * The text of a viewing-key record: the one encoding that is signed and hashed. Whoever holds the record's
+ * values can write this text again, which is how a record travels in fewer bytes than its text.
+ */
+export const viewingKeyRecordText = (viewingKey: ViewingKey, controllerPublicKey: Uint8Array): string => {
+  const body: JsonValue = {
+    format: VIEWING_KEY_RECORD_FORMAT,
+    version: VIEWING_KEY_RECORD_VERSION,
+    network: viewingKey.network,
+    addressScheme: ADDRESS_SCHEME_VERSION,
+    addressNodes: { givenOut: viewingKey.addressNodes.givenOut, change: viewingKey.addressNodes.change },
+    blindingSeed: binToHex(viewingKey.blindingSeed),
+    controllerPublicKey: binToHex(controllerPublicKey),
+  };
+  return canonicalJson(body);
+};
 
 /** Make and sign the viewing-key record of a seed. */
 export const signViewingKeyRecord = (keys: Pick<SeedKeys, 'network' | 'viewingKey' | 'controllerKey'>): SignedMessage =>
-  signMessage(PURPOSE, canonicalJson(body(keys)), keys.controllerKey);
+  signMessage(PURPOSE, viewingKeyRecordText(keys.viewingKey, keys.controllerKey.publicKey), keys.controllerKey);
 
 const text = (value: unknown, name: string): string => (typeof value === 'string' ? value : fail(`The record has no ${name}.`));
 

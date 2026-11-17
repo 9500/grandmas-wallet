@@ -50,10 +50,12 @@ export const generateRecipientKeyPair = async (): Promise<RecipientKeyPair> => {
 export const recipientKeyFingerprint = (publicKey: Uint8Array): string =>
   (binToHex(sha256.hash(publicKey)).slice(0, 16).match(/.{4}/g) ?? []).join(' ');
 
-/** Encrypt a signed package to the recoverer. */
-export const sealPackage = async (signed: SignedMessage, recipientPublicKey: Uint8Array): Promise<Uint8Array> => {
+/**
+ * Encrypt bytes to the holder of an encryption key. Sealing adds 49 bytes: a version byte, the 32 bytes
+ * the recipient needs to open it, and a 16-byte tag. Sealing the same bytes twice gives unrelated results.
+ */
+export const sealBytes = async (plaintext: Uint8Array, recipientPublicKey: Uint8Array): Promise<Uint8Array> => {
   const hpke = suite();
-  const plaintext = canonicalBytes({ message: signed.message, publicKey: binToHex(signed.publicKey), signature: binToHex(signed.signature) });
   const { enc, ct } = await hpke.seal(
     { recipientPublicKey: await hpke.kem.deserializePublicKey(toArrayBuffer(recipientPublicKey)), info: toArrayBuffer(INFO) },
     toArrayBuffer(plaintext),
@@ -63,16 +65,15 @@ export const sealPackage = async (signed: SignedMessage, recipientPublicKey: Uin
 };
 
 /**
- * Open an envelope with the recoverer's private key.
+ * Open an envelope with the recipient's private key.
  * @throws EnrollmentError if the envelope is not for this key or was altered
  */
-export const openPackage = async (envelope: Uint8Array, recipientPrivateKey: Uint8Array): Promise<SignedMessage> => {
+export const openBytes = async (envelope: Uint8Array, recipientPrivateKey: Uint8Array): Promise<Uint8Array> => {
   if (envelope[0] !== ENVELOPE_VERSION) throw new EnrollmentError('This kind of enrollment envelope is not supported.');
   if (envelope.length <= 1 + ENCAPSULATED_KEY_LENGTH) throw new EnrollmentError('The enrollment envelope is incomplete.');
   const hpke = suite();
-  let plaintext: Uint8Array;
   try {
-    plaintext = new Uint8Array(
+    return new Uint8Array(
       await hpke.open(
         {
           recipientKey: await hpke.kem.deserializePrivateKey(toArrayBuffer(recipientPrivateKey)),
@@ -86,7 +87,24 @@ export const openPackage = async (envelope: Uint8Array, recipientPrivateKey: Uin
   } catch {
     throw new EnrollmentError('The enrollment envelope cannot be opened with this key.');
   }
-  const value = JSON.parse(binToUtf8(plaintext)) as { message?: unknown; publicKey?: unknown; signature?: unknown };
+};
+
+/** Encrypt a signed message, as its text, to the holder of an encryption key. */
+export const sealPackage = async (signed: SignedMessage, recipientPublicKey: Uint8Array): Promise<Uint8Array> =>
+  sealBytes(canonicalBytes({ message: signed.message, publicKey: binToHex(signed.publicKey), signature: binToHex(signed.signature) }), recipientPublicKey);
+
+/**
+ * Open an envelope that holds a signed message.
+ * @throws EnrollmentError if the envelope is not for this key or was altered
+ */
+export const openPackage = async (envelope: Uint8Array, recipientPrivateKey: Uint8Array): Promise<SignedMessage> => {
+  const plaintext = await openBytes(envelope, recipientPrivateKey);
+  let value: { message?: unknown; publicKey?: unknown; signature?: unknown };
+  try {
+    value = JSON.parse(binToUtf8(plaintext)) as typeof value;
+  } catch {
+    throw new EnrollmentError('The enrollment envelope does not hold a signed package.');
+  }
   if (typeof value.message !== 'string' || typeof value.publicKey !== 'string' || typeof value.signature !== 'string') {
     throw new EnrollmentError('The enrollment envelope does not hold a signed package.');
   }
