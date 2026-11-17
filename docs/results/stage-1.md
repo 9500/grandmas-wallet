@@ -1,6 +1,6 @@
 # Stage 1: record of the acceptance tests
 
-Made by `node scripts/test-record.mjs 1 CT01-CT15 AD01-AD13 FE01-FE03` at revision `899a877` with changes not yet committed.
+Made by `node scripts/test-record.mjs 1 CT01-CT15 AD01-AD13 FE01-FE03` at revision `949c634`.
 All tests of the repository: 265 passed, 0 failed, of 265.
 
 | No. | Test, as the proposal states it | Expected | Tests that carry the number | Result |
