@@ -1,6 +1,7 @@
 import { binToHex, hash160, hexToBin, sha256, utf8ToBin } from '@bitauth/libauth';
 import {
   type ArchiveStore,
+  type RecordEntry,
   type RecoveryStatus,
   type Sent as SentToRecoverer,
   type SignedMessage,
@@ -11,6 +12,7 @@ import {
   readViewingKeyRecord,
   recoveryStatus,
   safelyStored,
+  signRecord,
   signViewingKeyRecord,
   viewingKeyRecordHash,
 } from '@grandmas-wallet/archive';
@@ -125,6 +127,8 @@ export interface RecoveryArrangement {
   change?: PreparedChange;
   /** Set on the old device once it has handed the wallet to a new seed: this device no longer owns it. */
   movedTo?: string;
+  /** The earlier archives whose templates, notes and labels are all in the archive in use, by identifier. */
+  copiedArchives?: string[];
 }
 
 /** A change of the controller's settings that waits for the recoverer's prepared receipt. Plain data. */
@@ -666,4 +670,61 @@ export const finishMove = async (options: {
     missing,
     recovery,
   };
+};
+
+// ------------------------------------------------------------------ records in the archive (section 10)
+
+/**
+ * Write a template, a token note or a label to the archive in use, signed with this seed's controller key.
+ * The result says which stores confirmed it; something may come to depend on the record only if one did.
+ */
+export const writeRecord = async (options: {
+  entry: RecordEntry;
+  identity: string;
+  seed: Pick<SeedKeys, 'network' | 'controllerKey'>;
+  arrangement: RecoveryArrangement;
+  storeAt: StoreAt;
+}): Promise<WriteResult> =>
+  archiveOf(options.arrangement.archive, options.storeAt).write({ type: 'record', signed: signRecord(options.entry, { network: options.seed.network, identity: options.identity }, options.seed.controllerKey) });
+
+/**
+ * After a recovery or a move to a new seed (section 10.6): the templates, notes and labels of the earlier
+ * archives are copied into the archive in use, which the earlier device's content key does not read. They
+ * stay what they were, records signed by an earlier owner. Nothing is removed from an earlier archive, and
+ * the access to it is kept; an archive counts as copied only when every one of its stores answered and
+ * every record was confirmed in the new one. An unfinished copy is continued by calling this again.
+ *
+ * @returns the arrangement to keep, how many records were copied this time, and what is unfinished and why
+ */
+export const copyEarlierArchives = async (options: {
+  arrangement: RecoveryArrangement;
+  storeAt: StoreAt;
+}): Promise<{ arrangement: RecoveryArrangement; copied: number; unfinished: string[] }> => {
+  const { arrangement, storeAt } = options;
+  const done = new Set(arrangement.copiedArchives ?? []);
+  const unfinished: string[] = [];
+  const target = archiveOf(arrangement.archive, storeAt);
+  let copied = 0;
+  // What the archive in use already holds is not written again: a copy that is continued adds only what is missing.
+  let present: Set<string> | undefined;
+  for (const earlier of arrangement.earlierArchives) {
+    if (done.has(earlier.archiveId)) continue;
+    present ??= new Set((await contentsOf(arrangement.archive, storeAt)).blobs.filter(({ blob }) => blob.type === 'record').map(({ blob }) => messageHash(blob.signed)));
+    const contents = await contentsOf(earlier, storeAt);
+    let complete = contents.answered.length === earlier.stores.length && contents.problems.length === 0;
+    if (!complete) unfinished.push(`An earlier archive could not be read in full: ${contents.problems.join('; ') || 'a store did not answer'}.`);
+    for (const { blob } of contents.blobs) {
+      if (blob.type !== 'record' || present.has(messageHash(blob.signed))) continue;
+      const result = await target.write(blob);
+      if (safelyStored(result)) {
+        copied += 1;
+        present.add(messageHash(blob.signed));
+      } else {
+        complete = false;
+        unfinished.push(`No store of the archive in use confirmed a copied record: ${result.failed.map((failure) => `${failure.store}: ${failure.reason}`).join('; ')}.`);
+      }
+    }
+    if (complete) done.add(earlier.archiveId);
+  }
+  return { arrangement: { ...arrangement, copiedArchives: [...done] }, copied, unfinished };
 };

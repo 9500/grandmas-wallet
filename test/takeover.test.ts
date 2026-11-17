@@ -93,7 +93,10 @@ describe('a new device takes over', () => {
     // The fee came out of the swept coins, and the token arrived unchanged.
     const after = await wallet.balance();
     expect(after.toSweep).toBe(0n);
-    expect(after.recoverable + 1_000n).toBe(held - (swept.transactions[0] as Sent).feeSatoshis);
+    expect(after.recoverable + after.cancelling + 1_000n).toBe(held - (swept.transactions[0] as Sent).feeSatoshis);
+    // The sweep also put a coin aside for cancelling: the new device can refuse a request from here on.
+    expect(after.cancelling).toBe(1_091n);
+    expect(await wallet.canCancel()).toBe(true);
     expect((swept.transactions[0] as Sent).feeSatoshis).toBe(BigInt((swept.transactions[0] as Sent).bytes));
     expect(after.tokens.map((coin) => hex((coin.utxo.output.token as NonNullable<Output['token']>).category))).toEqual([fungible]);
     expect((after.tokens[0] as AccountCoin).utxo.output.token).toMatchObject({ amount: 250n });
@@ -133,7 +136,8 @@ describe('a new device takes over', () => {
     const fees = [...first.transactions, ...rest.transactions].reduce((sum, sent) => sum + sent.feeSatoshis, 0n);
     const after = await again.balance();
     expect(after.toSweep).toBe(0n);
-    expect(after.recoverable).toBe(held - fees);
+    expect(after.recoverable + after.cancelling).toBe(held - fees);
+    expect(after.cancelling).toBe(1_091n);
     // A third call finds nothing left to do.
     expect(await again.sweepEarlier()).toMatchObject({ coins: 0, transactions: [] });
   });
@@ -379,7 +383,46 @@ describe('moving on without a loss', () => {
     // The vault coin never obeyed a key; the first seed's device cannot move it, by any path it has.
     const swept = await third.wallet.sweepEarlier();
     expect(swept.coins).toBe(2);
-    expect(await third.wallet.balance()).toMatchObject({ toSweep: 0n, recoverable: 14_000n - (swept.transactions[0] as Sent).feeSatoshis });
+    expect(await third.wallet.balance()).toMatchObject({ toSweep: 0n, cancelling: 1_091n, recoverable: 14_000n - 1_091n - (swept.transactions[0] as Sent).feeSatoshis });
     expect((await readControllerHistory(chain, identity)).owners).toHaveLength(3);
+  });
+
+  it('MG07: after a move to a new identity the old one is kept, not retired: a later payment to its vault address is found, released by its own controller, and it can still be recovered', async () => {
+    const { chain, owner, identity, recoverTo, takeOver } = await start();
+    const vault = (await owner.vaultAddress()).address;
+    chain.fund(vault.lockingBytecode, 6_000n);
+    expect(await owner.standing()).toMatchObject({ state: 'in use', watched: true });
+
+    // A wallet with a new identity, here of another seed, and the move: ordinary payments from the old addresses, the vault coin released by the old controller.
+    const next = seedOf(1);
+    const successor = await OwnerWallet.open({ backend: new KeyBackend(chain, next), chain, seed: next });
+    chain.fund(p2pkhLockingBytecode(next.fundingKey.keyHash), 50_000n);
+    await successor.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY });
+    expect(successor.stored.identity).not.toBe(owner.stored.identity);
+    await owner.sendEverything((await successor.receiveAddress()).address.lockingBytecode);
+    owner.noteMovedTo(successor.stored.identity as string);
+
+    // The old identity holds nothing, and is kept all the same.
+    expect(await owner.balance()).toMatchObject({ recoverable: 0n, cancelling: 0n, vault: 0n });
+    const kept = await owner.standing();
+    expect(kept).toMatchObject({ state: 'kept', watched: true, movedTo: successor.stored.identity });
+    expect(kept.note).toMatch(/stays watched and recoverable, whatever it holds/);
+    expect(await owner.closed()).toBe(false);
+
+    // The published vault address is paid later. The old wallet sees it, and its own controller releases it.
+    chain.fund(vault.lockingBytecode, 9_000n);
+    chain.fund((await owner.receiveAddress()).address.lockingBytecode, 3_000n);
+    expect((await owner.balance()).vault).toBe(9_000n);
+    const released = await owner.sendEverything((await successor.receiveAddress()).address.lockingBytecode);
+    expect(released.sentSatoshis).toBeGreaterThan(9_000n);
+    expect((await owner.balance()).vault).toBe(0n);
+
+    // And it is still recoverable: after a recovery of the old identity, a new device finds what arrives at that address.
+    chain.fund(vault.lockingBytecode, 7_000n);
+    await recoverTo(2);
+    const { wallet } = await takeOver(2, [0]);
+    await wallet.search({ passes: ['quick'] });
+    expect((await wallet.balance()).toSweep).toBe(7_000n);
+    expect((await readControllerHistory(chain, identity)).closed).toBeUndefined();
   });
 });

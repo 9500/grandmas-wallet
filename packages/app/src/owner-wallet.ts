@@ -87,6 +87,8 @@ export interface OwnerWalletState {
   earlierFound?: { seed: number; kind: 0 | 1 | 2; number: number }[];
   /** The chain shows, confirmed, that a key this device does not hold owns the wallet. */
   ownedElsewhere?: boolean;
+  /** The identity the user moved on to (section 18.3). This one is kept: payments can still arrive at its addresses. */
+  movedToIdentity?: string;
 }
 
 /** A viewing key as a device stores it. */
@@ -772,6 +774,16 @@ export class OwnerWallet {
     }
     // A full pass that has finished for every seed stays finished; a later quick pass does not undo it.
     this.store({ allocation, earlierFound, fullySearched: result.status === 'fully-found' || (this.state.fullySearched && result.status !== 'incomplete') });
+    // A device that opens the wallet again from its words does not remember which coin was put aside for
+    // cancelling. A coin of exactly that value at one of this seed's change addresses is that coin.
+    if (this.state.cancelCoinNumber === undefined) {
+      const cost = this.cancellationCost();
+      const current = result.seeds.find((entry) => entry.label === 'the current seed');
+      const kept = [...(current?.quick?.found ?? []), ...(current?.full?.found ?? [])].find(
+        (found) => found.address.kind === ADDRESS_KIND.change && found.coins.some((coin) => coin.utxo.output.valueSatoshis === cost && coin.utxo.output.token === undefined),
+      );
+      if (kept !== undefined) this.store({ cancelCoinNumber: kept.address.number });
+    }
     await this.makeKnown();
     return result;
   }
@@ -791,8 +803,16 @@ export class OwnerWallet {
     this.requireCreated();
     const swept: Swept = { transactions: [], coins: 0, tokens: [] };
     for (;;) {
-      const { own, earlier } = await this.sorted();
+      const { own, earlier, cancelling } = await this.sorted();
       if (earlier.length === 0) return swept;
+      // A device that has just taken the wallet over holds no coin for cancelling. The sweep puts one aside
+      // (section 11.1, step 9) as one more output, when what it carries pays for it.
+      let aside: Output | undefined;
+      if (cancelling.length === 0) {
+        const asideNumber = this.state.cancelCoinNumber ?? (await this.giveOut(ADDRESS_KIND.change)).address.number;
+        if (this.state.cancelCoinNumber === undefined) this.store({ cancelCoinNumber: asideNumber });
+        aside = { lockingBytecode: this.address(ADDRESS_KIND.change, asideNumber).lockingBytecode, valueSatoshis: this.cancellationCost() };
+      }
       const ordered = [...earlier].sort((a, b) => {
         if (tokenFree(a) !== tokenFree(b)) return tokenFree(a) ? 1 : -1;
         return a.utxo.output.valueSatoshis > b.utxo.output.valueSatoshis ? -1 : 1;
@@ -813,7 +833,7 @@ export class OwnerWallet {
         return { ...output, valueSatoshis: coin.utxo.output.valueSatoshis > smallest ? coin.utxo.output.valueSatoshis : smallest };
       };
       const part: AccountCoin[] = [];
-      const outputsFor = (coins: AccountCoin[]): Output[] => [this.controllerOutput(next), ...coins.filter((coin) => !tokenFree(coin)).map(tokenOutput)];
+      const outputsFor = (coins: AccountCoin[]): Output[] => [this.controllerOutput(next), ...coins.filter((coin) => !tokenFree(coin)).map(tokenOutput), ...(aside === undefined ? [] : [aside])];
       for (const coin of ordered) {
         const candidate = [...part, coin];
         const bytes = transactionBytes([INPUT_BYTES.controller, ...candidate.map(inputBytesOf)], [...outputsFor(candidate), { lockingBytecode: destination, valueSatoshis: 0n }]);
@@ -834,10 +854,12 @@ export class OwnerWallet {
         try {
           choice = choose();
         } catch (error) {
-          // Coins with tokens alone cannot pay: the largest swept coin without a token joins them.
+          // Coins with tokens alone cannot pay: the largest swept coin without a token joins them. When
+          // nothing more can join, the coin for cancelling is left for later.
           const payer = ordered.find((coin) => tokenFree(coin) && !part.includes(coin));
-          if (!(error instanceof InsufficientFundsError) || payer === undefined) throw error;
-          part.push(payer);
+          if (!(error instanceof InsufficientFundsError) || (payer === undefined && aside === undefined)) throw error;
+          if (payer === undefined) aside = undefined;
+          else part.push(payer);
         }
       }
       const payers = choice.coins.map(({ utxo }) => own.find((coin) => coin.utxo === utxo) as AccountCoin);
@@ -1037,6 +1059,31 @@ export class OwnerWallet {
   /** The code that reads receipts reports whether the recoverer has confirmed. */
   noteRecoveryConfirmed(confirmed: boolean): void {
     this.store({ recoveryConfirmed: confirmed });
+  }
+
+  /** The user has moved on to a wallet with another identity (section 18.3), for example one with newer controller rules. */
+  noteMovedTo(identity: string): void {
+    this.store({ movedToIdentity: identity });
+  }
+
+  /**
+   * Where this identity stands (section 18.3). An identity the user has moved on from is kept, not retired:
+   * a vault address that was published, or a payout address stored in a contract, goes on being paid, and
+   * only this identity's controller releases what arrives there. So it stays watched and recoverable, and a
+   * change of owner or of recoverer is made on it as on the new one. A balance of zero changes nothing.
+   * Only closing ends an identity, and that is for when nothing can arrive any more.
+   */
+  async standing(): Promise<{ state: 'in use' | 'kept' | 'closed'; watched: boolean; recovery: 'on' | 'off'; movedTo?: string; note?: string }> {
+    if (await this.closed()) return { state: 'closed', watched: false, recovery: 'off', note: 'This wallet was closed. What arrives at its vault addresses from now on cannot be spent.' };
+    const { movedToIdentity } = this.state;
+    if (movedToIdentity === undefined) return { state: 'in use', watched: true, recovery: this.recovery };
+    return {
+      state: 'kept',
+      watched: true,
+      recovery: this.recovery,
+      movedTo: movedToIdentity,
+      note: 'Payments can still arrive at this wallet\'s addresses, and only its own controller releases what arrives at its vault addresses. It stays watched and recoverable, whatever it holds.',
+    };
   }
 
   /** What the device stores. */

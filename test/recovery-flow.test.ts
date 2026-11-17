@@ -1,5 +1,5 @@
 import { hexToBin } from '@bitauth/libauth';
-import { MemoryStore } from '@grandmas-wallet/archive';
+import { MemoryStore, assessArchive, readArchive } from '@grandmas-wallet/archive';
 import {
   type OwnerWalletState,
   type RecoveryArrangement,
@@ -10,6 +10,7 @@ import {
   acceptUpdate,
   checkRecovery,
   completeTakeover,
+  copyEarlierArchives,
   enroll,
   finishMove,
   finishTakeover,
@@ -19,8 +20,9 @@ import {
   sendUpdate,
   startTakeover,
   walletTemplateNumbers,
+  writeRecord,
 } from '@grandmas-wallet/app';
-import { deriveSeedKeys, p2pkhLockingBytecode } from '@grandmas-wallet/core';
+import { deriveSeedKeys, p2pkhLockingBytecode, readControllerHistory } from '@grandmas-wallet/core';
 import { type KeptKit, ENROLLMENT_LINK_BUDGET, credentialKeys, generateRecipientKeyPair } from '@grandmas-wallet/enrollment';
 import { KeyBackend, SimulatedChain } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
@@ -190,6 +192,46 @@ describe('a takeover, from the first message to the sweep', () => {
     // A device of another seed is not the owner, whatever it is handed.
     const wrong = seedOf(2);
     await expect(finishTakeover({ sealedHandOver: handed.sealed, pending: asked.pending, seed: wrong, backend: new KeyBackend(chain, wrong), chain })).rejects.toThrow(/not the owner/);
+  });
+});
+
+describe('a recovery that stops at any step', () => {
+  it('MG08: every step of a recovery can stop and be repeated; the hand-over is made again if it did not arrive', async () => {
+    const { chain, storeAt, owner, enrolled, recovererDevice, recovererWallet } = await start();
+    const { kept, recoveryKey } = await enrolled();
+    chain.fund((await owner.receiveAddress()).address.lockingBytecode, 10_000n);
+    const seed = seedOf(1);
+    // Step 1: the new device stops before its message arrives, and asks again. The later message replaces the earlier.
+    await startTakeover({ seed, stores: STORES, storeAt, recovererPublicKey: recovererDevice.publicKey });
+    const asked = await startTakeover({ seed, stores: STORES, storeAt, recovererPublicKey: recovererDevice.publicKey });
+    const savedOnce = await acceptTakeover({ sealed: asked.sealed, privateKey: recovererDevice.privateKey, kept, chain });
+    const saved = await acceptTakeover({ sealed: asked.sealed, privateKey: recovererDevice.privateKey, kept: savedOnce.kept, chain });
+    expect(saved.kept).toEqual(savedOnce.kept);
+
+    // Steps 3 to 5: the recoverer's device restarts between the request and the completion. A second request is refused by the chain.
+    await (await recovererWallet()).request(saved.proposedKeyHash);
+    await expect((await recovererWallet()).request(saved.proposedKeyHash)).rejects.toThrow();
+    chain.nowMs += 2 * 512 * 1000;
+    await (await recovererWallet()).complete();
+    await expect((await recovererWallet()).complete()).rejects.toThrow();
+
+    // Step 6: the recoverer records the hand-over and stops before it reaches the new device. It makes the same one again.
+    let stored: typeof saved.kept | undefined;
+    const handed = await completeTakeover({ kept: saved.kept, chain, recoveryKey, storeAt, save: (next) => void (stored = next) });
+    expect(stored?.pending).toBeUndefined();
+    const again = await completeTakeover({ kept: stored as NonNullable<typeof stored>, chain, recoveryKey, storeAt });
+    expect(again.kept).toEqual(handed.kept);
+    expect(again.kept.viewingKeyRecords).toHaveLength(2);
+
+    // The new device takes either, and after a restart takes it again.
+    const finish = (sealedHandOver: Uint8Array) => finishTakeover({ sealedHandOver, pending: asked.pending, seed, backend: new KeyBackend(chain, seed), chain });
+    const first = await finish(again.sealed);
+    const second = await finish(handed.sealed);
+    expect(second.arrangement).toEqual(first.arrangement);
+    expect(first.missing).toEqual([]);
+    expect(first.recovery.on).toBe(true);
+    await first.wallet.search({ passes: ['quick'] });
+    expect((await first.wallet.balance()).toSweep).toBeGreaterThan(10_000n);
   });
 });
 
@@ -414,5 +456,96 @@ describe('a new recoverer and a new waiting period', () => {
     const status = await checkRecovery({ wallet: owner, chain, arrangement: changed.arrangement, storeAt, network: 'testnet' });
     expect(status.status.on).toBe(true);
     expect(status.status.receipt?.prepared).toBeDefined();
+  });
+});
+
+describe('the archive after a recovery or a move to a new seed', () => {
+  const read = (archive: RecoveryArrangement['archive'], storeAt: (address: string) => MemoryStore, contentKey = archive.contentKey) =>
+    readArchive(hexToBin(archive.archiveId), hexToBin(contentKey), archive.stores.map(storeAt));
+
+  /** An enrolled wallet whose first seed has stored two labels, taken over by a second device. */
+  const takenOver = async () => {
+    const made = await start();
+    const { arrangement, kept, recoveryKey } = await made.enrolled();
+    const identity = made.owner.stored.identity as string;
+    for (const name of ['rent', 'savings']) {
+      await writeRecord({ entry: { kind: 'label', subject: `address of ${name}`, name }, identity, seed: made.first, arrangement, storeAt: made.storeAt });
+    }
+    const second = await made.recover(1, kept, recoveryKey);
+    if (!('wallet' in second)) throw new Error('the takeover was to finish');
+    return { ...made, first: made.first, old: arrangement, second, identity };
+  };
+
+  it('SW08: records written after a recovery and after a move to a new seed are not readable with the earlier content key', async () => {
+    const { chain, storeAt, old, second, identity, recipient, recovererDevice } = await takenOver();
+    // After the recovery the second device writes a label to its own archive.
+    await writeRecord({ entry: { kind: 'label', subject: 'address of the new flat', name: 'deposit' }, identity, seed: second.seed, arrangement: second.arrangement, storeAt });
+    expect(second.arrangement.archive.contentKey).not.toBe(old.archive.contentKey);
+    expect(second.arrangement.archive.archiveId).not.toBe(old.archive.archiveId);
+    const labelsOf = (contents: Awaited<ReturnType<typeof read>>) => contents.blobs.filter(({ blob }) => blob.type === 'record').map(({ blob }) => (JSON.parse(blob.signed.message) as { entry: { name: string } }).entry.name);
+    // The earlier archive does not hold it, and the earlier key opens nothing of the new archive.
+    expect(labelsOf(await read(old.archive, storeAt)).sort()).toEqual(['rent', 'savings']);
+    const withEarlierKey = await read(second.arrangement.archive, storeAt, old.archive.contentKey);
+    expect(withEarlierKey.blobs).toEqual([]);
+    expect(withEarlierKey.problems.length).toBeGreaterThan(0);
+    expect(labelsOf(await read(second.arrangement.archive, storeAt))).toEqual(['deposit']);
+
+    // The same after a move to a third seed with the second device still working.
+    await second.wallet.search({ passes: ['quick'] });
+    await second.wallet.sweepEarlier();
+    const third = seedOf(2);
+    const preparation = await prepareNewSeed({ seed: third, stores: STORES, storeAt });
+    const announced = await sendUpdate({ wallet: second.wallet, seed: second.seed, chain, arrangement: second.arrangement, recipient, newSeed: preparation });
+    await acceptUpdate({ sealed: announced.sealed, privateKey: recovererDevice.privateKey, kept: second.kept, chain, recoveryKey: (await import('@grandmas-wallet/enrollment')).recoveryKeyOf(second.kept.kit), storeAt });
+    await makeChange({ wallet: second.wallet, chain, arrangement: announced.arrangement, storeAt, network: 'testnet' });
+    if (announced.handOver === undefined) throw new Error('a move hands the wallet over');
+    const moved = await finishMove({ handOver: announced.handOver, preparation, seed: third, backend: new KeyBackend(chain, third), chain, storeAt });
+    await writeRecord({ entry: { kind: 'label', subject: 'address of the car', name: 'car' }, identity, seed: third, arrangement: moved.arrangement, storeAt });
+    for (const earlierKey of [old.archive.contentKey, second.arrangement.archive.contentKey]) {
+      expect((await read(moved.arrangement.archive, storeAt, earlierKey)).blobs).toEqual([]);
+    }
+    expect(labelsOf(await read(moved.arrangement.archive, storeAt))).toEqual(['car']);
+  });
+
+  it('BK09: the earlier archive is copied while a store cannot be reached; nothing is removed, the copy is finished later, and the earlier kit stays usable', async () => {
+    const { chain, stores, storeAt, old, second, identity } = await takenOver();
+    const [storeOne, storeTwo] = STORES.map((address) => stores.get(address) as MemoryStore) as [MemoryStore, MemoryStore];
+    const before = await read(old.archive, storeAt);
+
+    // One store cannot be reached: what can be read is copied, and the archive does not count as copied.
+    storeOne.unreachable = true;
+    const first = await copyEarlierArchives({ arrangement: second.arrangement, storeAt });
+    expect(first.copied).toBe(2);
+    expect(first.arrangement.copiedArchives).toEqual([]);
+    expect(first.unfinished).toHaveLength(1);
+    expect(first.unfinished[0]).toMatch(/could not be read in full/);
+    // No store can be reached, as when the device stops half-way: nothing is copied, nothing is lost.
+    storeTwo.unreachable = true;
+    const stopped = await copyEarlierArchives({ arrangement: first.arrangement, storeAt });
+    expect(stopped.copied).toBe(0);
+    expect(stopped.arrangement.copiedArchives).toEqual([]);
+
+    // Both stores are back: the copy is finished, and repeating it changes nothing.
+    storeOne.unreachable = false;
+    storeTwo.unreachable = false;
+    const finished = await copyEarlierArchives({ arrangement: stopped.arrangement, storeAt });
+    expect(finished.unfinished).toEqual([]);
+    expect(finished.arrangement.copiedArchives).toEqual([old.archive.archiveId]);
+    const repeated = await copyEarlierArchives({ arrangement: finished.arrangement, storeAt });
+    expect(repeated.copied).toBe(0);
+    expect(repeated.arrangement).toEqual(finished.arrangement);
+
+    // The earlier archive holds what it held, on both stores, and the access to it is still in the arrangement.
+    const after = await read(old.archive, storeAt);
+    expect(after.blobs.map((entry) => entry.blobId).sort()).toEqual(before.blobs.map((entry) => entry.blobId).sort());
+    expect(after.blobs.every((entry) => entry.stores.length === 2)).toBe(true);
+    expect(finished.arrangement.earlierArchives).toEqual([old.archive]);
+
+    // In the new archive the copied labels are there once, as an earlier owner's; they do not pass for the new owner's.
+    const assessed = assessArchive(await read(second.arrangement.archive, storeAt), { network: 'testnet', history: await readControllerHistory(chain, hexToBin(identity)) });
+    expect(assessed.labels.map((label) => [label.entry.name, label.standing]).sort()).toEqual([
+      ['rent', 'earlier owner'],
+      ['savings', 'earlier owner'],
+    ]);
   });
 });

@@ -59,6 +59,11 @@ export interface KeptKit {
   latestReceiptHash?: string;
   /** A takeover message it has saved, for a recovery that is not complete yet. */
   pending?: { messageHash: string; proposedKeyHash: string; viewingKeyRecord: SignedJson; archive: KitArchive; answerKey: string };
+  /**
+   * The last hand-over it made: to whom, and how much of the kit was earlier than that device's seed. If
+   * the hand-over did not arrive, it is made again from this.
+   */
+  handedOver?: { proposedKeyHash: string; answerKey: string; earlierRecords: number; earlierArchives: number };
 }
 
 export interface CheckedEnrollment {
@@ -225,26 +230,42 @@ export const settlePending = (kept: KeptKit, history: ControllerHistory): KeptKi
  */
 export const handOver = async (kept: KeptKit, chain: ChainReader, recoveryKey: KeyPair): Promise<{ handOver: SignedMessage; receipt: SignedMessage; answerKey: Uint8Array; kept: KeptKit }> => {
   const { pending } = kept;
-  if (pending === undefined) return fail('No takeover message has been saved for this wallet.');
   const history = await historyOf(chain, kept.kit.identity, kept.kit.creationTransactionId);
+  const sign = (grown: KeptKit, earlierRecords: number, earlierArchives: number, answerKey: string) => {
+    const { receipt, kept: after } = receiptFor(grown, recoveryKey);
+    const signed = signHandOver(
+      {
+        network: kept.kit.network,
+        identity: kept.kit.identity,
+        creationTransactionId: kept.kit.creationTransactionId,
+        viewingKeyRecords: grown.viewingKeyRecords.slice(0, earlierRecords),
+        archives: grown.archives.slice(0, earlierArchives),
+        receipt: toSignedJson(receipt),
+      },
+      recoveryKey,
+    );
+    return { handOver: signed, receipt, answerKey: hexToBin(answerKey), kept: after };
+  };
+  if (pending === undefined) {
+    // The hand-over was made before and may not have arrived: it is made again, for the same device.
+    const before = kept.handedOver;
+    if (before === undefined) return fail('No takeover message has been saved for this wallet.');
+    if (hex(history.current.state.ownerKeyHash) !== before.proposedKeyHash) return fail('The device the last hand-over was made for no longer owns the wallet.');
+    return sign(kept, before.earlierRecords, before.earlierArchives, before.answerKey);
+  }
   if (hex(history.current.state.ownerKeyHash) !== pending.proposedKeyHash) {
     return fail('The proposed key is not the owner on chain. The earlier viewing keys are handed over only after the recovery is complete.');
   }
   if (!history.currentConfirmed) return fail('The completion is not confirmed yet.');
-  const earlier = { viewingKeyRecords: kept.viewingKeyRecords, archives: kept.archives };
   const { pending: _done, ...rest } = kept;
   const grown: KeptKit = {
     ...rest,
     viewingKeyRecords: [...kept.viewingKeyRecords, pending.viewingKeyRecord],
     archives: [...kept.archives, pending.archive],
     answered: pending.messageHash,
+    handedOver: { proposedKeyHash: pending.proposedKeyHash, answerKey: pending.answerKey, earlierRecords: kept.viewingKeyRecords.length, earlierArchives: kept.archives.length },
   };
-  const { receipt, kept: after } = receiptFor(grown, recoveryKey);
-  const signed = signHandOver(
-    { network: kept.kit.network, identity: kept.kit.identity, creationTransactionId: kept.kit.creationTransactionId, viewingKeyRecords: earlier.viewingKeyRecords, archives: earlier.archives, receipt: toSignedJson(receipt) },
-    recoveryKey,
-  );
-  return { handOver: signed, receipt, answerKey: hexToBin(pending.answerKey), kept: after };
+  return sign(grown, kept.viewingKeyRecords.length, kept.archives.length, pending.answerKey);
 };
 
 /**

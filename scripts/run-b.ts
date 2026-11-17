@@ -427,7 +427,7 @@ try {
       const full = await wallet.search();
       note(`The full pass over both seeds (${full.seeds.reduce((sum, seed) => sum + (seed.full?.lookups ?? 0), 0)} addresses) took ${((Date.now() - started) / 1000).toFixed(0)} seconds; the wallet was then "${full.status}".`, 'the full pass');
       const holds = async (amount: bigint, tokens: number): Promise<void> => {
-        await until(`the new device to hold ${amount} satoshis`, async () => { const now = await wallet.balance(); return now.recoverable === amount && now.tokens.length === tokens && now.toSweep === 0n; });
+        await until(`the new device to hold ${amount} satoshis`, async () => { const now = await wallet.balance(); return now.recoverable + now.cancelling === amount && now.tokens.length === tokens && now.toSweep === 0n; });
       };
       // What the sweep sent is written down as soon as it is sent, so that a run that stops here does not sweep twice.
       if (facts.steps['the new device sweeps'] === undefined) {
@@ -443,7 +443,7 @@ try {
       const swept = BigInt(facts.steps['the new device sweeps']?.data?.['recoverable'] as string);
       const paid = await once('the new owner pays', async () => {
         await holds(swept, 1);
-        note(`After the sweep the new device holds everything at its own addresses: ${swept} satoshis and the NFT, which it reports as a token of unknown meaning.`);
+        note(`After the sweep the new device holds everything at its own addresses: ${swept} satoshis, of which ${(await wallet.balance()).cancelling} are a coin the sweep put aside for cancelling, and the NFT, which it reports as a token of unknown meaning. It can cancel a request: ${await wallet.canCancel()}.`);
         const sent = await wallet.pay([{ lockingBytecode: funderLocking, valueSatoshis: 4_000n }]);
         record('pay', sent, 'the new owner pays from what it swept, by its own key');
         return { transactionIds: [sent.transactionId], data: { recoverable: String(swept - 4_000n - sent.feeSatoshis) } };
