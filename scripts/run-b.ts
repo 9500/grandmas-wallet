@@ -15,6 +15,10 @@
 // usage (from packages/app):
 //   npx tsx ../../scripts/run-b.ts local      with the local node running (deploy/regtest/regtest.sh)
 //   npx tsx ../../scripts/run-b.ts chipnet    paid from the key in .chipnet/funder-design-2.json
+//
+// Two switches rehearse on the local node what chipnet brings:
+//   --few-blocks        a block is made only where the run waits for a confirmation, as on a chain whose blocks come when they come
+//   STOP_AFTER=<step>   the run stops after the named step, to be continued with the same command
 import 'fake-indexeddb/auto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -45,12 +49,15 @@ import { regtestServers, rpc, mine, BURN } from '../spikes/xo-engine/regtest.mjs
 
 const hex = binToHex;
 const root = fileURLToPath(new URL('..', import.meta.url));
-const [chainName, phase] = process.argv.slice(2);
+const [chainName, phase] = process.argv.slice(2).filter((word) => !word.startsWith('--'));
+const fewBlocks = process.argv.includes('--few-blocks');
 if (chainName !== 'local' && chainName !== 'chipnet') {
   console.error('usage: npx tsx ../../scripts/run-b.ts <local|chipnet>');
   process.exit(2);
 }
 const local = chainName === 'local';
+/** The exit code of a part that stopped at a step of its own and said why. */
+const STOPPED = 3;
 const PHASES = ['the owner uses the wallet', 'the recoverer recovers', 'the new device takes over', 'the recoverer returns its fee coins', 'the run returns what is left'];
 mkdirSync(`${root}.chipnet`, { recursive: true });
 const stateFile = `${root}.chipnet/run-b-${chainName}.json`;
@@ -66,6 +73,8 @@ interface Facts {
   ownerState?: OwnerWalletState;
   newState?: OwnerWalletState;
   steps: Record<string, { transactionIds: string[]; data?: Record<string, number | string> }>;
+  /** The parts that have run to their end; a run that continues starts after them. */
+  finished: string[];
   held?: string;
   funderAtStart?: string;
   log: Entry[];
@@ -79,8 +88,18 @@ if (phase === undefined) {
     console.error('The local chain is long and its block rewards are small. Start a new one: deploy/regtest/regtest.sh reset');
     process.exit(1);
   }
+  const finished = existsSync(stateFile) ? (JSON.parse(readFileSync(stateFile, 'utf8')) as Facts).finished : [];
   for (const next of PHASES) {
-    const result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), chainName, next], { stdio: 'inherit' });
+    if (finished.includes(next)) {
+      console.log(`${next}: done before`);
+      continue;
+    }
+    // A part that ends without saying why (the engine's packages can end the process) is continued, a few times.
+    let result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), chainName, next, ...(fewBlocks ? ['--few-blocks'] : [])], { stdio: 'inherit' });
+    for (let again = 0; again < 3 && result.status !== 0 && result.status !== STOPPED; again += 1) {
+      console.log(`"${next}" ended unexpectedly; continuing it`);
+      result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), chainName, next, ...(fewBlocks ? ['--few-blocks'] : [])], { stdio: 'inherit' });
+    }
     if (result.status !== 0) {
       console.error(`Stopped in "${next}". The same command continues the run.`);
       process.exit(result.status ?? 1);
@@ -98,7 +117,10 @@ if (phase === undefined) {
       `- Wallet identity: \`${facts.identity}\``,
       `- Repository at commit \`${revision}\``,
       `- Started ${facts.startedAt}`,
-      ...(local ? [] : ['- The engine ran with the local fix for chipnet\'s block timing (`docs/xo-chipnet-header-verification.md`); without it its header check stops below the tip.']),
+      ...(local ? [] : [
+        '- The engine ran with the local fix for chipnet\'s block timing (`docs/xo-chipnet-header-verification.md`); without it its header check stops below the tip.',
+        '- The engine was given one server. With three, the first start of this run ended while waiting for a block: the engine\'s network package asks every server for a new block\'s header and takes the first answer, and a server that had not seen the block yet answered first, with nothing. The run was continued with the same command.',
+      ]),
       '',
       '| Step | Transaction | Bytes | Fee (sat) | Note |',
       '| --- | --- | --- | --- | --- |',
@@ -118,12 +140,17 @@ if (phase === undefined) {
 
 const facts: Facts = existsSync(stateFile)
   ? (JSON.parse(readFileSync(stateFile, 'utf8')) as Facts)
-  : { startedAt: new Date().toISOString(), words: { owner: generateBip39Mnemonic(), next: generateBip39Mnemonic(), credential: generateBip39Mnemonic() }, steps: {}, log: [], notes: [] };
+  : { startedAt: new Date().toISOString(), words: { owner: generateBip39Mnemonic(), next: generateBip39Mnemonic(), credential: generateBip39Mnemonic() }, steps: {}, finished: [], log: [], notes: [] };
 const keep = (): void => writeFileSync(stateFile, JSON.stringify(facts, null, 1), { mode: 0o600 });
 // The keys are on disk before anything is paid to them.
 keep();
 const say = (line: string): void => console.log(line);
-const note = (line: string): void => {
+/** An observation for the log. One given a name is written the first time only: a run that continues sees a later state. */
+const note = (line: string, name?: string): void => {
+  if (name !== undefined) {
+    if (facts.steps[`observed: ${name}`] !== undefined) return;
+    facts.steps[`observed: ${name}`] = { transactionIds: [] };
+  }
   if (!facts.notes.includes(line)) facts.notes.push(line);
   keep();
   say(`  ${line}`);
@@ -140,6 +167,7 @@ const once = async (name: string, work: () => Promise<{ transactionIds?: string[
     const done = (await work()) ?? {};
     facts.steps[name] = { transactionIds: done.transactionIds ?? [], ...(done.data === undefined ? {} : { data: done.data }) };
     keep();
+    if (process.env['STOP_AFTER'] === name) throw new Error(`stopped after "${name}", as asked`);
   } else {
     say(`  (${name}: done before)`);
   }
@@ -147,7 +175,7 @@ const once = async (name: string, work: () => Promise<{ transactionIds?: string[
 };
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const PATIENCE_MS = local ? 60_000 : 20 * 60_000;
-const until = async <T>(what: string, check: () => Promise<T | undefined | false>, patienceMs = PATIENCE_MS): Promise<T> => {
+const until = async <T>(what: string, check: () => Promise<T | undefined | false>, patienceMs = PATIENCE_MS, everyMs = local ? 500 : 5_000): Promise<T> => {
   const deadline = Date.now() + patienceMs;
   let announced = false;
   for (;;) {
@@ -156,7 +184,7 @@ const until = async <T>(what: string, check: () => Promise<T | undefined | false
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     if (!announced && !local) say(`  waiting for ${what}`);
     announced = true;
-    await wait(local ? 500 : 5_000);
+    await wait(everyMs);
   }
 };
 console.error = () => undefined;
@@ -183,10 +211,10 @@ const funderLocking = p2pkhLockingBytecode(funder.keyHash);
 
 /** A block: made on demand on the local chain; awaited on chipnet only where a confirmation is needed. */
 const block = async (): Promise<void> => {
-  if (local) await mine(1, BURN);
+  if (local && !fewBlocks) await mine(1, BURN);
 };
 const confirmed = async (transactionId: string): Promise<void> => {
-  await block();
+  if (local) await mine(1, BURN);
   await until(`the first confirmation of ${transactionId.slice(0, 12)}…`, async () => ((await server.confirmations(transactionId)) ?? 0) > 0);
 };
 /** The funder's coins without tokens, as the server lists them. */
@@ -215,11 +243,11 @@ const openAccount = async (words: string): Promise<Account> => {
   const electrumServers = local
     ? await regtestServers()
     : (() => {
-        const known = resolveElectrumServersForNetwork(XO_SUPPORTED_NETWORKS.chipnet);
-        const [first] = known;
+        const [first] = resolveElectrumServersForNetwork(XO_SUPPORTED_NETWORKS.chipnet);
         if (first === undefined) throw new Error('the engine names no chipnet server');
-        // The user's own server first, then the ones the engine names.
-        return [{ host: 'chipnet.9500.cash', version: first.version, transports: { wss: 443 }, blockchain: first.blockchain }, ...known];
+        // One server. With several, the engine's network package takes the first answer to a request for a new
+        // block's header, and a server that has not seen the block yet answers first, with nothing: the process ends.
+        return [{ host: 'chipnet.9500.cash', version: first.version, transports: { wss: 443 }, blockchain: first.blockchain }];
       })();
   return Account.open(await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers }));
 };
@@ -304,8 +332,8 @@ try {
       return { transactionIds: [transactionId] };
     });
     await block();
-    await until('the coins and the NFT in the wallet', async () => { const balance = await wallet.balance(); return balance.vault === 6_000n && balance.tokens.length === 1 && balance.recoverable === arrived; });
     const paid = await once('the owner pays', async () => {
+      await until('the coins and the NFT in the wallet', async () => { const balance = await wallet.balance(); return balance.vault === 6_000n && balance.tokens.length === 1 && balance.recoverable === arrived; });
       const sent = await wallet.pay([{ lockingBytecode: funderLocking, valueSatoshis: 5_000n }]);
       record('pay', sent, 'an everyday payment by key');
       return { transactionIds: [sent.transactionId], data: { recoverable: String(arrived - 5_000n - sent.feeSatoshis) } };
@@ -344,7 +372,25 @@ try {
         await rpc('setmocktime', now + 700);
         await mine(11, BURN);
       }
+      // The network counts the waiting period on the chain's own clock: the median of the last eleven block times,
+      // from the block before the one that holds the request. The recoverer waits for that, then completes.
+      const medianTime = async (height: number): Promise<number> => {
+        const times = await Promise.all(Array.from({ length: 11 }, (_, back) => server.headerTime(height - back)));
+        return times.sort((a, b) => a - b)[5] as number;
+      };
       const startedWaiting = Date.now();
+      await until(
+        'the waiting period on the chain\'s clock',
+        async () => {
+          const request = (await readControllerHistory(chain, identity)).transactions.at(-1);
+          const confirmations = request === undefined ? 0 : ((await server.confirmations(request.transactionId)) ?? 0);
+          if (confirmations < 1) return false;
+          const tip = await server.tip();
+          return (await medianTime(tip.height)) >= (await medianTime(tip.height - confirmations)) + 512;
+        },
+        40 * 60_000,
+        local ? 500 : 30_000,
+      );
       const completed = await until(
         'the waiting period to pass',
         async () => {
@@ -356,8 +402,9 @@ try {
           }
         },
         40 * 60_000,
+        local ? 500 : 30_000,
       );
-      record('complete', completed, `after the waiting period${local ? '' : ` (${Math.round((Date.now() - startedWaiting) / 60_000)} minutes of trying every few seconds)`}; no coin has moved`);
+      record('complete', completed, `after the waiting period${local ? '' : ` (${Math.round((Date.now() - startedWaiting) / 60_000)} minutes)`}; no coin has moved`);
       if (local) await rpc('setmocktime', 0);
       await block();
     }
@@ -375,28 +422,28 @@ try {
       say('  (the wallet is closed: done before)');
     } else {
       const quick = await wallet.search({ passes: ['quick'] });
-      note(`The new device's quick pass found ${quick.coins.length} coins; the wallet was then reported as "${quick.status}", not as fully found.`);
+      note(`The new device's quick pass found ${quick.coins.length} coins; the wallet was then reported as "${quick.status}", not as fully found.`, 'the quick pass');
       const started = Date.now();
       const full = await wallet.search();
-      note(`The full pass over both seeds (${full.seeds.reduce((sum, seed) => sum + (seed.full?.lookups ?? 0), 0)} addresses) took ${((Date.now() - started) / 1000).toFixed(0)} seconds; the wallet was then "${full.status}".`);
-      if (facts.steps['the new device sweeps'] === undefined) {
-        const toSweep = await until('the earlier coins in the engine', async () => { const now = await wallet.balance(); return now.toSweep === BigInt(facts.held as string) ? now.toSweep : undefined; });
-        const swept = await wallet.sweepEarlier();
-        for (const sent of swept.transactions) record('sweep', sent, `${swept.coins} coins of the earlier seed, the vault coin and the NFT among them, to an address of the new seed`);
-        const fees = swept.transactions.reduce((sum, sent) => sum + sent.feeSatoshis, 0n);
-        await block();
-        const after = await until('the swept coins', async () => { const now = await wallet.balance(); return now.toSweep === 0n && now.recoverable > 0n && now.tokens.length === 1 ? now : undefined; });
-        if (after.recoverable + 1_000n !== toSweep - fees) throw new Error(`after the sweep the new device holds ${after.recoverable}, expected ${toSweep - fees - 1_000n}`);
-        note(`After the sweep the new device holds everything at its own addresses: ${after.recoverable} satoshis and the NFT, which it reports as a token of unknown meaning.`);
-        facts.steps['the new device sweeps'] = { transactionIds: swept.transactions.map((sent) => sent.transactionId), data: { recoverable: String(after.recoverable) } };
-        keep();
-      }
+      note(`The full pass over both seeds (${full.seeds.reduce((sum, seed) => sum + (seed.full?.lookups ?? 0), 0)} addresses) took ${((Date.now() - started) / 1000).toFixed(0)} seconds; the wallet was then "${full.status}".`, 'the full pass');
       const holds = async (amount: bigint, tokens: number): Promise<void> => {
         await until(`the new device to hold ${amount} satoshis`, async () => { const now = await wallet.balance(); return now.recoverable === amount && now.tokens.length === tokens && now.toSweep === 0n; });
       };
+      // What the sweep sent is written down as soon as it is sent, so that a run that stops here does not sweep twice.
+      if (facts.steps['the new device sweeps'] === undefined) {
+        const toSweep = await until('the earlier coins in the engine', async () => { const now = await wallet.balance(); return now.toSweep === BigInt(facts.held as string) ? now.toSweep : undefined; });
+        const sent = await wallet.sweepEarlier();
+        for (const transaction of sent.transactions) record('sweep', transaction, `${sent.coins} coins of the earlier seed, the vault coin and the NFT among them, to an address of the new seed`);
+        const fees = sent.transactions.reduce((sum, transaction) => sum + transaction.feeSatoshis, 0n);
+        // The NFT keeps the 1,000 satoshis under it; everything else, less the fee, is at the new seed's addresses.
+        facts.steps['the new device sweeps'] = { transactionIds: sent.transactions.map((transaction) => transaction.transactionId), data: { recoverable: String(toSweep - fees - 1_000n) } };
+        keep();
+      }
+      await block();
       const swept = BigInt(facts.steps['the new device sweeps']?.data?.['recoverable'] as string);
       const paid = await once('the new owner pays', async () => {
         await holds(swept, 1);
+        note(`After the sweep the new device holds everything at its own addresses: ${swept} satoshis and the NFT, which it reports as a token of unknown meaning.`);
         const sent = await wallet.pay([{ lockingBytecode: funderLocking, valueSatoshis: 4_000n }]);
         record('pay', sent, 'the new owner pays from what it swept, by its own key');
         return { transactionIds: [sent.transactionId], data: { recoverable: String(swept - 4_000n - sent.feeSatoshis) } };
@@ -473,9 +520,11 @@ try {
     note(`The funding address held ${facts.funderAtStart} satoshis before the run and holds ${total} after it: the run cost ${spent} satoshis in fees. ${left.length === 0 ? 'Nothing is left anywhere else.' : `LEFT BEHIND: ${left.join('; ')}.`}`);
     if (left.length > 0) throw new Error(`coins were left behind: ${left.join('; ')}`);
   }
+  if (!facts.finished.includes(phase)) facts.finished.push(phase);
+  keep();
 } catch (error) {
   say(`FAILED: ${(error as Error).name}: ${String((error as Error).message).slice(0, 700)}\n${String((error as Error).stack).split('\n').slice(1, 5).join('\n')}`);
-  process.exitCode = 1;
+  process.exitCode = STOPPED;
 } finally {
   if (local) await rpc('setmocktime', 0).catch(() => undefined);
   await server.disconnect().catch(() => undefined);
