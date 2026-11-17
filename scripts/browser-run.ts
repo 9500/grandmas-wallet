@@ -229,10 +229,11 @@ const main = async (): Promise<void> => {
     mkdirSync(`${work}store1`, { recursive: true });
     mkdirSync(`${work}store2`, { recursive: true });
     const origins = ['--origin', 'http://localhost:8101', '--origin', 'http://localhost:8102'];
-    await serve('http://127.0.0.1:8111/', 'npx', ['tsx', 'apps/archive-store/src/cli.ts', '--port', '8111', '--directory', `${work}store1`, ...origins], 'store 1');
-    await serve('http://127.0.0.1:8112/', 'npx', ['tsx', 'apps/archive-store/src/cli.ts', '--port', '8112', '--directory', `${work}store2`, ...origins], 'store 2');
+    await serve('http://127.0.0.1:8111/', process.execPath, ['--import', 'tsx', 'apps/archive-store/src/cli.ts', '--port', '8111', '--directory', `${work}store1`, ...origins], 'store 1');
+    await serve('http://127.0.0.1:8112/', process.execPath, ['--import', 'tsx', 'apps/archive-store/src/cli.ts', '--port', '8112', '--directory', `${work}store2`, ...origins], 'store 2');
+    // Each is started as a process of its own, not through a wrapper, so that it ends when the run does.
     for (const [app, port] of [['wallet', 8101], ['recoverer', 8102]] as const) {
-      await serve(`http://127.0.0.1:${port}/`, 'node', ['deploy/serve.mjs', '--root', `apps/${app}/dist`, '--config', 'deploy/config/local-regtest.json', '--host', '127.0.0.1', '--port', String(port)], `the ${app} page`);
+      await serve(`http://127.0.0.1:${port}/`, process.execPath, ['deploy/serve.mjs', '--root', `apps/${app}/dist`, '--config', 'deploy/config/local-regtest.json', '--host', '127.0.0.1', '--port', String(port)], `the ${app} page`);
     }
   }
 
