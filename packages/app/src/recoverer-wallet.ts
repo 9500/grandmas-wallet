@@ -14,6 +14,7 @@ import {
   encodeControllerState,
   readControllerHistory,
   requiredFee,
+  smallestOutputValue,
   transactionBytes,
 } from '@grandmas-wallet/core';
 
@@ -182,6 +183,24 @@ export class RecovererWallet {
     await this.backend.send(prepared);
     for (const spent of [coin, ...payers]) this.spent.add(`${hex(spent.utxo.transactionHash)}:${spent.utxo.index}`);
     return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: choice.remainderSatoshis };
+  }
+
+  /**
+   * Send what the fee address holds to another address: for a recoverer that gives an allowance back, or
+   * that no longer serves the wallet. Nothing obliges it to; the coins are its own.
+   *
+   * @returns `undefined` when the fee address holds too little to send on
+   */
+  async returnFeeCoins(toLockingBytecode: Uint8Array): Promise<Sent | undefined> {
+    const coins = await this.feeCoins();
+    const destination = { lockingBytecode: toLockingBytecode, valueSatoshis: 0n };
+    const fee = requiredFee(transactionBytes(coins.map(() => INPUT_BYTES.p2pkh), [destination]), this.feeRate);
+    const total = coins.reduce((sum, coin) => sum + coin.utxo.output.valueSatoshis, 0n);
+    if (coins.length === 0 || total - fee < smallestOutputValue(destination)) return undefined;
+    const prepared = await this.backend.prepare({ template: 'actions', action: 'pay', role: 'owner', inputs: coins.map((coin) => ({ coin })), outputs: [{ ...destination, valueSatoshis: total - fee }] });
+    await this.backend.send(prepared);
+    for (const coin of coins) this.spent.add(`${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`);
+    return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: 0n };
   }
 
   /**

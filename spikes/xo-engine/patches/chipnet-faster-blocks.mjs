@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const revert = process.argv.includes('--revert');
 const edits = [
   {
-    file: '../node_modules/@electrum-cash/checkpoint/dist/index.mjs',
+    file: '../../../node_modules/@electrum-cash/checkpoint/dist/index.mjs',
     // The chipnet block is the only one with this anchor timestamp followed by a one-hour half-life... and so is
     // testnet4, which shares the anchor; the checkpoint hash just above makes the match unique to chipnet.
     original: `		blockHash: "0000000038161e1d24f9cad45fc46bc4e5512453b8523bb5f393b46ea7f752cd",
@@ -50,7 +50,7 @@ const edits = [
 	}`,
   },
   {
-    file: '../node_modules/@electrum-cash/application/dist/index.mjs',
+    file: '../../../node_modules/@electrum-cash/application/dist/index.mjs',
     original: `	if (allowMinimumDifficultyBlocks) {
 		if (blockTimestamp - parentTimestamp > 2 * asertIdealBlockTimeInSeconds) return minimumDifficultyTarget;
 	}
@@ -70,7 +70,7 @@ const edits = [
 	const exponent = BigInt(timeDifferenceInSeconds - expectedTimeInSeconds) * ASERT_FIXED_POINT_RADIX / BigInt(asertHalfLifeInSeconds);`,
   },
   {
-    file: '../node_modules/@electrum-cash/application/dist/index.mjs',
+    file: '../../../node_modules/@electrum-cash/application/dist/index.mjs',
     original: `	if (shifts < 0n) nextTarget >>= -shifts;
 	else nextTarget <<= shifts;
 	if (nextTarget <= minimumDifficultyTarget) return nextTarget;`,

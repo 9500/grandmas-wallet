@@ -271,6 +271,18 @@ describe('the recoverer\'s fees', () => {
     expect(wallet.controller().state.ownerKeyHash).toEqual(newDevice.keyHash);
   });
 
+  it('the recoverer can send what its fee address holds back; nothing obliges it to', async () => {
+    const wallet = await setup({ allowance: 4_900n });
+    await wallet.recoverer.request(newDevice.keyHash);
+    const sent = await wallet.recoverer.returnFeeCoins(payee);
+    // 4,900 less the request's 991, less the 185 of sending it on.
+    expect(sent).toMatchObject({ bytes: 185, feeSatoshis: 185n });
+    expect(wallet.chain.balanceOf(payee)).toBe(4_900n - 991n - 185n);
+    expect(wallet.chain.balanceOf(wallet.feeAddress)).toBe(0n);
+    // With nothing left there is nothing to send.
+    expect(await wallet.recoverer.returnFeeCoins(payee)).toBeUndefined();
+  });
+
   it('a recoverer\'s account takes up a wallet only when its key is the recoverer the controller names', async () => {
     const wallet = await setup();
     const stranger = deriveCredentialKeys(OTHER_CREDENTIAL_WORDS, 'testnet', numbers);
