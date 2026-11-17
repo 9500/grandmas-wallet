@@ -728,7 +728,7 @@ The recoverer never learns the new device's seed. It does have the agreed power 
 | Input 0 | The controller, `ownerAuthorize`, signed by the new owner's controller key |
 | Inputs 1… | Coins at earlier addresses, each unlocked with `sweep(identity, secret)`; vault coins with `spend(identity, secret)` |
 | Output 0 | The controller, state unchanged and Active |
-| Outputs 1… | Addresses of the new seed. Fungible tokens and NFTs are carried over with category, amount, capability and commitment unchanged. |
+| Outputs 1… | Addresses of the new seed. Fungible tokens and NFTs are carried over with category, amount, capability and commitment unchanged. When the new device holds no coin for cancelling, one output is that coin. |
 | Fee | Taken from the swept BCH |
 
 Rules for the wallet:
@@ -737,6 +737,7 @@ Rules for the wallet:
 - **A large wallet is swept in several transactions.** Each spends the controller output of the one before. An interruption between parts loses nothing: what is not yet swept is found again by the same search.
 - **A wallet with tokens and no BCH still needs a fee.** The new device must have a source: a coin received at a new address, or one given by the recoverer.
 - **A sweep also cancels a pending request,** since it uses `ownerAuthorize`.
+- **The first sweep puts the coin for cancelling aside** (section 8), as one more output. A device that has just taken the wallet over can then refuse a request without a transaction of its own for that. If what is swept does not pay for it, the coin is put aside later.
 - **Coins that arrive at an earlier address later are swept the same way** when the wallet notices them.
 - **Application tokens need no special handling.** An NFT of an application the wallet has never heard of is swept like any coin.
 - **Tokens are carried over unchanged.** The owner's approval would allow anything to be done with a swept token. The wallet changes nothing about it: the fee never comes from a coin's token, and the amount, capability and commitment stay as they were.
@@ -1223,17 +1224,17 @@ The implementation uses XO's TypeScript packages, libauth for keys, transactions
 | --- | --- |
 | Recovery controller | Implemented with its five actions; tested in the virtual machine (CT01 to CT15). All five ran on a local node and on chipnet: a request, a cancellation, a completion after the waiting period, and a closing (`docs/runs/`). |
 | Fees and sending everything | Implemented: the exact fee, the smallest value of each output, the check before sending, choosing coins, sending everything, and closing by the owner's wallet (FE01 to FE08). |
-| Owner-approval rule | Written; without tests on the working branch until an address contract uses it |
+| Owner-approval rule | Implemented (`contracts/lib/authorization.cash`); both address contracts use it, and it is tested through them (AD01 to AD13) |
 | Reading and checking a controller's history; several servers read as one | Implemented and tested |
 | Waiting-period calculation; watching for requests | Implemented and tested |
 | Sealing to the recoverer; signing; encrypted stores and the store server | Implemented and tested |
 | WizardConnect transport and `xo_v1` messages | Implemented and tested with an earlier form of the announcement |
 | Recoverable address, vault address | Implemented (`contracts/recoverableAddress.cash`, `contracts/vaultAddress.cash`); tested in the virtual machine (AD01 to AD13), with each refusal shown to come from the script meant to refuse. A wallet's life ran on a local node and on chipnet: receiving, a payment by key, a sweep by a new owner, a spend from the vault, and the refusals of a sweep attached to a request and of a sweep approved by an earlier owner (`docs/runs/stage-1-chipnet.md`). |
-| Derivation, viewing key, giving out and finding addresses | Implemented and tested (KV01 to KV05, KV07 to KV12, PV01, PV02), with test vectors in `test/vectors/`. The wallet's own derivation gives the keys the engine makes. The cost of the full pass on real servers (KV13) is still to be recorded. |
-| Creating a wallet as in section 7.9 | Implemented (`packages/app/src/owner-wallet.ts`): in steps a device can resume, with no address given out before confirmation (CR01 to CR04). Ran on the XO engine against a local node. |
-| Recovery kit, receipts, takeover and update messages, sweep, moving to a new seed, replacing the recoverer | Proposed |
-| Backup records as in section 10 | Proposed |
-| The wallet's templates | Implemented (`packages/app/src/templates.ts`) and accepted by the XO validator. The controller template and the two address templates are final; a test fixes their identifiers. Every action ran through the unmodified engine on a local node, with the engine's keys and addresses equal to the ones this project's code derives and every transaction of the size worked out beforehand (`docs/runs/stage-3-local-node.md`). Loading the run's invitations in XO's debugging tool is still to be tried. |
+| Derivation, viewing key, giving out and finding addresses | Implemented and tested (KV01 to KV05, KV07 to KV12, PV01, PV02), with test vectors in `test/vectors/`. The wallet's own derivation gives the keys the engine makes. The cost of the full pass is recorded for a local node and a chipnet server (KV13, `docs/results/kv13-full-pass.md`). |
+| Creating a wallet as in section 7.9 | Implemented (`packages/app/src/owner-wallet.ts`): in steps a device can resume, with no address given out before confirmation (CR01 to CR04). Ran on the XO engine against a local node and on chipnet. |
+| Recovery kit, receipts, takeover and update messages, sweep, moving to a new seed, replacing the recoverer | Implemented and tested on the simulated chain (RC01 to RC11, SW01, SW03 to SW08, MG01 to MG08, KV06, FE09, PV03): the kit and the enrollment link, receipts and prepared receipts, the recoverer's fee address, the takeover message and the hand-over, both passes and the sweep, the move to a new seed and the replacement of the recoverer with every step stopped and repeated, and the backup of section 18.1 (`packages/enrollment`, `packages/app/src/recovery-flow.ts`, `packages/app/src/user-backup.ts`). The whole course ran through the XO engine on a local node and on chipnet: a wallet created and used, recovered to a new device after the waiting period, swept with a vault coin and an NFT, used again and closed, with every coin returned (SW02, `docs/runs/stage-5-chipnet.md`). The pages that show these steps to a user are not built yet. |
+| Backup records as in section 10 | Implemented and tested with stores in memory (BK01 to BK03, BK07 to BK09): signed records sealed on several stores, the rules for records of an earlier seed, what a reader says when it cannot rely on what it was given, and the copy into a new archive after a change of seed (`packages/archive`). The records that applications bring (BK04 to BK06, BK10) are not built yet. |
+| The wallet's templates | Implemented (`packages/app/src/templates.ts`) and accepted by the XO validator. The controller template and the two address templates are final; a test fixes their identifiers. Every action ran through the unmodified engine on a local node, with the engine's keys and addresses equal to the ones this project's code derives and every transaction of the size worked out beforehand (`docs/runs/stage-3-local-node.md`). The same actions ran on chipnet, where the engine needed a local fix for its header check and was given one server (`docs/runs/stage-5-chipnet.md`). Loading the run's invitations in XO's debugging tool is still to be tried. |
 | Application templates with wallet-bound outputs; recovery declaration | Proposed |
 | Savings Jar with a key NFT | Proposed |
 | ParyonUSD template and front end | Proposed; contracts read, nothing run |
