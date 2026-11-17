@@ -1,8 +1,8 @@
 # Grandma's Wallet — Implementation Plan
 
-**Design:** [docs/design.html](docs/design.html) · **Target:** BCH Blaze 2026, "Build with XO" bounty, and use beyond it
+**Design:** [Architecture proposal v0.2](Grandmas_Wallet_Architecture_Proposal_v0.2.md), with an illustrated overview in [docs/design.html](docs/design.html) · **Target:** BCH Blaze 2026, "Build with XO" bounty, and use beyond it
 
-This plan gives the order of work and what must be true before each stage counts as done. It gives no dates. Section names in *italics* refer to sections of the design page.
+This plan gives the order of work and what must be true before each stage counts as done. It gives no dates. Section names in *italics* refer to sections of the overview page. The proposal's acceptance tests (its section 21) are the detailed form of the exit criteria below; where a stage's exit criteria and those tests differ, the tests are the more specific.
 
 ## Rules that hold throughout
 
