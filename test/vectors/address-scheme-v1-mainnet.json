@@ -1,0 +1,172 @@
+{
+ "description": "Test vectors of the address scheme: from twelve words, a network, the numbers of the templates and an identity to keys, secrets, tags and addresses. The template numbers are examples; a wallet uses those of its templates.",
+ "addressSchemeVersion": 1,
+ "words": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+ "network": "mainnet",
+ "templateNumbers": {
+  "controller": 11,
+  "givenOut": 22,
+  "change": 33,
+  "standardWallet": 44
+ },
+ "identity": "4111cd75889c049062892a4e3907b20a0ffe758d9bd95313e15fd5349e82507a",
+ "controllerPublicKey": "02fba96f0ce70325bbf35139ad6e50ce20db177e482e3866f4eae8ffaf45bf6d2a",
+ "fundingPublicKey": "03dc964748407ffe236598874972b377736c359a3311d1cbe2368396dd9fbdd048",
+ "viewingKey": {
+  "givenOut": "xpub6DP3j3Ab9bbYyfpUp8nbtpewaeBcomW6wHRpHQaA2EMkTap3rRsg5HB6q3qrZwkyA7Cj8FU6gA7BGC5JPUF4KxDVNW4zeKFHNi7d8sZ7fGj",
+  "change": "xpub6DT76BgSxStVEHGEJaX9sJpHCwBzuG4Bso73YrxvsEN8NZ9889QrxYXqicoHabidKHKixjZ1kGJ5Sfzt5xAYcsih5XBPjHQxZsfGSPkbui5",
+  "blindingSeed": "186c1befc4cc76416248c546b49bd3d881bab59f4851544f14d1d7b3b8298a78"
+ },
+ "addresses": [
+  {
+   "kind": 0,
+   "number": 0,
+   "path": "m/2415'/22'/0'/0",
+   "publicKey": "03311686718a8115fed99f0098f909ac6073f4f853997841fa57307661cc6de8d3",
+   "keyHash": "e05205d666eb6e9ba46b17262a4040bb469ded5e",
+   "secret": "54dbe1aa625ac9311b98f9b043c21c6605fc158bfbd642df912551d6920231e0",
+   "tag": "372fba84a9377ff8a2e61a294b94251b5b710641e57a1b949be357be19dd56e5",
+   "lockingBytecode": "aa206970e2374d03c8619b014ad13d37150903895c13e47408fa6b6cbca40d18d67e87",
+   "address": "bitcoincash:pd5hpc3hf5puscvmq99dz0fhz5ys8z2uz0j8gz86ddktefqdrrt8urad9s5vf"
+  },
+  {
+   "kind": 0,
+   "number": 1,
+   "path": "m/2415'/22'/0'/1",
+   "publicKey": "03b77e438ce665439eaca0ceb326765df187a447701a72e7c17f4baf4809844f47",
+   "keyHash": "f8103738b10d58910585375cd7cd71a1e832748f",
+   "secret": "119c1f6421720a82866b2c5e0469c254fd84c3180e1c056c52206b8d694d06b3",
+   "tag": "e53096896b8647e376a1027484eab828b7c33e48905f9162d53ca16404d84cb1",
+   "lockingBytecode": "aa20b8da298cddf5c1f6fb2c73fcfcaa10e8a8ed7c92653e0bae1dd492f1959ef87c87",
+   "address": "bitcoincash:pwud52vvmh6urahm93elel92zr523mtujfjnuzawrh2f9uv4nmu8ca3nq9m6r"
+  },
+  {
+   "kind": 0,
+   "number": 2,
+   "path": "m/2415'/22'/0'/2",
+   "publicKey": "025ea9a6c37de49150e4b9e81010b24c1f4b542772d0f05d2ba44863a7d795430c",
+   "keyHash": "b49f31eaf71067d80167b5a310f163f2cad56bff",
+   "secret": "259d2c3c007cc01980c1a1dc00331399d26c2819c350626690a2d510c62c31be",
+   "tag": "117662f938ce5835ab0461097fab90dd181aeb082a2dfe7ad6beb545f694a7dd",
+   "lockingBytecode": "aa20a2bf4fac9f89c640058efd8e6f90c282f51e2c7d574d7f6c982bab41a948c0f487",
+   "address": "bitcoincash:pw3t7navn7yuvsq93m7cumusc2p0283v04t56lmvnq46ksdffrq0gw0pkla67"
+  },
+  {
+   "kind": 0,
+   "number": 19,
+   "path": "m/2415'/22'/0'/19",
+   "publicKey": "030df226006735a78d1ae7f3cbe20bb1eeb07e5678ab6b5919dfd694236f0a4d17",
+   "keyHash": "265d7d03528dd42c69ee0644983d6e0215c1ffac",
+   "secret": "41b2a7b1ec6c5448adcc7958811256549c8fea8ba56a0f4c10f1a482810787a1",
+   "tag": "ed8ec689f18261aedcecced536c106ad676cd77f74080c8c1e80c0b02a5ba785",
+   "lockingBytecode": "aa2039126969843bdc42dc6f773725e88f0a7b05fe5cb57b7682462239f7a8f792de87",
+   "address": "bitcoincash:pvu3y6tfssaacskudamnwf0g3u98kp07tj6hka5zgc3rnaag77fduqjhfxca9"
+  },
+  {
+   "kind": 0,
+   "number": 999,
+   "path": "m/2415'/22'/0'/999",
+   "publicKey": "03dee289e649f0654dac4c43d4d83194679be2c2a442fca6b558d34941e7125477",
+   "keyHash": "e92bdbccdb4f1f25a2c750a3790f3164eb32a781",
+   "secret": "12199ffe8c8db1c4267e1a62db75f51d3a57d380ec98c3bdd813dae95f7dcdd9",
+   "tag": "989daf24b0f9a11e7c7c01d2720911809827a79cb95bb66faf15efa9160f383b",
+   "lockingBytecode": "aa209a0041f478f33b0fcd5b258e28aa805a551f46aed14e158069b7f8279288d66687",
+   "address": "bitcoincash:pwdqqs050renkr7dtvjcu292spd9286x4mg5u9vqdxmlsfuj3rtxvuepku300"
+  },
+  {
+   "kind": 1,
+   "number": 0,
+   "path": "m/2415'/33'/0'/0",
+   "publicKey": "03aba89d4a4d5dee0ec005e7b3d7fea320905bfa2504505a3fb6caf71d7748a56b",
+   "keyHash": "fea7729f0a768b5fbfef62a928c769c78a7fd5c1",
+   "secret": "66f242d27898a787b80cb2968204b9b7476a09f7cf0708cb649868bea77c649a",
+   "tag": "21aaddd90386754d321a5d2b9e950edd0cb98339dc0b3b598d945ac6fe35b870",
+   "lockingBytecode": "aa20f688b35680a40929e8ddbf15b5eb48e55d6ad21aed3c649735aaf817c43b7c6b87",
+   "address": "bitcoincash:p0mg3v6kszjqj20gmkl3td0tfrj466kjrtknceyhxk40s97y8d7xkpzgw2ga4"
+  },
+  {
+   "kind": 1,
+   "number": 1,
+   "path": "m/2415'/33'/0'/1",
+   "publicKey": "02902d84f87e3fd289a0d73bc95f622546aa2d3c3c0d27bccc69043329c59fa603",
+   "keyHash": "d45f24878a9845d0c9d7931b8c6a592d5660fe58",
+   "secret": "4b29c89772268b7962568f26235bd5bd39042af300740064ce95ac2bd665fb68",
+   "tag": "a1abb509ea5159704de03db1a1d41f668b0034a4b25f759c6562e9fd77d79948",
+   "lockingBytecode": "aa2082f4ab599cbcdfafd8a947059a902e62d7e3f8b67278d309de0a57fdc2b0506e87",
+   "address": "bitcoincash:pwp0f26enj7dlt7c49rstx5s9e3d0clckee835cfmc990lwzkpgxuvg6lyg04"
+  },
+  {
+   "kind": 1,
+   "number": 2,
+   "path": "m/2415'/33'/0'/2",
+   "publicKey": "03b239c8fc3de41b748ec9b0f73f36a98c69d3c3db08f41c5ba081d983fdb6d5be",
+   "keyHash": "f340c01b0bc10aac420531b5576b328076aa17db",
+   "secret": "006a415fda612616be8a2644e3790625088cd99cfe5a287a07a9579072dceb07",
+   "tag": "e2e8653275124ed845761fa34eeb3c9c94e109e05a3bd17e9857e70370675464",
+   "lockingBytecode": "aa20c7c9c740d15730e753aad91f58f4f5b26e2e2458761316cc79770fdc9b0b4ba887",
+   "address": "bitcoincash:p0run36q69tnpe6n4tv37k857kexut3ytpmpx9kv09mslhympd96sf2zk9t3w"
+  },
+  {
+   "kind": 1,
+   "number": 19,
+   "path": "m/2415'/33'/0'/19",
+   "publicKey": "0236b126b1cf5477a08ea5fab825e728b4f2cb5a09fdfd3606ebc5dde32ce88b6c",
+   "keyHash": "ffb5eb65d6d986b59e69df0d0ec6f8324b804522",
+   "secret": "7ca4779d6a570319000d60feeacee9f7e09a674cbad4bc4f17138e7c8d53b510",
+   "tag": "990b83c8b30bfe89cf186a9a0cb1fb2872f4cb666efa4dd12e866df53000a533",
+   "lockingBytecode": "aa20d0387f2fa820c90ff13de9acbec87e5cb1e49c655aa6d05ea32df597fa49705287",
+   "address": "bitcoincash:p0grsle04qsvjrl38h56e0kg0ewtreyuv4d2d5z75vklt9l6f9c9ya7p3tvv3"
+  },
+  {
+   "kind": 1,
+   "number": 999,
+   "path": "m/2415'/33'/0'/999",
+   "publicKey": "03feea35baaf68e6a60cc2b062c744136ee89f5c8ad3aae343b0f217d7e0054a93",
+   "keyHash": "f9bf001374c8256812c0db8b2be11d8a62bf13d6",
+   "secret": "ca6ac23a730fc78f94ebe94d8859bebff16a62b3b1627906e008b56bac71eac5",
+   "tag": "d77c953dffc0a0e8b4b4bfac4e19125639742a0450a74d57c5cb5e9501130ce5",
+   "lockingBytecode": "aa2095fe14228cfb2978b5e3fca43c2cc41b4cbaace5e01f8fc69d7c435392c4984887",
+   "address": "bitcoincash:pw2lu9pz3najj794u072g0pvcsd5ew4vuhsplr7xn47yx5ujcjvysad8zfens"
+  },
+  {
+   "kind": 2,
+   "number": 0,
+   "secret": "e58aa0fea48ad4bafd958e3e88d8af2df1a49021dc9a4da8a631ff3d281d46d4",
+   "tag": "17fe3e23a22cef69b9855e158f4fa4c2f8160522018946f0590084602a83ad12",
+   "lockingBytecode": "aa206e13d68845c1be4164bf022b9998644b7e1574aa23d9fce7e11999cdad11b3fd87",
+   "address": "bitcoincash:pdhp845gghqmustyhupzhxvcv39hu9t54g3anl88uyvennddzxel6zae7tc6n"
+  },
+  {
+   "kind": 2,
+   "number": 1,
+   "secret": "967ae3a7ae51e7c41a5fc54201541682b7934cdb3ee63296ddc71bcf0437d030",
+   "tag": "daf6385db206b34b33c397ddf7e131ff543afaae84bf06169274774685d604eb",
+   "lockingBytecode": "aa20c4b699db65cda8c94b70c79af79e2a618df77d7ac348b0c22e880350cf74b17887",
+   "address": "bitcoincash:p0ztdxwmvhx63j2twrre4au79fscmama0tp53vxz96yqx5x0wjchsdf5ze4ft"
+  },
+  {
+   "kind": 2,
+   "number": 2,
+   "secret": "8f5baefb58a1df9b040a58f62790fc91754acdb9f9418ce14e088c48e0515a31",
+   "tag": "d49f73d46041043e39a650d97cc0ae3db5372d24db34f06c7c1ed6592b294759",
+   "lockingBytecode": "aa2000f558c20a53ab929b027fbc0bf859ac74c0c35d3d9d02d44b11bbbf8928d67a87",
+   "address": "bitcoincash:pvq02kxzpff6hy5mqflmczlctxk8fsxrt57e6qk5fvgmh0uf9rt858p09dxl0"
+  },
+  {
+   "kind": 2,
+   "number": 19,
+   "secret": "a084a459a965d4184e8886687a97db94a7cb92fbd7dbb1e290118c07a414112f",
+   "tag": "05d04aee217ba80f7775841c28e153eba11620a4d3dec876e78928742680d4c8",
+   "lockingBytecode": "aa20c7a2372a2d86138c6e1581ccf1555d3a4998c694584947e5196ff9cf6e239c5287",
+   "address": "bitcoincash:p0r6yde29krp8rrwzkqueu24t5aynxxxj3vyj3l9r9hlnnmwyww9y8dewuujq"
+  },
+  {
+   "kind": 2,
+   "number": 999,
+   "secret": "d08431a52c967a1aec94d905988d8bd904ceb1444e3014369e0f407ff7949d16",
+   "tag": "2e81969c80b725dc03d94c474a1b45cdc077aaf64bd7559b00be9502835c6a20",
+   "lockingBytecode": "aa205db28f0d5a5e4fbdf3cf986b181b1d6ee28502ddcf1edcab7ffd1ae64a8202ef87",
+   "address": "bitcoincash:pdwm9rcdtf0yl00ne7vxkxqmr4hw9pgzmh83ah9t0l734ej2sgpw7nl8sn285"
+  }
+ ]
+}

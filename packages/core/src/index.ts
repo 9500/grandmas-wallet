@@ -1,6 +1,8 @@
 export * from './addresses.js';
+export * from './allocation.js';
 export * from './builder.js';
 export * from './controller.js';
+export * from './discovery.js';
 export * from './genesis.js';
 export * from './protected.js';
 export * from './script.js';
@@ -8,3 +10,5 @@ export * from './state.js';
 export * from './transitions.js';
 export * from './xo-keys.js';
 export * from './history.js';
+export * from './keys.js';
+export * from './wallet-addresses.js';

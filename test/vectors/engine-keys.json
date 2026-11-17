@@ -1,0 +1,42 @@
+{
+ "description": "Public keys made by the XO engine 0.1.1-next.18029697917 for a known seed, on a test network. Made by spikes/xo-engine/26-engine-key-vectors.mjs.",
+ "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+ "network": "testnet",
+ "templates": [
+  {
+   "templateIdentifier": "cca243ad97a1890a759964366d898f31ff6a8e2cec67cf62feaec5815ad1f6ce",
+   "keys": [
+    {
+     "number": 0,
+     "publicKey": "0396f78704a31bd4dc077ccb3e0aedbaa8b0bb2bce6ee8c4bf12a8e81a1517a29a",
+     "keyHash": "e5b62980a212ebcea86890fce83b2c3c6b099dc3"
+    }
+   ]
+  },
+  {
+   "templateIdentifier": "e995a34800a456117fea961be7eea6082b41e58e5c888632b5990ea19146a0d8",
+   "keys": [
+    {
+     "number": 0,
+     "publicKey": "03960b4e5de95dcd54e6dd24c3ca98cee9532268dce8e3a4a2e89b0347fe68c0f0",
+     "keyHash": "4b3b6b96501d671677be672c8a190f7ffd4b9908"
+    },
+    {
+     "number": 1,
+     "publicKey": "02c913365e453508dac3d283413ca70217d648f645204b869faa2a360311733558",
+     "keyHash": "6bde7171ddd07a65b4128b10470dc4e39247016e"
+    },
+    {
+     "number": 2,
+     "publicKey": "03a609f940c8b60f009e22820eab377f3bc552f583ef55702fa9c58c6fe93840bf",
+     "keyHash": "c32391582eb0981739f291459fc8916eae287b72"
+    },
+    {
+     "number": 3,
+     "publicKey": "02b2b036c13018ed9a55d64d434dc3004ca0355968ef4424dcfc1d4f9bcce31f70",
+     "keyHash": "5badb9593880f4b1a784c3b4678c76b61ad72822"
+    }
+   ]
+  }
+ ]
+}

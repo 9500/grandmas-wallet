@@ -1,0 +1,172 @@
+{
+ "description": "Test vectors of the address scheme: from twelve words, a network, the numbers of the templates and an identity to keys, secrets, tags and addresses. The template numbers are examples; a wallet uses those of its templates.",
+ "addressSchemeVersion": 1,
+ "words": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+ "network": "testnet",
+ "templateNumbers": {
+  "controller": 11,
+  "givenOut": 22,
+  "change": 33,
+  "standardWallet": 44
+ },
+ "identity": "4111cd75889c049062892a4e3907b20a0ffe758d9bd95313e15fd5349e82507a",
+ "controllerPublicKey": "03969772e356273fe388a13797cedb28f763aa049fe140a9cbf6f816d50c56ac5f",
+ "fundingPublicKey": "02321fa1d6dccd70a1fc2e9c7e13ff4be2ba2136fa552d56e6da29bfaf93d0268d",
+ "viewingKey": {
+  "givenOut": "tpubDDjtnnHUnES6oa3Knc2DU1WpRzzm9A4vsPkwZUsPgiFQBkJkzVxgwLKs9J6Q9yauniD4XjSMTGrYyDp6WfJXXtpGb8dLvYSnDwsETwnxRvz",
+  "change": "tpubDDKQ695Jn6bZaVzLmxbyL1mfENRgBxBbzi8KbrPFp7vGmMqwZX1vuyTt9SyhoAeRfKCvUCA4QkWhW2xC81i9uuH7wj6kzWUfifvAHm5MrG4",
+  "blindingSeed": "f8e8806d9c0be1226f8afb29518fec01a1e94b93af1bc4055cdcc85f8904f378"
+ },
+ "addresses": [
+  {
+   "kind": 0,
+   "number": 0,
+   "path": "m/42415'/22'/0'/0",
+   "publicKey": "037f58f624f6faf58105c80b4b51a6e8d2459ff392cabbdcbd8ae99693f3f3696b",
+   "keyHash": "0d44aa47372cfe73c776619eecdbc0501153c878",
+   "secret": "4f8e2d8db790b6e43d3097a54a26c479b591a9044b1f5b80932e28024eaff60e",
+   "tag": "bcbb84ce5dc93558dec2d77cae3d1ef57ed0c334d6938ce7baf8a18acf5f79d0",
+   "lockingBytecode": "aa207e10697bfa58d4af7f5e0ceffd0687fea0f9c4c5bc696f29dba9e02df543e0b187",
+   "address": "bchtest:pdlpq6tmlfvdftmltcxwllgxsll2p7wyck7xjmefmw57qt04g0stz0np6k6ma"
+  },
+  {
+   "kind": 0,
+   "number": 1,
+   "path": "m/42415'/22'/0'/1",
+   "publicKey": "0259d9b78ffeb9d2a0e3db6fe8c6541d69d094fd1f806fcf6414555981f9bd548c",
+   "keyHash": "7ddf3a41b2c2e6e736686a1453c132a9c17741d4",
+   "secret": "93833e4abfb9c4baa3863ff5ebc0b065c751b0a84c39e08d8d46642b8662063e",
+   "tag": "cd3ea1279f1d5ce67c156dfeef2b078206c2666d2378c18d911f2a96be4e7156",
+   "lockingBytecode": "aa20470a1bed6101ec278adbd64424fa415e5099e97de168d93e459479a85f359d7987",
+   "address": "bchtest:pdrs5xldvyq7cfu2m0tygf86g909px0f0hsk3kf7gk28n2zlxkwhj6wa0vw3f"
+  },
+  {
+   "kind": 0,
+   "number": 2,
+   "path": "m/42415'/22'/0'/2",
+   "publicKey": "0320ebe957f629f49a5fac22fa04a8e07f9dc121d72c7a9a61dd719095944575bd",
+   "keyHash": "eaf7dcfdc15c13de1d01531ba348a9eea2951c67",
+   "secret": "c16d029e7347e9bcb698bd3dfe22778982ec07a3b83e353ca45ebea9194cbf04",
+   "tag": "db5f7a198364cc5e18ff36c5ec775326c2fd10e761d64fa461483039437f7c99",
+   "lockingBytecode": "aa20c18df5bc5607f15439f6173b693d8d21a666b3d8b9bdcdd24c1361b6273ef85587",
+   "address": "bchtest:p0qcmadu2crlz4pe7ctnk6fa35s6ve4nmzummnwjfsfkrd388mu92qw6uasv8"
+  },
+  {
+   "kind": 0,
+   "number": 19,
+   "path": "m/42415'/22'/0'/19",
+   "publicKey": "036ae075dff8b61239d201f733174ec8abcc3bc83a00a6594911d976b2a3369aa8",
+   "keyHash": "be9a2a036220e3b418dee5e8ee72220dcd252bfc",
+   "secret": "8bcde0d317842be31e8ec3900b9cba7b3612ff6c5153a5b42b3dab17166fdf8c",
+   "tag": "bcb8e1304a448e25e7459f7108c7656c23a34829a4fbdd015d8c76bee7ee413c",
+   "lockingBytecode": "aa20169021f36ddfbeaeae21ba99adafc09fd5d8b3ce0c28ad08a5cd36caa94145ef87",
+   "address": "bchtest:pvtfqg0ndh0mat4wyxafntd0cz0atk9necxz3tgg5hxndj4fg9z77wqg06rd7"
+  },
+  {
+   "kind": 0,
+   "number": 999,
+   "path": "m/42415'/22'/0'/999",
+   "publicKey": "02f870fe2f892c2809e8157b5fea090b18595faa9b382a8177da77df0e27f3e881",
+   "keyHash": "c025a1aea2eea004544239ba4019f3477c00ccf0",
+   "secret": "f42af316c1e1274e569339a3a5052d88a0e405827ecc160901df1823f768d556",
+   "tag": "4feaf40440dd470a78503efbef1b6aa62390e71b339b62dc636edba4c2f31bc6",
+   "lockingBytecode": "aa207d20687f7f6da0b9d7b7f8fb439a8909c5961c0cca946bf7c4ac8145fbf047af87",
+   "address": "bchtest:pd7jq6rl0ak6pwwhklu0ksu63yyut9supn9fg6lhcjkgz30m7pr67sam2h30n"
+  },
+  {
+   "kind": 1,
+   "number": 0,
+   "path": "m/42415'/33'/0'/0",
+   "publicKey": "02e3ac6693383b801731782344a9318c2663c810ac00ec15384150544ad59a9d47",
+   "keyHash": "b9a851de4abbffae7eab67106ad9b760fc4bcf4d",
+   "secret": "a74778df538b6bfdfce5aa1eff555c49eb8694331263b35a4edec00cb591fa8b",
+   "tag": "2117d5fd7ea63572340233d705197c7d268082243c505345b80d2b6addb92029",
+   "lockingBytecode": "aa20fad9cf1e5e88c1d92fedd935131be536392510b92ebef081ca86b21d1950f28e87",
+   "address": "bchtest:p0adnnc7t6yvrkf0ahvn2ycmu5mrjfgshyhtauype2rty8ge2reguvx5u98k3"
+  },
+  {
+   "kind": 1,
+   "number": 1,
+   "path": "m/42415'/33'/0'/1",
+   "publicKey": "0253675675001308d76860ba02ebc12d9e6a3578122fafd402da0ef571e04e6389",
+   "keyHash": "8fe1c579f883943552d6c5dc589e48340589dece",
+   "secret": "5c3f3b74e8bbad8bea2ad4bb8c4057f0aafb4bb0195d391b31b9a50aed7a6697",
+   "tag": "a55ffc523b5533b192be580fed43d75cc501cf475fb394bfaf770b3fead7a601",
+   "lockingBytecode": "aa208f04665dc085a54d3852229713d54ee167e25ec1d7e40913091c3d4c748c7fd787",
+   "address": "bchtest:pw8sgejaczz62nfc2g3fwy74fmsk0cj7c8t7gzgnpywr6nr533law9n84k9j5"
+  },
+  {
+   "kind": 1,
+   "number": 2,
+   "path": "m/42415'/33'/0'/2",
+   "publicKey": "02965a5b18e792e3d4b14c8d4727ce847dc50be15dfaf96d51daf4b61951c8c8eb",
+   "keyHash": "0993cc3e2faddb02cba1019fa5df42177fb15465",
+   "secret": "ca4dc5093c701b564001ab407b8537387fc6269c67b588b444d21306f7c3a9ef",
+   "tag": "02c83327e3c4f5eaae0ad4c0261b145d3a587cc9b026e97c08f248caf64320c5",
+   "lockingBytecode": "aa20784abde0558927a962d5b41181516e80b329b6f2eec13beefba8b8715e69fe4f87",
+   "address": "bchtest:pduy400q2kyj02tz6k6prq23d6qtx2dk7thvzwlwlw5tsu27d8ly79qhnr0c5"
+  },
+  {
+   "kind": 1,
+   "number": 19,
+   "path": "m/42415'/33'/0'/19",
+   "publicKey": "03247d364a5ce8e9e87ad7dc554234856eee74e6b3a4d58d04319bf681e64b9112",
+   "keyHash": "1df20b52b62898560db483289c1669b393a1abd3",
+   "secret": "522494b2727a9ebdd03bbd5f4cb1af7e91ab3ea1d7c835212145bc3f2b2c2fe0",
+   "tag": "20f0e37deb7258cfe0c024fcc80190c649d1d77b31625a4cb237209b7bcc8e5d",
+   "lockingBytecode": "aa207e1e88cac73e53746994a34763bbd757226075142b526623d76c671a304de99287",
+   "address": "bchtest:pdlpazx2cul9xarfjj35wcam6atjycr4zs44ye3r6akxwx3sfh5eym4n8fh29"
+  },
+  {
+   "kind": 1,
+   "number": 999,
+   "path": "m/42415'/33'/0'/999",
+   "publicKey": "02d9afab268746e9129c526dd5a9e3fc25d1f9896fc6b89c2fb829dbadff2bb59e",
+   "keyHash": "d6370f8017e1669917dcbc49486aed937c91cdb5",
+   "secret": "0751bc71ddabc3685d16f6e7ae3e7a7643f6bc63dd5cef36f6dfdd1c5d8ffcce",
+   "tag": "203f202c1232e96a37b9dc470aea99eccab9349934a095e9009b464cf9be213b",
+   "lockingBytecode": "aa205b3140872ec95c91e4bab3aec3129c8c494f31b985622068605cb136855baa8a87",
+   "address": "bchtest:pddnzsy89my4ey0yh2e6ascjnjxyjne3hxzkygrgvpwtzd59tw4g5sqzxaxeu"
+  },
+  {
+   "kind": 2,
+   "number": 0,
+   "secret": "23e6e8b8dd5a4bd4396643085814e3afc384e4e814747a17a18f35c70926dee9",
+   "tag": "66d233a61821eb1866be94c3bc9dc9f4717af390d40b8625a971e8b389a2b690",
+   "lockingBytecode": "aa20d9fda042547ed4858df514c08fb506cae0fb8cab1d30a204210faa9bbc98670287",
+   "address": "bchtest:p0vlmgzz23ldfpvd752vpra4qm9wp7uv4vwnpgsyyy864xaunpnsys53zzsn0"
+  },
+  {
+   "kind": 2,
+   "number": 1,
+   "secret": "e6563a98741e7dd869123e540121e81941f73b34dffa0f4129ed70aef6ff0219",
+   "tag": "360f54e019915ffafd1b06338487fc22f6787d7fedd7c83fcad512e2d16dff6e",
+   "lockingBytecode": "aa20fd95470cd136b7d695b480c96503bc8b22136652d127d4d7f7d3c73bb23e116987",
+   "address": "bchtest:p07e23cv6ymt0454kjqvjegrhj9jyymx2tgj04xh7lfuwwaj8cgkjk20ktyzy"
+  },
+  {
+   "kind": 2,
+   "number": 2,
+   "secret": "f43ef5333e0f8cf3f587327d21df1cbc6affe461e2bec3025999f69d452a3545",
+   "tag": "c2424e4fdfd1ca5277333cca70ec801090168feaae638945f14db2e8f2337d9f",
+   "lockingBytecode": "aa2094907fdf3d91336ed137a3bc1ffbfc5ca3c89b1d11c741cfd119a4ed11c9d8e487",
+   "address": "bchtest:pw2fql7l8kgnxmk3x73mc8lml3w28jymr5guwsw06yv6fmg3e8vwgc9gdwhrx"
+  },
+  {
+   "kind": 2,
+   "number": 19,
+   "secret": "dd28b2378d65cd5aa6cf52727b12dfc191d26e0a7050fa316bf561988c57928d",
+   "tag": "0ea9133c74f22471c3f21bddcda410927779ad01112d252c0a987609b3f7d711",
+   "lockingBytecode": "aa2068f0b5ab0969248e4028f87615d4183fc3e738bfa337cbc52c21a4dcd7d801fa87",
+   "address": "bchtest:pd50pddtp95jfrjq9ru8v9w5rqlu8eech73n0j799ss6fhxhmqql57j6rjlc2"
+  },
+  {
+   "kind": 2,
+   "number": 999,
+   "secret": "36015bf161ef7316929a8362ae1376165b6e1264978f35c5f5b7576abf0eb97e",
+   "tag": "8d01b69ff413485d844273e29b5d23c48e0dd8e2c88b64f894d94497a66b2160",
+   "lockingBytecode": "aa20ecd8f4cf0e302a97b1253363a65a6b27c7cb0ef014103f66fbe949e50c12fbba87",
+   "address": "bchtest:p0kd3ax0pccz49a3y5ek8fj6dvnu0jcw7q2pq0mxl055negvztam545us6vsc"
+  }
+ ]
+}
