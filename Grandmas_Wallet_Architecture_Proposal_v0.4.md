@@ -813,7 +813,8 @@ From the engine's documentation and this project's trials (`docs/xo-spike.md` an
 - An account can hold only one role that has a follow-up action. Owner and recoverer are separate accounts.
 - The validator rejects properties it does not know, at every level.
 - Parties to one invitation must have imported the identical template. An invitation is for one template; it accepts inputs that the account holds under other templates, unlocked as their own scripts say, and outputs to scripts of other templates.
-- A template's identifier depends on the order of its fields, so a template is kept as the text it arrived in.
+- A template's identifier depends on the order of its fields, so a template is kept as the text it arrived in. The identifier the engine uses is the hash of the template as its parser writes it out, which differs from the hash of the text it was given.
+- What the engine hears about a transaction before its header check has reached the tip is dropped and not asked for again. An account waits for the header check before it makes scripts known.
 - The engine cannot produce a valid `0x61` signature for a transaction with more than one input.
 - A template variable of type `timestamp` is read back as text when unlocking later, so it cannot be used in a script that is unlocked later.
 - An output's locking script can be given by a variable that holds locking bytecode; the stock payment template does this for its recipient.
@@ -1232,7 +1233,7 @@ The implementation uses XO's TypeScript packages, libauth for keys, transactions
 | Creating a wallet as in section 7.9 | Proposed |
 | Recovery kit, receipts, takeover and update messages, sweep, moving to a new seed, replacing the recoverer | Proposed |
 | Backup records as in section 10 | Proposed |
-| The wallet's templates | Proposed. Trial templates ran creation, addresses, a payment by key, a sweep and a takeover by a new seed through the engine on a local node. |
+| The wallet's templates | Drafted (`packages/app/src/templates.ts`) and accepted by the XO validator. With them a wallet's whole life ran through the unmodified engine on a local node: creation with an allowance, a payment with change, a request, a cancellation, a completed recovery, a takeover by a new seed, a sweep, and sending everything with a closing. The engine's keys and addresses equalled the ones this project's code derives, and every transaction had the size worked out beforehand. They become final in stage 3. |
 | Application templates with wallet-bound outputs; recovery declaration | Proposed |
 | Savings Jar with a key NFT | Proposed |
 | ParyonUSD template and front end | Proposed; contracts read, nothing run |
