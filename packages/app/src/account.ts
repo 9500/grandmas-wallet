@@ -1,15 +1,20 @@
-import { type Output, binToHex, decodeTransactionBch, hash160, hexToBin } from '@bitauth/libauth';
+import { binToHex, decodeTransactionBch, hash160, hexToBin } from '@bitauth/libauth';
 import {
+  type AccountCoin,
   type KeyedAddressKind,
+  type PreparedTransaction,
   type RecoverableWalletAddress,
-  type Utxo,
+  type Role,
+  type TransactionRequest,
   type VaultWalletAddress,
+  type WalletBackend,
+  type WalletTemplateName,
   ADDRESS_KIND,
   checkBeforeSending,
 } from '@grandmas-wallet/core';
 import type { Engine } from '@xo-cash/engine';
 
-import { type WalletTemplateName, WALLET_TEMPLATES } from './templates.js';
+import { WALLET_TEMPLATES } from './templates.js';
 
 /**
  * One account of the XO engine with the wallet's templates: the owner's device, or the recoverer's.
@@ -21,43 +26,6 @@ import { type WalletTemplateName, WALLET_TEMPLATES } from './templates.js';
  *
  * Only one engine can be open in a process or a page.
  */
-
-export type Role = 'owner' | 'recoverer';
-
-/** A coin the account follows. */
-export interface AccountCoin {
-  utxo: Utxo;
-  /** Which of the wallet's templates the coin's script belongs to, or the identifier of another template. */
-  template: WalletTemplateName | string;
-  /** The height of the block that holds it; 0 or less while unconfirmed. */
-  height: number;
-}
-
-/** What a transaction is to be, as the wallet's code decides it. */
-export interface TransactionRequest {
-  /** The template whose action the transaction is. Inputs and outputs of the other templates can be part of it. */
-  template: WalletTemplateName;
-  action: string;
-  role: Role;
-  /** Values for the template's variables: bytes as hex, amounts as whole numbers. */
-  variables?: Record<string, string | number | bigint>;
-  /**
-   * The coins the transaction spends, in order. A coin of the action's own template names the template
-   * input it stands for; a coin of another template is unlocked the way its own script says.
-   */
-  inputs: { coin: AccountCoin; inputIdentifier?: string }[];
-  /** The outputs, in order: an output of the template by name, or any output given whole. */
-  outputs: ({ outputIdentifier: string } | Output)[];
-}
-
-/** A transaction that is signed and checked, and not yet sent. */
-export interface PreparedTransaction {
-  invitationIdentifier: string;
-  transactionId: string;
-  transactionHex: string;
-  bytes: number;
-  feeSatoshis: bigint;
-}
 
 interface IntentLike {
   action: string;
@@ -87,7 +55,7 @@ const KEY_OF_ROLE: Record<Role, { secret: string; action: string }> = {
 const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const hex = binToHex;
 
-export class Account {
+export class Account implements WalletBackend {
   /** The invitation the controller key was made for: the handle by which the engine finds that key again. */
   private keyInvitation: Partial<Record<Role, string>> = {};
 
@@ -200,6 +168,10 @@ export class Account {
     const before = (await this.secretsOf(template, 'addressKey')).length;
     const lockingBytecode = hexToBin(await this.withPolicy('address', template, () => this.engine.generateLockingBytecodeFromDefaultPolicy('address', { tag: hex(tag) })));
     return { lockingBytecode, number: before };
+  }
+
+  async addressCount(kind: KeyedAddressKind): Promise<number> {
+    return (await this.secretsOf(kind === ADDRESS_KIND.givenOut ? 'givenOut' : 'change', 'addressKey')).length;
   }
 
   /** Make an address of an earlier seed known: this account follows it and can sweep it, and cannot spend it by key. */

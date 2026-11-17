@@ -1,7 +1,7 @@
 import { controllerBytecodeHex } from '@grandmas-wallet/contracts/controller';
 import { recoverableAddressBytecodeHex } from '@grandmas-wallet/contracts/recoverableAddress';
 import { vaultAddressBytecodeHex } from '@grandmas-wallet/contracts/vaultAddress';
-import { type TemplateNumbers, xoTemplateIndex } from '@grandmas-wallet/core';
+import { type TemplateNumbers, type WalletTemplateName, xoTemplateIndex } from '@grandmas-wallet/core';
 import { p2pkhTemplate } from '@xo-cash/templates';
 import type { XOTemplate } from '@xo-cash/types';
 import { generateTemplateIdentifier, parseTemplate } from '@xo-cash/utils';
@@ -293,7 +293,7 @@ export const walletActionsTemplate = {
 } as const satisfies Record<string, unknown>;
 
 /** The templates the wallet brings to an account, by the name the wallet's code uses for each. */
-export const WALLET_TEMPLATES = {
+export const WALLET_TEMPLATES: Record<WalletTemplateName, XOTemplate> = {
   controller: controllerTemplate as unknown as XOTemplate,
   givenOut: givenOutTemplate as unknown as XOTemplate,
   change: changeTemplate as unknown as XOTemplate,
@@ -302,7 +302,7 @@ export const WALLET_TEMPLATES = {
   coins: p2pkhTemplate as unknown as XOTemplate,
 };
 
-export type WalletTemplateName = keyof typeof WALLET_TEMPLATES;
+export type { WalletTemplateName };
 
 /**
  * The identifier the engine gives a template: the hash of the template as the engine's parser writes it
