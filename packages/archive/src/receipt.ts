@@ -1,5 +1,5 @@
 import { binToHex, hash160, hexToBin, sha256, utf8ToBin } from '@bitauth/libauth';
-import { type ControllerHistory, type KeyPair, type XoNetwork, decodeControllerState, encodeControllerState } from '@grandmas-wallet/core';
+import { type ControllerHistory, type ControllerState, type KeyPair, type XoNetwork, decodeControllerState, encodeControllerState } from '@grandmas-wallet/core';
 
 import { type JsonValue, canonicalJson } from './canonical.js';
 import { type SignedMessage, signMessage, verifyMessage } from './signing.js';
@@ -190,6 +190,45 @@ export const recoveryStatus = (receipts: SignedMessage[], sent: Sent, history: C
       continue;
     }
     const reason = whyNot(receipt, sent, history);
+    if (reason === undefined) return { on: true, receipt, reasons: [] };
+    reasons.push(`A receipt does not count: ${reason}.`);
+  }
+  return { on: false, reasons: reasons.length > 0 ? reasons : ['The recoverer has left no receipt.'] };
+};
+
+/**
+ * Whether the recoverer's prepared receipt is in place for a change the owner is about to make (section
+ * 9.7): it answers the message that announced the change, names the viewing-key record and the recovery
+ * key that are to apply, and was prepared against the controller's present output for exactly the state the
+ * change produces. The owner signs the change only after this; if the controller has moved since, the
+ * receipt has to be prepared again.
+ *
+ * @param sent - what was sent about the change: the message, the record and the keys that are to apply after it
+ * @param intended - the state the change is to produce
+ */
+export const preparedReceipt = (receipts: SignedMessage[], sent: Sent, history: ControllerHistory, intended: ControllerState, network: XoNetwork): RecoveryStatus => {
+  const reasons: string[] = [];
+  const state = hex(encodeControllerState(intended));
+  const { utxo } = history.current;
+  for (const signed of receipts) {
+    let receipt: Receipt;
+    try {
+      receipt = readReceipt(signed, network);
+    } catch (error) {
+      reasons.push(`A receipt does not count: ${(error as Error).message}`);
+      continue;
+    }
+    const reason = ((): string | undefined => {
+      if (receipt.identity !== hex(history.genesis.identity)) return 'it is for another wallet';
+      if (receipt.answers !== sent.messageHash) return 'it answers another message than the one that announced this change';
+      if (receipt.recoveryKeyHash !== sent.recoveryKeyHash || hex(intended.recovererKeyHash) !== sent.recoveryKeyHash) return 'it is not signed with the recovery key that is to apply';
+      if (hex(intended.ownerKeyHash) !== sent.ownerKeyHash) return 'the change does not install the owner key that was announced';
+      if (!receipt.viewingKeyRecords.includes(sent.viewingKeyRecordHash)) return 'it does not name the viewing-key record that is to apply';
+      if (receipt.prepared === undefined) return 'it was not prepared for a change';
+      if (receipt.prepared.controllerOutput.transactionId !== hex(utxo.transactionHash) || receipt.prepared.controllerOutput.index !== utxo.index) return 'it was prepared against another controller output than the present one';
+      if (receipt.prepared.state !== state) return 'it was prepared for other settings';
+      return undefined;
+    })();
     if (reason === undefined) return { on: true, receipt, reasons: [] };
     reasons.push(`A receipt does not count: ${reason}.`);
   }

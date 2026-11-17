@@ -202,6 +202,17 @@ export const saveTakeover = (kept: KeptKit, takeover: ReadTakeover): KeptKit => 
 };
 
 /**
+ * Take a saved takeover into the kit once its key has owned the wallet. A device may be lost between the
+ * completion and the hand-over; its viewing-key record and archive must not be dropped when the next
+ * takeover message arrives. One whose key never owned the wallet is left as it is, to be replaced.
+ */
+export const settlePending = (kept: KeptKit, history: ControllerHistory): KeptKit => {
+  const { pending, ...rest } = kept;
+  if (pending === undefined || !history.owners.some((period) => hex(period.ownerKeyHash) === pending.proposedKeyHash)) return kept;
+  return { ...rest, viewingKeyRecords: [...kept.viewingKeyRecords, pending.viewingKeyRecord], archives: [...kept.archives, pending.archive], answered: pending.messageHash };
+};
+
+/**
  * Hand over to the new device after completion (section 11.1, step 6): the identity, the transaction that
  * created it, the viewing-key record of every earlier seed, the access to earlier archives, and the
  * recoverer's receipt for the kit as it now stands.

@@ -10,6 +10,7 @@
   "dependencies": {
     "@bitauth/libauth": "3.1.0-next.8",
     "@grandmas-wallet/archive": "0.0.0",
+    "@grandmas-wallet/core": "0.0.0",
     "@hpke/chacha20poly1305": "1.8.1",
     "@hpke/core": "1.10.1",
     "@hpke/dhkem-x25519": "1.8.1"
