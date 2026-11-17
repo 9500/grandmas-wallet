@@ -66,13 +66,13 @@ describe('watching for recovery requests', () => {
     expect(seen).toHaveLength(2);
   });
 
-  it('still sees the request when one of the servers leaves it out', async () => {
+  it('RC08: a request to an unknown key raises the alarm when only one of the servers shows it', async () => {
     const { wallet, first, monitor } = setup();
     first.hidden.add(wallet.requestRecovery(recoverer, stranger.keyHash));
     expect((await monitor.check())?.kind).toBe('recovery-requested');
   });
 
-  it('goes quiet again when the request drops out of the chain', async () => {
+  it('RC09: when a request drops out of the chain, the status is rebuilt from the chain and is quiet again', async () => {
     const { wallet, first, second, monitor, seen } = setup();
     const requestedIn = wallet.requestRecovery(recoverer, stranger.keyHash);
     expect((await monitor.check())?.kind).toBe('recovery-requested');
@@ -92,7 +92,7 @@ describe('watching for recovery requests', () => {
     expect(wallet.controller().state.status).toBe('active');
   });
 
-  it('cancels again when its cancellation does not stay in the chain', async () => {
+  it('RC09: when its cancellation does not stay in the chain, the request is seen again and cancelled again', async () => {
     const { wallet, first, second, monitor, cancellations, clock } = setup(true);
     wallet.requestRecovery(recoverer, stranger.keyHash);
     await monitor.check();
@@ -118,7 +118,7 @@ describe('watching for recovery requests', () => {
     expect(wallet.controller().state.status).toBe('active');
   });
 
-  it('does not treat a request to this device\'s own key as an alarm', async () => {
+  it('RC08: a request to this device\'s own key is no alarm', async () => {
     const { chain, wallet } = setup();
     const seen: WatchStatus[] = [];
     const newDevice = new Monitor({
@@ -140,6 +140,35 @@ describe('watching for recovery requests', () => {
     chain.nowMs += 3 * 3_600_000;
     wallet.finalizeRecovery(recoverer);
     expect(await monitor.check()).toEqual({ kind: 'owned-elsewhere', ownerKeyHash: binToHex(stranger.keyHash), ownerEpoch: 1 });
+  });
+
+  it('RC09: a request that is seen unconfirmed warns and is not reported as confirmed', async () => {
+    const { chain, wallet } = setup();
+    const unconfirmed = new Set<string>();
+    const reader: ChainReader = {
+      getTransaction: (transactionId) => chain.getTransaction(transactionId),
+      listUnspent: (lockingBytecode) => chain.listUnspent(lockingBytecode),
+      getHistory: async (lockingBytecode) => (await chain.getHistory(lockingBytecode)).map((entry) => (unconfirmed.has(entry.transactionId) ? { ...entry, height: 0 } : entry)),
+    };
+    const monitor = new Monitor({ servers: [reader, reader], identity: wallet.identityHex, genesisTransactionId: wallet.genesisTransactionId, ownKeyHashes: [binToHex(owner.keyHash)], onStatus: () => undefined });
+    const requestedIn = wallet.requestRecovery(recoverer, stranger.keyHash);
+    unconfirmed.add(requestedIn);
+    // It warns at once, and says that the request is not in a block yet.
+    expect(await monitor.check()).toMatchObject({ kind: 'recovery-requested', requestedIn, confirmed: false });
+    unconfirmed.delete(requestedIn);
+    expect(await monitor.check()).toMatchObject({ kind: 'recovery-requested', requestedIn, confirmed: true });
+  });
+
+  it('RC09: a request that only one server shows as confirmed is not reported as confirmed', async () => {
+    const { chain, wallet } = setup();
+    const lagging: ChainReader = {
+      getTransaction: (transactionId) => chain.getTransaction(transactionId),
+      listUnspent: (lockingBytecode) => chain.listUnspent(lockingBytecode),
+      getHistory: async (lockingBytecode) => (await chain.getHistory(lockingBytecode)).map((entry) => (entry.transactionId === requestedIn ? { ...entry, height: 0 } : entry)),
+    };
+    const monitor = new Monitor({ servers: [server(chain).reader, lagging], identity: wallet.identityHex, genesisTransactionId: wallet.genesisTransactionId, ownKeyHashes: [binToHex(owner.keyHash)], onStatus: () => undefined });
+    const requestedIn = wallet.requestRecovery(recoverer, stranger.keyHash);
+    expect(await monitor.check()).toMatchObject({ kind: 'recovery-requested', confirmed: false });
   });
 
   it('reports a wallet its owner has closed, and nothing after it', async () => {

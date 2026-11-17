@@ -69,4 +69,30 @@ describe('reading a wallet from several servers', () => {
     expect((await readControllerHistory(new ChainPool([chain, down]), wallet.identity)).transitions).toHaveLength(2);
     await expect(new ChainPool([down]).getHistory(new Uint8Array(1))).rejects.toThrow('No server returned');
   });
+
+  it('OP01: two servers that disagree about a confirmation: it is reported, and nothing is treated as final', async () => {
+    const { chain, wallet } = setup();
+    const latest = wallet.authorize(owner);
+    // One server says the latest step is in a block; the other has it unconfirmed.
+    const behind: ChainReader = {
+      getTransaction: (transactionId) => chain.getTransaction(transactionId),
+      listUnspent: (lockingBytecode) => chain.listUnspent(lockingBytecode),
+      getHistory: async (lockingBytecode) => (await chain.getHistory(lockingBytecode)).map((entry) => (entry.transactionId === latest ? { ...entry, height: 0 } : entry)),
+    };
+    const pool = new ChainPool([chain, behind]);
+    const history = await readControllerHistory(pool, wallet.identity);
+    // The step is seen, and it does not count as confirmed.
+    expect(history.transitions).toHaveLength(3);
+    expect(history.currentConfirmed).toBe(false);
+    expect(pool.disagreements).toEqual([{ transactionId: latest, heights: [1, 0] }]);
+    // A server that leaves a confirmed transaction out disagrees just as much.
+    const silent: ChainReader = { ...behind, getHistory: async (lockingBytecode) => (await chain.getHistory(lockingBytecode)).filter((entry) => entry.transactionId !== latest) };
+    const second = new ChainPool([chain, silent]);
+    expect((await readControllerHistory(second, wallet.identity)).currentConfirmed).toBe(false);
+    expect(second.disagreements).toEqual([{ transactionId: latest, heights: [1, undefined] }]);
+    // Servers that agree leave nothing to report.
+    const agreeing = new ChainPool([chain, chain]);
+    expect((await readControllerHistory(agreeing, wallet.identity)).currentConfirmed).toBe(true);
+    expect(agreeing.disagreements).toEqual([]);
+  });
 });
