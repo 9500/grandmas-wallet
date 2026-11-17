@@ -1221,14 +1221,14 @@ The implementation uses XO's TypeScript packages, libauth for keys, transactions
 
 | Item | Status |
 | --- | --- |
-| Recovery controller | Implemented with its five actions; tested in the virtual machine (CT01 to CT15). The four continuing actions ran on chipnet for the first design; the closing action has run on a local node. |
+| Recovery controller | Implemented with its five actions; tested in the virtual machine (CT01 to CT15). All five ran on a local node and on chipnet: a request, a cancellation, a completion after the waiting period, and a closing (`docs/runs/`). |
 | Fees and sending everything | The transaction builder pays the exact fee, computes the smallest value of each output and checks a transaction before it is sent (FE01 to FE03). Choosing coins and sending everything from a wallet are proposed. |
 | Owner-approval rule | Written; without tests on the working branch until an address contract uses it |
 | Reading and checking a controller's history; several servers read as one | Implemented and tested |
 | Waiting-period calculation; watching for requests | Implemented and tested |
 | Sealing to the recoverer; signing; encrypted stores and the store server | Implemented and tested |
 | WizardConnect transport and `xo_v1` messages | Implemented and tested with an earlier form of the announcement |
-| Recoverable address, vault address | Implemented (`contracts/recoverableAddress.cash`, `contracts/vaultAddress.cash`); tested in the virtual machine (AD01 to AD13), with each refusal shown to come from the script meant to refuse. A trial ran a wallet's life on a local node (`docs/address-contracts-trial.md`). |
+| Recoverable address, vault address | Implemented (`contracts/recoverableAddress.cash`, `contracts/vaultAddress.cash`); tested in the virtual machine (AD01 to AD13), with each refusal shown to come from the script meant to refuse. A wallet's life ran on a local node and on chipnet: receiving, a payment by key, a sweep by a new owner, a spend from the vault, and the refusals of a sweep attached to a request and of a sweep approved by an earlier owner (`docs/runs/stage-1-chipnet.md`). |
 | Derivation, viewing key, giving out and finding addresses | Implemented and tested (KV01 to KV05, KV07 to KV12, PV01, PV02), with test vectors in `test/vectors/`. The wallet's own derivation gives the keys the engine makes. The cost of the full pass on real servers (KV13) is still to be recorded. |
 | Creating a wallet as in section 7.9 | Proposed |
 | Recovery kit, receipts, takeover and update messages, sweep, moving to a new seed, replacing the recoverer | Proposed |
