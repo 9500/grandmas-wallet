@@ -1213,7 +1213,7 @@ The old identity does not end with the move. A vault address that was published,
 10. A complete search looks up every address of fixed ranges, for every seed the wallet has had, and a seed has a fixed number of fresh addresses.
 11. An address that outlives its controller's rules keeps the old identity in service.
 12. The closing action makes every controller transaction 45 bytes larger, and closing turns the identity's vault addresses into addresses nobody can spend from.
-13. The templates that hold keys can never change. A change means other keys: a new seed's worth of addresses, or a new identity.
+13. The templates that hold keys can never change. A change means other keys: a new seed's worth of addresses, or a new identity. A template names the network versions it supports, and one made today cannot name next year's; whether the engine goes on running it then is for XO to say.
 
 ## 20. Implementation approach and status
 
@@ -1222,7 +1222,7 @@ The implementation uses XO's TypeScript packages, libauth for keys, transactions
 | Item | Status |
 | --- | --- |
 | Recovery controller | Implemented with its five actions; tested in the virtual machine (CT01 to CT15). All five ran on a local node and on chipnet: a request, a cancellation, a completion after the waiting period, and a closing (`docs/runs/`). |
-| Fees and sending everything | The transaction builder pays the exact fee, computes the smallest value of each output and checks a transaction before it is sent (FE01 to FE03). Choosing coins and sending everything from a wallet are proposed. |
+| Fees and sending everything | Implemented: the exact fee, the smallest value of each output, the check before sending, choosing coins, sending everything, and closing by the owner's wallet (FE01 to FE08). |
 | Owner-approval rule | Written; without tests on the working branch until an address contract uses it |
 | Reading and checking a controller's history; several servers read as one | Implemented and tested |
 | Waiting-period calculation; watching for requests | Implemented and tested |
@@ -1230,10 +1230,10 @@ The implementation uses XO's TypeScript packages, libauth for keys, transactions
 | WizardConnect transport and `xo_v1` messages | Implemented and tested with an earlier form of the announcement |
 | Recoverable address, vault address | Implemented (`contracts/recoverableAddress.cash`, `contracts/vaultAddress.cash`); tested in the virtual machine (AD01 to AD13), with each refusal shown to come from the script meant to refuse. A wallet's life ran on a local node and on chipnet: receiving, a payment by key, a sweep by a new owner, a spend from the vault, and the refusals of a sweep attached to a request and of a sweep approved by an earlier owner (`docs/runs/stage-1-chipnet.md`). |
 | Derivation, viewing key, giving out and finding addresses | Implemented and tested (KV01 to KV05, KV07 to KV12, PV01, PV02), with test vectors in `test/vectors/`. The wallet's own derivation gives the keys the engine makes. The cost of the full pass on real servers (KV13) is still to be recorded. |
-| Creating a wallet as in section 7.9 | Proposed |
+| Creating a wallet as in section 7.9 | Implemented (`packages/app/src/owner-wallet.ts`): in steps a device can resume, with no address given out before confirmation (CR01 to CR04). Ran on the XO engine against a local node. |
 | Recovery kit, receipts, takeover and update messages, sweep, moving to a new seed, replacing the recoverer | Proposed |
 | Backup records as in section 10 | Proposed |
-| The wallet's templates | Drafted (`packages/app/src/templates.ts`) and accepted by the XO validator. With them a wallet's whole life ran through the unmodified engine on a local node: creation with an allowance, a payment with change, a request, a cancellation, a completed recovery, a takeover by a new seed, a sweep, and sending everything with a closing. The engine's keys and addresses equalled the ones this project's code derives, and every transaction had the size worked out beforehand. They become final in stage 3. |
+| The wallet's templates | Implemented (`packages/app/src/templates.ts`) and accepted by the XO validator. The controller template and the two address templates are final; a test fixes their identifiers. Every action ran through the unmodified engine on a local node, with the engine's keys and addresses equal to the ones this project's code derives and every transaction of the size worked out beforehand (`docs/runs/stage-3-local-node.md`). Loading the run's invitations in XO's debugging tool is still to be tried. |
 | Application templates with wallet-bound outputs; recovery declaration | Proposed |
 | Savings Jar with a key NFT | Proposed |
 | ParyonUSD template and front end | Proposed; contracts read, nothing run |
