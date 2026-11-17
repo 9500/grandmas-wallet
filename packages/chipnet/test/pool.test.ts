@@ -1,4 +1,4 @@
-import { type ChainReader, IdentityValidationError, p2pkhLockingBytecode, readControllerHistory } from '@grandmas-wallet/core';
+import { type ChainReader, IdentityValidationError, readControllerHistory } from '@grandmas-wallet/core';
 import { SimulatedChain, TestWallet, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -10,8 +10,8 @@ const recoverer = testKey(0x33);
 const setup = () => {
   const chain = new SimulatedChain();
   const wallet = TestWallet.create(chain, { owner, recovererKeyHash: recoverer.keyHash });
-  wallet.pay(owner, p2pkhLockingBytecode(new Uint8Array(20).fill(1)), 1_000n);
-  wallet.pay(owner, p2pkhLockingBytecode(new Uint8Array(20).fill(1)), 1_000n);
+  wallet.authorize(owner);
+  wallet.authorize(owner);
   return { chain, wallet };
 };
 

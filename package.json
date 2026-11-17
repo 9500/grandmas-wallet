@@ -16,10 +16,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
     "check": "npm run typecheck && npm run lint && npm run test",
-    "build:contracts": "npm run build -w @grandmas-wallet/contracts",
-    "chipnet": "npm run chipnet -w @grandmas-wallet/chipnet --",
-    "xo-demo": "npm run xo-demo -w @grandmas-wallet/xo-demo --",
-    "build:web": "npm run build -w @grandmas-wallet/wallet-app -w @grandmas-wallet/recoverer-app -w @grandmas-wallet/jar-app"
+    "build:contracts": "npm run build -w @grandmas-wallet/contracts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

@@ -1,13 +1,11 @@
-import { type Output, binToHex, hexToBin } from '@bitauth/libauth';
+import { binToHex, hexToBin } from '@bitauth/libauth';
 import {
   type BuiltTransaction,
   type ChallengeDelay,
   type ControllerAction,
   type ControllerState,
   type KeyPair,
-  type ProtectedScript,
   type Utxo,
-  assetScript,
   buildTransaction,
   controllerInput,
   controllerOutput,
@@ -17,15 +15,14 @@ import {
   keyPairFromPrivateKey,
   p2pkhInput,
   p2pkhLockingBytecode,
-  protectedInput,
 } from '@grandmas-wallet/core';
-import { savingsJarScript } from '@grandmas-wallet/savings-jar';
 
 import type { SimulatedChain } from './simulated-chain.js';
 
 /**
- * A wallet on the simulated chain, driven directly with keys: enough to
- * create one, use it, and take it through a recovery in a test.
+ * A wallet's controller on the simulated chain, driven directly with keys:
+ * enough to create one, act as its owner, and take it through a recovery in
+ * a test. It holds no coins besides the controller.
  */
 
 export const testKey = (byte: number): KeyPair => keyPairFromPrivateKey(new Uint8Array(32).fill(byte));
@@ -34,8 +31,6 @@ export interface TestWalletOptions {
   owner: KeyPair;
   recovererKeyHash: Uint8Array;
   challengeDelay?: ChallengeDelay;
-  /** Satoshis put into the wallet's funds at creation. */
-  funds?: bigint;
 }
 
 export class TestWallet {
@@ -49,7 +44,7 @@ export class TestWallet {
     const funder = testKey(0xf0);
     const funderLocking = p2pkhLockingBytecode(funder.keyHash);
     // The identity is named after the transaction whose first output its creation spends.
-    const identityHex = chain.fund(funderLocking, (options.funds ?? 50_000n) + 5_000n);
+    const identityHex = chain.fund(funderLocking, 5_000n);
     const identity = hexToBin(identityHex);
     const [funding] = chain.outputsAt(funderLocking).filter((utxo) => binToHex(utxo.transactionHash) === identityHex);
     if (funding === undefined) throw new Error('funding output missing');
@@ -64,7 +59,7 @@ export class TestWallet {
     const built = buildTransaction({
       inputs: [p2pkhInput(funding, funder)],
       outputs: [controllerOutput(identity, state, 1_000n)],
-      changeLockingBytecode: assetScript(identity).lockingBytecode,
+      changeLockingBytecode: funderLocking,
     });
     const wallet = new TestWallet(chain, identity, built.transactionId);
     wallet.send(built);
@@ -73,10 +68,6 @@ export class TestWallet {
 
   get identityHex(): string {
     return binToHex(this.identity);
-  }
-
-  get funds(): ProtectedScript {
-    return assetScript(this.identity);
   }
 
   controller(): { utxo: Utxo; state: ControllerState } {
@@ -93,67 +84,35 @@ export class TestWallet {
     return result.transactionId;
   }
 
-  /** An owner-approved transaction: spends the wallet's funds and any given positions; change returns to the funds. */
-  ownerTransaction(key: KeyPair, outputs: Output[], positions: { utxo: Utxo; script: ProtectedScript }[] = [], locktime?: number): BuiltTransaction {
+  /** A controller action, with the fee paid from a coin of the signer's own. */
+  private act(signer: KeyPair, action: ControllerAction): string {
     const { utxo, state } = this.controller();
-    const action: ControllerAction = { kind: 'ownerAuthorize' };
-    return buildTransaction({
-      inputs: [
-        controllerInput(utxo, state, action, key),
-        ...this.chain.outputsAt(this.funds.lockingBytecode).map((coin) => protectedInput(coin, this.funds)),
-        ...positions.map((position) => protectedInput(position.utxo, position.script)),
-      ],
-      outputs: [controllerSuccessor(utxo, state, action), ...outputs],
-      changeLockingBytecode: this.funds.lockingBytecode,
-      ...(locktime === undefined ? {} : { locktime }),
-    });
-  }
-
-  /** Pay from the wallet's funds to any script. */
-  pay(key: KeyPair, lockingBytecode: Uint8Array, valueSatoshis: bigint): string {
-    return this.send(this.ownerTransaction(key, [{ lockingBytecode, valueSatoshis }]));
-  }
-
-  jar(unlockTime: number): ProtectedScript {
-    return savingsJarScript(this.identity, unlockTime);
-  }
-
-  /** The transaction that opens a savings jar, not yet sent. */
-  openJarTransaction(key: KeyPair, unlockTime: number, valueSatoshis = 5_000n): BuiltTransaction {
-    return this.ownerTransaction(key, [{ lockingBytecode: this.jar(unlockTime).lockingBytecode, valueSatoshis }]);
-  }
-
-  /** Empty a savings jar back into the wallet's funds. */
-  emptyJar(key: KeyPair, unlockTime: number): string {
-    const script = this.jar(unlockTime);
-    const positions = this.chain.outputsAt(script.lockingBytecode).map((utxo) => ({ utxo, script }));
-    return this.send(this.ownerTransaction(key, [], positions, unlockTime));
-  }
-
-  /** A controller action by the recoverer, paying the fee from a coin of its own. */
-  private recovererAction(recoverer: KeyPair, action: ControllerAction): string {
-    const { utxo, state } = this.controller();
-    const feeLocking = p2pkhLockingBytecode(recoverer.keyHash);
+    const feeLocking = p2pkhLockingBytecode(signer.keyHash);
     const feeId = this.chain.fund(feeLocking, 5_000n);
     const [fee] = this.chain.outputsAt(feeLocking).filter((coin) => binToHex(coin.transactionHash) === feeId);
     if (fee === undefined) throw new Error('fee coin missing');
     return this.send(
       buildTransaction({
-        inputs: [controllerInput(utxo, state, action, recoverer), p2pkhInput(fee, recoverer)],
+        inputs: [controllerInput(utxo, state, action, signer), p2pkhInput(fee, signer)],
         outputs: [controllerSuccessor(utxo, state, action)],
         changeLockingBytecode: feeLocking,
       }),
     );
   }
 
+  /** The owner approves a transaction; this also cancels a pending recovery request. */
+  authorize(owner: KeyPair): string {
+    return this.act(owner, { kind: 'ownerAuthorize' });
+  }
+
   requestRecovery(recoverer: KeyPair, proposedOwnerKeyHash: Uint8Array): string {
-    return this.recovererAction(recoverer, { kind: 'requestRecovery', proposedOwnerKeyHash });
+    return this.act(recoverer, { kind: 'requestRecovery', proposedOwnerKeyHash });
   }
 
   /** Complete a pending recovery; the chain's clock is moved past the challenge delay first. */
   finalizeRecovery(recoverer: KeyPair): string {
     this.chain.nowMs += 2 * 512 * 1000;
-    return this.recovererAction(recoverer, { kind: 'finalizeRecovery' });
+    return this.act(recoverer, { kind: 'finalizeRecovery' });
   }
 
   /** Request and complete a recovery in one go. */

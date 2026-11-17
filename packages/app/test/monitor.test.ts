@@ -1,5 +1,5 @@
 import { binToHex } from '@bitauth/libauth';
-import { type ChainReader, p2pkhLockingBytecode } from '@grandmas-wallet/core';
+import type { ChainReader } from '@grandmas-wallet/core';
 import { SimulatedChain, TestWallet, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -8,7 +8,6 @@ import { type WatchStatus, Monitor } from '../src/monitor.js';
 const owner = testKey(0x11);
 const recoverer = testKey(0x22);
 const stranger = testKey(0x33);
-const elsewhere = p2pkhLockingBytecode(testKey(0x44).keyHash);
 
 /** A server that can leave transactions out, as after a reorganization or when it withholds them. */
 const server = (chain: SimulatedChain) => {
@@ -42,7 +41,7 @@ const setup = (autoCancel = false) => {
       ? {
           autoCancel: async () => {
             // Any action by the owner clears the request.
-            cancellations.push(wallet.pay(owner, elsewhere, 600n));
+            cancellations.push(wallet.authorize(owner));
           },
         }
       : {}),

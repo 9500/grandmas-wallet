@@ -9,10 +9,7 @@
     "@cashscript/utils": "0.14.0"
   },
   "exports": {
-    "./controller": "./artifacts/controller.ts",
-    "./asset": "./artifacts/asset.ts",
-    "./savingsJar": "./artifacts/savingsJar.ts",
-    "./keyJar": "./artifacts/keyJar.ts"
+    "./controller": "./artifacts/controller.ts"
   },
   "scripts": {
     "build": "node build.mjs"

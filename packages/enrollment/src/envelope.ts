@@ -4,7 +4,12 @@ import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
 import { CipherSuite } from '@hpke/core';
 import { DhkemX25519HkdfSha256, HkdfSha256 } from '@hpke/dhkem-x25519';
 
-import { EnrollmentError } from './package.js';
+export class EnrollmentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EnrollmentError';
+  }
+}
 
 /**
  * Sealing a package to the recoverer.
