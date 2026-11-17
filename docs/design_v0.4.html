@@ -257,7 +257,7 @@ pre.code .c { color: var(--muted); }
   <h1>Grandma's Wallet</h1>
   <p class="lede">A Bitcoin Cash wallet whose keys can be replaced by a trusted recoverer after a public waiting period. Every coin has its own address and key, as in an ordinary HD wallet. A single controller on chain can release any of them to a new owner. Applications give authority to a token in the wallet, so recovering an application position is the same as moving a coin.</p>
   <div class="chips">
-    <span class="chip">Overview of proposal v0.2</span>
+    <span class="chip">Design overview v0.4</span>
     <span class="chip">17 November 2026</span>
     <span class="chip">Not audited</span>
   </div>
@@ -267,13 +267,13 @@ pre.code .c { color: var(--muted); }
     <span style="--c: var(--recoverer)">Recoverer</span>
     <span style="--c: var(--app)">Application</span>
   </div>
-  <p class="small" style="margin-top:14px">This page is the illustrated overview. The specification for implementation is <code>Grandmas_Wallet_Architecture_Proposal_v0.2.md</code> in the repository, and the order of work is in <code>IMPLEMENTATION_PLAN.md</code>.</p>
+  <p class="small" style="margin-top:14px">This page is the illustrated overview. The specification for implementation is <code>Grandmas_Wallet_Architecture_Proposal_v0.4.md</code> in the repository, and the order of work is in <code>IMPLEMENTATION_PLAN_v0.4.md</code>. The three carry the same version number.</p>
 </header>
 
 <!-- ============================== IDEA -->
 <section id="idea">
   <h2>The design</h2>
-  <p>Every address of the wallet can be spent in two ways. Its own key spends it directly, like any single-key address. The wallet's controller can also release it, and the controller obeys whoever owns the wallet's identity today. Recovery changes the owner of the identity. The new owner then moves every coin and token to addresses of its own keys.</p>
+  <p>Every ordinary address of the wallet can be spent in two ways. Its own key spends it directly, like any single-key address. The wallet's controller can also release it, and the controller obeys whoever owns the wallet's identity today. Recovery changes the owner of the identity. The new owner then moves every coin and token to addresses of its own keys.</p>
   <div class="widget">
     <div class="wtitle"><span>Two ways into every coin</span><button type="button" id="idea-btn" class="primary">Lose the phone</button></div>
     <figure class="scroll">
@@ -303,7 +303,7 @@ pre.code .c { color: var(--muted); }
 
   <h3>The parts</h3>
   <div class="grid2">
-    <div class="card by" style="--c: var(--identity)"><span class="tag">Wallet</span><p style="margin:6px 0 0"><strong>Controller.</strong> One coin holding the identity NFT. Its state names the owner's controller key, the recoverer's key and the waiting period. It moves only for recovery, sweeps and the vault.</p></div>
+    <div class="card by" style="--c: var(--identity)"><span class="tag">Wallet</span><p style="margin:6px 0 0"><strong>Controller.</strong> One coin holding the identity NFT. Its state names the owner's controller key, the recoverer's key and the waiting period. It moves only for recovery, sweeps, the vault and changes of settings.</p></div>
     <div class="card by" style="--c: var(--owner)"><span class="tag">Wallet</span><p style="margin:6px 0 0"><strong>Recoverable addresses.</strong> One per coin, each with its own key for every day and a hidden link to the identity for recovery. A second kind, the vault address, has no key and never changes.</p></div>
     <div class="card by" style="--c: var(--recoverer)"><span class="tag">Recovery</span><p style="margin:6px 0 0"><strong>Recoverer and viewing key.</strong> The recoverer can replace the owner after the waiting period. It also keeps the viewing key, which lets a new device find every address. Neither lets it spend.</p></div>
     <div class="card by" style="--c: var(--app)"><span class="tag">Applications</span><p style="margin:6px 0 0"><strong>Three rules and a connection.</strong> Authority is a token. The wallet's inputs and outputs are the wallet's business. The template says what a token means. The wallet builds each transaction from the application's XO template.</p></div>
@@ -320,7 +320,7 @@ pre.code .c { color: var(--muted); }
     <tr><td><code>ownerAuthorize</code></td><td>Owner's controller key</td><td>Continues the controller unchanged as Active. Cancels a pending request.</td><td>Sweeps, spending from the vault, cancelling a request</td></tr>
     <tr><td><code>requestRecovery</code></td><td>Recoverer's key</td><td>Marks the state Pending and names the proposed new owner key. The waiting period starts.</td><td>The first step of recovery</td></tr>
     <tr><td><code>finalizeRecovery</code></td><td>Recoverer's key</td><td>Only after the waiting period. Installs exactly the proposed key and raises the epoch by one.</td><td>The second step of recovery</td></tr>
-    <tr><td><code>ownerUpdate</code></td><td>Owner's controller key</td><td>Replaces the owner key, the recoverer or the waiting period.</td><td>Moving to a new seed without the recoverer; changing the recoverer</td></tr>
+    <tr><td><code>ownerUpdate</code></td><td>Owner's controller key</td><td>Replaces the owner key, the recoverer or the waiting period.</td><td>Moving to a new seed without the recoverer; changing the recoverer or the waiting period</td></tr>
   </table>
   </div>
   <p style="margin-top:14px">Rules that hold for every action: the controller is input 0 and output 0 of its transaction, the NFT and the coin's value continue, and the signature must cover every input and output.</p>
@@ -328,7 +328,7 @@ pre.code .c { color: var(--muted); }
   <h3>Two properties carry the scheme</h3>
   <ul>
     <li><strong>The waiting period is enforced by the network.</strong> It is a relative time lock on the controller's own coin. Nobody can shorten it.</li>
-    <li><strong>The recoverer never gains spending power.</strong> A coin released through the controller requires the controller to continue unchanged, with the same owner and no request pending. A request leaves a claim pending and a completion changes the owner, so neither can carry coins with it. This check is one shared function, <code>ownerApproves(identity)</code>, used by every address script.</li>
+    <li><strong>The recoverer's key never spends a coin.</strong> A coin released through the controller requires the controller to continue unchanged, with the same owner and no request pending. A request leaves a claim pending and a completion changes the owner, so neither can carry coins with it. This check is one shared function, <code>ownerApproves(identity)</code>, used by every address script. A recoverer who installs a key of its own after a wait that nobody cancelled is then the owner; that is the trust placed in it.</li>
   </ul>
 <pre class="code">function ownerApproves(bytes32 identity) {
     <span class="c">// Input 0 is this identity's controller.</span>
@@ -340,7 +340,7 @@ pre.code .c { color: var(--muted); }
     require(tx.outputs[0].tokenCategory == identity + 0x01);
     require(tx.outputs[0].nftCommitment == 0x0100 + state.slice(2, 49) + bytes20(0));
 }</pre>
-  <p>Only the owner-signed <code>ownerAuthorize</code> can produce that successor. The owner's signature on the controller, which covers the whole transaction, is therefore what approves the release. The simulator under <a href="#life">A wallet's life</a> shows the state byte by byte.</p>
+  <p>Only an owner-signed step produces that successor: <code>ownerAuthorize</code>, or an <code>ownerUpdate</code> that changes nothing. The owner's signature on the controller, which covers the whole transaction, is therefore what approves the release. The simulator under <a href="#life">A wallet's life</a> shows the state byte by byte.</p>
 </section>
 
 <!-- ============================== KEYS -->
@@ -352,7 +352,7 @@ pre.code .c { color: var(--muted); }
     <div class="row" style="--c: var(--identity)"><div class="k">Controller key<small>from the seed</small></div><div class="v">One key on a branch of its own. Its hash is the owner entry in the controller. It is used for nothing else and appears in no address.</div></div>
     <div class="row" style="--c: var(--owner)"><div class="k">Address keys<small>from the seed</small></div><div class="v">One branch whose children are the address keys, counted from 0. There are two kinds: <strong>given out</strong>, for addresses the user hands to people who pay them, and <strong>change</strong>, for change and for coins and tokens that an application's transaction sends to the wallet.</div></div>
     <div class="row" style="--c: var(--recoverer)"><div class="k">Blinding seed<small>from the seed</small></div><div class="v">32 bytes on a third branch. It gives every address a secret: <code>secret = hash256(blinding seed ‖ kind ‖ number)</code>.</div></div>
-    <div class="row" style="--c: var(--recoverer)"><div class="k">Viewing key<small>on the phone and with the recoverer</small></div><div class="v">Two values: the <strong>extended public key</strong> of the address branch, which gives every address's public key and no private key, and the <strong>blinding seed</strong>. Together with the identity they find every coin. They cannot spend one. Either value alone finds nothing.</div></div>
+    <div class="row" style="--c: var(--recoverer)"><div class="k">Viewing key<small>on the phone and with the recoverer</small></div><div class="v">Two values: the <strong>extended public key</strong> of the address branch, which gives every address's public key and no private key, and the <strong>blinding seed</strong>. Together with the identity they find every coin of the seed. They cannot spend one. Neither value alone gives an ordinary address; the blinding seed with the identity gives the vault addresses, which have no key. Each seed has its own viewing key, and earlier ones are kept.</div></div>
     <div class="row" style="--c: var(--identity)"><div class="k">Identity<small>public, on chain</small></div><div class="v">The token category of the controller's NFT. It is not written in any address, and it cannot be worked out from the seed: it exists only once the controller has been created.</div></div>
   </div>
   <div class="scroll">
@@ -362,6 +362,7 @@ pre.code .c { color: var(--muted); }
     <tr><td>Address key, kind <em>c</em>, number <em>i</em></td><td><code>m / P' / S' / 1' / c / i</code> &nbsp; (<em>c</em> = 0 given out, 1 change)</td></tr>
     <tr><td>Blinding seed</td><td>SHA-256 of the private key at <code>m / P' / S' / 2'</code></td></tr>
     <tr><td>Funding key</td><td><code>m / P' / S' / 3' / 0</code></td></tr>
+    <tr><td>Recoverer's credential, a separate set of twelve words</td><td>Recovery key <code>m / P' / S' / 0' / 0</code> and fee key <code>m / P' / S' / 3' / 0</code> of its own tree</td></tr>
   </table>
   </div>
   <p class="small" style="margin-top:10px"><code>P</code> is XO's purpose number, 2415 on mainnet and 42415 on test networks. <code>S</code> is a constant for this scheme that is still to be fixed. Whether the XO engine can be made to use exactly these keys is one of the first trials in the plan; if it cannot, the wallet's own code handles its coins beside the engine.</p>
@@ -380,17 +381,23 @@ pre.code .c { color: var(--muted); }
   </div>
 
   <h3>Finding everything again</h3>
-  <p>A device that holds the identity and the viewing key restores the wallet the way any HD wallet is restored. For each kind of address it derives number 0, 1, 2 and so on, looks each up on chain, and stops after a run of unused ones: 20 for addresses given out, 5 for change and for vault addresses. For each address it finds it also has the secret, which is what the recovery path needs. No list of addresses has to be kept anywhere.</p>
-  <p>After a recovery the new device has a new seed and a new viewing key. It gives the new viewing key to the recoverer before the waiting period starts, so the wallet is never without a recovery path. Earlier viewing keys are kept: they find payments that still arrive at earlier addresses.</p>
+  <p>A device that holds the identity and a viewing key finds that seed's coins in two passes. No list of addresses has to be kept anywhere.</p>
+  <ol class="steps">
+    <li><div><strong>Quick pass.</strong> For each kind of address it derives number 0, 1, 2 and so on, looks each up on chain, and stops after a run of unused ones: 20 for addresses given out, 5 for change and for vault addresses. This is how any HD wallet is restored, and it nearly always finds everything.</div></li>
+    <li><div><strong>Full pass.</strong> It looks up every number of every range. Each kind has a fixed number of addresses per seed, the same for every wallet, so nothing about the ranges has to be stored. This finds what the quick pass can miss, for example an address given out past a gap after the transaction that had closed the gap was dropped.</div></li>
+  </ol>
+  <p>For each address it finds, the device also has the secret, which is what the recovery path needs. The wallet is reported as fully found only when the full pass has finished for every seed it has had. A server that does not answer gives "incomplete", never "empty".</p>
+
+  <p>After a recovery the new device has a new seed and a new viewing key. It gives the new viewing key to the recoverer before the request is made, so the wallet is never without a recovery path. The same holds when an owner moves to a new seed with the old phone at hand: the recoverer confirms that it holds the new viewing key, and only then does the owner key change. Earlier viewing keys are kept: they find payments that still arrive at earlier addresses.</p>
 
   <h3>The first coins</h3>
   <p>An address needs the identity, and the identity is the identifier of a transaction, so the wallet's very first coins cannot arrive at a recoverable address.</p>
   <ol class="steps">
     <li><div><strong>Fund.</strong> The user sends coins to the wallet's funding address, an ordinary single-key address of the funding key.</div></li>
     <li><div><strong>Prepare.</strong> The wallet pays itself, so that it has a coin that is output 0 of its transaction. That transaction's identifier is the identity.</div></li>
-    <li><div><strong>Create and move.</strong> A transaction spends that coin and creates the controller. The rest goes to recoverable addresses, and a small amount is set aside for the recoverer's fees.</div></li>
+    <li><div><strong>Create and move.</strong> A transaction spends that coin and creates the controller. The rest goes to recoverable addresses, apart from two small amounts that are set aside: the recoverer's fees, and a coin of the owner's that pays for a cancellation.</div></li>
   </ol>
-  <p>The funding address is not recoverable. It is shown only until the wallet exists. The wallet gives out no address until the transaction that defines the identity is confirmed. The first coins can be traced to the creation of the identity; coins received later cannot.</p>
+  <p>The funding address is not recoverable. It is shown only until the wallet exists. The wallet gives out no address until the transaction that defines the identity is confirmed. The first coins can be traced to the creation of the identity; coins received later at fresh addresses have no such link. If the phone stops part-way, it continues from the transactions that exist and does not start a second identity.</p>
 </section>
 
 <!-- ============================== MAKING -->
@@ -427,8 +434,9 @@ pre.code .c { color: var(--muted); }
     <li><strong>The phone can do every step.</strong> A holder of the viewing key can do all but the private key: it gets each public key from the extended public key.</li>
     <li><strong>Nobody can go backwards from an address.</strong> The address is a hash of the script. The tag inside the script is a hash of the identity and a secret that only the viewing key gives.</li>
     <li><strong>Two addresses of one wallet share nothing visible.</strong> Each has its own key and its own secret, so each has its own tag.</li>
-    <li><strong>The payer sees an ordinary script address.</strong> Nothing shows that it is recoverable or which wallet it belongs to.</li>
-    <li><strong>The wallet never shows an address more than 20 numbers past the last one that was used.</strong> A later scan stops after 20 unused addresses, so this keeps every address it gave out findable.</li>
+    <li><strong>The payer sees an ordinary script address.</strong> Nothing shows that it is recoverable or which wallet it belongs to. Spending it by key shows the kind of address, and still not the wallet.</li>
+    <li><strong>The wallet stays inside a window and a range.</strong> It shows no address more than 20 numbers past the last used one of its kind (5 for change and for vault addresses), and none past the fixed range of its kind. When the window is full it offers an address it has already given out, and says so.</li>
+    <li><strong>An address made for something that did not happen</strong> gets its number used again only if it was never shown and nothing was signed. Otherwise it stays taken and stays watched.</li>
   </ul>
 </section>
 
@@ -503,22 +511,25 @@ contract VaultAddress(bytes32 tag) {
 <section id="recovery">
   <h2>Recovery flow</h2>
   <ol class="timeline">
-    <li><span class="dot" style="--c: var(--owner)">0</span><div><h4>Setup, while all is well</h4><span class="who" style="--c: var(--owner)">Owner and recoverer</span><p>The wallet creates its controller, naming the recoverer's key and the waiting period. It sends the recoverer a recovery kit, signed by the owner and sealed so that only the recoverer can open it. The recoverer checks the kit against the chain and leaves a signed confirmation. Only then does the wallet say that recovery is on.</p></div></li>
-    <li><span class="dot" style="--c: var(--recoverer)">1</span><div><h4>A new device asks</h4><span class="who" style="--c: var(--recoverer)">New device and recoverer</span><p>The new device makes a new seed. It gives the recoverer the hash of its controller key, its own viewing key and a key for the answer. The recoverer satisfies itself that the person is the wallet's user; how it does so is its own process, and the design depends on it.</p></div></li>
+    <li><span class="dot" style="--c: var(--owner)">0</span><div><h4>Setup, while all is well</h4><span class="who" style="--c: var(--owner)">Owner and recoverer</span><p>The wallet creates its controller, naming the recoverer's key and the waiting period. It sends the recoverer an enrollment message with the recovery kit, signed by the owner and sealed so that only the recoverer can open it. The recoverer checks it against the chain, saves the kit and leaves a signed receipt. Only then does the wallet say that recovery is on.</p></div></li>
+    <li><span class="dot" style="--c: var(--recoverer)">1</span><div><h4>A new device asks</h4><span class="who" style="--c: var(--recoverer)">New device and recoverer</span><p>The new device makes a new seed. It gives the recoverer the hash of its controller key, its own viewing key signed with that key, the access to a new backup, and a key for the answer. It does not need to know the wallet's identity yet. The recoverer satisfies itself that the person is the wallet's user; how it does so is its own process, and the design depends on it.</p></div></li>
     <li><span class="dot" style="--c: var(--recoverer)">2</span><div><h4>Request</h4><span class="who" style="--c: var(--recoverer)">Recoverer</span><p>The recoverer signs <code>requestRecovery</code> naming that key. The controller is now Pending, on chain, and the waiting period has started.</p></div></li>
     <li><span class="dot" style="--c: var(--owner)">3</span><div><h4>Wait, and the owner's chance to refuse</h4><span class="who" style="--c: var(--owner)">Owner, if the phone is not lost</span><p>The wallet watches its controller on several servers. If a request appears that the owner did not ask for, the owner cancels it with one signature of the controller key. Ordinary payments do not touch the controller, so they do not cancel a request. The cancel is a transaction of its own, by hand or automatic, and the wallet keeps a small coin to pay for it.</p></div></li>
-    <li><span class="dot" style="--c: var(--recoverer)">4</span><div><h4>Complete and hand over</h4><span class="who" style="--c: var(--recoverer)">Recoverer</span><p>After the waiting period the recoverer signs <code>finalizeRecovery</code>. The proposed key becomes the owner and the epoch goes up. No coin has moved. The recoverer now gives the new device the identity and every earlier viewing key, sealed to the device.</p></div></li>
-    <li><span class="dot" style="--c: var(--owner)">5</span><div><h4>Sweep</h4><span class="who" style="--c: var(--owner)">New device</span><p>With the identity and the earlier viewing keys the new device finds every address in use. It moves what is there to addresses of its own seed, in transactions that carry the controller, signed with <code>ownerAuthorize</code>. Each swept input shows the identity and its address secret. Coins, fungible tokens and NFTs move the same way. The fee comes out of the swept coins. A large wallet is swept in several transactions, the most valuable coins first.</p></div></li>
+    <li><span class="dot" style="--c: var(--recoverer)">4</span><div><h4>Complete and hand over</h4><span class="who" style="--c: var(--recoverer)">Recoverer</span><p>After the waiting period the recoverer signs <code>finalizeRecovery</code>. The proposed key becomes the owner and the epoch goes up. No coin has moved. The recoverer now gives the new device the identity, the viewing key of every earlier seed and the access to earlier backups, sealed to the device.</p></div></li>
+    <li><span class="dot" style="--c: var(--owner)">5</span><div><h4>Sweep</h4><span class="who" style="--c: var(--owner)">New device</span><p>With the identity and the earlier viewing keys the new device finds every address in use: a quick search first, then a full search of every range. It moves what is there to addresses of its own seed, in transactions that carry the controller, signed with <code>ownerAuthorize</code>. Each swept input shows the identity and its address secret. Coins, fungible tokens and NFTs move the same way. The fee comes out of the swept coins. A large wallet is swept in several transactions, the most valuable first. A token the wallet does not understand counts as possibly valuable.</p></div></li>
     <li><span class="dot" style="--c: var(--app)">6</span><div><h4>Understand what the tokens are</h4><span class="who" style="--c: var(--app)">New device, with the applications' templates</span><p>A swept NFT is already under the new owner's control. To show it as "a jar with 0.3 BCH that opens in March" the wallet needs the application's template, from its backup or from the application when the user connects again. Recovery does not wait for this.</p></div></li>
-    <li><span class="dot" style="--c: var(--owner)">7</span><div><h4>Keep watching</h4><span class="who" style="--c: var(--owner)">New device</span><p>The new device watches the controller, and it keeps watching the earlier addresses for payments that still arrive there. See <a href="#late">A payment to an old address</a>.</p></div></li>
+    <li><span class="dot" style="--c: var(--owner)">7</span><div><h4>Keep watching</h4><span class="who" style="--c: var(--owner)">New device</span><p>The new device watches the controller, and it keeps watching the earlier addresses for payments that still arrive there. It sets aside a coin for cancelling and tops up the recoverer's fees. See <a href="#late">A payment to an old address</a>.</p></div></li>
   </ol>
 
   <h3>The recovery kit and the recoverer's key</h3>
   <ul>
-    <li><strong>The kit contains</strong> the identity and the transaction that created it, the recoverer's key for this wallet, the viewing key, where the sealed backup is kept and how to read it, and the settings as the owner saw them, for the recoverer to compare with the chain. It fits in one link or one QR code.</li>
-    <li><strong>The recoverer's key is one per wallet, not one per coin.</strong> Only its hash is on chain, in the controller. No address contains it, and the recoverer never signs for a coin. It signs two kinds of transaction: the request and the completion.</li>
-    <li><strong>The recoverer uses a different key for every wallet,</strong> so two wallets with the same recoverer show nothing in common. By default the owner's phone makes this key as a separate set of twelve words, puts its hash into the controller, seals the words into the kit and does not keep them.</li>
-    <li><strong>The recoverer's fees are set aside</strong> when the wallet is created: enough for three requests and one completion.</li>
+    <li><strong>The kit contains</strong> the identity, the recoverer's credential for this wallet, the viewing key of every seed, where the sealed backups are kept and how to read them, and the settings as the owner saw them, for the recoverer to compare with the chain. The first kit arrives in one link or one QR code. The recoverer keeps the kit and adds to it whenever the wallet gets a new seed.</li>
+    <li><strong>The recoverer's key is one per wallet, not one per coin.</strong> Only its hash is on chain, in the controller. No address contains it, and the recoverer never signs for a coin of the wallet. It signs two kinds of transaction: the request and the completion.</li>
+    <li><strong>The recoverer uses a different key for every wallet,</strong> so two wallets with the same recoverer show nothing in common. By default the owner's phone makes this key as a separate set of twelve words, puts its hash into the controller, seals the words into the kit and does not keep them. The same words give a separate fee key.</li>
+    <li><strong>The recoverer's fees are set aside</strong> when the wallet is created: enough for four requests and one completion, so that three cancelled requests still leave room for one that succeeds. They sit at an ordinary address of the fee key and are the recoverer's own.</li>
+    <li><strong>A receipt decides.</strong> The wallet says that recovery is on only when the recoverer's signed receipt matches what it was sent and the controller's state on chain.</li>
+    <li><strong>A new seed with the old phone at hand, and a new recoverer,</strong> follow one order: the recoverer first confirms that it holds what it needs, and only then does the owner sign the change. A recoverer that is replaced keeps what it has already seen.</li>
+
   </ul>
 
   <h3>What each party holds and can do</h3>
@@ -526,13 +537,13 @@ contract VaultAddress(bytes32 tag) {
   <table>
     <tr><th>Party</th><th>Holds</th><th>Can do</th><th>Cannot do</th></tr>
     <tr><td>Owner's device</td><td>The seed; the identity; the viewing key</td><td>Spend, cancel a request, change the recoverer</td><td></td></tr>
-    <tr><td>Recoverer</td><td>Its key for this wallet; the identity; the viewing key</td><td>Request and complete a recovery. See every address and balance of the wallet.</td><td>Spend anything. Shorten the wait. Complete with a key other than the one requested.</td></tr>
+    <tr><td>Recoverer</td><td>Its key for this wallet; the identity; the viewing keys; its fee allowance</td><td>Request and complete a recovery. See every address and balance of the wallet. Spend its own allowance.</td><td>Spend a coin of the wallet with its key. Shorten the wait. Complete with a key other than the one requested.</td></tr>
     <tr><td>New device</td><td>Its own new seed. After completion: the identity and the earlier viewing keys.</td><td>After completion: sweep and spend</td><td>Anything before the wait is over</td></tr>
-    <tr><td>Backup stores</td><td>Sealed records: copies of the viewing keys, trusted templates, notes on which template made which token, labels</td><td>Hand the records back</td><td>Read them</td></tr>
+    <tr><td>Backup stores</td><td>Sealed records: copies of the viewing keys, trusted templates, the recoverer's receipts, notes on which template made which token, labels</td><td>Hand the records back</td><td>Read them</td></tr>
   </table>
   </div>
   <div class="note"><p><strong>What the waiting period does and does not protect.</strong> It protects against a recoverer who acts without being asked, as long as the owner notices in time. A recoverer who names their own key and is not cancelled gets the wallet. It does not protect against a thief who can use the owner's phone: such a thief can spend at once, as with any wallet.</p></div>
-  <div class="note"><p><strong>If a recovery completes against the owner's will,</strong> the owner's keys still spend every coin that has not been swept. A wallet that finds itself owned by a key it does not hold offers to move its coins out at once, to a wallet with a new identity. Coins at vault addresses cannot be saved this way.</p></div>
+  <div class="note"><p><strong>If a recovery completes against the owner's will,</strong> the owner's keys still spend every coin that has not been swept. A wallet that finds itself owned by a key it does not hold stops giving out addresses, makes sure of what it sees on more than one server, and offers to move its coins out at once, to a wallet with a new identity. That is a race against the new owner's sweep. Coins at vault addresses cannot be saved this way.</p></div>
 </section>
 
 <!-- ============================== LATE -->
@@ -541,7 +552,7 @@ contract VaultAddress(bytes32 tag) {
   <p>After a recovery, someone may still pay an address the wallet gave out before: an old invoice, an address saved in an exchange's withdrawal list. That coin is not lost. The new owner collects it through the controller, by the same path as the sweep. This is <strong>not</strong> the vault address; the two are compared below.</p>
   <ol class="steps">
     <li><div><strong>The coin lands at the old address.</strong> Receiving runs no script, and nothing on chain tells the payer that the wallet has a new owner.</div></li>
-    <li><div><strong>The new device notices it.</strong> It holds the earlier viewing key, which the recoverer handed over. From it the device derives the same addresses the old phone used and keeps watching them, including the 20 numbers past the last one used.</div></li>
+    <li><div><strong>The new device notices it.</strong> It holds the earlier viewing key, which the recoverer handed over. From it the device derives the same addresses the old phone used and keeps watching them: every address that was used, and the window past the last one. From time to time it looks up the whole range again.</div></li>
     <li><div><strong>The new device collects it.</strong> One transaction: the controller at input 0, approved by the new owner, and the coin, unlocked by showing the identity and that address's secret. The secret comes from the earlier viewing key. The coin goes to an address of the new seed.</div></li>
     <li><div><strong>Until then the coin has two masters.</strong> The key the address was made for is on the lost phone, and it still opens the address. This matters only if someone can use that phone.</div></li>
   </ol>
@@ -572,7 +583,7 @@ contract VaultAddress(bytes32 tag) {
 <!-- ============================== PRIVACY -->
 <section id="privacy">
   <h2>What others can see</h2>
-  <p>Addresses are not linked to each other or to the identity until the wallet is recovered. Choose who is looking.</p>
+  <p>No address shows the identity or another address of the wallet. The ordinary links between coins that are spent together remain, as with any wallet. Choose who is looking.</p>
   <div class="widget">
     <div class="wtitle"><span>The same six addresses, seen by</span>
       <button type="button" id="pv-after" aria-pressed="false">Show after a recovery sweep</button>
@@ -594,19 +605,22 @@ contract VaultAddress(bytes32 tag) {
     <tr><td>Creating the wallet</td><td>The coins the wallet was funded with, and the first addresses they move to</td></tr>
     <tr><td>A cancel or a change of settings</td><td>The coin that pays the fee, and its change. The wallet keeps a small coin apart for this.</td></tr>
     <tr><td>The recoverer's request and completion</td><td>The recoverer's fee coins, which came from the wallet's first coins</td></tr>
+    <tr><td>Topping up the recoverer's fees after the recoverer has used them</td><td>The coin that pays the top-up</td></tr>
     <tr><td>A sweep, or collecting a late payment</td><td>Every address emptied, and the new addresses the coins go to</td></tr>
     <tr><td>Spending from a vault address</td><td>That vault address</td></tr>
   </table>
   </div>
-  <p style="margin-top:14px">Everything else the wallet does leaves no link to the identity.</p>
+  <p style="margin-top:14px">Nothing else the wallet does shows the identity. A link, once made, spreads in the ordinary way: a coin that is tied to the identity ties to it whatever it is later spent together with.</p>
   <h3>The controller is readable on purpose</h3>
-  <p>Anyone can see that a controller exists, and read its state. It is not linked to any address until a sweep. Hiding the state behind a hash would gain little: every transaction of the controller has to show the state to the script, so it would become public the first time the controller is used. Two simple measures do more:</p>
+  <p>Anyone can see that a controller exists, and read its state. Its state names no address. Hiding the state behind a hash would gain little: every transaction of the controller has to show the state to the script, so it would become public the first time the controller is used. Two simple measures do more:</p>
   <ul>
     <li><strong>The recoverer uses a different key for every wallet.</strong> Two wallets with the same recoverer then show nothing in common.</li>
     <li><strong>The owner's controller key is used for nothing else.</strong> It never appears in an address.</li>
   </ul>
   <h3>What a recovery reveals</h3>
-  <p>A sweep has the controller as its first input and shows the identity in every swept input. Everything the wallet held at that moment is tied together, in public. Coins received afterwards at new addresses are unlinked again. Limiting this would take several controllers, each covering part of the addresses. Hiding it fully would take a zero-knowledge proof checked in script, which Bitcoin Cash cannot practically do today as far as we know. Neither is part of this design; both remain possible, because applications never see the identity or the controller.</p>
+  <p>A sweep has the controller as its first input and shows the identity in every swept input. Everything the wallet held at that moment is tied together, in public. Coins received afterwards at new addresses are not, until they are spent together with coins that are. A token whose history is public, such as a loan key, links its position before and after the sweep.</p>
+  <p>Limiting this would take several controllers, each covering part of the addresses. Hiding it fully would need a way to prove the link without showing it, which this project has not found for Bitcoin Cash and does not claim. Neither is part of this design. A later version of the wallet's scripts could add either without changing applications, because applications are never sent the identity or the controller and deal only with tokens.</p>
+
 </section>
 
 <!-- ============================== RULES -->
@@ -616,14 +630,14 @@ contract VaultAddress(bytes32 tag) {
   <div class="grid3">
     <div class="card rule"><span class="tag">Rule 1</span><h4>Authority is a token</h4><p>Whoever may act on a position is whoever spends its ownership NFT in the same transaction. Payouts go to an address the wallet supplied.</p><p class="small">No user key or key hash inside an application contract. A key cannot be replaced; a token can be moved.</p></div>
     <div class="card rule"><span class="tag">Rule 2</span><h4>The wallet's parts are the wallet's business</h4><p>The application does not assume the wallet's inputs are P2PKH or have a fixed size. Tokens and change go to an address the wallet names.</p><p class="small">"Back to the address it came from" is acceptable: after a sweep that is a new address.</p></div>
-    <div class="card rule"><span class="tag">Rule 3</span><h4>The token leads to the position</h4><p>From the NFT alone (its category and commitment) and the template, a wallet can find the position on chain and list the actions it offers.</p><p class="small">No application server and no private note is needed to find a position again.</p></div>
+    <div class="card rule"><span class="tag">Rule 3</span><h4>The token leads to the position</h4><p>From the NFT (its category and commitment), the template and the chain, a wallet can find the position, work out what its actions need, and list the actions it offers.</p><p class="small">No application server, no private note and no secret that existed only on the lost phone is needed. What the application itself goes on needing, such as a price oracle, is named in the template.</p></div>
   </div>
   <h3>Why these are enough</h3>
   <ul>
     <li><strong>Recovery never touches an application contract.</strong> The sweep moves the NFT from one wallet address to another. The position stays where it is.</li>
     <li><strong>The application's transaction layout is its own.</strong> The controller is not in application transactions, so an application may fix its input and output positions as it likes.</li>
     <li><strong>A wallet can recover what it does not understand.</strong> An NFT of an unknown application is swept like any coin. Its meaning can be learned later.</li>
-    <li><strong>The rules are checkable.</strong> Each can be tested against a contract's source and a template, so a conformance checker is possible.</li>
+    <li><strong>Part of this can be checked by a program.</strong> Whether a template leaves the wallet's outputs to the wallet, and whether its declaration leads to a position on chain, can be checked mechanically. Whether a contract gives authority to the token and to nothing else takes reading and testing it. A checker therefore gives one of three answers: verified, a violation found, or not verified.</li>
   </ul>
   <p>What the rules exclude: positions opened by a key written into the contract, positions whose owner is known only to a server, and front ends that insist on building the transaction themselves from the wallet's public keys.</p>
 </section>
@@ -647,14 +661,16 @@ contract VaultAddress(bytes32 tag) {
   <p>A template normally names a locking script for every output. Here it leaves the script to the wallet. The same marker on an input says "any coin of the wallet", with no assumption about its script.</p>
   <div class="scroll">
   <table>
-    <tr><th>Kind</th><th>The wallet supplies</th></tr>
-    <tr><td><code>receive</code></td><td>A fresh ordinary address, for a coin or token created now</td></tr>
-    <tr><td><code>change</code></td><td>A fresh ordinary address for what is left over</td></tr>
-    <tr><td><code>return</code></td><td>The address of a named input of the same transaction, for contracts that require a token to go back where it came from</td></tr>
-    <tr><td><code>lasting</code></td><td>A vault address, for an address stored now and paid later</td></tr>
+    <tr><th>Kind</th><th>The wallet supplies</th><th>Number taken</th></tr>
+    <tr><td><code>receive</code></td><td>A fresh ordinary address of the "change" kind, for a coin or token created now</td><td>The next one</td></tr>
+    <tr><td><code>change</code></td><td>A fresh ordinary address of the same kind, for what is left over</td><td>The next one</td></tr>
+    <tr><td><code>return</code></td><td>The script of a named input of the same transaction, which must be a coin of the wallet. For contracts that require a token to go back where it came from.</td><td>None</td></tr>
+    <tr><td><code>lasting</code></td><td>A vault address, for an address stored now and paid later</td><td>The next vault number, or one already given out</td></tr>
+
   </table>
   </div>
-  <p style="margin-top:14px">XO's validator rejects properties it does not know, so this form needs XO's agreement. Until then the same is done with what exists: the template declares a variable that holds a locking script, and the request says which kind the wallet is to fill it with.</p>
+  <p style="margin-top:14px">The wallet fills each kind itself and never from an address the application supplies. A <code>return</code> is refused when the named input is not the wallet's, or sits at an address of an earlier seed: such a token is swept first.</p>
+  <p>XO's validator rejects properties it does not know, so this form needs XO's agreement. Until then the same is done with what exists: the template declares a variable that holds a locking script, and the request says which kind the wallet is to fill it with.</p>
 
   <h3>2. What a token means</h3>
 <pre class="code">"recovery": {
@@ -688,12 +704,12 @@ contract VaultAddress(bytes32 tag) {
     }
   }
 }</pre>
-  <p>ParyonUSD keeps a small sidecar coin next to each loan, carrying the loan key's category. The wallet finds the unspent sidecar with that category; the loan is the output before it in the same transaction. This reading comes from Paryon's borrowing and manage contracts and has not been run.</p>
+  <p>ParyonUSD keeps a small sidecar coin next to each loan, carrying the loan key's category. The wallet finds the unspent sidecar with that category; the loan is the output before it in the same transaction. Category and place alone are not enough where someone could make a look-alike, so the declaration also has to say what makes a sidecar genuine, and the wallet checks it. That part of the declaration is still to be designed. This reading comes from Paryon's borrowing and manage contracts and has not been run.</p>
 
   <h3>4. The wallet's own template</h3>
   <p>The wallet is itself described by an XO template. It holds the controller with its four actions, the recoverable address as a locking script with two unlocking scripts (<code>spend</code> and <code>sweep</code>), the vault address, and a <code>sweep</code> action whose first input and output are the controller.</p>
 
-  <div class="note"><p><strong>Tying a token to a template without a backup.</strong> The backup keeps one line per token saying which template made it. If the backup is gone, the wallet can test a token against a template the user trusts: rebuild the position's address from the token and look for that address in the transaction that created the token.</p></div>
+  <div class="note"><p><strong>Tying a token to a template without a backup.</strong> The backup keeps one line per token saying which template made it. If the backup is gone, the wallet can test a token against each template the user trusts: find the position the way that template's declaration says, and check what it finds.</p></div>
 </section>
 
 <!-- ============================== CONNECT -->
@@ -715,28 +731,29 @@ contract VaultAddress(bytes32 tag) {
   <p>A wallet announces the extension in the WizardConnect session. Nothing in it names an application.</p>
 <pre class="code">{ "xo_v1": { "version": 1, "network": "chipnet",
     "profiles":  ["recoverable-app-v1"],           <span class="c">// the application rules this wallet relies on</span>
-    "bindings":  ["receive", "change", "return", "lasting"],   <span class="c">// what the wallet fills in itself</span>
-    "templates": [{ "identifier": "…", "contentHash": "…" }] } }</pre>
+    "bindings":  ["receive", "change", "return", "lasting"] } }   <span class="c">// what the wallet fills in itself</span></pre>
+  <p>The announcement lists no templates. A list of what the user trusts would tell each application which others the user deals with. The application names its template in its request.</p>
   <div class="scroll">
   <table>
     <tr><th>Message</th><th>Direction</th><th>Meaning</th></tr>
-    <tr><td><code>xo_action_request</code></td><td>application → wallet</td><td>The template (or its identifier if the wallet has it), the action, the role, the variables, which variables the wallet fills and with which kind, and which of the wallet's tokens the action spends</td></tr>
+    <tr><td><code>xo_action_request</code></td><td>application → wallet</td><td>The template's identifier and content hash (and the template itself if the wallet lacks it), the action, the role, the variables, which variables the wallet fills and with which kind, and which of the wallet's tokens the action spends</td></tr>
     <tr><td><code>xo_action_response</code></td><td>wallet → application</td><td>Taken on, or refused with a reason</td></tr>
-    <tr><td><code>xo_invitation_update</code></td><td>wallet → application</td><td>Approved by the user, recorded in the backup, sent</td></tr>
+    <tr><td><code>xo_invitation_update</code></td><td>wallet → application</td><td>Approved by the user; sent</td></tr>
     <tr><td><code>xo_action_result</code></td><td>wallet → application</td><td>The transaction and the tokens the wallet received, or an error</td></tr>
-    <tr><td><code>xo_positions_request</code> / <code>xo_positions</code></td><td>both</td><td>Which tokens of this template does the wallet hold? Answered only for a template the user trusts.</td></tr>
+    <tr><td><code>xo_positions_request</code> / <code>xo_positions</code></td><td>both</td><td>Which tokens of this template does the wallet hold? Answered only for a template the user trusted in a session with this application.</td></tr>
   </table>
   </div>
   <h3>Rules the wallet follows</h3>
   <ul>
-    <li><strong>An unknown template is shown to the user</strong> with its name, description and actions, and is trusted only on their word.</li>
+    <li><strong>An unknown template is shown to the user</strong> with its name, description and actions, and is trusted only on their word. The template and its declaration are bound by content hash; a later download does not replace them.</li>
+    <li><strong>The wallet states what it knows about a template: verified, a violation found, or not verified.</strong> Verified means that the checks the wallet can run have passed, not that the contract was audited. Not verified is the ordinary state of a template met for the first time. A violation is named, with the rule it breaks and what that means for recovery.</li>
     <li><strong>The user sees two things before approving:</strong> the action in the template's words, and the wallet's own figures from the transaction it built. The application cannot influence the second.</li>
-    <li><strong>A request is carried out at most once.</strong> It is identified by its <code>id</code>; a repeat gets the stored outcome.</li>
-    <li><strong>The application is never told the identity.</strong> It learns the addresses that appear in its own transactions and nothing else.</li>
+    <li><strong>A request is carried out at most once.</strong> It is identified by its <code>id</code>; a repeat gets the stored outcome, and the same <code>id</code> with other content is refused.</li>
+    <li><strong>The application is never sent the identity, a viewing key, or anything about other applications.</strong> It learns the addresses that appear in its own transactions. It can study the chain like anyone.</li>
     <li><strong>A position is a token.</strong> The wallet answers a positions request from the NFTs it holds on chain.</li>
     <li><strong>The wallet signs with the address keys.</strong> The controller is not part of an application's transaction.</li>
     <li><strong>A token that carries authority is spent only in transactions the wallet built itself</strong> from a template the user trusts. Whoever gets such a token spent in a transaction of their own shape can use its authority.</li>
-    <li><strong>A template that breaks one of the three rules is pointed out</strong> where the wallet can tell, with what that means for recovery.</li>
+    <li><strong>A standard signing request is refused.</strong> The wallet builds every transaction itself, so it answers no request to sign one that an application built.</li>
   </ul>
   <div class="note"><p><strong>This is the part that most needs XO.</strong> XO has invitations and a sync client but no protocol between a website and a wallet. A standard would best come from XO, or as a WizardConnect extension that both projects agree on.</p></div>
 </section>
@@ -757,6 +774,7 @@ contract VaultAddress(bytes32 tag) {
     <li><strong>The key.</strong> Opening a jar creates one NFT of a fresh category and sends it to the wallet. Its commitment is the unlock time.</li>
     <li><strong>The jar's address</strong> follows from the key alone: <code>P2SH32( SavingsJar(key.category, key.commitment) )</code>. That is rule 3.</li>
     <li><strong>One contract for every wallet.</strong> An ordinary wallet holds the key NFT at a P2PKH address and the application builds the transaction. Grandma's Wallet holds it at a recoverable address and builds the transaction itself. The jar cannot tell the difference.</li>
+    <li><strong>The key is kept.</strong> Anyone can pay in again later, and a jar whose key was destroyed could never be emptied. The contract does not require this; the template's withdrawal returns the key, and the wallet checks that output before it signs.</li>
   </ul>
   <div class="widget">
     <div class="wtitle"><span>The jar's transactions</span></div>
@@ -802,7 +820,7 @@ contract VaultAddress(bytes32 tag) {
     </ul></div>
   </div>
   <div class="note"><p><strong>Before any front end:</strong> open, manage and close one loan on chipnet from a recoverable address with a plain script. That settles whether the contracts accept this wallet. It needs about 0.5 test BCH. Paryon's contracts repository states no licence, so the npm package is used as a dependency and not copied, and telling the Paryon team would be sensible.</p></div>
-  <p class="small">One consequence for privacy: managing a loan returns the loan key to the address it left, so the key stays at one address for the life of the loan. That address is known to anyone who looks at the loan, and to nobody as part of this wallet.</p>
+  <p class="small">One consequence for privacy: managing a loan returns the loan key to the address it left, so the key stays at one address for as long as the wallet does not move it. That address is known to anyone who looks at the loan. A sweep moves the key, and the key's public history then links the loan to the recovery.</p>
 </section>
 
 <!-- ============================== APPS -->
@@ -829,25 +847,27 @@ contract VaultAddress(bytes32 tag) {
   <table>
     <tr><th>Information</th><th>Needed for</th><th>If it is lost</th></tr>
     <tr><td>Identity</td><td>Everything</td><td>The recoverer cannot act. It is in the kit.</td></tr>
-    <tr><td>Viewing keys</td><td>Finding coins and showing their secrets</td><td>Coins cannot be found or swept. This is the one thing that must not be lost.</td></tr>
-    <tr><td>An application's template</td><td>Showing what a token means and using its position</td><td>The token is still swept and safe. The template can be had again from the application.</td></tr>
+    <tr><td>Viewing key of every seed</td><td>Finding coins and showing their secrets</td><td>Coins at that seed's addresses cannot be found or swept by a new owner. This is the one thing that must not be lost; the recoverer's kit holds them all.</td></tr>
+    <tr><td>An application's template</td><td>Showing what a token means and using its position</td><td>The token is still swept and safe. The template can be had again from the application or from any copy.</td></tr>
     <tr><td>Which template made which token</td><td>Convenience</td><td>The wallet can test a token against the templates the user trusts.</td></tr>
     <tr><td>Labels</td><td>Convenience</td><td>Names are lost.</td></tr>
   </table>
   </div>
-  <p style="margin-top:14px">No record per payment or per address is needed, which keeps the backup small. Backup stores hold sealed copies and cannot read them. The recoverer can read them, so a record counts only if it is signed by the key the controller shows as owner at the time. After a recovery the new device starts a new backup, because the lost phone knows the key of the old one.</p>
+  <p style="margin-top:14px">No record per payment or per address is needed, which keeps the backup small. Backup stores hold sealed copies and cannot read them. The recoverer can read them, so a record counts only if it is signed by a key that the controller's history shows as an owner. A signature does not show when a record was made, so for viewing keys the recoverer's receipt decides which record counts, and a record from an earlier seed never overrides the current owner's. After a recovery, or a move to a new seed, the new device starts a new backup, because the earlier phone knows the key of the old one.</p>
 
   <h3>A backup the user keeps</h3>
   <p>The design does not need one and supports one.</p>
   <ul>
-    <li><strong>What to keep:</strong> the twelve words and the wallet's identity (64 characters). A device with both is the same owner. It recomputes every key and address, finds its coins by scanning, and needs no controller transaction and no waiting period.</li>
+    <li><strong>What to keep for the current seed:</strong> the twelve words and the wallet's identity (64 characters). A device with both is the same owner. It recomputes every key and address of that seed, finds its coins by searching, and needs no controller transaction and no waiting period. Nothing more is needed, because the search ranges are the same for every wallet.</li>
+    <li><strong>What that leaves out:</strong> addresses of earlier seeds. If the wallet has been recovered or moved to a new seed before, payments that still arrive at earlier addresses, and earlier vault addresses, are found only with the earlier viewing keys. A complete backup adds them.</li>
     <li><strong>It is not a standard wallet backup.</strong> The words alone restore nothing in another wallet, and nothing here without the identity.</li>
-    <li><strong>It goes stale at a recovery,</strong> because the wallet then has a new seed. It must be made again.</li>
+    <li><strong>It goes stale at a recovery or a change of owner,</strong> because the wallet then has a new seed. It must be made again, and an old backup cannot undo the change.</li>
     <li><strong>Whoever holds it has the wallet at once.</strong> The waiting period guards against the recoverer, not against someone holding the words.</li>
+
   </ul>
 
   <h3>Being your own recoverer</h3>
-  <p>The recoverer's role is a key and the viewing key. Nothing requires a business: a second device of the user's, or a family member's phone, can hold the kit. A wallet has one recoverer at a time, and the owner can replace it.</p>
+  <p>The recoverer's role is a key and the kit. Nothing requires a business: a second device of the user's, or a family member's phone, can hold the kit. A wallet has one recoverer at a time, and the owner can replace it.</p>
 </section>
 
 <!-- ============================== CHOICES -->
@@ -868,18 +888,20 @@ contract VaultAddress(bytes32 tag) {
 
   <h3>Parts, in the order they depend on each other</h3>
   <ol class="steps">
-    <li><div><strong>Trials with the XO engine:</strong> whether it can hold one address per coin with a counter, and carry a sweep.</div></li>
-    <li><div><strong>The controller</strong> and <code>ownerApproves</code>. These exist.</div></li>
-    <li><div><strong>The recoverable address and the vault address.</strong> Contracts and tests: both paths, the sweep, and every refusal shown on this page.</div></li>
-    <li><div><strong>The wallet's keys.</strong> Seed, address chain, viewing key; receiving and paying.</div></li>
-    <li><div><strong>The recoverer.</strong> Recovery kit, request, completion; the owner's monitor and cancel.</div></li>
-    <li><div><strong>The sweep on a new device.</strong> Finding addresses from the viewing key; moving coins and tokens.</div></li>
-    <li><div><strong>Applications.</strong> The <code>xo_v1</code> extension; building from an application's template; actions that create tokens.</div></li>
+    <li><div><strong>Trials with the XO engine:</strong> whether it can hold one address per coin with our keys, carry a sweep, combine an application's template with the wallet's coins, and let a new seed take over. Also the sizes of the address ranges.</div></li>
+    <li><div><strong>The recoverable address and the vault address,</strong> on the controller and <code>ownerApproves</code>, which exist. Contracts and tests: both paths, the sweep, and every refusal shown on this page.</div></li>
+    <li><div><strong>The wallet's keys.</strong> Seed, address chains, viewing key; giving out and finding addresses.</div></li>
+    <li><div><strong>Creating a wallet, and the wallet on the XO engine.</strong> First coins, receiving and paying.</div></li>
+    <li><div><strong>The recoverer.</strong> Recovery kit, receipts, request, completion; the owner's monitor and cancel.</div></li>
+    <li><div><strong>A new device takes over.</strong> Finding addresses with the viewing keys; the sweep. Also a new seed without loss, and a new recoverer.</div></li>
+    <li><div><strong>The pages</strong> for the wallet and the recoverer, and the public demonstration.</div></li>
+    <li><div><strong>Applications.</strong> The <code>xo_v1</code> extension; building from an application's template; actions that create tokens; finding a position from a token.</div></li>
     <li><div><strong>Savings Jar,</strong> with its template and recovery declaration, checked with this wallet and with an ordinary wallet.</div></li>
     <li><div><strong>ParyonUSD.</strong> First a loan from a script address by plain script. Then the template and the front end. Then the recovery of a live loan.</div></li>
     <li><div><strong>Two short specifications for XO:</strong> the recoverable address, and the three application rules as a template profile.</div></li>
+
   </ol>
-  <p class="small">The stages, and what must hold before each is done, are in <code>IMPLEMENTATION_PLAN.md</code>.</p>
+  <p class="small">The stages, and what must hold before each is done, are in <code>IMPLEMENTATION_PLAN_v0.4.md</code>.</p>
 </section>
 
 <!-- ============================== LIMITS -->
@@ -890,16 +912,20 @@ contract VaultAddress(bytes32 tag) {
     <li><strong>An earlier seed works until the sweep.</strong> Someone who later finds the lost phone can take a coin that was not swept. The new device sweeps as soon as recovery completes.</li>
     <li><strong>Payments to an earlier address.</strong> A coin sent to an old address after recovery can be moved by the new owner through the controller, and also by the earlier seed. People who pay the wallet need a new address, or a vault address, which does not go stale.</li>
     <li><strong>The recoverer can read the wallet.</strong> The viewing key shows every address and balance. It gives no power to spend.</li>
-    <li><strong>The viewing key is needed to recover.</strong> Without it the new owner cannot find the addresses or show their secrets. It is kept by the recoverer and, sealed, in the backup stores.</li>
+    <li><strong>The viewing key of every seed is needed to recover.</strong> Without it the new owner cannot find that seed's addresses or show their secrets. The recoverer has to keep each one; sealed copies are in the backup stores.</li>
     <li><strong>A recovery is public.</strong> The sweep ties together everything the wallet held.</li>
     <li><strong>A request is not cancelled by ordinary use.</strong> The owner's device has to notice it and cancel.</li>
     <li><strong>Larger transactions.</strong> Spending a script address costs more bytes than P2PKH: about twice per input, by an estimate from the script size.</li>
     <li><strong>The first coins are traceable.</strong> They can be followed to the creation of the identity.</li>
     <li><strong>Applications have to be reached through a template.</strong> Front ends that build transactions from the wallet's public keys cannot serve it.</li>
+    <li><strong>A complete search is a long one.</strong> It looks up every address of fixed ranges, for every seed the wallet has had. A seed has a fixed number of fresh addresses; after that the wallet uses addresses again or the owner moves to a new seed.</li>
+    <li><strong>An old identity can outlive its rules.</strong> A vault address that was published goes on being paid, so a wallet that moves to new controller rules keeps the old identity in service.</li>
   </ul>
   <h3>Open points</h3>
   <ul>
-    <li><strong>The key paths.</strong> One constant is still to be fixed, and it is not known whether the XO engine can use a simple counter for address keys.</li>
+    <li><strong>The key paths and the ranges.</strong> One constant is still to be fixed, and it is not known whether the XO engine can use a simple counter for address keys. The sizes of the address ranges are to be fixed from measurement.</li>
+    <li><strong>Confidence in the chain.</strong> The phone takes confirmations from the servers it is set up with, the user's own node among them. Checking block headers on the phone is later work, and until then the wallet does not call chain state verified.</li>
+    <li><strong>Watching on a phone.</strong> A phone that is switched on is not thereby watching the chain. Background operation on phones has to be shown before protection is claimed.</li>
     <li><strong>Who makes the recoverer's key.</strong> The owner's phone by default; the recoverer could make it instead.</li>
     <li><strong>Template fit for large application transactions.</strong> Untested for ParyonUSD, see above.</li>
     <li><strong>The template extension.</strong> Whether "the wallet's own address" and the recovery declaration belong in the XO schema or in a companion document is for XO to say.</li>
@@ -1141,7 +1167,7 @@ contract VaultAddress(bytes32 tag) {
         } },
       { who: "owner", label: "Owner moves to a new seed", run: function () {
           var k = s.nextSeed++; s.seeds.push(k); s.epoch++; clearReq();
-          say("ok", "The owner moved the identity to seed " + L(k) + " without the recoverer, and gave the recoverer the new viewing key. Epoch " + s.epoch + ". What sits at earlier addresses waits for a sweep.");
+          say("ok", "The recoverer first confirmed that it holds the viewing key of seed " + L(k) + ". Then the owner moved the identity to that seed with one signature and no waiting. Epoch " + s.epoch + ". What sits at earlier addresses waits for a sweep.");
         } },
       { who: "recoverer", label: "Recoverer requests recovery", run: function () {
           if (s.pending) { say("no", "Refused. A request can be opened only when none is pending."); return; }
@@ -1237,10 +1263,10 @@ contract VaultAddress(bytes32 tag) {
     var CAPS = {
       owner: "The phone holds the seed. It derives every address key and the controller key.",
       rec: "The recoverer holds the viewing key, so it can list every address and balance. It holds no address key and cannot spend. Choose a recoverer you would let read your bank statement.",
-      jar: "An application sees the addresses that appear in its own transactions, as with any wallet. It is not told the identity and cannot link the wallet's other addresses.",
-      py: "ParyonUSD sees the address the loan key sits at and the address the borrowed PUSD went to. It is not told the identity and cannot link the wallet's other addresses.",
+      jar: "An application sees the addresses that appear in its own transactions, as with any wallet. It is not sent the identity or the wallet's other addresses. It can study the chain like anyone.",
+      py: "ParyonUSD sees the address the loan key sits at and the address the borrowed PUSD went to. It is not sent the identity or the wallet's other addresses. The loan key's own history is public.",
       chain: "Each address is a script address with an opaque tag. Spending one shows that it is a recoverable address, and nothing about which wallet it belongs to.",
-      after: "A sweep shows the identity and each address's secret, and has the controller as its first input. Everything swept is tied to the wallet from then on, for anyone. Coins received afterwards at new addresses are unlinked again. A vault address shows its link only when it is spent."
+      after: "A sweep shows the identity and each address's secret, and has the controller as its first input. Everything swept is tied to the wallet from then on, for anyone. Coins received afterwards at new addresses are not tied to it until they are spent together with coins that are. A vault address shows its link only when it is spent."
     };
     var who = "chain", after = false;
     var seg = document.getElementById("pv-seg"), btn = document.getElementById("pv-after");
@@ -1291,7 +1317,7 @@ contract VaultAddress(bytes32 tag) {
       xo: { label: "With xo_v1 the application names a template action; the wallet builds, shows, signs and sends the transaction.",
         cap: "The same WizardConnect session, carrying XO requests (blue). The application learns only the addresses that appear in its own transactions, and never needs to know what kind of script the wallet uses.",
         steps: [
-          { from: 1, to: 0, label: "xo_v1: profiles, trusted templates", xo: true },
+          { from: 1, to: 0, label: "xo_v1: profiles, kinds it fills in", xo: true },
           { from: 0, to: 1, label: "xo_action_request: template, action", xo: true },
           { self: 1, label: "user trusts the template, once" },
           { from: 1, to: 2, label: "looks up the coins the action names" },
@@ -1327,7 +1353,7 @@ contract VaultAddress(bytes32 tag) {
       verdict: "Accepted. Grandchildren can pay in too." },
     { name: "Empty the jar", kind: "ok",
       inputs: [{ i: "0", k: "app", t: "Savings jar", s: "no signature: points at input 1" }, { i: "1", k: "app", t: "Jar key NFT", s: KEYSIG }],
-      outputs: [{ i: "0", k: "wallet", t: "Savings", s: "to an address of the wallet" }, { i: "1", k: "app", t: "Jar key NFT", s: "back to the wallet, or burned" }],
+      outputs: [{ i: "0", k: "wallet", t: "Savings", s: "to an address of the wallet" }, { i: "1", k: "app", t: "Jar key NFT", s: "back to the wallet, kept for later" }],
       checks: [[1, "Jar: the input it points at carries a token of the jar's key category."], [1, "Jar: the transaction's lock time is at or after the unlock time."], [1, "Wallet address: the key signature is valid."]],
       verdict: "Accepted. No controller, in any wallet." },
     { name: "Too early", kind: "no",
