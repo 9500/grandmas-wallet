@@ -220,7 +220,7 @@ describe('the recoverer\'s fees', () => {
   it('RC06: with the suggested allowance, the recoverer pays all five fees from its fee address, exactly', async () => {
     expect(suggestedAllowance()).toBe(4n * 991n + 936n);
     const wallet = await setup({ allowance: suggestedAllowance() });
-    expect(await wallet.recoverer.feeReadiness()).toMatchObject({ holds: 4_900n, request: 991n, completion: 970n, canRequest: true, canRecover: true, missing: 0n });
+    expect(await wallet.recoverer.feeReadiness()).toMatchObject({ holds: 4_900n, request: 991n, completion: 936n, canRequest: true, canRecover: true, missing: 0n });
     const paid = await fiveTransactions(wallet);
     expect(paid.map((sent) => sent.bytes)).toEqual([991, 991, 991, 991, 936]);
     // Every fee is the size at the stated rate, and nothing is left over.
@@ -248,7 +248,7 @@ describe('the recoverer\'s fees', () => {
   it('RC06: with an empty fee address, the recoverer says beforehand what is missing, and goes on once coins arrive', async () => {
     const wallet = await setup();
     // Known when the wallet is taken up, not only at the moment of a recovery.
-    expect(await wallet.recoverer.feeReadiness()).toEqual({ holds: 0n, request: 991n, completion: 970n, canRequest: false, canRecover: false, missing: 1_961n });
+    expect(await wallet.recoverer.feeReadiness()).toEqual({ holds: 0n, request: 991n, completion: 936n, canRequest: false, canRecover: false, missing: 1_927n });
     try {
       await wallet.recoverer.request(newDevice.keyHash);
       expect.unreachable('a request needs a coin for its fee');
@@ -261,7 +261,7 @@ describe('the recoverer\'s fees', () => {
     expect(wallet.controller().state.status).toBe('active');
 
     wallet.chain.fund(wallet.feeAddress, 1_000n);
-    expect(await wallet.recoverer.feeReadiness()).toMatchObject({ holds: 1_000n, canRequest: true, canRecover: false, missing: 961n });
+    expect(await wallet.recoverer.feeReadiness()).toMatchObject({ holds: 1_000n, canRequest: true, canRecover: false, missing: 927n });
     await wallet.recoverer.request(newDevice.keyHash);
     wallet.wait();
     // The request took the coin; the completion says what it needs.

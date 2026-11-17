@@ -35,8 +35,9 @@ const CONTROLLER_SATOSHIS = 1_000n;
 export interface FeeReadiness {
   /** What the fee address holds. */
   holds: bigint;
-  /** What a request and a completion cost when each is paid by one coin with change. */
+  /** What a request costs, paid by one coin with its change. */
   request: bigint;
+  /** What a completion costs when it takes what is left, with no change: the least it can cost. */
   completion: bigint;
   /** Enough for a request now. */
   canRequest: boolean;
@@ -58,17 +59,34 @@ export class FeeCoinsMissingError extends Error {
   }
 }
 
+const controllerSized: Output = { lockingBytecode: new Uint8Array(35), valueSatoshis: CONTROLLER_SATOSHIS, token: { amount: 0n, category: new Uint8Array(32), nft: { capability: 'mutable', commitment: new Uint8Array(69) } } };
+const feeChange: Output = { lockingBytecode: new Uint8Array(25), valueSatoshis: 0n };
+
+/**
+ * What a recovery costs the recoverer (proposal section 9.6): a request paid by one coin with its change,
+ * and a completion that takes what is left. The allowance and the readiness of the fee address are both
+ * counted in these, so that an allowance used as intended never shows as short.
+ */
+export const recoveryFees = (feeRate = 1): { request: bigint; completion: bigint } => ({
+  request: requiredFee(transactionBytes([INPUT_BYTES.controllerRequest, INPUT_BYTES.p2pkh], [controllerSized, feeChange]), feeRate),
+  completion: requiredFee(transactionBytes([INPUT_BYTES.controller, INPUT_BYTES.p2pkh], [controllerSized]), feeRate),
+});
+
 /**
  * The allowance the owner's wallet suggests giving a recoverer (proposal section 9.6): what four requests
  * and one completion cost, so that three requests the owner cancels still leave enough for a fourth and its
- * completion. Each request is paid by one coin with its change; the completion takes what is left exactly.
+ * completion.
  */
 export const suggestedAllowance = (feeRate = 1): bigint => {
-  const controller: Output = { lockingBytecode: new Uint8Array(35), valueSatoshis: CONTROLLER_SATOSHIS, token: { amount: 0n, category: new Uint8Array(32), nft: { capability: 'mutable', commitment: new Uint8Array(69) } } };
-  const change: Output = { lockingBytecode: new Uint8Array(25), valueSatoshis: 0n };
-  const request = requiredFee(transactionBytes([INPUT_BYTES.controllerRequest, INPUT_BYTES.p2pkh], [controller, change]), feeRate);
-  const completion = requiredFee(transactionBytes([INPUT_BYTES.controller, INPUT_BYTES.p2pkh], [controller]), feeRate);
+  const { request, completion } = recoveryFees(feeRate);
   return 4n * request + completion;
+};
+
+/** Whether a fee address that holds this much can pay for a recovery. */
+export const feeReadinessOf = (holds: bigint, feeRate = 1): FeeReadiness => {
+  const { request, completion } = recoveryFees(feeRate);
+  const both = request + completion;
+  return { holds, request, completion, canRequest: holds >= request, canRecover: holds >= both, missing: holds >= both ? 0n : both - holds };
 };
 
 export class RecovererWallet {
@@ -97,6 +115,17 @@ export class RecovererWallet {
     }
     await options.backend.ordinaryAddress();
     await options.backend.knowController(options.identity, 'recoverer', encodeControllerState(history.current.state));
+    return wallet;
+  }
+
+  /**
+   * The account of a recoverer that the wallet does not name: one that was replaced, or one that is not
+   * named yet. Its fee coins are its own and it can send them on; a request or a completion would find
+   * that its key does not work on the controller.
+   */
+  static async unnamed(options: { backend: WalletBackend; chain: ChainReader; identity: Uint8Array; feeRate?: number }): Promise<RecovererWallet> {
+    const wallet = new RecovererWallet(options.backend, options.chain, options.identity, options.feeRate ?? 1);
+    await options.backend.ordinaryAddress();
     return wallet;
   }
 
@@ -141,13 +170,7 @@ export class RecovererWallet {
    * is taken up and whenever it is opened, not only at the moment of a recovery.
    */
   async feeReadiness(): Promise<FeeReadiness> {
-    const fee = { lockingBytecode: await this.feeAddress(), valueSatoshis: 0n };
-    const controller = this.controllerOutput({ version: 1, status: 'active', ownerEpoch: 0, ownerKeyHash: new Uint8Array(20).fill(1), recovererKeyHash: new Uint8Array(20).fill(1), challengeDelay: { unit: 'time512', value: 1 } });
-    const request = requiredFee(transactionBytes([INPUT_BYTES.controllerRequest, INPUT_BYTES.p2pkh], [controller, fee]), this.feeRate);
-    const completion = requiredFee(transactionBytes([INPUT_BYTES.controller, INPUT_BYTES.p2pkh], [controller, fee]), this.feeRate);
-    const holds = (await this.feeCoins()).reduce((sum, coin) => sum + coin.utxo.output.valueSatoshis, 0n);
-    const both = request + completion;
-    return { holds, request, completion, canRequest: holds >= request, canRecover: holds >= both, missing: holds >= both ? 0n : both - holds };
+    return feeReadinessOf((await this.feeCoins()).reduce((sum, coin) => sum + coin.utxo.output.valueSatoshis, 0n), this.feeRate);
   }
 
   /** A transaction of the controller, with the fee from the recoverer's own coins and the change back to its fee address. */

@@ -1,4 +1,4 @@
-import type { ChallengeDelay } from '@grandmas-wallet/core';
+import { type ChallengeDelay, type ControllerHistory, controllerScript } from '@grandmas-wallet/core';
 
 import type { AppChain } from './support.js';
 
@@ -48,9 +48,46 @@ export const recoveryEligibility = async (chain: AppChain, requestHeight: number
   return clock >= readyAt ? { ready: true } : { ready: false, waitingFor: 'time', remainingSeconds: readyAt - clock, readyAt };
 };
 
-/** A delay in plain words. A delay in blocks is counted in ten-minute blocks on every network. */
+/** When the waiting period of a pending request ends, as far as the chain shows it. */
+export interface RequestTiming {
+  eligibility: Eligibility;
+  /** By the chain's clock, for a delay counted in time: Unix seconds. */
+  endsAt?: number;
+  /** About how many seconds are left. Not known before the request is in a block. */
+  secondsLeft?: number;
+}
+
+/**
+ * Where the waiting period of the request in a controller's last transaction stands.
+ *
+ * @param secondsPerBlock - how often this network's blocks come, for a delay counted in blocks
+ */
+export const requestTiming = async (chain: AppChain, identity: Uint8Array, history: ControllerHistory, secondsPerBlock: number): Promise<RequestTiming> => {
+  const last = history.transactions.at(-1);
+  const entries = await chain.getHistory(controllerScript(identity).lockingBytecode);
+  const height = entries.find((entry) => entry.transactionId === last?.transactionId)?.height ?? 0;
+  const eligibility = await recoveryEligibility(chain, height, history.current.state.challengeDelay);
+  if (eligibility.ready) return { eligibility, secondsLeft: 0 };
+  if (eligibility.waitingFor === 'time') return { eligibility, endsAt: eligibility.readyAt, secondsLeft: eligibility.remainingSeconds };
+  if (eligibility.waitingFor === 'blocks') return { eligibility, secondsLeft: eligibility.remaining * secondsPerBlock };
+  return { eligibility };
+};
+
+/** How long a delay lasts, in seconds. A delay in blocks is counted in ten-minute blocks on every network. */
+export const delaySeconds = (delay: ChallengeDelay): number => (delay.unit === 'blocks' ? delay.value * 600 : delay.value * 512);
+
+/** A delay in plain words. */
 export const describeDelay = (delay: ChallengeDelay): string => {
-  const seconds = delay.unit === 'blocks' ? delay.value * 600 : delay.value * 512;
-  const about = seconds < 5_400 ? `${Math.max(1, Math.round(seconds / 60))} minutes` : seconds < 172_800 ? `${Math.round(seconds / 3_600)} hours` : `${Math.round(seconds / 86_400)} days`;
+  const seconds = delaySeconds(delay);
+  const count = (amount: number, unit: string): string => `${amount} ${unit}${amount === 1 ? '' : 's'}`;
+  // Minutes up to 50, then hours to the half hour up to six, then whole hours, then days.
+  const about =
+    seconds < 3_300
+      ? count(Math.max(1, Math.round(seconds / 60)), 'minute')
+      : seconds < 21_600
+        ? count(Math.round(seconds / 1_800) / 2, 'hour')
+        : seconds < 172_800
+          ? count(Math.round(seconds / 3_600), 'hour')
+          : count(Math.round(seconds / 86_400), 'day');
   return delay.unit === 'blocks' ? `${delay.value} ten-minute blocks (about ${about})` : `about ${about}`;
 };

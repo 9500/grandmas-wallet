@@ -162,6 +162,46 @@ export interface SentEverything {
 }
 
 /** Thrown when closing is asked for and something stands in the way. */
+/** What a payment will cost, worked out as the wallet will make it and before anything is signed. */
+export interface PaymentQuote {
+  feeSatoshis: bigint;
+  /** What is too small to come back as change and goes to the fee. */
+  remainderSatoshis: bigint;
+  bytes: number;
+  change: boolean;
+}
+
+/** What sending everything will deliver, before anything is signed. */
+export interface EverythingQuote {
+  sentSatoshis: bigint;
+  feeSatoshis: bigint;
+  bytes: number;
+  transactions: number;
+  /** Coins that hold no more than it costs to spend them, which stay where they are. */
+  leftOut: number;
+}
+
+const controllerSized: Output = { lockingBytecode: new Uint8Array(35), valueSatoshis: CONTROLLER_SATOSHIS, token: { amount: 0n, category: new Uint8Array(32), nft: { capability: 'mutable', commitment: new Uint8Array(69) } } };
+
+/** What a cancellation costs when the coin kept for it pays and nothing is left over: what that coin holds. */
+export const cancellationCost = (feeRate = 1): bigint => requiredFee(transactionBytes([INPUT_BYTES.controller, INPUT_BYTES.byKey], [controllerSized]), feeRate);
+
+/**
+ * What the funding address must receive for a wallet to be created (proposal section 7.9): the controller,
+ * the coin for cancelling, the allowance if one is given, the smallest first coin of the wallet, and the
+ * fees of the creating transaction and of the payment to itself that comes before it when the funding coin
+ * is not the first output of its transaction.
+ */
+export const creationFunding = (options: { allowanceSatoshis?: bigint; feeRate?: number } = {}): bigint => {
+  const feeRate = options.feeRate ?? 1;
+  const keyed: Output = { lockingBytecode: new Uint8Array(25), valueSatoshis: 0n };
+  const own: Output = { lockingBytecode: new Uint8Array(35), valueSatoshis: 0n };
+  const outputs = [controllerSized, { ...own, valueSatoshis: cancellationCost(feeRate) }, ...(options.allowanceSatoshis === undefined ? [] : [{ ...keyed, valueSatoshis: options.allowanceSatoshis }]), own];
+  const creating = requiredFee(transactionBytes([INPUT_BYTES.p2pkh], outputs), feeRate);
+  const toItself = requiredFee(transactionBytes([INPUT_BYTES.p2pkh], [keyed]), feeRate);
+  return outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n) + smallestOutputValue(own) + creating + toItself;
+};
+
 export class CannotCloseError extends Error {
   constructor(readonly reasons: string[]) {
     super(`The wallet cannot be closed: ${reasons.join(' ')}`);
@@ -501,10 +541,8 @@ export class OwnerWallet {
     };
   }
 
-  /** What a cancellation costs when the coin kept for it pays and nothing is left over. */
   private cancellationCost(): bigint {
-    const controller = { lockingBytecode: new Uint8Array(35), valueSatoshis: CONTROLLER_SATOSHIS, token: { amount: 0n, category: new Uint8Array(32), nft: { capability: 'mutable' as const, commitment: new Uint8Array(69) } } };
-    return requiredFee(transactionBytes([INPUT_BYTES.controller, INPUT_BYTES.byKey], [controller]), this.feeRate);
+    return cancellationCost(this.feeRate);
   }
 
   // ---------------------------------------------------------------- what the wallet shows
@@ -608,17 +646,7 @@ export class OwnerWallet {
    */
   async pay(outputs: Output[], moving: AccountCoin[] = []): Promise<Sent> {
     this.requireCreated();
-    const { own } = await this.sorted();
-    const taken = takeNumber(this.state.allocation, ADDRESS_KIND.change);
-    const changeNumber = 'number' in taken ? taken.number : taken.refused.offer;
-    const changeAddress = this.address(ADDRESS_KIND.change, changeNumber);
-    const choice = chooseCoins({
-      available: own.map((coin) => spendable(coin, INPUT_BYTES.byKey)),
-      fixedInputs: moving.map((coin) => spendable(coin, INPUT_BYTES.byKey)),
-      outputs,
-      changeLockingBytecode: changeAddress.lockingBytecode,
-      feeRate: this.feeRate,
-    });
+    const { own, taken, changeNumber, changeAddress, choice } = await this.choosePayment(outputs, moving);
     if (choice.changeSatoshis !== undefined && 'number' in taken) {
       this.store({ allocation: keepNumber(taken.allocation, ADDRESS_KIND.change, taken.number) });
       await this.makeAddresses(ADDRESS_KIND.change, taken.number + 1);
@@ -638,6 +666,37 @@ export class OwnerWallet {
     });
     await this.sendPrepared(prepared);
     return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: choice.remainderSatoshis };
+  }
+
+  /** The coins a payment takes and its change, chosen as `pay` will choose them. Nothing is stored. */
+  private async choosePayment(outputs: Output[], moving: AccountCoin[]) {
+    for (const output of outputs) {
+      const smallest = smallestOutputValue(output);
+      if (output.valueSatoshis < smallest) throw new Error(`The smallest amount that can be sent to this address is ${smallest} satoshis.`);
+    }
+    const { own } = await this.sorted();
+    const taken = takeNumber(this.state.allocation, ADDRESS_KIND.change);
+    const changeNumber = 'number' in taken ? taken.number : taken.refused.offer;
+    const changeAddress = this.address(ADDRESS_KIND.change, changeNumber);
+    const choice = chooseCoins({
+      available: own.map((coin) => spendable(coin, INPUT_BYTES.byKey)),
+      fixedInputs: moving.map((coin) => spendable(coin, INPUT_BYTES.byKey)),
+      outputs,
+      changeLockingBytecode: changeAddress.lockingBytecode,
+      feeRate: this.feeRate,
+    });
+    return { own, taken, changeNumber, changeAddress, choice };
+  }
+
+  /**
+   * What paying these outputs will cost, so that the fee can be shown before the user approves.
+   *
+   * @throws InsufficientFundsError, with the figures, when the wallet's coins do not cover it
+   */
+  async quotePay(outputs: Output[], moving: AccountCoin[] = []): Promise<PaymentQuote> {
+    this.requireCreated();
+    const { choice } = await this.choosePayment(outputs, moving);
+    return { feeSatoshis: choice.feeSatoshis, remainderSatoshis: choice.remainderSatoshis, bytes: choice.bytes, change: choice.changeSatoshis !== undefined };
   }
 
   /** Send a coin that carries a token on, token unchanged, with the smallest value its new output may hold. */
@@ -925,6 +984,21 @@ export class OwnerWallet {
    * @throws InsufficientFundsError, with the figures, when what is left after the fee is below what the receiving output must hold
    */
   async sendEverything(toLockingBytecode: Uint8Array): Promise<SentEverything> {
+    return this.everything(toLockingBytecode, true);
+  }
+
+  /**
+   * What sending everything to an address will deliver and cost, so that it can be shown before the user approves.
+   *
+   * @throws InsufficientFundsError as `sendEverything` does
+   */
+  async quoteSendEverything(toLockingBytecode: Uint8Array): Promise<EverythingQuote> {
+    const planned = await this.everything(toLockingBytecode, false);
+    return { sentSatoshis: planned.sentSatoshis, feeSatoshis: planned.feeSatoshis, bytes: planned.transactions.reduce((sum, sent) => sum + sent.bytes, 0), transactions: planned.transactions.length, leftOut: planned.leftOut.length };
+  }
+
+  /** Plan sending everything and, if asked to, carry the plan out. */
+  private async everything(toLockingBytecode: Uint8Array, carryOut: boolean): Promise<SentEverything> {
     this.requireCreated();
     const sorted = await this.sorted();
     const { own, cancelling } = sorted;
@@ -938,7 +1012,13 @@ export class OwnerWallet {
     const leftOut: AccountCoin[] = [];
     let sentSatoshis = 0n;
 
-    const send = async (coins: AccountCoin[], withController: boolean, sent: bigint): Promise<void> => {
+    const send = async (coins: AccountCoin[], withController: boolean, part: { sentSatoshis: bigint; feeSatoshis: bigint; bytes: number }): Promise<void> => {
+      const sent = part.sentSatoshis;
+      if (!carryOut) {
+        transactions.push({ transactionId: '', bytes: part.bytes, feeSatoshis: part.feeSatoshis, remainderSatoshis: 0n });
+        sentSatoshis += sent;
+        return;
+      }
       let prepared;
       if (withController) {
         const { coin, state } = await this.controllerCoin();
@@ -973,13 +1053,13 @@ export class OwnerWallet {
       if (first === undefined) throw new Error('Nothing to send.');
       const inFirst = first.coins.map((entry) => (entry as ReturnType<typeof spendable>).coin);
       if (vault.some((coin) => !inFirst.includes(coin))) throw new Error('The vault coins do not fit one transaction with the controller.');
-      await send(inFirst, true, first.sentSatoshis);
+      await send(inFirst, true, first);
       remaining = byKey.filter((entry) => !inFirst.includes(entry.coin));
       leftOut.push(...plan.leftOut.filter((entry) => !byKey.includes(entry as (typeof byKey)[number])).map((entry) => (entry as ReturnType<typeof spendable>).coin));
     }
     if (remaining.length > 0) {
       const plan = planSendEverything({ coins: remaining, destination, feeRate: this.feeRate });
-      for (const part of plan.parts) await send(part.coins.map((entry) => (entry as ReturnType<typeof spendable>).coin), false, part.sentSatoshis);
+      for (const part of plan.parts) await send(part.coins.map((entry) => (entry as ReturnType<typeof spendable>).coin), false, part);
       leftOut.push(...plan.leftOut.map((entry) => (entry as ReturnType<typeof spendable>).coin));
     } else if (vault.length === 0) {
       throw new InsufficientFundsError(0n, 0n, smallestOutputValue(destination), 'the wallet holds no coin without a token.');

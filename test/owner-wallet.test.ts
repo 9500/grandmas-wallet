@@ -1,5 +1,5 @@
 import { type Output, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
-import { CannotCloseError, OwnerWallet, type OwnerWalletState, walletTemplateNumbers } from '@grandmas-wallet/app';
+import { CannotCloseError, OwnerWallet, type OwnerWalletState, cancellationCost, creationFunding, suggestedAllowance, walletTemplateNumbers } from '@grandmas-wallet/app';
 import {
   type ChainReader,
   type PreparedTransaction,
@@ -104,6 +104,29 @@ describe('creating a wallet', () => {
     const history = await readControllerHistory(chain, hexToBin(state().identity as string));
     expect(history.genesis.state.ownerEpoch).toBe(0);
     expect(await chain.getHistory(funding)).toHaveLength(3);
+  });
+
+  it('CR01: the wallet says beforehand what the funding address must receive, and that amount is enough wherever the coin sits', async () => {
+    const allowance = { feeLockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), satoshis: suggestedAllowance() };
+    for (const [position, options, needed] of [
+      [0, createOptions, creationFunding()],
+      [2, createOptions, creationFunding()],
+      [2, { ...createOptions, allowance }, creationFunding({ allowanceSatoshis: allowance.satoshis })],
+    ] as const) {
+      const chain = new SimulatedChain();
+      const { wallet, funding } = await device(chain);
+      chain.fund(funding, needed, position);
+      expect(await wallet.create(options)).toBe('confirmed');
+      expect((await wallet.balance()).cancelling).toBe(cancellationCost());
+    }
+    // The controller, the coin for cancelling, the smallest first coin, and the two fees.
+    expect(creationFunding()).toBe(1_000n + 1_091n + 546n + 602n);
+    expect(creationFunding({ allowanceSatoshis: 4_900n }) - creationFunding()).toBe(4_900n + 34n);
+    // Less than the least the creation needs is refused with the figures, and nothing is created.
+    const chain = new SimulatedChain();
+    const { wallet, funding } = await device(chain);
+    chain.fund(funding, 3_000n);
+    await expect(wallet.create(createOptions)).rejects.toThrow(InsufficientFundsError);
   });
 
   it('CR02: no address is given out before the identity and the controller are confirmed', async () => {
@@ -289,6 +312,29 @@ describe('paying', () => {
     expect((await wallet.balance()).recoverable).toBe(8_000n - 5_150n - 680n);
   });
 
+  it('the fee is known before the payment is approved: the figures quoted are the figures of the payment', async () => {
+    const cases: [bigint[], bigint][] = [
+      [[10_000n, 5_340n, 3_000n], 5_000n],
+      [[30_000n], 12_000n],
+      [[6_000n, 2_000n], 5_400n],
+      [[6_000n, 2_000n], 5_150n],
+    ];
+    for (const [coins, amount] of cases) {
+      const { wallet, state } = await exactly(...coins);
+      const before = JSON.stringify(state().allocation);
+      const quote = await wallet.quotePay([{ lockingBytecode: payee, valueSatoshis: amount }]);
+      // Asking takes no change address and stores nothing.
+      expect(JSON.stringify(state().allocation)).toBe(before);
+      const sent = await wallet.pay([{ lockingBytecode: payee, valueSatoshis: amount }]);
+      expect(quote).toEqual({ feeSatoshis: sent.feeSatoshis, remainderSatoshis: sent.remainderSatoshis, bytes: sent.bytes, change: sent.remainderSatoshis === 0n && sent.bytes > 340 });
+    }
+    const { wallet } = await exactly(6_000n);
+    await expect(wallet.quotePay([{ lockingBytecode: payee, valueSatoshis: 9_000n }])).rejects.toThrow(InsufficientFundsError);
+    // An amount the network would not relay is refused in words, before anything is chosen.
+    await expect(wallet.quotePay([{ lockingBytecode: payee, valueSatoshis: 100n }])).rejects.toThrow(/smallest amount that can be sent to this address is 546/);
+    await expect(wallet.pay([{ lockingBytecode: payee, valueSatoshis: 100n }])).rejects.toThrow(/smallest amount/);
+  });
+
   it('a token is sent on unchanged, with the fee from another coin; the coin for cancelling is left alone', async () => {
     const { chain, wallet } = await walletWith(10_000n);
     const { address } = await wallet.receiveAddress();
@@ -346,7 +392,11 @@ describe('sending everything', () => {
 
     const before = await wallet.balance();
     const total = before.recoverable + before.cancelling + before.vault;
+    // What will arrive and what it costs is known before it is approved, and nothing moves by asking.
+    const quote = await wallet.quoteSendEverything(payee);
+    expect(chain.balanceOf(payee)).toBe(0n);
     const result = await wallet.sendEverything(payee);
+    expect(quote).toEqual({ sentSatoshis: result.sentSatoshis, feeSatoshis: result.feeSatoshis, bytes: result.transactions.reduce((sum, sent) => sum + sent.bytes, 0), transactions: result.transactions.length, leftOut: 0 });
     expect(result.transactions.length).toBeGreaterThan(1);
     for (const sent of result.transactions) {
       expect(sent.feeSatoshis).toBe(BigInt(sent.bytes));
@@ -375,6 +425,7 @@ describe('sending everything', () => {
     const arrived = chain.balanceOf(payee);
     chain.fund((await wallet.receiveAddress()).address.lockingBytecode, 600n);
     try {
+      await expect(wallet.quoteSendEverything(payee)).rejects.toThrow(InsufficientFundsError);
       await wallet.sendEverything(payee);
       expect.unreachable('600 satoshis cannot be sent on');
     } catch (error) {
