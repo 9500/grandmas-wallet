@@ -4,7 +4,7 @@ import { vaultAddressBytecodeHex } from '@grandmas-wallet/contracts/vaultAddress
 import { type TemplateNumbers, xoTemplateIndex } from '@grandmas-wallet/core';
 import { p2pkhTemplate } from '@xo-cash/templates';
 import type { XOTemplate } from '@xo-cash/types';
-import { generateTemplateIdentifier } from '@xo-cash/utils';
+import { generateTemplateIdentifier, parseTemplate } from '@xo-cash/utils';
 
 /**
  * The wallet's XO templates (proposal section 13.2).
@@ -304,13 +304,19 @@ export const WALLET_TEMPLATES = {
 
 export type WalletTemplateName = keyof typeof WALLET_TEMPLATES;
 
-/** The identifier of each template: the hash of its content. */
+/**
+ * The identifier the engine gives a template: the hash of the template as the engine's parser writes it
+ * out, which is not the hash of the text it was given.
+ */
+export const templateIdentifier = (template: XOTemplate): string => generateTemplateIdentifier(parseTemplate(JSON.stringify(template)));
+
+/** The identifier of each of the wallet's templates. */
 export const walletTemplateIdentifiers = (): Record<WalletTemplateName, string> => ({
-  controller: generateTemplateIdentifier(WALLET_TEMPLATES.controller),
-  givenOut: generateTemplateIdentifier(WALLET_TEMPLATES.givenOut),
-  change: generateTemplateIdentifier(WALLET_TEMPLATES.change),
-  actions: generateTemplateIdentifier(WALLET_TEMPLATES.actions),
-  coins: generateTemplateIdentifier(WALLET_TEMPLATES.coins),
+  controller: templateIdentifier(WALLET_TEMPLATES.controller),
+  givenOut: templateIdentifier(WALLET_TEMPLATES.givenOut),
+  change: templateIdentifier(WALLET_TEMPLATES.change),
+  actions: templateIdentifier(WALLET_TEMPLATES.actions),
+  coins: templateIdentifier(WALLET_TEMPLATES.coins),
 });
 
 /** The numbers under which the engine derives the keys of the templates that hold keys (proposal section 7.2). */
