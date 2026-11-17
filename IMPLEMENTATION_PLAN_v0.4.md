@@ -17,9 +17,44 @@ This plan gives the order of work and what must be true before each stage counts
 - **Every transaction is checked before it is signed.** Whoever built it, it passes this project's own script check against the outputs it spends.
 - **Every transaction pays the exact fee.** One check, used by every stage before anything is sent, holds a transaction to the fee rules of the proposal's section 8: the fee is the signed size times the rate, and no output is below its smallest value.
 - **Chain state is not called verified.** Confirmations are taken from the configured servers, which include the user's own node. Until a device checks block headers itself, results say so (proposal section 17).
-- **Each stage ends with `npm run check` passing** and, where the stage says so, a recorded run on chipnet, with compiler and library versions and transaction identifiers. A stage is not done while one of its tests is open; an open one is written down with its reason, not passed over. A test that passes on the simulated chain is run again where a later stage puts it on chipnet or in a browser.
+- **Each stage ends with `npm run check` passing** and with its run script passing on the local node. Where a chipnet run is named for the stage (see "Where tests run"), it is started then, and the stage is done when its log is committed. A stage is not done while one of its tests is open; an open one is written down with its reason, not passed over. A test that passes on the simulated chain is run again where a later stage puts it on the local node, on chipnet or in a browser.
 - **Pushes** happen at the milestones marked below, or when asked.
 - **The public sites** keep serving the first design, from a separate checkout of the tag `design-1`, until stage 6 switches them.
+
+## Where tests run
+
+Runs on chipnet take long, because blocks and waiting periods take their real time. They are therefore few, they come last, and they are prepared so that each passes the first time.
+
+| Level | What it is | When |
+| --- | --- | --- |
+| Simulated chain | `packages/testing`: this project's own script check, and a clock the test controls | Every change |
+| Local node | Bitcoin Cash Node 29.2.0 in regtest mode with Fulcrum 2.1.4, reachable from this machine only, with the relay rules of the public networks. Blocks are made on demand and the test sets the clock, so a waiting period takes no time. Blocks can be undone. | Every run script before it goes to chipnet; the replaced and reorganized transactions of CR02 |
+| Chipnet | The public test network | The five runs below, once each |
+
+**What was shown on the local node (17 November 2026).** A controller was created, a recovery requested, refused before its time, completed after it, and the wallet closed, in about one second. The node gave the same verdicts as this project's own check: a fee one satoshi short was refused, as were an output below its smallest value and a closing by the wrong key. Its `testmempoolaccept` call, which tries a transaction without sending it, answered as sending did.
+
+**Two sets of rules.** The local node runs mainnet's rules by default. According to the node's settings, chipnet has run the tentative upgrade of May 2027 since 15 November 2026. A run script passes on the local node under both before it goes to chipnet. The local node is also the only place where the code is shown to run under mainnet's rules.
+
+**Chipnet runs**
+
+| Run | Started at the end of stage | What it shows |
+| --- | --- | --- |
+| A | 1 | The contracts, driven by a script: create, receive, pay by key, request, cancel, request, complete, sweep, spend from the vault, close. Also that the local node and chipnet agree. |
+| B | 5 | The wallet's whole life through its own code: the steps of stage 3 (create, receive, pay, tokens, send everything) and the complete course of stage 5, ending with a closing |
+| C | 6 | The pages in real browsers, on the public addresses |
+| D | 8 | A jar with this wallet, lost and recovered; a jar with Cashonize |
+| E | 9 | ParyonUSD, in its three steps |
+
+**How a chipnet run is prepared and carried out**
+
+- **One script, three chains.** The script that runs on chipnet has passed on the simulated chain and on the local node; only the network settings differ.
+- **A check before starting.** Coins for the whole run are at hand; the servers agree on the tip of the chain; a deployment the run depends on is alive. The first transaction of each chain is built against the outputs that exist and tried with `testmempoolaccept` on the user's node. For ParyonUSD, which cannot be rehearsed on the local node, every transaction is first built against Paryon's live outputs and checked without sending.
+- **Each step is written to disk** before and after it is sent, so a run that stops continues from where it stopped. The first design's run script worked this way (`design-1:packages/chipnet/src/lifecycle.ts`).
+- **Trouble with a server is retried. A refusal that was not expected stops the run** and keeps its state. The fix is made and tried on the local node, and the run continues.
+- **One waiting period for each recovery,** of one unit of 512 seconds.
+- **Refusals are observed on the local node.** A chipnet run sends only a few transactions that must be refused; they are answered at once and cost no waiting.
+- **Runs go on in the background.** The next stage starts meanwhile. If a run fails, its fix comes before the new stage's work. Runs that do not depend on each other use separate wallets and may go on side by side.
+- **A result stands** until the compiled contracts or the layout of a transaction change. The log records the hashes of the compiled contracts, compiler and library versions and transaction identifiers. Other changes do not repeat a run.
 
 ## What is already here
 
@@ -53,6 +88,8 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 | Do `RecoverableAddress` and `VaultAddress` compile as the proposal gives them, and what does each kind of input cost? | Fees, what a request and a completion need, and the "larger transactions" cost. | The earlier trial repeated inside the repository (96 and 75 bytes of rules, approval check first, cashc 0.14.0), with the bytecode kept; sizes of an input spent by key, a swept input and a vault input, measured on transactions in the virtual machine. |
 | Which signing type do the wallet's own inputs use? | The engine's `0x61` signatures are invalid with several inputs. | The local fix, a signer of our own, or `0x41`; one answer, tested. |
 | Does the engine's header check work on chipnet with the local fix? | What the wallet may say about confirmations. | Whether the verified height follows the chain with the fix. Not a gate: the rule on chain state above holds either way. |
+| Does the local node stand in for chipnet in every respect the runs need? | Every chipnet run is rehearsed on it. | What was shown is under "Where tests run". Still to show: Fulcrum's notifications and unconfirmed chains, undoing blocks, the rules of the 2027 upgrade, and whether the XO engine and the pages can be pointed at it. Scripts in `deploy/` start and stop it. |
+| What does the tentative upgrade of May 2027 change for this wallet? | Chipnet runs it already; mainnet does not. | The changes read from the node's release notes, and what in the wallet depends on them. Nothing may depend on a rule mainnet does not have. |
 | How large can the address ranges be? | The full pass looks up every address of every range for every seed (section 7.7). | Time and number of requests for candidate sizes, against the user's own server and a public one, with any limit on subscriptions. Sizes `N0`, `N1`, `N2` and the interval for repeating the full pass, chosen and written into the proposal. |
 
 **Exit:** each question has an answer in writing, and decisions 1, 2 and 12 of the proposal are settled. If the engine cannot hold the wallet's addresses, stage 3 uses our own builder for address inputs and the engine for the controller and for application templates. This plan and the proposal are amended before stage 1 starts where an answer changes them.
@@ -69,7 +106,8 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 - The sizes of section 5.8 are measured again on the contract as built, and the proposal's figures are corrected where they differ.
 - Each refusal is shown to come from the script that is meant to refuse: the address script for AD04 to AD07, while the controller input alone is satisfied.
 - AD08 is kept as a passing test of known behaviour: the earlier seed spends an unswept coin.
-- A scripted run on chipnet: create a controller, receive at three addresses and a vault address, pay by key, request, cancel, request, complete, sweep to the new owner's addresses, spend the vault coin, and close: the last coins and the controller's value go back in one transaction. The same refusals are observed from the network. The log is committed.
+- A scripted run: create a controller, receive at three addresses and a vault address, pay by key, request, cancel, request, complete, sweep to the new owner's addresses, spend the vault coin, and close: the last coins and the controller's value go back in one transaction. It passes on the local node under both sets of rules, with the same refusals observed from the node.
+- **Chipnet run A** is started. Stage 2 does not wait for it.
 - **Push.**
 
 ## Stage 2 — Keys, viewing key, giving out and finding addresses
@@ -95,7 +133,7 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 **Exit**
 
 - **CR01–CR04 and FE04–FE08** pass.
-- On chipnet, by the route stage 0 settled: create a wallet, receive at fresh addresses, pay with change to a fresh address, receive and send a token, send everything, and close.
+- On the local node, by the route stage 0 settled: create a wallet, receive at fresh addresses, pay with change to a fresh address, receive and send a token, send everything, and close. The same steps go to chipnet as part of run B.
 - The template passes the XO validator; a test checks that the scripts in the template are the compiled contracts, byte for byte.
 - The invitations of the run load in the XO debugging tool. What the engine did not build is not presented as an invitation.
 - Recovery is shown as off: nothing in this stage confirms a kit.
@@ -124,7 +162,8 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 
 - **SW01–SW08, MG01–MG08, KV06, BK09, PV03 and FE09** pass.
 - Every step of a recovery, of a move to a new seed and of a replacement is stopped once in a test and continued (MG08). The earlier kit is still usable until the new one is confirmed.
-- The complete course on chipnet, recorded with its transactions (SW02): the device is erased, the new device takes over, finishes the full pass and sweeps.
+- The complete course on the local node: the device is erased, the new device takes over, finishes the full pass and sweeps.
+- **Chipnet run B** is started: the steps of stage 3 and the complete course, recorded with its transactions (SW02). Stage 6 does not wait for it; the push does.
 - **Push. This is the point at which the branch replaces `main`.** The public sites are not touched by this.
 
 ## Stage 6 — The pages
@@ -136,8 +175,8 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 **Exit**
 
 - **OP02 and OP03** pass.
-- A scripted run in real browsers on chipnet: create, enroll, receive, pay, an unwanted request cancelled, loss of the device, takeover and sweep on a new device, a move to a new seed, a new recoverer. Each device's browser storage is kept on disk.
-- The same run on the public addresses.
+- A scripted run in real browsers against the local node: create, enroll, receive, pay, an unwanted request cancelled, loss of the device, takeover and sweep on a new device, a move to a new seed, a new recoverer. Each device's browser storage is kept on disk. If the pages cannot be pointed at the local node (stage 0), this run is made on chipnet with the pages served locally.
+- **Chipnet run C:** the same run on the public addresses.
 - A person can follow the written walkthrough by hand with two browser profiles. It says what the demonstration does not show, monitoring on a phone in the background among it.
 
 **Switching the public sites** is work of its own, not a change of branch. The services run from the checkout of the tag `design-1`; the stores' data is outside both checkouts. In order: note the running service definitions and where the stores keep their data; copy that data; install the services from the checkout that holds this design, with the script in `deploy/`; check the running version, the stores and the public walkthrough; keep the earlier checkout and its service definitions, and try the way back once (OP03). Until the run passes on the public addresses, they keep serving the first design.
@@ -163,13 +202,13 @@ Short experiments, kept under `spikes/`, each ending in a written answer in `doc
 **Exit**
 
 - **SJ01–SJ06 and AP10** pass.
-- Chipnet, this wallet: open a jar, lose the device, recover; the new device finds the jar from the swept key token and the template, with the application's site not consulted, and empties it. Someone then pays in again, and that is withdrawn too (SJ06).
-- Chipnet, Cashonize: open and empty a jar with the same application and the same contract.
+- This wallet, on the local node and then on chipnet: open a jar, lose the device, recover; the new device finds the jar from the swept key token and the template, with the application's site not consulted, and empties it. Someone then pays in again, and that is withdrawn too (SJ06).
+- Cashonize, on chipnet only: open and empty a jar with the same application and the same contract. Both are **chipnet run D**.
 - **Push.**
 
 ## Stage 9 — ParyonUSD
 
-Three steps, each worth having without the next.
+Three steps, each worth having without the next. Together they are **chipnet run E**. Paryon's deployment exists on chipnet only, so there is no rehearsal on the local node: each transaction is built against Paryon's live outputs and checked without sending before the step is run.
 
 | Step | Exit |
 | --- | --- |
