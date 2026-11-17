@@ -9,7 +9,9 @@
     "@cashscript/utils": "0.14.0"
   },
   "exports": {
-    "./controller": "./artifacts/controller.ts"
+    "./controller": "./artifacts/controller.ts",
+    "./recoverableAddress": "./artifacts/recoverableAddress.ts",
+    "./vaultAddress": "./artifacts/vaultAddress.ts"
   },
   "scripts": {
     "build": "node build.mjs"

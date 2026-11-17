@@ -5,14 +5,17 @@ import {
   createVirtualMachineBch2026,
   encodeDataPush,
   encodeLockingBytecodeP2pkh,
+  encodeLockingBytecodeP2sh32,
   encodeTransactionBch,
   flattenBinArray,
+  getDustThreshold,
   hash160,
   hashTransactionUiOrder,
   secp256k1,
 } from '@bitauth/libauth';
 
-import { CONTROLLER_INDEX, controllerScript, signInput } from './controller.js';
+import type { RecoverableAddressScript, VaultAddressScript } from './addresses.js';
+import { CONTROLLER_INDEX, CONTROLLER_SIGHASH_TYPE, controllerScript, signInput } from './controller.js';
 import type { ProtectedScript } from './protected.js';
 import { type ControllerState, encodeChallengeDelay, encodeControllerState } from './state.js';
 import {
@@ -72,7 +75,30 @@ export const protectedInput = (utxo: Utxo, script: ProtectedScript, sequence = 0
   unlock: () => script.unlockingBytecode,
 });
 
+/** A coin at a recoverable address, spent by the key the address was made for. No controller is involved. */
+export const recoverableInput = (utxo: Utxo, script: RecoverableAddressScript, key: KeyPair, sequence = 0): InputSpec => ({
+  utxo,
+  sequence,
+  unlock: (sign) => script.unlock.spend({ publicKey: key.publicKey, signature: sign(key.privateKey, script.redeemBytecode) }),
+});
+
+/**
+ * A coin at a recoverable address, released by the wallet's current owner. It carries no signature: the
+ * transaction must spend the wallet's controller as its first input, with the owner's approval.
+ */
+export const sweptInput = (utxo: Utxo, script: RecoverableAddressScript, identity: Uint8Array, secret: Uint8Array): InputSpec => ({
+  utxo,
+  unlock: () => script.unlock.sweep(identity, secret),
+});
+
+/** A coin at a vault address. Like a swept input, it needs the controller as the first input, approved by the owner. */
+export const vaultInput = (utxo: Utxo, script: VaultAddressScript, identity: Uint8Array, secret: Uint8Array): InputSpec => ({
+  utxo,
+  unlock: () => script.unlock.spend(identity, secret),
+});
+
 export type ControllerAction =
+  | { kind: 'ownerClose' }
   | { kind: 'ownerAuthorize' }
   | { kind: 'requestRecovery'; proposedOwnerKeyHash: Uint8Array }
   | { kind: 'finalizeRecovery' }
@@ -81,6 +107,8 @@ export type ControllerAction =
 /** The controller state an action leads to. Throws if the action is not permitted in `state`. */
 export const applyControllerAction = (state: ControllerState, action: ControllerAction): ControllerState => {
   switch (action.kind) {
+    case 'ownerClose':
+      throw new Error('Closing ends the identity: there is no state after it.');
     case 'ownerAuthorize':
       return afterOwnerAuthorize(state);
     case 'requestRecovery':
@@ -123,6 +151,8 @@ export const controllerInput = (utxo: Utxo, state: ControllerState, action: Cont
     const script = controllerScript(identityOf(utxo));
     const authorization = { publicKey: key.publicKey, signature: sign(key.privateKey, script.redeemBytecode) };
     switch (action.kind) {
+      case 'ownerClose':
+        return script.unlock.ownerClose(authorization);
       case 'ownerAuthorize':
         return script.unlock.ownerAuthorize(authorization);
       case 'requestRecovery':
@@ -149,14 +179,21 @@ export const controllerSuccessor = (utxo: Utxo, state: ControllerState, action: 
 export interface BuildParameters {
   inputs: InputSpec[];
   outputs: Output[];
-  /** Where BCH left over after outputs and fee goes. Omitted when the remainder is below `dustSatoshis`. */
+  /**
+   * Where BCH left over after outputs and fee goes. No change output is made when what is left is below the
+   * smallest value nodes relay for it; that remainder then goes to the fee and is reported.
+   */
   changeLockingBytecode?: Uint8Array;
-  /** Satoshis per byte. */
+  /**
+   * Index of an output that receives everything left after the exact fee; its given value is ignored.
+   * For sending everything, sweeping and closing. Not together with `changeLockingBytecode`.
+   */
+  remainderOutputIndex?: number;
+  /** Satoshis per byte. Nodes require 1. */
   feeRate?: number;
+  /** Signing type of every signature: `0x61` (default) or `0x41`. */
+  signingType?: number;
   locktime?: number;
-  dustSatoshis?: bigint;
-  /** Refuse to build a transaction paying more than this in fees. */
-  maximumFeeSatoshis?: bigint;
   /** Permit input tokens that do not reappear in the outputs. */
   allowTokenBurn?: boolean;
 }
@@ -168,15 +205,32 @@ export interface BuiltTransaction {
   /** Transaction ID as shown by explorers. */
   transactionId: string;
   transactionHash: Uint8Array;
+  /** What the transaction pays: inputs less outputs. */
   feeSatoshis: bigint;
+  /** What nodes require for a transaction of this size at the fee rate. */
+  requiredFeeSatoshis: bigint;
+  /** Part of the fee beyond the required one: an amount that was too small to return as change. Zero otherwise. */
+  remainderSatoshis: bigint;
   /** Index of the change output, when one was added. */
   changeIndex?: number;
 }
 
-const DEFAULT_FEE_RATE = 1;
-const DEFAULT_DUST = 546n;
-const DEFAULT_MAXIMUM_FEE = 5_000n;
+/** Every transaction is version 2, which the controller requires and which makes relative time locks apply. */
 const VERSION = 2;
+
+export const DEFAULT_FEE_RATE = 1;
+
+/** The fee nodes require for a transaction of `byteLength` bytes at `feeRate` satoshis per byte. */
+export const requiredFee = (byteLength: number, feeRate = DEFAULT_FEE_RATE): bigint => BigInt(Math.ceil(byteLength * feeRate));
+
+/** The smallest value nodes relay for this output. It depends on the output's own size, tokens included. */
+export const smallestOutputValue = (output: Output): bigint => getDustThreshold(output);
+
+/**
+ * The smallest value of a change output at an address of this wallet. A leftover below it cannot be returned
+ * to the wallet; this is the most a transaction's fee may exceed the required one.
+ */
+export const SMALLEST_CHANGE = smallestOutputValue({ lockingBytecode: encodeLockingBytecodeP2sh32(new Uint8Array(32)), valueSatoshis: 0n });
 
 /** Fungible amount and NFT count per token category. */
 const tokenHoldings = (outputs: Output[]): Map<string, { amount: bigint; nfts: number }> => {
@@ -218,10 +272,11 @@ const assemble = (
     })),
     outputs,
   };
+  const signingType = parameters.signingType ?? CONTROLLER_SIGHASH_TYPE;
   // Signatures do not cover unlocking bytecode, so every input can be signed against the same transaction.
   const unlocking = parameters.inputs.map(({ unlock }, inputIndex) =>
     unlock((privateKey, coveredBytecode) =>
-      signInput({ transaction, sourceOutputs, inputIndex, coveredBytecode, privateKey }),
+      signInput({ transaction, sourceOutputs, inputIndex, coveredBytecode, privateKey, signingType }),
     ),
   );
   unlocking.forEach((unlockingBytecode, inputIndex) => {
@@ -231,17 +286,40 @@ const assemble = (
   return { transaction, sourceOutputs, encoded: encodeTransactionBch(transaction) };
 };
 
+/** Thrown when the inputs do not cover the outputs and the fee, or leave less than an output may hold. */
+export class InsufficientFundsError extends Error {
+  constructor(
+    readonly totalSatoshis: bigint,
+    readonly feeSatoshis: bigint,
+    readonly neededSatoshis: bigint,
+    detail: string,
+  ) {
+    super(`Insufficient funds: ${detail} Inputs ${totalSatoshis}, fee ${feeSatoshis}, needed ${neededSatoshis}.`);
+    this.name = 'InsufficientFundsError';
+  }
+}
+
 /**
- * Build and sign a version 2 transaction. The fee is set from the final size
- * and `feeRate`; the remainder goes to `changeLockingBytecode`.
+ * Build and sign a version 2 transaction that pays the exact fee.
+ *
+ * Signatures here have a fixed length, so the size of the signed transaction does not depend on the amounts
+ * in it. The transaction is therefore signed once to measure it, and once more with the final amounts.
+ *
+ * - With `remainderOutputIndex`, that output receives everything left after the fee.
+ * - With `changeLockingBytecode`, what is left returns there. If it is below the smallest value of that
+ *   output, no change is made and the amount is reported as `remainderSatoshis`.
+ * - With neither, the outputs are taken as given and must leave the required fee, and no more than
+ *   `SMALLEST_CHANGE` beyond it.
+ *
+ * No output may be below the smallest value nodes relay for it.
  */
 export const buildTransaction = (parameters: BuildParameters): BuiltTransaction => {
   const feeRate = parameters.feeRate ?? DEFAULT_FEE_RATE;
-  const dust = parameters.dustSatoshis ?? DEFAULT_DUST;
-  const maximumFee = parameters.maximumFeeSatoshis ?? DEFAULT_MAXIMUM_FEE;
-
   if (parameters.inputs.length === 0) {
     throw new Error('A transaction needs at least one input.');
+  }
+  if (parameters.changeLockingBytecode !== undefined && parameters.remainderOutputIndex !== undefined) {
+    throw new Error('A transaction returns what is left either as change or to one of its outputs, not both.');
   }
   const inputOutputs = parameters.inputs.map(({ utxo }) => utxo.output);
   if (parameters.allowTokenBurn !== true && !keepsAllTokens(inputOutputs, parameters.outputs)) {
@@ -249,20 +327,25 @@ export const buildTransaction = (parameters: BuildParameters): BuiltTransaction 
   }
 
   const inputTotal = inputOutputs.reduce((sum, { valueSatoshis }) => sum + valueSatoshis, 0n);
-  const outputTotal = parameters.outputs.reduce((sum, { valueSatoshis }) => sum + valueSatoshis, 0n);
-  const feeFor = (encoded: Uint8Array): bigint => BigInt(Math.ceil(encoded.length * feeRate));
-  const finish = (
-    assembled: ReturnType<typeof assemble>,
-    feeSatoshis: bigint,
-    changeIndex?: number,
-  ): BuiltTransaction => {
-    if (feeSatoshis < feeFor(assembled.encoded)) {
-      throw new Error(
-        `Insufficient funds: inputs ${inputTotal}, outputs ${outputTotal}, fee needed ${feeFor(assembled.encoded)}.`,
-      );
+  const finish = (outputs: Output[], changeIndex?: number): BuiltTransaction => {
+    const assembled = assemble(parameters, outputs);
+    const outputTotal = outputs.reduce((sum, { valueSatoshis }) => sum + valueSatoshis, 0n);
+    const feeSatoshis = inputTotal - outputTotal;
+    const requiredFeeSatoshis = requiredFee(assembled.encoded.length, feeRate);
+    if (feeSatoshis < requiredFeeSatoshis) {
+      throw new InsufficientFundsError(inputTotal, requiredFeeSatoshis, outputTotal + requiredFeeSatoshis, 'the outputs and the fee exceed the inputs.');
     }
-    if (feeSatoshis > maximumFee) {
-      throw new Error(`Fee of ${feeSatoshis} satoshis exceeds the maximum of ${maximumFee}.`);
+    outputs.forEach((output, index) => {
+      const smallest = smallestOutputValue(output);
+      if (output.valueSatoshis < smallest) {
+        throw new Error(`Output ${index} holds ${output.valueSatoshis} satoshis; nodes relay no such output below ${smallest}.`);
+      }
+    });
+    const remainderSatoshis = feeSatoshis - requiredFeeSatoshis;
+    if (remainderSatoshis >= SMALLEST_CHANGE && changeIndex === undefined) {
+      throw new Error(
+        `The fee of ${feeSatoshis} satoshis is ${remainderSatoshis} above the required ${requiredFeeSatoshis}; an amount that size is returned as change, not left to the fee.`,
+      );
     }
     const transactionHash = hashTransactionUiOrder(assembled.encoded);
     return {
@@ -270,9 +353,30 @@ export const buildTransaction = (parameters: BuildParameters): BuiltTransaction 
       transactionHash,
       transactionId: binToHex(transactionHash),
       feeSatoshis,
+      requiredFeeSatoshis,
+      remainderSatoshis,
       ...(changeIndex === undefined ? {} : { changeIndex }),
     };
   };
+  const withValue = (outputs: Output[], index: number, valueSatoshis: bigint): Output[] =>
+    outputs.map((output, position) => (position === index ? { ...output, valueSatoshis } : output));
+  const totalExcept = (outputs: Output[], index: number): bigint =>
+    outputs.reduce((sum, { valueSatoshis }, position) => (position === index ? sum : sum + valueSatoshis), 0n);
+
+  if (parameters.remainderOutputIndex !== undefined) {
+    const index = parameters.remainderOutputIndex;
+    const target = parameters.outputs[index];
+    if (target === undefined) throw new Error(`There is no output ${index} to receive what is left.`);
+    // The size does not depend on the amount, so measure with a placeholder.
+    const fee = requiredFee(assemble(parameters, withValue(parameters.outputs, index, 0n)).encoded.length, feeRate);
+    const others = totalExcept(parameters.outputs, index);
+    const value = inputTotal - others - fee;
+    const smallest = smallestOutputValue(target);
+    if (value < smallest) {
+      throw new InsufficientFundsError(inputTotal, fee, others + fee + smallest, `what is left after the fee is below the ${smallest} satoshis an output of this kind must hold.`);
+    }
+    return finish(withValue(parameters.outputs, index, value));
+  }
 
   if (parameters.changeLockingBytecode !== undefined) {
     const changeIndex = parameters.outputs.length;
@@ -280,14 +384,18 @@ export const buildTransaction = (parameters: BuildParameters): BuiltTransaction 
       ...parameters.outputs,
       { lockingBytecode: parameters.changeLockingBytecode as Uint8Array, valueSatoshis },
     ];
-    // The size does not depend on the change amount, so measure with a placeholder.
-    const fee = feeFor(assemble(parameters, withChange(dust)).encoded);
-    const change = inputTotal - outputTotal - fee;
-    if (change >= dust) {
-      return finish(assemble(parameters, withChange(change)), fee, changeIndex);
+    const fee = requiredFee(assemble(parameters, withChange(0n)).encoded.length, feeRate);
+    const change = inputTotal - totalExcept(parameters.outputs, -1) - fee;
+    if (change >= smallestOutputValue(withChange(0n)[changeIndex] as Output)) {
+      return finish(withChange(change), changeIndex);
     }
+    // Too little to return: no change output, and what is left goes to the fee, reported as the remainder.
+    const built = finish(parameters.outputs, changeIndex);
+    const { changeIndex: _none, ...withoutChange } = built;
+    return withoutChange;
   }
-  return finish(assemble(parameters, parameters.outputs), inputTotal - outputTotal);
+
+  return finish(parameters.outputs);
 };
 
 const vm = createVirtualMachineBch2026(true);
@@ -300,5 +408,30 @@ const vm = createVirtualMachineBch2026(true);
  */
 export const verifyTransaction = ({ transaction, sourceOutputs }: Pick<BuiltTransaction, 'transaction' | 'sourceOutputs'>): string | true =>
   vm.verify({ transaction, sourceOutputs });
+
+/**
+ * The check before sending. `true` when the transaction passes the network's rules, pays the required fee
+ * and no more than a remainder too small to return, and has no output below its smallest value; otherwise
+ * the reason. It works from the signed transaction alone, whoever built it.
+ */
+export const checkBeforeSending = (
+  { transaction, sourceOutputs }: Pick<BuiltTransaction, 'transaction' | 'sourceOutputs'>,
+  feeRate = DEFAULT_FEE_RATE,
+): string | true => {
+  if (sourceOutputs.length !== transaction.inputs.length) return 'The spent outputs do not match the inputs.';
+  const inputTotal = sourceOutputs.reduce((sum, { valueSatoshis }) => sum + valueSatoshis, 0n);
+  const outputTotal = transaction.outputs.reduce((sum, { valueSatoshis }) => sum + valueSatoshis, 0n);
+  const fee = inputTotal - outputTotal;
+  const required = requiredFee(encodeTransactionBch(transaction).length, feeRate);
+  if (fee < required) return `The fee of ${fee} satoshis is below the ${required} that nodes require.`;
+  if (fee - required >= SMALLEST_CHANGE) {
+    return `The fee of ${fee} satoshis is ${fee - required} above the required ${required}: more than a remainder too small to return.`;
+  }
+  for (const [index, output] of transaction.outputs.entries()) {
+    const smallest = smallestOutputValue(output);
+    if (output.valueSatoshis < smallest) return `Output ${index} holds ${output.valueSatoshis} satoshis; nodes relay no such output below ${smallest}.`;
+  }
+  return verifyTransaction({ transaction, sourceOutputs });
+};
 
 export { CONTROLLER_INDEX };

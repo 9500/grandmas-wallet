@@ -66,7 +66,21 @@ export interface ControllerHistory {
   owners: OwnerPeriod[];
   /** The genesis and every later controller transaction, oldest first. */
   transactions: ControllerHistoryTransaction[];
+  /**
+   * Present when the owner closed the wallet: the identity token no longer exists. `current` is then the
+   * last state the controller had, and nothing can act on it.
+   */
+  closed?: { transactionId: string; confirmed: boolean };
 }
+
+/**
+ * Whether a transaction that spends the controller closes the wallet. The network has already enforced the
+ * controller's rules, and only closing leaves a transaction with a single output that carries no token.
+ */
+const closesWallet = (transaction: TransactionCommon): boolean => {
+  const [only, ...others] = transaction.outputs;
+  return only !== undefined && others.length === 0 && only.token === undefined;
+};
 
 const outpointKey = (transactionId: string, index: number): string => `${transactionId}:${index}`;
 
@@ -114,10 +128,12 @@ export const readControllerHistory = async (
   }
   const genesis = validateGenesis(creator.transaction, hexToBin(creator.transactionId), identity);
 
+  // The four continuing actions spend the controller as the first input; closing may spend it at any position.
   const bySpentController = new Map<string, ControllerHistoryTransaction>();
   for (const item of decoded.values()) {
-    const [first] = item.transaction.inputs;
-    if (first !== undefined) bySpentController.set(outpointKey(binToHex(first.outpointTransactionHash), first.outpointIndex), item);
+    for (const input of item.transaction.inputs) {
+      bySpentController.set(outpointKey(binToHex(input.outpointTransactionHash), input.outpointIndex), item);
+    }
   }
 
   const transitions: ControllerTransition[] = [];
@@ -127,9 +143,15 @@ export const readControllerHistory = async (
   ];
   let current: ControllerSnapshot = genesis;
   let currentConfirmed = creator.confirmed;
+  let closed: ControllerHistory['closed'];
   for (;;) {
     const next = bySpentController.get(outpointKey(binToHex(current.utxo.transactionHash), current.utxo.index));
     if (next === undefined) break;
+    if (closesWallet(next.transaction)) {
+      transactions.push(next);
+      closed = { transactionId: next.transactionId, confirmed: next.confirmed };
+      break;
+    }
     const transition = followController(current, next.transaction, hexToBin(next.transactionId));
     transitions.push(transition);
     transactions.push(next);
@@ -144,5 +166,5 @@ export const readControllerHistory = async (
     currentConfirmed = next.confirmed;
   }
 
-  return { genesis, transitions, current, currentConfirmed, owners, transactions };
+  return { genesis, transitions, current, currentConfirmed, owners, transactions, ...(closed === undefined ? {} : { closed }) };
 };

@@ -1,0 +1,17 @@
+pragma cashscript ^0.14.0;
+
+import "./lib/authorization.cash";
+
+// Grandma's Wallet vault address, address scheme v1.
+//
+// An address without a key: only the identity's current owner can spend from
+// it, through the controller at input 0. It stays valid through every change
+// of owner, and it stops working for good when the controller is closed.
+//
+//   tag  hash256(identity ‖ address secret), as for a recoverable address.
+contract VaultAddress(bytes32 tag) {
+    function spend(bytes32 identity, bytes32 addressSecret) {
+        ownerApproves(identity);
+        require(hash256(identity + addressSecret) == tag);
+    }
+}

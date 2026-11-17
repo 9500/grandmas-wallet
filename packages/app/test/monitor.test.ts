@@ -1,5 +1,5 @@
 import { binToHex } from '@bitauth/libauth';
-import type { ChainReader } from '@grandmas-wallet/core';
+import { type ChainReader, controllerScript } from '@grandmas-wallet/core';
 import { SimulatedChain, TestWallet, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -140,6 +140,18 @@ describe('watching for recovery requests (C13)', () => {
     chain.nowMs += 3 * 3_600_000;
     wallet.finalizeRecovery(recoverer);
     expect(await monitor.check()).toEqual({ kind: 'owned-elsewhere', ownerKeyHash: binToHex(stranger.keyHash), ownerEpoch: 1 });
+  });
+
+  it('reports a wallet its owner has closed, and nothing after it', async () => {
+    const { wallet, monitor, chain } = setup();
+    expect(await monitor.check()).toEqual({ kind: 'quiet' });
+    wallet.requestRecovery(recoverer, stranger.keyHash);
+    const closedIn = wallet.close(owner);
+    const status = await monitor.check();
+    expect(status).toMatchObject({ kind: 'closed', closedIn });
+    // The identity token is gone: no controller output is left, and the recoverer has nothing to complete.
+    expect(() => wallet.controller()).toThrow('the controller is not on the chain');
+    expect((await chain.listUnspent(controllerScript(wallet.identity).lockingBytecode))).toHaveLength(0);
   });
 
   it('keeps the last status and reports the problem when no server answers', async () => {

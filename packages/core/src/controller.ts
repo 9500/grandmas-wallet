@@ -33,6 +33,7 @@ const SELECTOR = {
   requestRecovery: 1n,
   finalizeRecovery: 2n,
   ownerUpdate: 3n,
+  ownerClose: 4n,
 } as const;
 
 export interface KeyAuthorization {
@@ -56,6 +57,8 @@ export interface ControllerScript {
       authorization: KeyAuthorization,
       update: { ownerKeyHash: Uint8Array; recovererKeyHash: Uint8Array; challengeDelay: Uint8Array },
     ) => Uint8Array;
+    /** Ends the identity: the transaction has one output, which carries no token. */
+    ownerClose: (authorization: KeyAuthorization) => Uint8Array;
   };
 }
 
@@ -90,6 +93,7 @@ export const controllerScript = (identity: Uint8Array): ControllerScript => {
           update.recovererKeyHash,
           update.challengeDelay,
         ]),
+      ownerClose: ({ publicKey, signature }) => unlock(SELECTOR.ownerClose, [publicKey, signature]),
     },
   };
 };

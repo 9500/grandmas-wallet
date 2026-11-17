@@ -114,7 +114,8 @@ export const validateGenesis = (
   return snapshot;
 };
 
-export type ControllerTransitionKind = ControllerAction['kind'];
+/** The four actions that continue the controller. Closing ends it and is not a transition to a new state. */
+export type ControllerTransitionKind = Exclude<ControllerAction['kind'], 'ownerClose'>;
 
 export interface ControllerTransition extends ControllerSnapshot {
   kind: ControllerTransitionKind;

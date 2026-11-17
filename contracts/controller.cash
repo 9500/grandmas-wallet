@@ -13,9 +13,12 @@ pragma cashscript ^0.14.0;
 //   [46..49] challenge delay    BIP68 relative locktime, 3 bytes, little-endian
 //   [49..69] proposed owner     hash160, all zero when Active
 //
-// Transaction layout for every function:
-//   Inputs:  00-controller, 01+ anything (fee funding, protected assets)
+// Transaction layout for the four functions that continue the controller:
+//   Inputs:  00-controller, 01+ anything (fee funding, coins the owner releases)
 //   Outputs: 00-controller, 01+ anything
+//
+// The fifth function, ownerClose, ends the identity: the transaction has one
+// output, which carries no token.
 //
 // The contract is constructed with the wallet identity: the token category of
 // the identity NFT, in the byte order contracts see. Each wallet therefore has
@@ -132,5 +135,22 @@ contract RecoveryController(bytes32 identity) {
             tx.outputs[0].nftCommitment ==
                 0x0100 + toPaddedBytes(epoch, 4) + newOwner + newRecoverer + newDelay + NO_PROPOSED_OWNER
         );
+    }
+
+    // Owner closes the wallet. The identity NFT is destroyed and the
+    // controller's value is released: the transaction has one output and it
+    // carries no token. Coins that only the controller can release (vault
+    // addresses, an earlier owner's addresses) are out of reach afterwards,
+    // and so is recovery.
+    function ownerClose(pubkey ownerPk, sig ownerSig) {
+        bytes state = tx.inputs[this.activeInputIndex].nftCommitment;
+        require(state.length == 69);
+        require(state.split(1)[0] == 0x01);
+        require(tx.inputs[this.activeInputIndex].tokenCategory == identity + 0x01);
+        authorizedKey(state.slice(6, 26), ownerPk, ownerSig);
+        require(checkSig(ownerSig, ownerPk));
+
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].tokenCategory == 0x);
     }
 }

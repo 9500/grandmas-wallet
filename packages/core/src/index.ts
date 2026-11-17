@@ -1,3 +1,4 @@
+export * from './addresses.js';
 export * from './builder.js';
 export * from './controller.js';
 export * from './genesis.js';

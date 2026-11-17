@@ -1,0 +1,33 @@
+pragma cashscript ^0.14.0;
+
+import "./lib/authorization.cash";
+
+// Grandma's Wallet recoverable address, address scheme v1.
+//
+// One address of a wallet. It holds BCH, fungible tokens and NFTs alike.
+//
+//   tag      hash256(identity ‖ address secret): ties the address to a wallet
+//            identity without showing it. The identity is the controller's
+//            token category in the byte order contracts see.
+//   keyHash  hash160 of the public key this address was made for.
+//
+// To a payer this is an ordinary script address. A spend by key publishes
+// the script, which shows the kind of address and not the wallet. A sweep
+// publishes the identity and the address secret.
+contract RecoverableAddress(bytes32 tag, bytes20 keyHash) {
+    // Everyday path: the key this address was made for. The script does not
+    // restrict the signing type; the wallet signs over every input and output.
+    function spend(pubkey pk, sig s) {
+        require(hash160(pk) == keyHash);
+        require(checkSig(s, pk));
+    }
+
+    // Recovery path: whoever owns the identity today, through the controller
+    // at input 0. Open to the current owner at any time, not only after a
+    // recovery. The tag check comes last because a function has to end on a
+    // check of its own.
+    function sweep(bytes32 identity, bytes32 addressSecret) {
+        ownerApproves(identity);
+        require(hash256(identity + addressSecret) == tag);
+    }
+}

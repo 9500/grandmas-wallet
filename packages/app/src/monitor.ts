@@ -22,10 +22,15 @@ export type WatchStatus =
   /** A request is open to a key this device holds: its own takeover. */
   | { kind: 'own-request'; requestedIn: string }
   /** The wallet names an owner key this device does not hold. */
-  | { kind: 'owned-elsewhere'; ownerKeyHash: string; ownerEpoch: number };
+  | { kind: 'owned-elsewhere'; ownerKeyHash: string; ownerEpoch: number }
+  /** The owner closed the wallet: its identity no longer exists and nothing can be asked of it. */
+  | { kind: 'closed'; closedIn: string; confirmed: boolean };
 
 /** The status that follows from a wallet's history for a device holding the given keys. */
 export const assess = (history: ControllerHistory, ownKeyHashes: string[]): WatchStatus => {
+  if (history.closed !== undefined) {
+    return { kind: 'closed', closedIn: history.closed.transactionId, confirmed: history.closed.confirmed };
+  }
   const { state } = history.current;
   const own = new Set(ownKeyHashes);
   if (!own.has(hex(state.ownerKeyHash))) {

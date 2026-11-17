@@ -115,6 +115,26 @@ export class TestWallet {
     return this.act(recoverer, { kind: 'finalizeRecovery' });
   }
 
+  /**
+   * The owner closes the wallet: the identity token is destroyed, and the controller's value goes, with a
+   * coin of the owner's, to an ordinary address of the owner.
+   */
+  close(owner: KeyPair): string {
+    const { utxo, state } = this.controller();
+    const ownerLocking = p2pkhLockingBytecode(owner.keyHash);
+    const coinId = this.chain.fund(ownerLocking, 5_000n);
+    const [coin] = this.chain.outputsAt(ownerLocking).filter((candidate) => binToHex(candidate.transactionHash) === coinId);
+    if (coin === undefined) throw new Error('the owner\'s coin is missing');
+    return this.send(
+      buildTransaction({
+        inputs: [controllerInput(utxo, state, { kind: 'ownerClose' }, owner), p2pkhInput(coin, owner)],
+        outputs: [{ lockingBytecode: ownerLocking, valueSatoshis: 0n }],
+        remainderOutputIndex: 0,
+        allowTokenBurn: true,
+      }),
+    );
+  }
+
   /** Request and complete a recovery in one go. */
   recover(recoverer: KeyPair, newOwner: KeyPair): void {
     this.requestRecovery(recoverer, newOwner.keyHash);
