@@ -1,12 +1,13 @@
 // Writes the record of a stage's acceptance tests: for each test number of the proposal's section 21,
 // the tests that carry it and whether they passed.
 //
-// usage: node scripts/test-record.mjs <stage> <first>-<last> [<first>-<last> ...] > docs/results/stage-<n>.md
+// usage: node scripts/test-record.mjs <stage> <first>-<last> [<first>-<last> ...]
+//        The record is written to docs/results/stage-<stage>.md.
 //        e.g. node scripts/test-record.mjs 1 CT01-CT15 AD01-AD13 FE01-FE03
 //
 // A test carries a number when its title starts with it ("AD04: ...").
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 
@@ -43,7 +44,7 @@ for (const file of report.testResults) {
 const proposal = readFileSync('Grandmas_Wallet_Architecture_Proposal_v0.4.md', 'utf8');
 const stated = (id) => new RegExp(`^\\| ${id} \\| (.+?) \\| (.+?) \\|$`, 'm').exec(proposal);
 const revision = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
-const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim() !== '';
+const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).split('\n').some((line) => line.trim() !== '' && !line.includes(`docs/results/stage-${stage}.md`));
 
 const lines = [
   `# Stage ${stage}: record of the acceptance tests`,
@@ -63,5 +64,8 @@ for (const [id, tests] of byNumber) {
   lines.push(`| ${id} | ${what} | ${expected} | ${list} | ${tests.length === 0 ? '**open**' : passed ? 'passed' : '**failed**'} |`);
 }
 lines.push('', open === 0 ? 'Every number has at least one test, and all of them pass.' : `${open} of ${byNumber.size} numbers are open or failing.`);
-console.log(lines.join('\n'));
+mkdirSync('docs/results', { recursive: true });
+const recordFile = `docs/results/stage-${stage}.md`;
+writeFileSync(recordFile, `${lines.join('\n')}\n`);
+console.log(`${recordFile}: ${byNumber.size - open} of ${byNumber.size} numbers passed`);
 process.exitCode = open === 0 ? 0 : 1;
