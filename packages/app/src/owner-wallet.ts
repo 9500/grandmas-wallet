@@ -11,11 +11,15 @@ import {
   type SeedKeys,
   type SpendableCoin,
   type TransactionRequest,
+  type ViewingKey,
+  type WalletSearch,
+  type SeedView,
   type WalletAddress,
   type WalletBackend,
   ADDRESS_KIND,
   INPUT_BYTES,
   InsufficientFundsError,
+  LARGEST_TRANSACTION_BYTES,
   afterOwnerAuthorize,
   afterOwnerUpdate,
   chooseCoins,
@@ -30,6 +34,7 @@ import {
   readControllerHistory,
   requiredFee,
   returnNumber,
+  searchWallet,
   smallestOutputValue,
   takeNumber,
   transactionBytes,
@@ -76,6 +81,32 @@ export interface OwnerWalletState {
   recoveryConfirmed: boolean;
   /** A full pass has finished for every seed the wallet has had (section 7.7). Set by the code that searches. */
   fullySearched: boolean;
+  /** The viewing keys of the seeds the wallet had before this one, oldest first, as far as the device was given them. */
+  earlierSeeds?: StoredViewingKey[];
+  /** Addresses of earlier seeds that a search found in use. They are watched, and what arrives there is swept. */
+  earlierFound?: { seed: number; kind: 0 | 1 | 2; number: number }[];
+  /** The chain shows, confirmed, that a key this device does not hold owns the wallet. */
+  ownedElsewhere?: boolean;
+}
+
+/** A viewing key as a device stores it. */
+export interface StoredViewingKey {
+  label: string;
+  network: ViewingKey['network'];
+  addressNodes: ViewingKey['addressNodes'];
+  /** Hex. */
+  blindingSeed: string;
+}
+
+const storedViewingKey = (label: string, viewingKey: ViewingKey): StoredViewingKey => ({ label, network: viewingKey.network, addressNodes: viewingKey.addressNodes, blindingSeed: binToHex(viewingKey.blindingSeed) });
+const viewingKeyOf = (stored: StoredViewingKey): ViewingKey => ({ network: stored.network, addressNodes: stored.addressNodes, blindingSeed: hexToBin(stored.blindingSeed) });
+
+export interface Swept {
+  transactions: Sent[];
+  /** How many coins were moved. */
+  coins: number;
+  /** Tokens that were moved, unchanged. The wallet does not know what they mean until it has their application's template. */
+  tokens: { category: string; meaning: 'unknown' }[];
 }
 
 export const newOwnerWalletState = (): OwnerWalletState => ({
@@ -108,6 +139,8 @@ export interface Balance {
   notRecoverable: bigint;
   /** Coins that carry tokens, at the wallet's addresses. */
   tokens: AccountCoin[];
+  /** At an earlier seed's addresses, not yet swept. Until it is swept, the earlier seed can spend it too. */
+  toSweep: bigint;
 }
 
 export interface Sent {
@@ -146,6 +179,8 @@ export class OwnerWallet {
    */
   private readonly spent = new Set<string>();
   private readonly preparedInputs = new Map<string, string[]>();
+  /** Addresses of earlier seeds that were made known to the key holder, by locking bytecode. */
+  private readonly earlier = new Map<string, WalletAddress>();
 
   private constructor(
     private readonly backend: WalletBackend,
@@ -173,6 +208,40 @@ export class OwnerWallet {
     await wallet.backend.ordinaryAddress();
     if (wallet.state.identity !== undefined) await wallet.makeKnown();
     return wallet;
+  }
+
+  /**
+   * A device takes a wallet over, or opens it again from its twelve words and the identity (proposal
+   * sections 11.1 and 18.1): the chain must show this device's controller key as the owner. No controller
+   * transaction is needed for that. The viewing keys of earlier seeds, as far as the device was given them,
+   * let it find and sweep what is at their addresses.
+   *
+   * @throws if the controller names another owner, or the wallet has been closed
+   */
+  static async takeOver(options: {
+    backend: WalletBackend;
+    chain: ChainReader;
+    seed: Pick<SeedKeys, 'viewingKey' | 'network'>;
+    identity: Uint8Array;
+    /** Oldest first. */
+    earlierViewingKeys?: ViewingKey[];
+    save?: (state: OwnerWalletState) => void;
+    feeRate?: number;
+  }): Promise<OwnerWallet> {
+    const history = await readControllerHistory(options.chain, options.identity);
+    if (history.closed !== undefined) throw new Error('This wallet has been closed.');
+    const key = await options.backend.controllerKey('owner');
+    if (hex(history.current.state.ownerKeyHash) !== hex(key.keyHash)) {
+      throw new Error('The wallet\'s controller names another owner than this device\'s key.');
+    }
+    const state: OwnerWalletState = {
+      ...newOwnerWalletState(),
+      identity: hex(options.identity),
+      creation: { identitySeen: true, createSeen: true, confirmed: true },
+      earlierSeeds: (options.earlierViewingKeys ?? []).map((viewingKey, index) => storedViewingKey(`earlier seed ${index + 1}`, viewingKey)),
+    };
+    options.save?.(state);
+    return OwnerWallet.open({ ...options, state });
   }
 
   /** The coins the key holder follows, without those this wallet has already spent. */
@@ -217,6 +286,18 @@ export class OwnerWallet {
       const address = this.address(ADDRESS_KIND.vault, number);
       if (address.kind === ADDRESS_KIND.vault) await this.backend.knowVaultAddress(this.identity, address);
     }
+    for (const found of this.state.earlierFound ?? []) await this.knowEarlier(found.seed, found.kind, found.number);
+  }
+
+  /** Make an address of an earlier seed known: the key holder follows it and can sweep it. */
+  private async knowEarlier(seed: number, kind: 0 | 1 | 2, number: number): Promise<void> {
+    const stored = this.state.earlierSeeds?.[seed];
+    if (stored === undefined) return;
+    const address = walletAddress(this.identity, viewingKeyOf(stored), kind, number);
+    if (this.earlier.has(hex(address.lockingBytecode))) return;
+    if (address.kind === ADDRESS_KIND.vault) await this.backend.knowVaultAddress(this.identity, address);
+    else await this.backend.knowEarlierAddress(this.identity, address);
+    this.earlier.set(hex(address.lockingBytecode), address);
   }
 
   /** Have the backend make addresses of a kind up to, not including, `count`: it hands out keys in order. */
@@ -427,6 +508,9 @@ export class OwnerWallet {
   // ---------------------------------------------------------------- what the wallet shows
 
   private requireCreated(): void {
+    if (this.state.ownedElsewhere === true) {
+      throw new Error('The chain shows that another key owns this wallet. It gives out no address and takes on no action; coins that have not been swept can still be moved out.');
+    }
     if (!this.state.creation.confirmed) {
       throw new Error('The wallet\'s identity is not confirmed yet. Until it is, no address is given out: if the transaction that defines the identity were replaced, the identity would be another.');
     }
@@ -446,7 +530,7 @@ export class OwnerWallet {
   }
 
   /** The wallet's coins by where they are. */
-  private async sorted(): Promise<{ own: AccountCoin[]; cancelling: AccountCoin[]; vault: AccountCoin[]; funding: AccountCoin[]; tokens: AccountCoin[] }> {
+  private async sorted(): Promise<{ own: AccountCoin[]; cancelling: AccountCoin[]; vault: AccountCoin[]; earlier: AccountCoin[]; funding: AccountCoin[]; tokens: AccountCoin[] }> {
     const coins = await this.coins();
     const cancelAt = this.state.cancelCoinNumber === undefined || this.state.identity === undefined ? undefined : hex(this.address(ADDRESS_KIND.change, this.state.cancelCoinNumber).lockingBytecode);
     const controllerAt = this.state.identity === undefined ? undefined : hex(controllerScript(this.identity).lockingBytecode);
@@ -457,15 +541,17 @@ export class OwnerWallet {
     return {
       own: keyed.filter((coin) => tokenFree(coin) && !cancelling.includes(coin)),
       cancelling,
-      vault: atAddress.filter((coin) => coin.template === 'actions' && tokenFree(coin)),
+      vault: atAddress.filter((coin) => coin.template === 'actions' && tokenFree(coin) && !this.earlier.has(hex(coin.utxo.output.lockingBytecode))),
+      // At an earlier seed's addresses, with or without tokens: what a sweep is for.
+      earlier: atAddress.filter((coin) => this.earlier.has(hex(coin.utxo.output.lockingBytecode))),
       funding: coins.filter((coin) => coin.template === 'coins' && tokenFree(coin)),
-      tokens: atAddress.filter((coin) => !tokenFree(coin)),
+      tokens: atAddress.filter((coin) => !tokenFree(coin) && !this.earlier.has(hex(coin.utxo.output.lockingBytecode))),
     };
   }
 
   async balance(): Promise<Balance> {
-    const { own, cancelling, vault, funding, tokens } = await this.sorted();
-    return { recoverable: valueOf(own), cancelling: valueOf(cancelling), vault: valueOf(vault), notRecoverable: this.state.creation.confirmed ? valueOf(funding) : 0n, tokens };
+    const { own, cancelling, vault, earlier, funding, tokens } = await this.sorted();
+    return { recoverable: valueOf(own), cancelling: valueOf(cancelling), vault: valueOf(vault), notRecoverable: this.state.creation.confirmed ? valueOf(funding) : 0n, tokens, toSweep: valueOf(earlier) };
   }
 
   /** Whether the wallet can cancel a request now: it holds the coin kept for that. */
@@ -635,6 +721,178 @@ export class OwnerWallet {
     return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: choice.remainderSatoshis };
   }
 
+  // ---------------------------------------------------------------- finding and sweeping
+
+  private searchProgress: WalletSearch['seeds'] | undefined;
+
+  /**
+   * Search for the wallet's coins over every seed it has had (proposal section 7.7), and take account of
+   * what is found: used addresses of this seed move its windows on, and used addresses of earlier seeds are
+   * made known to the key holder so that their coins can be swept. A search that was interrupted continues
+   * where it stopped.
+   *
+   * The wallet is fully found only after the full pass has finished for every seed. An earlier seed whose
+   * viewing key the device was not given makes the result incomplete, and the device says so.
+   */
+  async search(options: { passes?: ('quick' | 'full')[]; batchSize?: number } = {}): Promise<WalletSearch> {
+    const history = await readControllerHistory(this.chain, this.identity);
+    const earlier = this.state.earlierSeeds ?? [];
+    // Every earlier owner the chain shows had a seed of its own.
+    const unknown = Math.max(0, history.owners.length - 1 - earlier.length);
+    const seeds: SeedView[] = [
+      ...Array.from({ length: unknown }, (_, index) => ({ label: unknown === 1 ? 'an earlier seed' : `earlier seed ${index + 1} of ${unknown} without a viewing key`, missing: true as const })),
+      ...earlier.map((stored) => ({ label: stored.label, viewingKey: viewingKeyOf(stored) })),
+      { label: 'the current seed', viewingKey: this.seed.viewingKey },
+    ];
+    const result = await searchWallet(this.chain, this.identity, seeds, {
+      ...(options.passes === undefined ? {} : { passes: options.passes }),
+      ...(options.batchSize === undefined ? {} : { batchSize: options.batchSize }),
+      // A pass that finished is run afresh, since coins may have arrived; one that was interrupted continues.
+      ...(this.searchProgress === undefined
+        ? {}
+        : {
+            resume: this.searchProgress.map((entry) => ({
+              label: entry.label,
+              ...(entry.quick?.status === 'incomplete' ? { quick: entry.quick } : {}),
+              ...(entry.full?.status === 'incomplete' ? { full: entry.full } : {}),
+            })),
+          }),
+    });
+    this.searchProgress = result.seeds;
+
+    let allocation = this.state.allocation;
+    const earlierFound = [...(this.state.earlierFound ?? [])];
+    for (const entry of result.seeds) {
+      const seedIndex = earlier.findIndex((stored) => stored.label === entry.label);
+      for (const found of [...(entry.quick?.found ?? []), ...(entry.full?.found ?? [])]) {
+        const { kind, number } = found.address;
+        if (entry.label === 'the current seed') allocation = markUsed(allocation, kind, number);
+        else if (seedIndex >= 0 && !earlierFound.some((known) => known.seed === seedIndex && known.kind === kind && known.number === number)) earlierFound.push({ seed: seedIndex, kind, number });
+      }
+    }
+    // A full pass that has finished for every seed stays finished; a later quick pass does not undo it.
+    this.store({ allocation, earlierFound, fullySearched: result.status === 'fully-found' || (this.state.fullySearched && result.status !== 'incomplete') });
+    await this.makeKnown();
+    return result;
+  }
+
+  /**
+   * Sweep what is at earlier seeds' addresses to addresses of this seed (proposal section 11.2): one
+   * transaction, or several, each with the controller approving. Tokens are carried over unchanged. What a
+   * token means is not known here; a token may give authority over a position worth far more than its
+   * coin, so coins with tokens go first, then the largest coins. A sweep also cancels a pending request.
+   *
+   * It can be repeated: what was swept is gone from the earlier addresses, and what is left is found again.
+   *
+   * @param options.maximumCoins - how many coins one transaction carries at most, besides what its size allows
+   * @param options.maximumTransactions - stop after this many transactions; the rest is swept by the next call
+   */
+  async sweepEarlier(options: { maximumCoins?: number; maximumTransactions?: number } = {}): Promise<Swept> {
+    this.requireCreated();
+    const swept: Swept = { transactions: [], coins: 0, tokens: [] };
+    for (;;) {
+      const { own, earlier } = await this.sorted();
+      if (earlier.length === 0) return swept;
+      const ordered = [...earlier].sort((a, b) => {
+        if (tokenFree(a) !== tokenFree(b)) return tokenFree(a) ? 1 : -1;
+        return a.utxo.output.valueSatoshis > b.utxo.output.valueSatoshis ? -1 : 1;
+      });
+      const { coin: controller, state } = await this.controllerCoin();
+      const next = afterOwnerAuthorize(state);
+      const taken = takeNumber(this.state.allocation, ADDRESS_KIND.change);
+      const number = 'number' in taken ? taken.number : taken.refused.offer;
+      if ('number' in taken) this.store({ allocation: keepNumber(taken.allocation, ADDRESS_KIND.change, taken.number) });
+      await this.makeAddresses(ADDRESS_KIND.change, number + 1);
+      const destination = this.address(ADDRESS_KIND.change, number).lockingBytecode;
+
+      // As many coins as one transaction holds.
+      const inputBytesOf = (coin: AccountCoin): number => (this.earlier.get(hex(coin.utxo.output.lockingBytecode))?.kind === ADDRESS_KIND.vault ? INPUT_BYTES.vault : INPUT_BYTES.swept);
+      const tokenOutput = (coin: AccountCoin): Output => {
+        const output = { lockingBytecode: destination, valueSatoshis: 0n, token: coin.utxo.output.token as NonNullable<Output['token']> };
+        const smallest = smallestOutputValue(output);
+        return { ...output, valueSatoshis: coin.utxo.output.valueSatoshis > smallest ? coin.utxo.output.valueSatoshis : smallest };
+      };
+      const part: AccountCoin[] = [];
+      const outputsFor = (coins: AccountCoin[]): Output[] => [this.controllerOutput(next), ...coins.filter((coin) => !tokenFree(coin)).map(tokenOutput)];
+      for (const coin of ordered) {
+        const candidate = [...part, coin];
+        const bytes = transactionBytes([INPUT_BYTES.controller, ...candidate.map(inputBytesOf)], [...outputsFor(candidate), { lockingBytecode: destination, valueSatoshis: 0n }]);
+        if (part.length > 0 && (bytes > LARGEST_TRANSACTION_BYTES || part.length >= (options.maximumCoins ?? Number.MAX_SAFE_INTEGER))) break;
+        part.push(coin);
+      }
+      // The fee comes from the swept coins. A wallet that holds only tokens there pays it from a coin of this seed.
+      const choose = (): ReturnType<typeof chooseCoins> =>
+        chooseCoins({
+          available: own.map((coin) => spendable(coin, INPUT_BYTES.byKey)),
+          fixedInputs: [{ utxo: controller.utxo, inputBytes: INPUT_BYTES.controller }, ...part.map((coin) => ({ utxo: coin.utxo, inputBytes: inputBytesOf(coin) }))],
+          outputs: outputsFor(part),
+          changeLockingBytecode: destination,
+          feeRate: this.feeRate,
+        });
+      let choice: ReturnType<typeof chooseCoins> | undefined;
+      while (choice === undefined) {
+        try {
+          choice = choose();
+        } catch (error) {
+          // Coins with tokens alone cannot pay: the largest swept coin without a token joins them.
+          const payer = ordered.find((coin) => tokenFree(coin) && !part.includes(coin));
+          if (!(error instanceof InsufficientFundsError) || payer === undefined) throw error;
+          part.push(payer);
+        }
+      }
+      const payers = choice.coins.map(({ utxo }) => own.find((coin) => coin.utxo === utxo) as AccountCoin);
+      const prepared = await this.prepareTransaction({
+        template: 'controller',
+        action: 'approve',
+        role: 'owner',
+        variables: { identity: hex(this.identity), nextState: hex(encodeControllerState(next)) },
+        inputs: [{ coin: controller, inputIdentifier: 'approveInput' }, ...part.map((coin) => ({ coin })), ...payers.map((coin) => ({ coin }))],
+        outputs: [{ outputIdentifier: 'controllerOutput' }, ...outputsFor(part).slice(1), ...(choice.changeSatoshis === undefined ? [] : [{ lockingBytecode: destination, valueSatoshis: choice.changeSatoshis }])],
+      });
+      await this.sendPrepared(prepared);
+      swept.transactions.push({ transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: choice.remainderSatoshis });
+      swept.coins += part.length;
+      for (const coin of part) if (coin.utxo.output.token !== undefined) swept.tokens.push({ category: hex(coin.utxo.output.token.category), meaning: 'unknown' });
+      if (options.maximumTransactions !== undefined && swept.transactions.length >= options.maximumTransactions) return swept;
+    }
+  }
+
+  /**
+   * Check who owns the wallet, as the chain shows it. When a key this device does not hold is the owner, and
+   * that is confirmed, the wallet stops giving out addresses and taking on actions (proposal section 17).
+   *
+   * @param settled - whether what the servers say may be taken as settled: more than one server was asked and none disagreed
+   */
+  async checkOwnership(settled = true): Promise<'this device' | 'another key' | 'closed'> {
+    const history = await readControllerHistory(this.chain, this.identity);
+    if (history.closed !== undefined) return 'closed';
+    const key = await this.backend.controllerKey('owner');
+    if (hex(history.current.state.ownerKeyHash) === hex(key.keyHash)) {
+      if (this.state.ownedElsewhere === true) this.store({ ownedElsewhere: false });
+      return 'this device';
+    }
+    if (settled && history.currentConfirmed) this.store({ ownedElsewhere: true });
+    return 'another key';
+  }
+
+  /**
+   * Move out every coin this device's keys still spend, to an address outside the wallet: for an owner whose
+   * wallet has gone to another key against their will. This is a race against the new owner's sweep. Coins
+   * at vault addresses cannot be moved this way, and nothing is offered for them.
+   */
+  async moveOut(toLockingBytecode: Uint8Array): Promise<SentEverything> {
+    const { own, cancelling } = await this.sorted();
+    const destination = { lockingBytecode: toLockingBytecode, valueSatoshis: 0n };
+    const plan = planSendEverything({ coins: [...own, ...cancelling].map((coin) => spendable(coin, INPUT_BYTES.byKey)), destination, feeRate: this.feeRate });
+    const transactions: Sent[] = [];
+    for (const part of plan.parts) {
+      const prepared = await this.prepareTransaction({ template: 'actions', action: 'pay', role: 'owner', inputs: part.coins.map((entry) => ({ coin: (entry as ReturnType<typeof spendable>).coin })), outputs: [{ ...destination, valueSatoshis: part.sentSatoshis }] });
+      await this.sendPrepared(prepared);
+      transactions.push({ transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: 0n });
+    }
+    return { transactions, sentSatoshis: plan.sentSatoshis, feeSatoshis: plan.feeSatoshis, leftOut: plan.leftOut.map((entry) => (entry as ReturnType<typeof spendable>).coin) };
+  }
+
   // ---------------------------------------------------------------- sending everything, closing
 
   /**
@@ -646,7 +904,12 @@ export class OwnerWallet {
    */
   async sendEverything(toLockingBytecode: Uint8Array): Promise<SentEverything> {
     this.requireCreated();
-    const { own, cancelling, vault } = await this.sorted();
+    const sorted = await this.sorted();
+    const { own, cancelling } = sorted;
+    // Coins that only the controller releases: at vault addresses, and at earlier seeds' addresses not yet swept.
+    const unswept = sorted.earlier.filter(tokenFree);
+    const vault = [...sorted.vault, ...unswept];
+    const boundBytes = (coin: AccountCoin): number => (unswept.includes(coin) && this.earlier.get(hex(coin.utxo.output.lockingBytecode))?.kind !== ADDRESS_KIND.vault ? INPUT_BYTES.swept : INPUT_BYTES.vault);
     const destination = { lockingBytecode: toLockingBytecode, valueSatoshis: 0n };
     const byKey = [...own, ...cancelling].map((coin) => spendable(coin, INPUT_BYTES.byKey));
     const transactions: Sent[] = [];
@@ -678,7 +941,7 @@ export class OwnerWallet {
       // One transaction with the controller carries the coins that need it, and as many others as it holds.
       const { coin: controller, state } = await this.controllerCoin();
       const plan = planSendEverything({
-        coins: [...vault.map((coin) => spendable(coin, INPUT_BYTES.vault)), ...byKey],
+        coins: [...vault.map((coin) => spendable(coin, boundBytes(coin))), ...byKey],
         destination,
         fixedInputs: [{ utxo: controller.utxo, inputBytes: INPUT_BYTES.controller }],
         fixedOutputs: [this.controllerOutput(afterOwnerAuthorize(state))],
@@ -704,9 +967,10 @@ export class OwnerWallet {
 
   /** What stands in the way of closing the wallet, if anything. */
   async closingObstacles(): Promise<string[]> {
-    const { vault, tokens } = await this.sorted();
+    const { vault, earlier, tokens } = await this.sorted();
     const reasons: string[] = [];
     if (vault.length > 0) reasons.push('A coin is at a vault address; after closing nobody could spend it.');
+    if (earlier.length > 0) reasons.push('A coin is at an earlier seed\'s address and has not been swept; after closing only that seed could spend it.');
     if (tokens.length > 0) reasons.push('The wallet holds a token; a token may give authority over a position.');
     if (!this.state.fullySearched) reasons.push('The full search has not finished for every seed; a coin that only the controller can move may not have been found yet.');
     return reasons;
