@@ -79,7 +79,7 @@ const Root = () => {
     case 'restore':
       return frame(<Restore session={session} onBack={() => choose(undefined)} onDone={becomeOwner} />);
     case 'owner':
-      return <OwnerApp session={session} opened={wallet} />;
+      return <OwnerApp session={session} opened={wallet} onLost={() => choose('create')} />;
     default:
       return frame(<Notice tone="bad">This device keeps something this page does not know. Erase the device under details to start again.</Notice>);
   }

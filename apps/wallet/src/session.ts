@@ -11,13 +11,14 @@ import {
   type StoreAt,
   type WatchLog,
   OwnerWallet,
+  kitTemplates,
   walletTemplateNumbers,
 } from '@grandmas-wallet/app';
 import { linkKind, readLink } from '@grandmas-wallet/app/links';
 import { HttpStore } from '@grandmas-wallet/archive';
 import type { LedgerEntry } from '@grandmas-wallet/connect';
 import { type ChainReader, type ChallengeDelay, type SeedKeys, deriveSeedKeys } from '@grandmas-wallet/core';
-import { recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
+import { credentialKeys, recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
 import { type Environment, Vault, connectChain, keyNetwork, loadEnvironment, openAccount } from '@grandmas-wallet/ui';
 
 /**
@@ -104,6 +105,11 @@ export interface Kept {
   vaultReceive: { number: number; again: boolean };
   /** Refuse a request to another key without asking. */
   autoCancel: boolean;
+  /**
+   * The network no longer has the transaction that made the wallet: it is being made again. Shown until
+   * recovery is on again, so that the user knows to send the new kit and to write the backup down again.
+   */
+  lostCreation: { at: number };
   /** A link the page was opened with, until something has dealt with it. */
   incoming: { kind: LinkField | 'enroll'; text: string };
   /** The applications this device is connected to, so that the page connects again when it is opened. */
@@ -214,6 +220,24 @@ export const sealedOf = async (text: string, field: 'handover' | 'takeover' | 'u
   return hexToBin(read.sealed);
 };
 export const sealedContent = (sealed: Uint8Array): { sealed: string } => ({ sealed: binToHex(sealed) });
+
+/**
+ * The wallet's creation is gone from the network, or its controller has to be made again. What this phone
+ * sent its recoverer and showed as addresses was for that creation; the recoverer has to be set up again.
+ * A credential the phone no longer holds (the recoverer had confirmed it) is replaced by a new one, which
+ * the new controller names.
+ */
+export const startCreationAgain = (session: Session): void => {
+  const setup = kept('setup');
+  if (setup !== undefined && setup.credentialWords === undefined) {
+    const credentialWords = generateBip39Mnemonic();
+    const { recoveryKey } = credentialKeys(credentialWords, session.network, kitTemplates());
+    keep('setup', { ...setup, credentialWords, recoveryKeyHash: binToHex(recoveryKey.keyHash) });
+  }
+  keep('lostCreation', { at: Math.floor(Date.now() / 1000) });
+  for (const name of ['arrangement', 'kitLink', 'receive', 'vaultReceive', 'watchLog'] as const) keep(name, undefined);
+  keep('mode', 'create');
+};
 
 export const noteActivity = (entry: Omit<Activity, 'at'>): void => {
   keep('activity', [{ ...entry, at: Math.floor(Date.now() / 1000) }, ...(kept('activity') ?? [])].slice(0, 100));

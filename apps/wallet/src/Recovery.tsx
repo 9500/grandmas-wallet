@@ -28,7 +28,9 @@ export const Recovery = ({ owner }: { owner: Owner }) => {
   if (view === 'backup') return <Backup owner={owner} onBack={back} />;
   const recipient = kept('recipient');
   const history = owner.watch.history;
-  const pending = kept('arrangement')?.change;
+  const announced = kept('arrangement')?.change;
+  // A change that has been made is in effect; it is only followed until a block holds it.
+  const pending = announced?.made === undefined ? announced : undefined;
   return (
     <div class="stack">
       <PageHead title="Recovery" />
@@ -84,7 +86,7 @@ const ChangeState = ({ owner }: { owner: Owner }) => {
   const { change } = owner;
   if (change.problem !== undefined) return <Notice tone="bad">{change.problem}</Notice>;
   return (
-    <Waiting session={owner.session} blocks={1}>
+    <Waiting>
       Waiting for your recoverer's receipt for this change. As soon as it is on the backup stores, this phone makes the change; keep the page open or come back to it.
     </Waiting>
   );
@@ -158,8 +160,8 @@ const MoveOut = ({ owner, onBack }: { owner: Owner; onBack: () => void }) => {
           <p>
             New phone: <span class="mono">{moveOut.fingerprint}</span>
           </p>
-          {owner.change.kind === 'new seed' || kept('arrangement')?.change?.kind === 'new seed' ? <ChangeState owner={owner} /> : <Notice tone="good">The wallet has been handed over.</Notice>}
-          <p class="small muted">There is no waiting period: the new phone owns the wallet as soon as the network confirms the change. This phone then stops giving out addresses.</p>
+          {kept('arrangement')?.change?.kind === 'new seed' && kept('arrangement')?.change?.made === undefined ? <ChangeState owner={owner} /> : <Notice tone="good">The wallet has been handed over.</Notice>}
+          <p class="small muted">There is no waiting period: the new phone owns the wallet as soon as the network has the change. This phone then stops giving out addresses.</p>
           <div class="actions">
             <Button
               kind="quiet"
@@ -251,7 +253,7 @@ const NewRecoverer = ({ owner, onBack }: { owner: Owner; onBack: () => void }) =
     });
   const allowance = useTask();
   if (pending !== undefined) {
-    const changing = kept('arrangement')?.change?.kind === 'new recoverer';
+    const changing = kept('arrangement')?.change?.kind === 'new recoverer' && kept('arrangement')?.change?.made === undefined;
     const name = pending.recipient.name || 'the new recoverer';
     const feeAddress = p2pkhLockingBytecode(credentialKeys(pending.credentialWords, owner.session.network, kitTemplates()).feeKey.keyHash);
     return (
@@ -355,7 +357,7 @@ const NewDelay = ({ owner, onBack }: { owner: Owner; onBack: () => void }) => {
           <HandOff text={pending.link} qrLabel="QR code of the update for your recoverer" copyLabel="Copy link" testId="delay-link">
             <p>Send this link to {kept('recipient')?.name || 'your recoverer'}. Once they have taken it in, this phone makes the change.</p>
           </HandOff>
-          <div class="actions">{kept('arrangement')?.change?.kind === 'waiting period' ? <ChangeState owner={owner} /> : <Notice tone="good">The waiting period is changed.</Notice>}</div>
+          <div class="actions">{kept('arrangement')?.change?.kind === 'waiting period' && kept('arrangement')?.change?.made === undefined ? <ChangeState owner={owner} /> : <Notice tone="good">The waiting period is changed.</Notice>}</div>
         </Card>
       ) : (
         <Card>

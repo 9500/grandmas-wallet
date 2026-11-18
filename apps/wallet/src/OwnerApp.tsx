@@ -16,7 +16,7 @@ import { MovedAway, OwnedElsewhere } from './Elsewhere.js';
 import { Receive } from './Receive.js';
 import { Recovery } from './Recovery.js';
 import { Send } from './Send.js';
-import { type Session, deviceWords, keep, kept, noteActivity, openWallet, seedOf } from './session.js';
+import { type Session, deviceWords, keep, kept, noteActivity, openWallet, seedOf, startCreationAgain } from './session.js';
 import { type Watch, useWatch } from './watch.js';
 
 const ROUTES = ['home', 'receive', 'send', 'apps', 'recovery', 'details'] as const;
@@ -50,7 +50,7 @@ export interface Owner {
   apps: ApplicationsPart;
 }
 
-export const OwnerApp = ({ session, opened }: { session: Session; opened?: OwnerWallet | undefined }) => {
+export const OwnerApp = ({ session, opened, onLost }: { session: Session; opened?: OwnerWallet | undefined; onLost: () => void }) => {
   const [wallet, setWallet] = useState<OwnerWallet | undefined>(opened);
   const [problem, setProblem] = useState<string | undefined>();
   useEffect(() => {
@@ -74,10 +74,10 @@ export const OwnerApp = ({ session, opened }: { session: Session; opened?: Owner
       </Frame>
     );
   }
-  return <OwnerScreens session={session} wallet={wallet} />;
+  return <OwnerScreens session={session} wallet={wallet} onLost={onLost} />;
 };
 
-const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWallet }) => {
+const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: OwnerWallet; onLost: () => void }) => {
   const seed = useMemo(() => seedOf(session, deviceWords()), []);
   const [route, navigate] = useRoute(ROUTES, 'home');
   const [balance, setBalance] = useState<Balance | undefined>();
@@ -104,6 +104,24 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
   };
   useEvery(8_000, refresh);
 
+  // The wallet is in use as soon as the network has its creation. Until a block holds it, every check looks
+  // at it again: if it is gone, the wallet is made again from the coins this phone has (proposal section 7.9).
+  // Coins at addresses given out before that are moved to the new wallet's addresses, by their keys.
+  useEvery(10_000, async () => {
+    if (!wallet.stored.creation.confirmed && (await wallet.creationStep()) !== 'created') {
+      startCreationAgain(session);
+      onLost();
+      return;
+    }
+    if (wallet.voided.length > 0 && wallet.created && wallet.stored.ownedElsewhere !== true && wallet.stored.otherOwnerSeen !== true) {
+      const sent = await wallet.collectVoided();
+      if (sent !== undefined) {
+        noteActivity({ what: 'Moved coins from addresses given out before the wallet was made again', transactionId: sent.transactionId, bytes: sent.bytes, fee: String(sent.feeSatoshis) });
+        await refresh();
+      }
+    }
+  });
+
   /** Whether recovery is on: the recoverer's receipt on the stores, against what this phone sent and the chain. */
   const checkReceipts = async () => {
     const checked = await checkRecovery({ wallet, chain: session.chain, arrangement: kept('arrangement'), storeAt: session.storeAt, network: session.network });
@@ -116,6 +134,7 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
     }
     setRecovery(checked.status);
     if (checked.status.on) {
+      keep('lostCreation', undefined);
       // The credential's words are with the recoverer now; this phone forgets them.
       const setup = kept('setup');
       if (setup?.credentialWords !== undefined) {
@@ -128,10 +147,12 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
   };
   useEvery(recovery?.on === true ? 120_000 : 20_000, checkReceipts, [recovery?.on]);
 
-  // A change announced to the recoverer is made as soon as its prepared receipt is on the stores.
+  // A change announced to the recoverer is made as soon as its prepared receipt is on the stores. It takes
+  // effect as soon as the network has it; until a block holds it, it is looked at again here, and made
+  // again if it disappeared.
   useEvery(15_000, async () => {
     const arrangement = kept('arrangement');
-    if (arrangement?.change === undefined || arrangement.movedTo !== undefined) {
+    if (arrangement?.change === undefined) {
       setChange({});
       return;
     }
@@ -139,6 +160,11 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
     try {
       const made = await makeChange({ wallet, chain: session.chain, arrangement, storeAt: session.storeAt, network: session.network });
       keep('arrangement', made.arrangement);
+      // Made earlier and still on its way to a block: nothing more to do here.
+      if (made.sent === undefined && made.arrangement.change !== undefined) {
+        setChange({});
+        return;
+      }
       if (made.sent !== undefined) noteActivity({ what: kind === 'new seed' ? 'Handed the wallet to the new phone' : kind === 'new recoverer' ? 'Changed the recoverer' : 'Changed the waiting period', transactionId: made.sent.transactionId, bytes: made.sent.bytes, fee: String(made.sent.feeSatoshis) });
       if (kind === 'new recoverer') {
         const next = kept('newRecoverer');
@@ -150,7 +176,7 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
       }
       if (kind === 'waiting period') keep('newDelay', undefined);
       setChange({});
-      toast(kind === 'new seed' ? 'The wallet now belongs to your new phone.' : 'The change is made.');
+      if (made.sent !== undefined) toast(kind === 'new seed' ? 'The wallet now belongs to your new phone.' : 'The change is made.');
       await checkReceipts();
       await watch.check();
     } catch (error) {
@@ -201,9 +227,13 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
 
   const moved = kept('arrangement')?.movedTo;
   const elsewhere = watch.status?.kind === 'owned-elsewhere';
+  // As soon as the network shows another owner, this phone gives out nothing and takes on nothing; if that
+  // change disappears before a block holds it, the phone carries on by itself.
   useEffect(() => {
-    if (elsewhere) void wallet.checkOwnership(session.servers.length >= 2).catch(() => undefined);
-  }, [elsewhere]);
+    if (wallet.stored.identity !== undefined && (elsewhere || wallet.stored.otherOwnerSeen === true || wallet.stored.ownedElsewhere === true)) {
+      void wallet.checkOwnership(session.servers.length >= 2).catch(() => undefined);
+    }
+  }, [elsewhere, watch.history?.transactions.length, watch.history?.currentConfirmed]);
 
   const alarm = watch.status?.kind === 'recovery-requested';
   const nav: NavItem<Route>[] = [

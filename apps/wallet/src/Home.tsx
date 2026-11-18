@@ -13,11 +13,12 @@ import { kept } from './session.js';
 export const Home = ({ owner }: { owner: Owner }) => {
   const { balance } = owner;
   if (balance === undefined) return <Loading>Reading what the wallet holds…</Loading>;
-  const total = balance.recoverable + balance.cancelling + balance.vault + balance.toSweep + balance.notRecoverable;
+  const total = balance.recoverable + balance.cancelling + balance.vault + balance.toSweep + balance.notRecoverable + balance.voided;
   const rows: [preact.ComponentChildren, preact.ComponentChildren][] = [[<>Ready to spend</>, <Amount satoshis={balance.recoverable} />]];
   if (balance.vault > 0n) rows.push([<>At vault addresses<small>Spending from these goes through the wallet's controller.</small></>, <Amount satoshis={balance.vault} />]);
   rows.push([<>Kept for cancelling<small>Pays for refusing a request.</small></>, balance.cancelling > 0n ? <Amount satoshis={balance.cancelling} /> : <span class="muted">none</span>]);
   if (balance.toSweep > 0n) rows.push([<>At earlier addresses<small>Not yet moved to this phone's addresses.</small></>, <Amount satoshis={balance.toSweep} />]);
+  if (balance.voided > 0n) rows.push([<>At addresses given out before the wallet was made again<small>Yours, and not recoverable until moved. This phone moves them.</small></>, <Amount satoshis={balance.voided} />]);
   if (balance.notRecoverable > 0n) rows.push([<>At the address for the first coins<small>Not recoverable. Only this phone can move it.</small></>, <Amount satoshis={balance.notRecoverable} />]);
   if (balance.tokens.length > 0) rows.push([<>Tokens</>, <span>{balance.tokens.length}</span>]);
   return (

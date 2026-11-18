@@ -1,11 +1,12 @@
 import { binToHex, hexToBin } from '@bitauth/libauth';
 import { type FeeView, type RecovererView, type RequestTiming, RecovererWallet, completeTakeover, describeDelay, feeView, requestTiming, viewAsRecoverer } from '@grandmas-wallet/app';
 import { makeLink } from '@grandmas-wallet/app/links';
-import { keyFingerprint, recoveryKeyOf } from '@grandmas-wallet/enrollment';
+import { keyFingerprint, recoveryKeyOf, undoHandOver } from '@grandmas-wallet/enrollment';
 import { Amount, Button, Card, Field, Fingerprint, HandOff, KeyValues, More, Notice, PageHead, Sat, Status, TaskStatus, TextInput, formatDuration, formatTime, lockingBytecodeOfAddress, plainError, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import { type Looked, type Session, credentialAccount, openWalletPage, saveWallet, wallets } from './session.js';
+import { describeProblem } from './Wallets.js';
 
 /**
  * One wallet the recoverer looks after (proposal sections 9.6 and 11.1): where its controller stands, the
@@ -43,7 +44,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
           setRecoverer(opened);
           setOpening(undefined);
         },
-        (error: unknown) => setOpening(plainError(error)),
+        (error: unknown) => setOpening(describeProblem(error) === (error as Error).message ? plainError(error) : describeProblem(error)),
       );
   }, []);
 
@@ -55,8 +56,16 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
       setView(seen);
       setTiming(seen.standing.kind === 'requested' ? await requestTiming(session.chain, hexToBin(identity), seen.history, session.environment.secondsPerBlock) : undefined);
       setFees(await feeView(session.chain, current.kept));
-      // After the completion, the hand-over is made as soon as the chain shows it confirmed.
-      if (seen.takenOver && current.handOverLink === undefined && current.kept.pending !== undefined && seen.history.currentConfirmed && task.busy === undefined) {
+      // A completion that the chain no longer shows lost to the owner's cancellation, or its block was undone:
+      // the kit is put back as it was, the takeover is saved again, and the hand-over link is withdrawn.
+      const undone = seen.takenOver ? undefined : undoHandOver(current.kept, seen.history);
+      if (undone !== undefined) {
+        const { handOverLink: _withdrawn, ...rest } = current;
+        update({ ...rest, kept: undone });
+        return;
+      }
+      // After the completion, the hand-over is made as soon as the chain shows it, in a block or not.
+      if (seen.takenOver && current.handOverLink === undefined && current.kept.pending !== undefined && task.busy === undefined) {
         await task.run('handover', async (progress) => {
           progress('Making the hand-over for the new phone');
           const handed = await completeTakeover({ kept: current.kept, chain: session.chain, recoveryKey: recoveryKeyOf(current.kept.kit), storeAt: session.storeAt, save: (next) => saveWallet(identity, { ...current, kept: next }) });
@@ -76,7 +85,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
       const proposed = looked.kept.pending.proposedKeyHash;
       const sent = await recoverer.request(hexToBin(proposed));
       update({ ...looked, requested: { proposedKeyHash: proposed, transactionId: sent.transactionId } });
-      toast('The request is sent. The waiting period starts when it is in a block.');
+      toast('The request is sent. The waiting period counts from the block that holds it.');
     });
 
   const complete = () =>
@@ -84,7 +93,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
       if (recoverer === undefined) return;
       progress('Signing and sending the completion');
       await recoverer.complete();
-      toast('The wallet is moved. The hand-over follows once the network confirms it.');
+      toast('The wallet is moved. The hand-over link follows in a moment.');
     });
 
   const state = view?.history.current.state;
@@ -121,7 +130,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
                     : timing.eligibility.ready
                       ? 'The waiting period has passed.'
                       : timing.eligibility.waitingFor === 'confirmation'
-                        ? 'The waiting period starts when the request is in a block.'
+                        ? 'The waiting period counts from the block that holds the request, so it starts with the next block. Only the chain can measure it: nobody can claim a time for a request that is not in a block.'
                         : `The waiting period ends in about ${formatDuration(timing.secondsLeft ?? 0)}${timing.endsAt === undefined ? '' : `, when the chain's clock passes ${formatTime(timing.endsAt)}`}.`}
                 </p>
                 <p>Until then the owner's phone can refuse it. You can close this page and come back to complete.</p>
@@ -178,7 +187,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
             </Card>
           )}
 
-          {looked.handOverLink !== undefined && standing?.kind !== 'not named' && (
+          {looked.handOverLink !== undefined && standing?.kind !== 'not named' && view?.takenOver === true && (
             <Card title="Send this to the new phone" tone="good">
               <HandOff text={looked.handOverLink} qrLabel="QR code of the hand-over link" copyLabel="Copy link" testId="handover-link">
                 <p>It is sealed to the new phone: only it can open it. It tells the phone which wallet it now owns and how to find the coins.</p>

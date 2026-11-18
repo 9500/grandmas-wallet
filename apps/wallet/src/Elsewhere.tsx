@@ -15,6 +15,8 @@ export const OwnedElsewhere = ({ owner }: { owner: Owner }) => {
   const [done, setDone] = useState<string[] | undefined>();
   const task = useTask();
   const { status, history } = owner.watch;
+  const since = history?.owners.at(-1)?.sinceTransactionId;
+  const inBlock = history?.transactions.find((entry) => entry.transactionId === since)?.confirmed === true;
   const { balance } = owner;
   const spendable = (balance?.recoverable ?? 0n) + (balance?.cancelling ?? 0n);
   const moveOut = () =>
@@ -36,7 +38,8 @@ export const OwnedElsewhere = ({ owner }: { owner: Owner }) => {
     <div class="stack">
       <PageHead title="This wallet now belongs to another key" />
       <Card tone="bad">
-        <p>The network shows that the wallet has been moved to a key this phone does not hold{history?.currentConfirmed === true ? '' : ' (not yet confirmed in a block)'}. This phone gives out no more addresses.</p>
+        <p>The network shows that the wallet has been moved to a key this phone does not hold. This phone gives out no addresses and takes on nothing for the wallet.</p>
+        {!inBlock && <p class="small muted">The change is not in a block yet. If it does not stay, for example because this wallet refused the request in time, this phone carries on by itself.</p>}
         <KeyValues
           wide
           entries={[
@@ -82,7 +85,7 @@ export const MovedAway = ({ owner }: { owner: Owner }) => (
     <Card tone="good">
       <p>This phone handed the wallet over. The new phone moves the coins to its own addresses and gives out new ones. This phone no longer owns the wallet and gives out no addresses.</p>
       <p class="small muted">Its words can still spend what is at its own addresses until the new phone has moved it. Once the new phone shows everything, erase this one.</p>
-      {owner.watch.status?.kind === 'owned-elsewhere' && <p class="small muted">The network confirms the new owner: {keyFingerprint(owner.watch.status.ownerKeyHash)}.</p>}
+      {owner.watch.status?.kind === 'owned-elsewhere' && <p class="small muted">The network shows the new owner: {keyFingerprint(owner.watch.status.ownerKeyHash)}.</p>}
     </Card>
     <Erase />
   </div>
