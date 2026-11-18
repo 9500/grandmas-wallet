@@ -45,7 +45,7 @@ export const Arrival = ({ owner, onDone }: { owner: Owner; onDone: () => void })
     for (let attempt = 0; attempt < 60 && (await owner.wallet.balance()).toSweep < expected; attempt++) await wait(1_000);
     progress('Moving the coins to this phone\'s addresses');
     const swept = await owner.wallet.sweepEarlier();
-    for (const sent of swept.transactions) owner.sent(`Moved ${swept.coins} coins from earlier addresses`, sent);
+    for (const sent of swept.transactions) owner.sent(`Moved ${swept.coins} ${swept.coins === 1 ? 'coin' : 'coins'} from earlier addresses`, sent);
     return expected;
   };
 

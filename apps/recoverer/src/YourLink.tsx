@@ -51,6 +51,8 @@ export const YourLink = ({ session }: { session: Session }) => {
   }, [name, desk.uri]);
   // Until the session is reachable the code waits a moment; a page that cannot reach it shows the plain link.
   const shown = reachable ? code : late ? link : undefined;
+  // What has arrived is shown above, by itself: the code and the link have done their work for this wallet.
+  if (desk.arrived?.answered === 'received') return null;
   return (
     <div class="stack">
       <PageHead title="Your link">The person whose wallet you will look after scans this code with their phone, or opens the link in their wallet. It holds your name and the key their wallet seals your kit to. It is not secret.</PageHead>
@@ -63,7 +65,7 @@ export const YourLink = ({ session }: { session: Session }) => {
             <Loading>Making the code…</Loading>
           ) : (
             <div class="stack">
-              <div class="handoff with-qr">
+              <div class="handoff">
                 <div data-testid="recoverer-code" data-value={shown}>
                   <QrCode text={shown} label="QR code of your recoverer link" />
                 </div>

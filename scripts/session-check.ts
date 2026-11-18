@@ -155,7 +155,7 @@ try {
   check(true, 'the wallet shows that the recoverer\'s page has it');
   check(!(await phone.getByTestId('kit-link').isVisible()), 'with the link folded away under "Send it as a link instead"');
   await recoverer.getByText('A recovery kit has arrived').waitFor();
-  check(await recoverer.getByText('The kit has arrived').isVisible(), 'the recoverer\'s page shows the kit as arrived, as if its link had been opened');
+  check(!(await recoverer.getByTestId('recoverer-code').isVisible()), 'the recoverer\'s page shows the kit as arrived, as if its link had been opened, with the code out of the way');
   await shoot(phone, 'wallet-kit-handed');
 
   // ---------------------------------------------------------------- the recoverer's page checks it, and refuses it

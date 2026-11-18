@@ -119,7 +119,7 @@ const EarlierCoins = ({ owner }: { owner: Owner }) => {
           onClick={() =>
             void task.run('sweep', async () => {
               const swept = await owner.wallet.sweepEarlier();
-              for (const sent of swept.transactions) owner.sent(`Moved ${swept.coins} coins from earlier addresses`, sent);
+              for (const sent of swept.transactions) owner.sent(`Moved ${swept.coins} ${swept.coins === 1 ? 'coin' : 'coins'} from earlier addresses`, sent);
             })
           }
         >
