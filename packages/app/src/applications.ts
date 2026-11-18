@@ -801,8 +801,8 @@ export class Applications {
     // Coins and the exact fee (section 8).
     const fixedInputs = [...applicationInputs, ...tokenInput, ...tokenInputs];
     const paying = [...templateOutputs, ...changeOutputs].map(({ output }) => output);
-    // A template may leave a place among its outputs to the wallet (a loan key's contract wants the maker's own
-    // coin at output 0). When nothing else of the wallet's fills it, something has to be left over to go there.
+    // A template may leave a place among its outputs to the wallet, such as output 0 before the outputs it
+    // places itself. When nothing else of the wallet's fills it, something has to be left over to go there.
     const placedAt = new Set(templateOutputs.flatMap(({ index }) => (index === undefined ? [] : [index])));
     const holes = Math.max(-1, ...placedAt) + 1 - placedAt.size;
     const mustLeave = holes > templateOutputs.filter(({ index }) => index === undefined).length + changeOutputs.length;
