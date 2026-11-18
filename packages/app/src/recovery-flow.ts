@@ -102,7 +102,7 @@ const archiveOf = (access: KitArchive, storeAt: StoreAt): Archive => new Archive
 const contentsOf = (access: KitArchive, storeAt: StoreAt) => readArchive(hexToBin(access.archiveId), hexToBin(access.contentKey), access.stores.map(storeAt));
 
 /** Write a signed text to an archive. Something may come to depend on it only when a store has confirmed it (section 10.5). */
-const keep = async (access: KitArchive, storeAt: StoreAt, type: 'viewing-key' | 'receipt', signed: SignedMessage, what: string): Promise<WriteResult> => {
+export const keepOnStores = async (access: KitArchive, storeAt: StoreAt, type: 'viewing-key' | 'receipt', signed: SignedMessage, what: string): Promise<WriteResult> => {
   const result = await archiveOf(access, storeAt).write({ type, signed });
   if (!safelyStored(result)) {
     throw new Error(`No backup store confirmed ${what}: ${result.failed.map((failure) => `${failure.store}: ${failure.reason}`).join('; ')}. Nothing depends on it yet; try again when a store can be reached.`);
@@ -213,10 +213,10 @@ export const enroll = async (options: {
   const arrangement: RecoveryArrangement = { ...(options.arrangement ?? { archive: newArchive(options.stores), earlierArchives: [], earlierViewingKeyRecords: [] }), creationTransactionId };
 
   const record = signViewingKeyRecord(seed);
-  await keep(arrangement.archive, storeAt, 'viewing-key', record, 'this seed\'s viewing-key record');
+  await keepOnStores(arrangement.archive, storeAt, 'viewing-key', record, 'this seed\'s viewing-key record');
   // Earlier records are in the archive in use too, so that the recoverer can fetch what the kit only names.
   for (const earlier of arrangement.earlierViewingKeyRecords) {
-    await keep(arrangement.archive, storeAt, 'viewing-key', fromSignedJson(earlier, 'viewing-key record'), 'an earlier seed\'s viewing-key record');
+    await keepOnStores(arrangement.archive, storeAt, 'viewing-key', fromSignedJson(earlier, 'viewing-key record'), 'an earlier seed\'s viewing-key record');
   }
   const kit = signKit(
     {
@@ -310,7 +310,7 @@ export const startTakeover = async (options: {
   const { seed } = options;
   const archive = newArchive(options.stores);
   const record = signViewingKeyRecord(seed);
-  await keep(archive, options.storeAt, 'viewing-key', record, 'the new seed\'s viewing-key record');
+  await keepOnStores(archive, options.storeAt, 'viewing-key', record, 'the new seed\'s viewing-key record');
   const answer = await generateRecipientKeyPair();
   const takeover = signTakeover(seed, archive, answer.publicKey);
   return {
@@ -420,7 +420,7 @@ export const acceptEnrollment = async (options: {
   await options.save?.(kept);
   const [current] = read.kit.archives;
   if (current === undefined) throw new Error('The kit names no archive to leave a receipt in.');
-  await keep(current, options.storeAt, 'receipt', receipt, 'the receipt');
+  await keepOnStores(current, options.storeAt, 'receipt', receipt, 'the receipt');
   return { kept, recoveryKey };
 };
 
@@ -466,7 +466,7 @@ export const completeTakeover = async (options: {
   await options.save?.(handed.kept);
   const current = handed.kept.archives.at(-1);
   if (current === undefined) throw new Error('The takeover message named no archive to leave a receipt in.');
-  await keep(current, options.storeAt, 'receipt', handed.receipt, 'the receipt');
+  await keepOnStores(current, options.storeAt, 'receipt', handed.receipt, 'the receipt');
   return { sealed: await sealPackage(handed.handOver, handed.answerKey), kept: handed.kept };
 };
 
@@ -501,7 +501,7 @@ export const prepareNewSeed = async (options: {
 }): Promise<NewSeedPreparation> => {
   const archive = newArchive(options.stores);
   const record = signViewingKeyRecord(options.seed);
-  await keep(archive, options.storeAt, 'viewing-key', record, 'the new seed\'s viewing-key record');
+  await keepOnStores(archive, options.storeAt, 'viewing-key', record, 'the new seed\'s viewing-key record');
   return { proposedKeyHash: hex(options.seed.controllerKey.keyHash), viewingKeyRecord: toSignedJson(record), archive, fingerprint: keyFingerprint(options.seed.controllerKey.keyHash) };
 };
 
@@ -599,7 +599,7 @@ export const acceptUpdate = async (options: {
   const { receipt, kept } = receiptFor({ ...taken.kept, viewingKeyRecords: [...records.values()], archives: [...archives.values()] }, options.recoveryKey, taken.prepared);
   await options.save?.(kept);
   for (const archive of new Map([inUse, update.update.newSeed?.archive].filter((entry) => entry !== undefined).map((entry) => [entry.archiveId, entry])).values()) {
-    await keep(archive, options.storeAt, 'receipt', receipt, 'the prepared receipt');
+    await keepOnStores(archive, options.storeAt, 'receipt', receipt, 'the prepared receipt');
   }
   return { kept };
 };

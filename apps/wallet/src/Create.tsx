@@ -1,9 +1,9 @@
 import { binToHex, generateBip39Mnemonic, hexToBin } from '@bitauth/libauth';
-import { type CreationStep, type OwnerWallet, addressOf, creationFunding, describeDelay, enroll, kitTemplates, suggestedAllowance } from '@grandmas-wallet/app';
-import { type ChallengeDelay, p2pkhLockingBytecode } from '@grandmas-wallet/core';
+import { type CreationStep, type OwnerWallet, addressOf, creationFunding, describeDelay, enroll, kitTemplates } from '@grandmas-wallet/app';
+import type { ChallengeDelay } from '@grandmas-wallet/core';
 import { sealedOfLink } from '@grandmas-wallet/app/hand-off';
 import { credentialKeys } from '@grandmas-wallet/enrollment';
-import { Amount, Button, Card, Choice, HandOff, Loading, Notice, PageHead, Sat, type Step, Steps, TaskStatus, useEvery, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, HandOff, Loading, Notice, PageHead, Sat, type Step, Steps, TaskStatus, useEvery, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 
 import { handToRecoverer } from './hand-to-recoverer.js';
@@ -56,13 +56,13 @@ const SetupForm = ({ session, onBack, onDone }: { session: Session; onBack: () =
   const [recipient, setRecipient] = useState<StoredRecipient | undefined>();
   const [matched, setMatched] = useState(false);
   const [delay, setDelay] = useState<ChallengeDelay>(DELAYS[0]?.delay ?? { unit: 'time512', value: 1 });
-  const [allowance, setAllowance] = useState(true);
+
   const proceed = () => {
     if (recipient === undefined) return;
     deviceWords();
     const credentialWords = generateBip39Mnemonic();
     const { recoveryKey } = credentialKeys(credentialWords, session.network, kitTemplates());
-    onDone({ recipient, delay, allowance, credentialWords, recoveryKeyHash: binToHex(recoveryKey.keyHash) });
+    onDone({ recipient, delay, allowance: false, credentialWords, recoveryKeyHash: binToHex(recoveryKey.keyHash) });
   };
   return (
     <div class="stack">
@@ -86,11 +86,6 @@ const SetupForm = ({ session, onBack, onDone }: { session: Session; onBack: () =
       <Card title="2. The waiting period">
         <p class="muted">When your recoverer asks to move the wallet, everyone can see it, and this phone has this long to say no. Your recoverer cannot shorten it.</p>
         <DelayPicker value={delay} onChange={setDelay} name="delay" />
-      </Card>
-      <Card title="3. An allowance for your recoverer">
-        <Choice type="checkbox" checked={allowance} onChange={setAllowance} title={<>Give your recoverer <Sat satoshis={suggestedAllowance()} /> for network fees</>}>
-          A recovery costs your recoverer about 2,000 satoshis in fees. With an allowance they need not find Bitcoin Cash first. It becomes theirs and gives them no other power.
-        </Choice>
       </Card>
       <div class="actions">
         <Button disabled={recipient === undefined || !matched} onClick={proceed}>
@@ -119,20 +114,14 @@ const Creating = ({ session, setup, onCreated, onAgain }: { session: Session; se
   const [lost, setLost] = useState(() => kept('lostCreation'));
   const previous = useRef<CreationStep | undefined>(undefined);
   const task = useTask();
-  const needed = creationFunding(setup.allowance ? { allowanceSatoshis: suggestedAllowance() } : {});
+  const needed = creationFunding();
   const name = setup.recipient.name || 'your recoverer';
 
   useEffect(() => {
     openWallet(session).then(setWallet, (error: Error) => setProblem(error.message));
   }, []);
 
-  const options = () => {
-    const allowance =
-      setup.allowance && setup.credentialWords !== undefined
-        ? { allowance: { feeLockingBytecode: p2pkhLockingBytecode(credentialKeys(setup.credentialWords, session.network, kitTemplates()).feeKey.keyHash), satoshis: suggestedAllowance() } }
-        : {};
-    return { recovererKeyHash: hexToBin(setup.recoveryKeyHash), challengeDelay: setup.delay, ...allowance };
-  };
+  const options = () => ({ recovererKeyHash: hexToBin(setup.recoveryKeyHash), challengeDelay: setup.delay });
 
   const finish = async (opened: OwnerWallet) => {
     await task.run('kit', async (progress) => {
@@ -219,7 +208,7 @@ const Creating = ({ session, setup, onCreated, onAgain }: { session: Session; se
       state: at >= 3 ? 'done' : at === 1 || at === 2 ? 'current' : 'later',
       detail: (
         <>
-          One transaction creates the wallet's controller, which names {name} and a waiting period of {describeDelay(setup.delay)}; it {setup.allowance ? 'gives the allowance and ' : ''}moves the rest into the wallet.
+          One transaction creates the wallet's controller, which names {name} and a waiting period of {describeDelay(setup.delay)}; it moves the rest into the wallet.
           {(at === 1 || at === 2) && (
             <div class="actions">
               <Button task={task} name="create" disabled={short} onClick={() => void task.run('create', async (progress) => {

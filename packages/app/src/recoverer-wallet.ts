@@ -64,8 +64,8 @@ const feeChange: Output = { lockingBytecode: new Uint8Array(25), valueSatoshis: 
 
 /**
  * What a recovery costs the recoverer (proposal section 9.6): a request paid by one coin with its change,
- * and a completion that takes what is left. The allowance and the readiness of the fee address are both
- * counted in these, so that an allowance used as intended never shows as short.
+ * and a completion that takes what is left. The reserve and the readiness of the fee address are both
+ * counted in these, so that a reserve used as intended never shows as short.
  */
 export const recoveryFees = (feeRate = 1): { request: bigint; completion: bigint } => ({
   request: requiredFee(transactionBytes([INPUT_BYTES.controllerRequest, INPUT_BYTES.p2pkh], [controllerSized, feeChange]), feeRate),
@@ -73,11 +73,11 @@ export const recoveryFees = (feeRate = 1): { request: bigint; completion: bigint
 });
 
 /**
- * The allowance the owner's wallet suggests giving a recoverer (proposal section 9.6): what four requests
- * and one completion cost, so that three requests the owner cancels still leave enough for a fourth and its
- * completion.
+ * What the recoverer puts at a wallet's fee address when it creates the wallet (proposal section 9.6), from
+ * its own coins: what four requests and one completion cost, so that three requests the owner cancels still
+ * leave enough for a fourth and its completion.
  */
-export const suggestedAllowance = (feeRate = 1): bigint => {
+export const feeReserve = (feeRate = 1): bigint => {
   const { request, completion } = recoveryFees(feeRate);
   return 4n * request + completion;
 };
@@ -209,8 +209,8 @@ export class RecovererWallet {
   }
 
   /**
-   * Send what the fee address holds to another address: for a recoverer that gives an allowance back, or
-   * that no longer serves the wallet. Nothing obliges it to; the coins are its own.
+   * Send what the fee address holds to another address: for a recoverer that no longer serves the wallet, or
+   * that moves its fee coins back to its own balance. The coins are its own.
    *
    * @returns `undefined` when the fee address holds too little to send on
    */

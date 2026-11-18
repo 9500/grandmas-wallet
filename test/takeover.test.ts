@@ -30,7 +30,9 @@ const start = async () => {
   let kept: OwnerWalletState | undefined;
   const owner = await OwnerWallet.open({ backend: new KeyBackend(chain, first), chain, seed: first, save: (state) => (kept = state) });
   chain.fund(p2pkhLockingBytecode(first.fundingKey.keyHash), 100_000n);
-  await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY, allowance: { feeLockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), satoshis: 20_000n } });
+  await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY });
+  // The recoverer's own coins for its fees.
+  chain.fund(p2pkhLockingBytecode(credential.feeKey.keyHash), 20_000n);
   const identity = hexToBin(owner.stored.identity as string);
   const recovererBackend = () => new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey });
   const recoverer = await RecovererWallet.open({ backend: recovererBackend(), chain, identity });
@@ -336,23 +338,23 @@ describe('moving on without a loss', () => {
     expect(state().status).toBe('active');
   });
 
-  it('MG04: what the earlier recoverer holds is not counted as available; the new one has a fee address of its own, with an allowance only if the user gives one', async () => {
+  it('MG04: what the earlier recoverer holds is not counted as available; the new one has a fee address of its own, which it fills from its own coins', async () => {
     const { chain, owner, identity } = await start();
     const earlierFeeAddress = p2pkhLockingBytecode(credential.feeKey.keyHash);
     expect(chain.balanceOf(earlierFeeAddress)).toBe(20_000n);
     const replacement = deriveCredentialKeys(WORDS[2] as string, 'testnet', numbers);
     const balance = await owner.balance();
     await owner.changeSettings({ recovererKeyHash: replacement.recoveryKey.keyHash });
-    // The wallet's balance never included the allowance, and the earlier recoverer keeps it.
+    // The wallet's balance never included the recoverer's fee coins, and the earlier recoverer keeps them.
     expect((await owner.balance()).recoverable).toBeLessThan(balance.recoverable);
     expect(chain.balanceOf(earlierFeeAddress)).toBe(20_000n);
     const account = new KeyBackend(chain, { controllerKey: replacement.recoveryKey, fundingKey: replacement.feeKey, addressKey: () => replacement.feeKey });
     const next = await RecovererWallet.open({ backend: account, chain, identity });
     expect(hex(await next.feeAddress())).not.toBe(hex(earlierFeeAddress));
-    // No allowance was given: the new recoverer says what it needs.
+    // Nothing is there yet: the new recoverer says what it needs.
     expect(await next.feeReadiness()).toMatchObject({ holds: 0n, canRequest: false });
-    // The user gives one: an ordinary payment to the new fee address.
-    await owner.pay([{ lockingBytecode: await next.feeAddress(), valueSatoshis: 4_900n }]);
+    // It pays its own fees: coins of its own arrive at the new fee address.
+    chain.fund(await next.feeAddress(), 4_900n);
     expect(await next.feeReadiness()).toMatchObject({ holds: 4_900n, canRecover: true });
   });
 

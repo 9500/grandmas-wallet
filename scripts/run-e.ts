@@ -66,7 +66,7 @@ import {
 import { paryonArtifacts } from '@paryonusd/contracts';
 import { Engine, XO_SUPPORTED_NETWORKS, resolveElectrumServersForNetwork } from '@xo-cash/engine';
 
-import { type OwnerWalletState, Account, OwnerWallet, RecovererWallet, suggestedAllowance, walletTemplateNumbers } from '../packages/app/src/index.js';
+import { type OwnerWalletState, Account, OwnerWallet, RecovererWallet, feeReserve, walletTemplateNumbers } from '../packages/app/src/index.js';
 import { Electrum } from '../packages/chipnet/src/electrum.js';
 import { type NodeRpcSettings, nodeRpc, testMempoolAccept } from '../packages/chipnet/src/node-rpc.js';
 
@@ -564,7 +564,9 @@ try {
     });
     if ((await wallet.creationStep()) !== 'created') {
       await until('the funding coin in the engine', async () => (await wallet.creationStep()) !== 'not funded');
-      await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 }, allowance: { feeLockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), satoshis: suggestedAllowance() } });
+      await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
+      // The recoverer's fee coins, paid here from the run's own coins; the owner gives no allowance.
+      await wallet.pay([{ lockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), valueSatoshis: feeReserve() }]);
       facts.identity = wallet.stored.identity as string;
       keep();
       // The wallet is in use as soon as the network has its creation; no block is waited for.

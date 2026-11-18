@@ -18,7 +18,7 @@ import { type ChainReader, deriveCredentialKeys, deriveSeedKeys, p2pkhLockingByt
 import { Engine, XO_SUPPORTED_NETWORKS } from '@xo-cash/engine';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
-import { Account, OwnerWallet, type OwnerWalletState, RecovererWallet, suggestedAllowance, walletTemplateNumbers } from '../packages/app/src/index.js';
+import { Account, OwnerWallet, type OwnerWalletState, RecovererWallet, feeReserve, walletTemplateNumbers } from '../packages/app/src/index.js';
 // @ts-expect-error a plain script: the engine's settings for the local chain, and the node's RPC
 import { regtestServers, rpc, mine, BURN } from '../spikes/xo-engine/regtest.mjs';
 
@@ -117,14 +117,15 @@ try {
       await wallet.create({
         recovererKeyHash: credential.recoveryKey.keyHash,
         challengeDelay: { unit: 'time512', value: 1 },
-        allowance: { feeLockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), satoshis: suggestedAllowance() },
       });
+      // The recoverer's fee coins, paid here from the run's own coins; the owner gives no allowance.
+      await wallet.pay([{ lockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), valueSatoshis: feeReserve() }]);
       facts.identity = wallet.stored.identity as string;
       keep();
       // The wallet is in use as soon as the network has its creation; no block is waited for.
       const createdIn = wallet.stored.creation.createTransactionId as string;
       const bytes = ((await server.getTransaction(createdIn)) as string).length / 2;
-      record('create', { transactionId: createdIn, bytes, feeSatoshis: BigInt(bytes) }, `with an allowance of ${suggestedAllowance()} for the recoverer: four requests and one completion`);
+      record('create', { transactionId: createdIn, bytes, feeSatoshis: BigInt(bytes) }, `with an allowance of ${feeReserve()} for the recoverer: four requests and one completion`);
       say(`  recovery is shown as "${wallet.recovery}"`);
     } else {
       const state = await controllerState();

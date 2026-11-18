@@ -1,5 +1,5 @@
 import { type Output, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
-import { CannotCloseError, OwnerWallet, type OwnerWalletState, cancellationCost, creationFunding, suggestedAllowance, walletTemplateNumbers } from '@grandmas-wallet/app';
+import { CannotCloseError, OwnerWallet, type OwnerWalletState, cancellationCost, creationFunding, walletTemplateNumbers } from '@grandmas-wallet/app';
 import {
   type AccountCoin,
   type ChainReader,
@@ -110,11 +110,9 @@ describe('creating a wallet', () => {
   });
 
   it('CR01: the wallet says beforehand what the funding address must receive, and that amount is enough wherever the coin sits', async () => {
-    const allowance = { feeLockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), satoshis: suggestedAllowance() };
     for (const [position, options, needed] of [
       [0, createOptions, creationFunding()],
       [2, createOptions, creationFunding()],
-      [2, { ...createOptions, allowance }, creationFunding({ allowanceSatoshis: allowance.satoshis })],
     ] as const) {
       const chain = new SimulatedChain();
       const { wallet, funding } = await device(chain);
@@ -125,7 +123,6 @@ describe('creating a wallet', () => {
     }
     // The controller, a first coin that pays for one cancellation, and the two fees.
     expect(creationFunding()).toBe(1_000n + 1_091n + 528n);
-    expect(creationFunding({ allowanceSatoshis: 4_900n }) - creationFunding()).toBe(4_900n + 34n);
     // Less than the least the creation needs is refused with the figures, and nothing is created.
     const chain = new SimulatedChain();
     const { wallet, funding } = await device(chain);
@@ -398,15 +395,12 @@ describe('creating a wallet', () => {
     expect(wallet.voided).toEqual([{ identity, givenOut: [0, 0], change: [0, 1] }]);
   });
 
-  it.each([
-    ['with an allowance for the recoverer', 6_000n],
-    ['without one', undefined],
-  ] as const)('CR03: the creating transaction, %s: a valid identity and every satoshi accounted for', async (_name, allowance) => {
+  it('CR03: the creating transaction: a valid identity and every satoshi accounted for; nothing for the recoverer', async () => {
     const chain = new SimulatedChain();
     const { wallet, state, funding, seed } = await device(chain);
     chain.fund(funding, 50_000n);
     const feeAddress = p2pkhLockingBytecode(credential.feeKey.keyHash);
-    await wallet.create({ ...createOptions, ...(allowance === undefined ? {} : { allowance: { feeLockingBytecode: feeAddress, satoshis: allowance } }) });
+    await wallet.create(createOptions);
     const identity = hexToBin(state().identity as string);
     const createdIn = state().creation.createTransactionId as string;
     const encoded = hexToBin((await chain.getTransaction(createdIn)) as string);
@@ -417,14 +411,13 @@ describe('creating a wallet', () => {
     const genesis = validateGenesis(transaction, hexToBin(createdIn), identity);
     expect(genesis.state).toMatchObject({ status: 'active', ownerEpoch: 0, ownerKeyHash: seed.controllerKey.keyHash, recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY });
 
-    // The outputs: the controller, the allowance if one was given, the rest. No coin is kept apart.
+    // The outputs: the controller and the rest. No coin is kept apart, and the owner gives the recoverer nothing.
     const [controller, ...others] = transaction.outputs;
     const rest = others.at(-1);
-    expect(transaction.outputs).toHaveLength(allowance === undefined ? 2 : 3);
+    expect(transaction.outputs).toHaveLength(2);
     expect(controller?.valueSatoshis).toBe(1_000n);
     expect(rest?.lockingBytecode).toEqual(wallet.address(change, 0).lockingBytecode);
-    if (allowance === undefined) expect(chain.balanceOf(feeAddress)).toBe(0n);
-    else expect(others[0]).toEqual({ lockingBytecode: feeAddress, valueSatoshis: allowance });
+    expect(chain.balanceOf(feeAddress)).toBe(0n);
 
     // Every satoshi: what went in is what came out and the fee, and the fee is the size.
     const out = transaction.outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n);

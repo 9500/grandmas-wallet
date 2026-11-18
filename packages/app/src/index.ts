@@ -7,6 +7,8 @@ export * from './owner-wallet.js';
 export * from './templates.js';
 export * from './confidence.js';
 export * from './recoverer-wallet.js';
+export * from './recoverer-funds.js';
+export * from './set-up.js';
 export * from './recoverer-view.js';
 export * from './recovery-flow.js';
 export * from './user-backup.js';
