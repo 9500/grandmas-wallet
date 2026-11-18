@@ -10,6 +10,8 @@ import type { Owner } from './OwnerApp.js';
 import { DELAYS, DelayPicker, RecipientCheck, RecipientEntry, Waiting, sameDelay } from './parts.js';
 import { CancelCoin, KitCard, ProtectionStatus } from './Protection.js';
 import { type StoredRecipient, deviceWords, keep, kept, recipientFingerprint, recipientOf, sealedContent } from './session.js';
+import { PREPARE_LINK } from './scan.js';
+import { WithScan } from './Scanner.js';
 
 type View = 'main' | 'move' | 'recoverer' | 'delay' | 'backup';
 
@@ -191,7 +193,9 @@ const MoveOut = ({ owner, onBack }: { owner: Owner; onBack: () => void }) => {
           <div class="stack-s">
             <p>On the new phone, open this wallet's page and choose "Move from my other phone". It shows a link. Open that link on this phone, or paste it here.</p>
             <Field label="The new phone's link" id="prepare" error={task.error?.name === 'read' ? task.error.message : undefined}>
-              <TextArea id="prepare" value={pasted} onInput={setPasted} placeholder="https://…#prepare=…" />
+              <WithScan filter={PREPARE_LINK} onScan={setPasted}>
+                <TextArea id="prepare" value={pasted} onInput={setPasted} placeholder="https://…#prepare=…" />
+              </WithScan>
             </Field>
             <div>
               <Button task={task} name="read" disabled={pasted.trim() === ''} onClick={() => void readPreparation(pasted)}>

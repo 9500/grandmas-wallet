@@ -50,7 +50,9 @@ const contentSecurityPolicy = [
   // The cryptography library runs as WebAssembly.
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self'",
-  "img-src 'self' data:",
+  // The QR code scanner reads codes in a worker made from its own code, and a picture chosen from the device.
+  "worker-src blob:",
+  "img-src 'self' data: blob:",
   `connect-src 'self' ${[...config.chain, ...config.stores, ...config.relays, ...(ENGINE_SERVERS[config.network] ?? []), ...extra].join(' ')}`,
   "base-uri 'none'",
   "form-action 'none'",

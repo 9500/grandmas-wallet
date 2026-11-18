@@ -9,6 +9,8 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import { ActionReview, Hex, Part, TemplateView, TypedValue, plainRefusal, refusalOf } from './ActionReview.js';
 import { type ApplicationsPart, type PositionsAsk, relayOf } from './connections.js';
 import type { Owner } from './OwnerApp.js';
+import { CONNECTION_ADDRESS } from './scan.js';
+import { WithScan } from './Scanner.js';
 import { type Connection, keep, kept } from './session.js';
 import './apps.css';
 
@@ -145,7 +147,9 @@ const Connections = ({ owner }: { owner: Owner }) => {
           </Notice>
         )}
         <Field label="Connect to an application" id="connect-address" hint="The application shows this address, starting with wiz://, when you choose to connect a wallet. Paste it here, or open the application's link on this phone." error={task.error?.message}>
-          <TextArea id="connect-address" rows={2} value={text} onInput={setText} placeholder="wiz://…" invalid={task.error !== undefined} />
+          <WithScan filter={CONNECTION_ADDRESS} onScan={setText}>
+            <TextArea id="connect-address" rows={2} value={text} onInput={setText} placeholder="wiz://…" invalid={task.error !== undefined} />
+          </WithScan>
         </Field>
         <div class="row">
           <Button task={task} name="connect" disabled={text.trim() === ''} onClick={() => void connect()}>

@@ -116,6 +116,8 @@ export interface Kept {
   connections: Connection[];
   /** Every request an application made, with its outcome: what makes a request carried out at most once. */
   ledger: LedgerEntry[];
+  /** The camera that read the last QR code, so that the next scan starts with it. */
+  scanCamera: string;
 }
 
 /** A connection to an application over WizardConnect. */

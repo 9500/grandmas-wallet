@@ -1,0 +1,67 @@
+/*
+ * The QR code scanner: a button beside a field, and a dialog with the camera's picture. On a phone the dialog
+ * takes the whole screen; from 600 px it is a panel in the middle.
+ */
+
+.with-scan { display: flex; gap: 8px; align-items: flex-start; }
+.with-scan > :first-child { flex: 1 1 auto; min-width: 0; }
+.scan-button { flex: none; min-width: 44px; padding-left: 12px; padding-right: 14px; }
+.scan-icon { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 380px) { .scan-button span { display: none; } .scan-button { padding: 10px; } }
+
+.scan-dialog {
+  padding: 0; border: 0; color: var(--ink); background: var(--surface);
+  width: 100%; max-width: 100%; height: 100%; max-height: 100%; margin: 0;
+}
+.scan-dialog::backdrop { background: rgb(10 14 18 / 60%); }
+.scan-body {
+  display: flex; flex-direction: column; gap: 12px; min-height: 100%;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+}
+@media (min-width: 600px) {
+  .scan-dialog {
+    width: min(480px, calc(100% - 32px)); height: fit-content; max-height: calc(100% - 32px); margin: auto;
+    border: 1px solid var(--line); border-radius: var(--r-m); box-shadow: 0 12px 40px rgb(10 14 18 / 25%);
+  }
+  .scan-body { min-height: 0; padding: 20px 24px 24px; }
+}
+
+.scan-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.scan-head h2 { margin: 0 0 2px; }
+.scan-head p { margin: 0; }
+.scan-close { flex: none; }
+
+.scan-view {
+  position: relative; width: 100%; aspect-ratio: 1 / 1; overflow: hidden;
+  border-radius: var(--r-m); background: #0b0f13;
+}
+.scan-view.switchable { cursor: pointer; }
+.scan-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* The square the scanner searches: 80 % of the picture's shorter side, in the middle. */
+.scan-frame {
+  position: absolute; inset: 10%; border-radius: var(--r-s); pointer-events: none;
+  box-shadow: 0 0 0 999px rgb(10 14 18 / 28%); outline: 2px solid rgb(255 255 255 / 85%);
+}
+.scan-switch {
+  position: absolute; top: 10px; right: 10px; min-height: 44px; width: 44px; padding: 0; border-radius: 50%;
+  background: rgb(10 14 18 / 55%); border-color: rgb(255 255 255 / 35%); color: #fff;
+}
+.scan-switch:hover:not(:disabled) { background: rgb(10 14 18 / 75%); }
+.scan-cover {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  padding: 24px; text-align: center; color: #e5eaf0; font-size: 15px;
+}
+.scan-cover.problem { background: #141b22; }
+.scan-cover .spinner { width: 24px; height: 24px; }
+
+.scan-caption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin-top: -4px; }
+.scan-zoom { display: flex; align-items: center; gap: 12px; font-weight: 600; }
+.scan-zoom input { flex: 1; min-height: 44px; accent-color: var(--accent); }
+
+.scan-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.scan-actions > * { flex: 1 1 auto; }
+@media (min-width: 600px) { .scan-actions { margin-top: 4px; } .scan-actions > * { flex: 0 0 auto; } }
+.scan-picture { position: relative; }
+.scan-picture input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.scan-picture:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.scan-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

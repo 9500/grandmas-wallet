@@ -5,6 +5,8 @@ import { Button, Card, Field, Fingerprint, HandOff, PageHead, type Step, Steps, 
 import { useEffect, useState } from 'preact/hooks';
 
 import { RecipientCheck, RecipientEntry } from './parts.js';
+import { HANDOVER_LINK } from './scan.js';
+import { WithScan } from './Scanner.js';
 import { type Session, type StoredRecipient, deviceAccount, deviceWords, keep, kept, recipientFingerprint, saveState, sealedContent, sealedOf, seedOf } from './session.js';
 
 /**
@@ -102,9 +104,11 @@ export const Takeover = ({ session, onBack, onDone }: { session: Session; onBack
       state: 'later',
       detail: (
         <div class="stack-s">
-          <p>After the waiting period your recoverer completes the move and sends you a link. Open it on this phone, or paste it here.</p>
+          <p>After the waiting period your recoverer completes the move and sends you a link. Open it on this phone, scan its code, or paste it here.</p>
           <Field label="The link from your recoverer" id="handover">
-            <TextArea id="handover" value={pasted} onInput={setPasted} placeholder="https://…#handover=…" />
+            <WithScan filter={HANDOVER_LINK} onScan={setPasted}>
+              <TextArea id="handover" value={pasted} onInput={setPasted} placeholder="https://…#handover=…" />
+            </WithScan>
           </Field>
           <TaskStatus task={task} name="handover" />
           <div>

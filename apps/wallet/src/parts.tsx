@@ -4,6 +4,8 @@ import { Button, Choice, Field, Fingerprint, Notice, Sat, TextArea, formatDurati
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
+import { RECOVERER_LINK } from './scan.js';
+import { WithScan } from './Scanner.js';
 import { type Activity, type StoredRecipient, keep, kept, readRecipientLink, recipientFingerprint } from './session.js';
 
 /** Waiting periods to choose from. Counted in time, by the chain's clock, in steps of 512 seconds. */
@@ -27,7 +29,7 @@ export const DelayPicker = ({ value, onChange, name }: { value: ChallengeDelay; 
 );
 
 /**
- * Taking in a recoverer's link: from the page's address when the page was opened with one, or pasted.
+ * Taking in a recoverer's link: from the page's address when the page was opened with one, scanned, or pasted.
  */
 export const RecipientEntry = ({ onRead, purpose }: { onRead: (recipient: StoredRecipient) => void; purpose: string }) => {
   const [text, setText] = useState('');
@@ -43,8 +45,10 @@ export const RecipientEntry = ({ onRead, purpose }: { onRead: (recipient: Stored
   }, []);
   return (
     <div>
-      <Field label="Your recoverer's link" id="recipient-link" hint={`Your recoverer's page shows this link under "Your link". Open it on this phone, or paste it here. ${purpose}`} error={task.error?.message}>
-        <TextArea id="recipient-link" value={text} onInput={setText} placeholder="https://…#recoverer=…" invalid={task.error !== undefined} />
+      <Field label="Your recoverer's link" id="recipient-link" hint={`Your recoverer's page shows this link under "Your link". Scan its code, open the link on this phone, or paste it here. ${purpose}`} error={task.error?.message}>
+        <WithScan filter={RECOVERER_LINK} onScan={setText}>
+          <TextArea id="recipient-link" value={text} onInput={setText} placeholder="https://…#recoverer=…" invalid={task.error !== undefined} />
+        </WithScan>
       </Field>
       <Button task={task} name="read" disabled={text.trim() === ''} onClick={() => void task.run('read', async () => onRead(await readRecipientLink(text)))}>
         Use this link

@@ -4,6 +4,8 @@ import { Button, Card, Field, Fingerprint, HandOff, PageHead, type Step, Steps, 
 import { useEffect, useState } from 'preact/hooks';
 
 import { Waiting } from './parts.js';
+import { MOVE_LINK } from './scan.js';
+import { WithScan } from './Scanner.js';
 import { type Session, type StoredRecipient, deviceAccount, deviceWords, keep, kept, saveState, seedOf } from './session.js';
 
 /** What the old phone gives the new one: the direct hand-over (section 9.7, step 2) and who the recoverer is. */
@@ -119,7 +121,9 @@ export const MoveIn = ({ session, onBack, onDone }: { session: Session; onBack: 
         given === undefined ? (
           <div class="stack-s">
             <Field label="The link from your old phone" id="move" hint={'It contains "#move=". Whoever has it can see what the wallet holds, so send it only to yourself.'}>
-              <TextArea id="move" value={pasted} onInput={setPasted} placeholder="https://…#move=…" />
+              <WithScan filter={MOVE_LINK} onScan={setPasted}>
+                <TextArea id="move" value={pasted} onInput={setPasted} placeholder="https://…#move=…" />
+              </WithScan>
             </Field>
             <TaskStatus task={task} name="move" />
             <div>

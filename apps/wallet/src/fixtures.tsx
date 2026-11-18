@@ -2,16 +2,20 @@ import '@grandmas-wallet/ui/styles.css';
 import './apps.css';
 
 import type { ActionPreview, HeldToken, TemplateSummary } from '@grandmas-wallet/app';
-import { Card, Frame } from '@grandmas-wallet/ui';
+import { Card, Field, Frame, TextArea, TextInput } from '@grandmas-wallet/ui';
 import { render } from 'preact';
+import { useState } from 'preact/hooks';
 
 import { ActionReview } from './ActionReview.js';
 import { TokenRow } from './Apps.js';
 import type { Owner } from './OwnerApp.js';
+import { RECOVERER_LINK, paymentAddress } from './scan.js';
+import { ScanDialog, WithScan } from './Scanner.js';
 
 /*
  * Parts of the Applications screen, fed from fixed data, for looking at them in a browser without a wallet.
- * Served by the development server only (`fixtures.html?show=tokens|review|closing`); the build of the page
+ * Served by the development server only (`fixtures.html?show=tokens|review|closing|scan`, and `&open` to show
+ * the scanner already opened); the build of the page
  * does not include it. The template here is an invented example, as a template would describe itself.
  */
 
@@ -149,6 +153,28 @@ const closing: ActionPreview = {
   firstUse: false,
 };
 
+/** Two fields that take a scanned code: the recoverer's link, and an address to pay. */
+const ScanFields = () => {
+  const [link, setLink] = useState('');
+  const [to, setTo] = useState('');
+  const [open, setOpen] = useState(new URLSearchParams(window.location.search).has('open'));
+  return (
+    <Card title="Fields that take a code">
+      <Field label="Your recoverer's link" id="recipient-link" hint="Scan the code your recoverer's page shows, or paste the link.">
+        <WithScan filter={RECOVERER_LINK} onScan={setLink}>
+          <TextArea id="recipient-link" value={link} onInput={setLink} placeholder="https://…#recoverer=…" />
+        </WithScan>
+      </Field>
+      <Field label="To" id="to" hint="A Bitcoin Cash address.">
+        <WithScan filter={paymentAddress('testnet')} onScan={setTo}>
+          <TextInput id="to" value={to} onInput={setTo} placeholder="bchtest:…" />
+        </WithScan>
+      </Field>
+      {open && <ScanDialog filter={RECOVERER_LINK} onScan={setLink} onClose={() => setOpen(false)} />}
+    </Card>
+  );
+};
+
 const show = new URLSearchParams(window.location.search).get('show') ?? 'tokens';
 const owner = { apps: { applications: { suggestions: [] } } } as unknown as Owner;
 const ignore = () => undefined;
@@ -156,7 +182,9 @@ const ignore = () => undefined;
 render(
   <Frame brand="Grandma's Wallet" role="Fixtures" environment={{ network: 'chipnet', walletUrl: '', recovererUrl: '', stores: [], chain: [], relays: [], explorer: '', secondsPerBlock: 60 }}>
     <div class="stack">
-      {show === 'tokens' ? (
+      {show === 'scan' ? (
+        <ScanFields />
+      ) : show === 'tokens' ? (
         <div class="grid two apps-layout">
           <Card title="Tokens">
             <ul class="list tokens">
