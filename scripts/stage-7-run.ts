@@ -87,8 +87,7 @@ try {
   await until('the funding coin', async () => (await wallet.creationStep()) === 'funded');
   await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
   const identity = hexToBin(wallet.stored.identity as string);
-  await settle();
-  await until('the creation to be confirmed', async () => (await wallet.creationStep()) === 'confirmed');
+  // The wallet is in use as soon as the network has its creation; no block is waited for.
   for (let coin = 0; coin < 2; coin++) await fund((await wallet.receiveAddress()).address.lockingBytecode);
   await until('the coins received', async () => (await wallet.balance()).recoverable > 100_000n);
   say(`  identity ${hex(identity)}`);

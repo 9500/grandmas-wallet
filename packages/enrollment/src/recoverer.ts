@@ -63,14 +63,22 @@ export interface KeptKit {
    * The last hand-over it made: to whom, and how much of the kit was earlier than that device's seed. If
    * the hand-over did not arrive, it is made again from this.
    */
-  handedOver?: { proposedKeyHash: string; answerKey: string; earlierRecords: number; earlierArchives: number };
+  handedOver?: HandedOver;
+}
+
+/** A hand-over the recoverer made, with what the kit was before it, should the completion disappear. */
+export interface HandedOver {
+  proposedKeyHash: string;
+  answerKey: string;
+  earlierRecords: number;
+  earlierArchives: number;
+  /** What the kit answered before, and the hand-over before this one, if any. */
+  before?: { answered: string; latestReceiptHash?: string; handedOver?: Omit<HandedOver, 'before'> };
 }
 
 export interface CheckedEnrollment {
   kept: KeptKit;
   history: ControllerHistory;
-  /** Whether the controller's current state is in a block. */
-  confirmed: boolean;
   /**
    * For a kit given to a recoverer that the controller does not name yet: the output the change is to
    * spend and the state it is to produce, for a prepared receipt.
@@ -151,7 +159,6 @@ export const checkEnrollment = async (
       answered: read.hash,
     },
     history,
-    confirmed: history.currentConfirmed,
     ...(prepared === undefined ? {} : { prepared }),
   };
 };
@@ -223,7 +230,10 @@ export const settlePending = (kept: KeptKit, history: ControllerHistory): KeptKi
  * recoverer's receipt for the kit as it now stands.
  *
  * Earlier viewing keys read the wallet. They are handed over only once the chain shows the proposed key
- * as the owner.
+ * as the owner, which it does as soon as the network has the completion, before it is in a block. A
+ * completion can still lose to the owner's cancellation until it is in a block; if it disappears, the kit
+ * is put back as it was ({@link undoHandOver}). The new device has then seen what the recoverer meant it
+ * to see, and owns nothing.
  *
  * @returns the hand-over to seal to the device's answer key, the receipt to leave on the stores, and the kit as it now stands
  * @throws EnrollmentError before the recovery is complete
@@ -256,16 +266,55 @@ export const handOver = async (kept: KeptKit, chain: ChainReader, recoveryKey: K
   if (hex(history.current.state.ownerKeyHash) !== pending.proposedKeyHash) {
     return fail('The proposed key is not the owner on chain. The earlier viewing keys are handed over only after the recovery is complete.');
   }
-  if (!history.currentConfirmed) return fail('The completion is not confirmed yet.');
   const { pending: _done, ...rest } = kept;
+  // Only the hand-over just before is kept for undoing: the one before that did own the wallet.
+  const previous = kept.handedOver === undefined ? undefined : (({ before: _older, ...rest }: HandedOver) => rest)(kept.handedOver);
   const grown: KeptKit = {
     ...rest,
     viewingKeyRecords: [...kept.viewingKeyRecords, pending.viewingKeyRecord],
     archives: [...kept.archives, pending.archive],
     answered: pending.messageHash,
-    handedOver: { proposedKeyHash: pending.proposedKeyHash, answerKey: pending.answerKey, earlierRecords: kept.viewingKeyRecords.length, earlierArchives: kept.archives.length },
+    handedOver: {
+      proposedKeyHash: pending.proposedKeyHash,
+      answerKey: pending.answerKey,
+      earlierRecords: kept.viewingKeyRecords.length,
+      earlierArchives: kept.archives.length,
+      before: {
+        answered: kept.answered,
+        ...(kept.latestReceiptHash === undefined ? {} : { latestReceiptHash: kept.latestReceiptHash }),
+        ...(previous === undefined ? {} : { handedOver: previous }),
+      },
+    },
   };
   return sign(grown, kept.viewingKeyRecords.length, kept.archives.length, pending.answerKey);
+};
+
+/**
+ * Put the kit back as it was before a hand-over whose completion the chain no longer shows: it was replaced
+ * by the owner's cancellation, or its block was undone and it was not mined again. The new device's
+ * takeover is saved again, so that the recoverer can ask once more. A hand-over whose device did own the
+ * wallet is left as it is, even if another key owns it now.
+ *
+ * @returns the kit put back, or `undefined` when there is nothing to undo
+ */
+export const undoHandOver = (kept: KeptKit, history: ControllerHistory): KeptKit | undefined => {
+  const { handedOver } = kept;
+  if (handedOver?.before === undefined || kept.pending !== undefined) return undefined;
+  if (history.owners.some((period) => hex(period.ownerKeyHash) === handedOver.proposedKeyHash)) return undefined;
+  const viewingKeyRecord = kept.viewingKeyRecords[handedOver.earlierRecords];
+  const archive = kept.archives[handedOver.earlierArchives];
+  if (viewingKeyRecord === undefined || archive === undefined) return undefined;
+  const { handedOver: _undone, latestReceiptHash: _receipt, ...rest } = kept;
+  const { before } = handedOver;
+  return {
+    ...rest,
+    viewingKeyRecords: kept.viewingKeyRecords.slice(0, handedOver.earlierRecords),
+    archives: kept.archives.slice(0, handedOver.earlierArchives),
+    answered: before.answered,
+    ...(before.latestReceiptHash === undefined ? {} : { latestReceiptHash: before.latestReceiptHash }),
+    ...(before.handedOver === undefined ? {} : { handedOver: before.handedOver }),
+    pending: { messageHash: kept.answered, proposedKeyHash: handedOver.proposedKeyHash, viewingKeyRecord, archive, answerKey: handedOver.answerKey },
+  };
 };
 
 /**

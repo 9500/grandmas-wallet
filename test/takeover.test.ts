@@ -340,11 +340,15 @@ describe('moving on without a loss', () => {
     chain.fund((await owner.vaultAddress()).address.lockingBytecode, 5_000n);
     expect(await owner.checkOwnership()).toBe('this device');
     await recoverTo(1);
-    // Seen, but not settled (one server only, or servers that disagree): the device does not act on it yet.
+    // Seen, but not settled (one server only, or servers that disagree): the device gives out nothing and
+    // takes on nothing at once; it has not stopped for good.
     expect(await owner.checkOwnership(false)).toBe('another key');
-    expect((await owner.receiveAddress()).again).toBe(false);
-    // Settled: confirmed, and on more than one server.
+    expect(owner.stored).toMatchObject({ otherOwnerSeen: true });
+    expect(owner.stored.ownedElsewhere).toBeUndefined();
+    await expect(owner.receiveAddress()).rejects.toThrow(/another key owns this wallet/);
+    // Settled: in a block, and on more than one server.
     expect(await owner.checkOwnership()).toBe('another key');
+    expect(owner.stored).toMatchObject({ ownedElsewhere: true, otherOwnerSeen: false });
     await expect(owner.receiveAddress()).rejects.toThrow(/another key owns this wallet/);
     await expect(owner.pay([{ lockingBytecode: payee, valueSatoshis: 1_000n }])).rejects.toThrow(/another key owns this wallet/);
     await expect(owner.sendEverything(payee)).rejects.toThrow(/another key owns this wallet/);
@@ -356,6 +360,26 @@ describe('moving on without a loss', () => {
     expect(chain.balanceOf(payee)).toBe(moved.sentSatoshis);
     // The vault coin stays where it is: no key of this device opens it.
     expect((await owner.balance()).vault).toBe(5_000n);
+  });
+
+  it('MG05: a completion that is not in a block pauses the device; when the owner\'s cancellation wins, it goes on by itself', async () => {
+    const { chain, owner, identity } = await start();
+    chain.blocksOnDemand = true;
+    const recoverer = await RecovererWallet.open({ backend: new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey }), chain, identity });
+    await recoverer.request(seedOf(1).controllerKey.keyHash);
+    chain.mine();
+    chain.nowMs += 2 * 512 * 1000;
+    const completion = await recoverer.complete();
+    expect(await owner.checkOwnership()).toBe('another key');
+    expect(owner.stored).toMatchObject({ otherOwnerSeen: true });
+    expect(owner.stored.ownedElsewhere).toBeUndefined();
+    await expect(owner.receiveAddress()).rejects.toThrow(/another key owns this wallet/);
+    // The completion loses the race to the owner's cancellation, sent from elsewhere with the owner's key.
+    chain.drop(completion.transactionId);
+    expect(await owner.checkOwnership()).toBe('this device');
+    expect(owner.stored).toMatchObject({ otherOwnerSeen: false });
+    expect((await owner.receiveAddress()).again).toBe(false);
+    await owner.cancel();
   });
 
   it('MG06: after two recoveries, first payments to an ordinary and to a vault address of the first seed are found and swept by the current owner', async () => {

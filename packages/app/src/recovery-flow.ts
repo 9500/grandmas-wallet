@@ -115,6 +115,11 @@ const keep = async (access: KitArchive, storeAt: StoreAt, type: 'viewing-key' | 
 export interface RecoveryArrangement {
   /** The archive in use. */
   archive: KitArchive;
+  /**
+   * The transaction that created the controller, as the kit that was sent names it. A recoverer can act only
+   * on that creation: if the network has another one, or none, the recoverer has to be set up again.
+   */
+  creationTransactionId?: string;
   /** The archives of earlier seeds, newest first. */
   earlierArchives: KitArchive[];
   /** The viewing-key records of earlier seeds, newest first, as the device was handed them. */
@@ -138,6 +143,12 @@ export interface PreparedChange {
   sent: SentToRecoverer;
   /** The change itself, as hex where it names a key. */
   update: { ownerKeyHash?: string; recovererKeyHash?: string; challengeDelay?: ChallengeDelay };
+  /**
+   * The change has been sent, in this transaction, and is not in a block yet. It takes effect as soon as the
+   * network has it; the device keeps it here until a block holds it, and makes it again if it disappears.
+   * `before` is what the device had sent the recoverer until then.
+   */
+  made?: { transactionId: string; before?: SentToRecoverer };
 }
 
 /** The recoverer as the owner's device knows it: a name to show, its page, and the key messages are sealed to. */
@@ -154,7 +165,7 @@ export interface Recipient {
  *
  * Records of earlier seeds are named by their hash; the recoverer fetches them from the stores.
  *
- * @throws if the wallet's creation is not confirmed, or no store confirmed the record
+ * @throws if the wallet is not created yet, or no store confirmed the record
  */
 export const enroll = async (options: {
   wallet: OwnerWallet;
@@ -175,12 +186,13 @@ export const enroll = async (options: {
   madeAt: number;
 }): Promise<{ link: string; arrangement: RecoveryArrangement }> => {
   const { wallet, seed, storeAt } = options;
-  const { identity, creation } = wallet.stored;
-  if (identity === undefined || !creation.confirmed) throw new Error('The wallet\'s creation is not confirmed yet. A recoverer is enrolled after that.');
+  const { identity } = wallet.stored;
+  // The network having the creating transaction is enough; a block is not waited for (section 7.9).
+  if (identity === undefined || !wallet.created) throw new Error('The wallet is not created yet. A recoverer is enrolled after that.');
   const history = await readControllerHistory(options.chain, hexToBin(identity));
   const creationTransactionId = history.transactions[0]?.transactionId;
   if (creationTransactionId === undefined) throw new Error('The transaction that created the wallet was not found.');
-  const arrangement: RecoveryArrangement = options.arrangement ?? { archive: newArchive(options.stores), earlierArchives: [], earlierViewingKeyRecords: [] };
+  const arrangement: RecoveryArrangement = { ...(options.arrangement ?? { archive: newArchive(options.stores), earlierArchives: [], earlierViewingKeyRecords: [] }), creationTransactionId };
 
   const record = signViewingKeyRecord(seed);
   await keep(arrangement.archive, storeAt, 'viewing-key', record, 'this seed\'s viewing-key record');
@@ -221,7 +233,9 @@ export const enroll = async (options: {
 
 /**
  * Whether recovery is on (sections 9.5 and 10.5): the stores hold a receipt that matches what this device
- * sent, and the controller's confirmed state matches both. The wallet is told, and shows it.
+ * sent, and the controller's state as the network shows it matches both. The wallet is told, and shows it.
+ * Nothing waits for a block: each check works the status out again, so a transaction that disappears takes
+ * the status with it.
  */
 export const checkRecovery = async (options: {
   wallet: OwnerWallet;
@@ -236,9 +250,14 @@ export const checkRecovery = async (options: {
     wallet.noteRecoveryConfirmed(false);
     return { status: { on: false, reasons: ['No recoverer has been sent a recovery kit from this device.'] }, ...(arrangement === undefined ? {} : { arrangement }) };
   }
+  const history = await readControllerHistory(options.chain, hexToBin(identity));
+  if (arrangement.creationTransactionId !== undefined && history.transactions[0]?.transactionId !== arrangement.creationTransactionId) {
+    wallet.noteRecoveryConfirmed(false);
+    return { status: { on: false, reasons: ['The wallet\'s controller was made again after the kit was sent, so the recoverer\'s kit no longer fits it. Send the recoverer a new kit.'] }, arrangement };
+  }
   const contents = await contentsOf(arrangement.archive, options.storeAt);
   const receipts = contents.blobs.filter(({ blob }) => blob.type === 'receipt').map(({ blob }) => blob.signed);
-  const status = recoveryStatus(receipts, arrangement.sent, await readControllerHistory(options.chain, hexToBin(identity)), options.network);
+  const status = recoveryStatus(receipts, arrangement.sent, history, options.network);
   wallet.noteRecoveryConfirmed(status.on);
   const reasons = contents.answered.length === 0 ? ['No backup store could be reached, so no receipt could be looked for.'] : status.reasons;
   const { latestReceiptHash: _earlier, ...rest } = arrangement;
@@ -371,7 +390,7 @@ export const acceptEnrollment = async (options: {
   forNewRecoverer?: boolean;
   /** Called with the kit before the receipt is written, so that it is saved first. */
   save?: (kept: KeptKit) => void | Promise<void>;
-}): Promise<{ kept: KeptKit; recoveryKey: KeyPair; confirmed: boolean }> => {
+}): Promise<{ kept: KeptKit; recoveryKey: KeyPair }> => {
   const read = await openEnrollment(envelopeFromLink(options.link), options.privateKey, options.network);
   const fetched: SignedMessage[] = [];
   if (read.references.length > 0) {
@@ -384,7 +403,7 @@ export const acceptEnrollment = async (options: {
   const [current] = read.kit.archives;
   if (current === undefined) throw new Error('The kit names no archive to leave a receipt in.');
   await keep(current, options.storeAt, 'receipt', receipt, 'the receipt');
-  return { kept, recoveryKey, confirmed: checked.confirmed };
+  return { kept, recoveryKey };
 };
 
 /**
@@ -415,7 +434,7 @@ export const acceptTakeover = async (options: {
  * identity, the creating transaction, the earlier seeds' viewing-key records, the access to earlier
  * archives and its receipt for the kit as it now stands. The receipt is also left in the new device's archive.
  *
- * @throws EnrollmentError before the completion is confirmed
+ * @throws EnrollmentError before the chain shows the completion
  */
 export const completeTakeover = async (options: {
   kept: KeptKit;
@@ -569,11 +588,16 @@ export const acceptUpdate = async (options: {
 
 /**
  * Step 4: the owner makes the change it announced, and only once the recoverer's prepared receipt for
- * exactly this change is on the stores. It takes effect at once. A change that the chain already shows is
- * not made again, so the step can be repeated after an interruption.
+ * exactly this change is on the stores. It takes effect as soon as the network has it. A change that the
+ * chain already shows is not made again, so the step can be repeated after an interruption.
  *
  * After a new recoverer or a new waiting period, `checkRecovery` says when recovery is on again. After a
  * new seed this device no longer owns the wallet.
+ *
+ * The change stays in the arrangement, marked as made, until a block holds it; the device calls this at
+ * every check meanwhile. If the change disappears (only a holder of the owner's key could replace it), the
+ * arrangement is put back as it was and the change is made again: for a new seed, this device owns the
+ * wallet again until then.
  *
  * @throws if the prepared receipt is not there, with the reasons
  */
@@ -589,15 +613,33 @@ export const makeChange = async (options: {
   const { identity } = wallet.stored;
   if (change === undefined || identity === undefined) throw new Error('No change has been announced to the recoverer.');
   const history = await readControllerHistory(options.chain, hexToBin(identity));
-  const { change: _made, ...rest } = arrangement;
-  const after: RecoveryArrangement = change.kind === 'new seed' ? { ...rest, movedTo: change.sent.ownerKeyHash } : { ...rest, sent: change.sent };
-  if (changeMade(history, change)) return { arrangement: after };
+  const { change: _made, movedTo: _moved, ...rest } = arrangement;
+  const afterWith = (made?: PreparedChange['made']): RecoveryArrangement => ({
+    ...(change.kind === 'new seed' ? { ...rest, movedTo: change.sent.ownerKeyHash } : { ...rest, sent: change.sent }),
+    ...(made === undefined ? {} : { change: { ...change, made } }),
+  });
+  if (changeMade(history, change)) {
+    // Kept until a block holds the transaction that made it; one the device did not record is not followed.
+    const madeIn = change.made === undefined ? undefined : history.transactions.find((entry) => entry.transactionId === change.made?.transactionId);
+    return { arrangement: afterWith(madeIn !== undefined && !madeIn.confirmed ? change.made : undefined) };
+  }
+  // A change that was made and is gone: the arrangement is put back as it was before, and it is made again.
+  let before: RecoveryArrangement = arrangement;
+  if (change.made !== undefined) {
+    const { made: _gone, ...unmade } = change;
+    const { sent: _after, ...others } = rest;
+    const earlier = change.kind === 'new seed' ? arrangement.sent : change.made.before;
+    before = { ...others, ...(earlier === undefined ? {} : { sent: earlier }), change: unmade };
+  }
   const intended = afterOwnerUpdate(history.current.state, updateOf(change));
-  const ready = preparedReceipt(await receiptsIn(arrangement.archive, options.storeAt), change.sent, history, intended, options.network);
-  if (!ready.on) throw new Error(`The recoverer's prepared receipt for this change is not on the backup stores. The change is not made before it is. ${ready.reasons.join(' ')}`);
+  const ready = preparedReceipt(await receiptsIn(before.archive, options.storeAt), change.sent, history, intended, options.network);
+  if (!ready.on) {
+    if (before !== arrangement) return { arrangement: before };
+    throw new Error(`The recoverer's prepared receipt for this change is not on the backup stores. The change is not made before it is. ${ready.reasons.join(' ')}`);
+  }
   const sent = await wallet.changeSettings(updateOf(change));
   if (change.kind !== 'new seed') wallet.noteRecoveryConfirmed(false);
-  return { sent, arrangement: after };
+  return { sent, arrangement: afterWith({ transactionId: sent.transactionId, ...(before.sent === undefined ? {} : { before: before.sent }) }) };
 };
 
 /** Whether the chain already shows the settings a change is to produce. */
@@ -613,10 +655,12 @@ const changeMade = (history: ControllerHistory, change: PreparedChange): boolean
 
 /**
  * Step 5: the new device takes the wallet over with what the old device gave it. It reads the identity's
- * history itself, and goes on only when the change that names its key is confirmed; until then it has no
- * wallet and gives out no address. A viewing-key record counts only if the chain shows its seed as an owner.
+ * history itself, and goes on as soon as the network has the change that names its key, in a block or not;
+ * before that it has no wallet and gives out no address. A viewing-key record counts only if the chain
+ * shows its seed as an owner. If the change later disappears, the device follows the chain: it finds
+ * another key named as the owner and stops until the change is made again.
  *
- * @throws if the change is not confirmed yet, or this device's key is not the owner
+ * @throws if this device's key is not the owner
  */
 export const finishMove = async (options: {
   handOver: DirectHandOver;
@@ -632,7 +676,6 @@ export const finishMove = async (options: {
   const history = await readControllerHistory(options.chain, hexToBin(given.identity), given.creationTransactionId);
   const own = hex(seed.controllerKey.keyHash);
   if (hex(history.current.state.ownerKeyHash) !== own) throw new Error('The wallet\'s controller does not name this device\'s key as the owner. The old device has not made the change yet.');
-  if (!history.currentConfirmed) throw new Error('The change that names this device\'s key is not confirmed yet.');
   const earlierOwners = history.owners.map((period) => hex(period.ownerKeyHash)).filter((keyHash) => keyHash !== own);
   const found = new Map<string, { signed: SignedJson; viewingKey: ReturnType<typeof readViewingKeyRecord>['viewingKey'] }>();
   for (const signed of given.viewingKeyRecords) {

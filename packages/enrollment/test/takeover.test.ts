@@ -1,3 +1,4 @@
+import { hexToBin } from '@bitauth/libauth';
 import { type ChainReader, readControllerHistory } from '@grandmas-wallet/core';
 import { readReceipt, readViewingKeyRecord, recoveryStatus, signMessage, signViewingKeyRecord, viewingKeyRecordHash } from '@grandmas-wallet/archive';
 import type { SimulatedChain } from '@grandmas-wallet/testing';
@@ -23,6 +24,7 @@ import {
   signUpdate,
   takeUpdate,
   toSignedJson,
+  undoHandOver,
 } from '../src/index.js';
 import { WORDS_B, WORDS_C, archiveAt, credential, hex, kitInput, otherCredential, ownerUpdate, seedOf, setup } from './setup.js';
 
@@ -114,12 +116,28 @@ describe('handing over viewing keys in a recovery', () => {
     await expect(handOver(saved, chain, recoveryKey)).rejects.toThrow(refusal);
   });
 
-  it('RC07: a completion that is not confirmed yet hands nothing over', async () => {
-    const { chain, wallet, kept, recoveryKey } = await enrolled();
+  it('RC07: a completion the network shows hands over at once, in a block or not; if it disappears, the kit is put back and the takeover saved again', async () => {
+    const { chain, wallet, seedA, kept, recoveryKey } = await enrolled();
     const device = await newDevice(WORDS_B);
     const saved = saveTakeover(kept, readTakeover(device.takeover, 'testnet'));
-    wallet.recover(recoveryKey, device.seed.controllerKey);
-    await expect(handOver(saved, unconfirmed(chain), recoveryKey)).rejects.toThrow('The completion is not confirmed yet.');
+    wallet.requestRecovery(recoveryKey, device.seed.controllerKey.keyHash);
+    const completion = wallet.finalizeRecovery(recoveryKey);
+    // Not in a block yet: the hand-over is made all the same.
+    const handed = await handOver(saved, unconfirmed(chain), recoveryKey);
+    expect(handed.kept.pending).toBeUndefined();
+    expect(handed.kept.viewingKeyRecords).toHaveLength(kept.viewingKeyRecords.length + 1);
+    // While the chain shows the device as the owner, there is nothing to undo.
+    expect(undoHandOver(handed.kept, await readControllerHistory(chain, hexToBin(kept.kit.identity)))).toBeUndefined();
+
+    // The owner's cancellation wins: the completion disappears and the request is refused.
+    chain.drop(completion);
+    wallet.authorize(seedA.controllerKey);
+    const undone = undoHandOver(handed.kept, await readControllerHistory(chain, hexToBin(kept.kit.identity)));
+    expect(undone).toEqual(saved);
+    // The recoverer can ask again for the same device; nothing it held is lost.
+    wallet.requestRecovery(recoveryKey, device.seed.controllerKey.keyHash);
+    wallet.finalizeRecovery(recoveryKey);
+    expect((await handOver(undone as KeptKit, chain, recoveryKey)).kept.viewingKeyRecords).toEqual(handed.kept.viewingKeyRecords);
   });
 
   it('RC07: after completion the earlier viewing keys reach the new device, sealed to its own key, and recovery is on again', async () => {
@@ -189,7 +207,7 @@ describe('handing over viewing keys in a recovery', () => {
 });
 
 describe('a move to a new seed while the old device works', () => {
-  it('the update message reaches the recoverer first; its prepared receipt counts once the owner\'s change is confirmed', async () => {
+  it('the update message reaches the recoverer first; its prepared receipt counts as soon as the network shows the owner\'s change', async () => {
     const { chain, wallet, seedA, kept, recoveryKey, identity } = await enrolled();
     const seedB = seedOf(WORDS_B);
     const record = signViewingKeyRecord(seedB);

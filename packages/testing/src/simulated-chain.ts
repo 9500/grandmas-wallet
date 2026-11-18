@@ -14,19 +14,73 @@ export type BroadcastResult = { accepted: true; transactionId: string } | { acce
  * A stand-in for the network: keeps a set of unspent outputs, checks every
  * submitted transaction with the same rules as the real network scripts, and
  * enforces relative and absolute time locks against a clock the test controls.
+ *
+ * By default every transaction is in a block as soon as it is accepted. With `blocksOnDemand` set, a
+ * transaction waits unconfirmed until the test makes a block with {@link mine}. A transaction can also
+ * disappear, as one does that is replaced by a conflicting one or whose block is undone and not mined
+ * again ({@link drop}).
  */
 export class SimulatedChain implements ChainReader {
   nowMs = 1_800_000_000_000;
   broadcasts = 0;
   /** Fail the n-th broadcast: 'before' loses the transaction, 'after' accepts it but loses the reply. */
   failure?: { at: number; when: 'before' | 'after' };
+  /** Leave accepted transactions unconfirmed until {@link mine} is called. */
+  blocksOnDemand = false;
+  private tip = 1;
   private readonly unspent = new Map<string, { output: Output; createdMs: number }>();
   private readonly transactions = new Map<string, string>();
   private readonly history = new Map<string, Set<string>>();
+  /** The height of the block each transaction is in; 0 while unconfirmed. */
+  private readonly heights = new Map<string, number>();
+  /** What each transaction spent, so that it can be undone. */
+  private readonly spentBy = new Map<string, { outpoint: string; entry: { output: Output; createdMs: number } }[]>();
 
   private remember(lockingBytecode: Uint8Array, transactionId: string): void {
     const script = binToHex(lockingBytecode);
     this.history.set(script, (this.history.get(script) ?? new Set<string>()).add(transactionId));
+  }
+
+  private record(transactionId: string): void {
+    this.heights.set(transactionId, this.blocksOnDemand ? 0 : this.tip);
+  }
+
+  /** Put every unconfirmed transaction into a new block. */
+  mine(): void {
+    this.tip += 1;
+    for (const [transactionId, height] of this.heights) if (height === 0) this.heights.set(transactionId, this.tip);
+  }
+
+  /** Whether the network knows a transaction: in a block, or waiting for one. */
+  knows(transactionId: string): boolean {
+    return this.heights.has(transactionId);
+  }
+
+  /**
+   * A transaction disappears, as one does that a conflicting transaction replaced, or whose block was undone
+   * and that is not mined again. Every transaction that spends one of its outputs disappears with it, and the
+   * coins it spent are unspent again.
+   */
+  drop(transactionId: string): void {
+    if (!this.transactions.has(transactionId)) throw new Error(`Transaction ${transactionId} is not known.`);
+    const encoded = hexToBin(this.transactions.get(transactionId) as string);
+    const transaction = decodeTransactionBch(encoded);
+    if (typeof transaction === 'string') throw new Error(transaction);
+    for (const [index] of transaction.outputs.entries()) {
+      const outpoint = `${transactionId}:${index}`;
+      if (this.unspent.has(outpoint)) {
+        this.unspent.delete(outpoint);
+        continue;
+      }
+      const child = [...this.spentBy.entries()].find(([, spent]) => spent.some((entry) => entry.outpoint === outpoint))?.[0];
+      if (child !== undefined) this.drop(child);
+      this.unspent.delete(outpoint);
+    }
+    for (const { outpoint, entry } of this.spentBy.get(transactionId) ?? []) this.unspent.set(outpoint, entry);
+    this.spentBy.delete(transactionId);
+    this.transactions.delete(transactionId);
+    this.heights.delete(transactionId);
+    for (const seen of this.history.values()) seen.delete(transactionId);
   }
 
   /**
@@ -52,6 +106,7 @@ export class SimulatedChain implements ChainReader {
     });
     const transactionId = binToHex(hashTransactionUiOrder(encoded));
     this.transactions.set(transactionId, binToHex(encoded));
+    this.record(transactionId);
     this.unspent.set(`${transactionId}:${outputIndex}`, { output: { lockingBytecode, valueSatoshis }, createdMs: this.nowMs });
     this.remember(lockingBytecode, transactionId);
     return transactionId;
@@ -75,6 +130,7 @@ export class SimulatedChain implements ChainReader {
         outputs: all,
       });
       this.transactions.set(transactionId, binToHex(encoded));
+      this.record(transactionId);
       for (const { index, output } of entries) {
         this.unspent.set(`${transactionId}:${index}`, { output, createdMs: this.nowMs });
         this.remember(output.lockingBytecode, transactionId);
@@ -99,12 +155,12 @@ export class SimulatedChain implements ChainReader {
       .filter(([, { output }]) => binToHex(output.lockingBytecode) === wanted)
       .map(([outpoint, { output }]) => {
         const [transactionId = '', index = '0'] = outpoint.split(':');
-        return { transactionId, index: Number(index), valueSatoshis: output.valueSatoshis, height: 0, hasToken: output.token !== undefined, ...(output.token === undefined ? {} : { token: { category: binToHex(output.token.category) } }) };
+        return { transactionId, index: Number(index), valueSatoshis: output.valueSatoshis, height: this.heights.get(transactionId) ?? 0, hasToken: output.token !== undefined, ...(output.token === undefined ? {} : { token: { category: binToHex(output.token.category) } }) };
       });
   };
 
   getHistory = async (lockingBytecode: Uint8Array): Promise<HistoryEntry[]> =>
-    [...(this.history.get(binToHex(lockingBytecode)) ?? [])].map((transactionId) => ({ transactionId, height: 1 }));
+    [...(this.history.get(binToHex(lockingBytecode)) ?? [])].map((transactionId) => ({ transactionId, height: this.heights.get(transactionId) ?? 0 }));
 
   /** The unspent outputs at a script, with their full contents. */
   outputsAt(lockingBytecode: Uint8Array): Utxo[] {
@@ -156,6 +212,7 @@ export class SimulatedChain implements ChainReader {
       }
     }
 
+    this.spentBy.set(transactionId, outpoints.map((outpoint, index) => ({ outpoint, entry: spent[index] as { output: Output; createdMs: number } })));
     outpoints.forEach((outpoint) => this.unspent.delete(outpoint));
     spent.forEach(({ output }) => this.remember(output.lockingBytecode, transactionId));
     transaction.outputs.forEach((output, index) => {
@@ -163,6 +220,7 @@ export class SimulatedChain implements ChainReader {
       this.remember(output.lockingBytecode, transactionId);
     });
     this.transactions.set(transactionId, transactionHex);
+    this.record(transactionId);
     return { accepted: true, transactionId };
   }
 }

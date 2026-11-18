@@ -118,7 +118,6 @@ describe('the recoverer\'s check against the chain', () => {
     const { chain, wallet, seedA, signed } = await sent();
     const read = readKit(signed, 'testnet');
     const checked = await checkEnrollment(read, chain);
-    expect(checked.confirmed).toBe(true);
     expect(checked.prepared).toBeUndefined();
     const recoveryKey = recoveryKeyOf(checked.kept.kit);
     expect(recoveryKey).toEqual(credential.recoveryKey);
@@ -241,7 +240,7 @@ describe('a kit for a new recoverer', () => {
     const sentByOwner = { messageHash: read.hash, viewingKeyRecordHash: hashes[0] as string, recoveryKeyHash: hex(otherCredential.recoveryKey.keyHash), ownerKeyHash: hex(seedB.controllerKey.keyHash) };
     const before = await readControllerHistory(chain, wallet.identity);
     expect(recoveryStatus([receipt], sentByOwner, before, 'testnet').on).toBe(false);
-    // Only then does the owner make the change; when it is confirmed and matches the receipt, recovery is on again.
+    // Only then does the owner make the change; as soon as the network shows it and it matches the receipt, recovery is on again.
     ownerUpdate(chain, wallet, seedB.controllerKey, { recovererKeyHash: otherCredential.recoveryKey.keyHash });
     expect(recoveryStatus([receipt], sentByOwner, await readControllerHistory(chain, wallet.identity), 'testnet').on).toBe(true);
     // The earlier recoverer's key no longer works on the controller.

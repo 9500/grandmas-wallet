@@ -60,7 +60,7 @@ export const KitCard = ({ owner }: { owner: Owner }) => {
         <p>Send this link to {name}, by message or by letting them scan the code. Only they can open it.</p>
       </HandOff>
       <div class="actions">
-        <Waiting session={owner.session}>
+        <Waiting>
           Waiting for {name} to check the kit and leave a receipt. Until then recovery is not on: coins you receive are not yet recoverable.
         </Waiting>
       </div>
@@ -98,7 +98,7 @@ export const Alarm = ({ owner }: { owner: Owner }) => {
           ) : timing.eligibility.ready ? (
             <strong>The waiting period has passed. The request can be completed at any moment: refuse it now if it is not yours.</strong>
           ) : timing.eligibility.waitingFor === 'confirmation' ? (
-            'The waiting period starts when the request is in a block.'
+            'You can refuse it now. The waiting period counts from the block that holds the request, so it starts with the next block.'
           ) : (
             <>
               You can refuse it until the waiting period ends. <WaitEnds endsAt={timing.endsAt} secondsLeft={timing.secondsLeft} />

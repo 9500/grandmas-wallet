@@ -3,10 +3,10 @@ import { type CreationStep, type OwnerWallet, addressOf, creationFunding, descri
 import { type ChallengeDelay, p2pkhLockingBytecode } from '@grandmas-wallet/core';
 import { credentialKeys } from '@grandmas-wallet/enrollment';
 import { Amount, Button, Card, Choice, HandOff, Loading, Notice, PageHead, Sat, type Step, Steps, TaskStatus, useEvery, useTask } from '@grandmas-wallet/ui';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 
-import { DELAYS, DelayPicker, RecipientCheck, RecipientEntry, Waiting } from './parts.js';
-import { type Session, type Setup, type StoredRecipient, deviceWords, keep, kept, openWallet, recipientOf, seedOf } from './session.js';
+import { DELAYS, DelayPicker, RecipientCheck, RecipientEntry } from './parts.js';
+import { type Session, type Setup, type StoredRecipient, deviceWords, keep, kept, openWallet, recipientOf, seedOf, startCreationAgain } from './session.js';
 
 /** Send the recoverer the kit (section 9.3) and remember what was sent. Recovery is on only when its receipt is found. */
 export const sendKit = async (session: Session, wallet: OwnerWallet, setup: Setup): Promise<string> => {
@@ -44,7 +44,7 @@ export const Create = ({ session, onBack, onCreated }: { session: Session; onBac
       />
     );
   }
-  return <Creating session={session} setup={setup} onCreated={onCreated} />;
+  return <Creating session={session} setup={setup} onCreated={onCreated} onAgain={() => setSetup(kept('setup'))} />;
 };
 
 /** Before anything is paid: who the recoverer is, how long the waiting period is, and whether to give an allowance. */
@@ -101,14 +101,19 @@ const SetupForm = ({ session, onBack, onDone }: { session: Session; onBack: () =
   );
 };
 
-const STEP_ORDER: CreationStep[] = ['not funded', 'funded', 'prepared', 'created', 'confirmed'];
+const STEP_ORDER: CreationStep[] = ['not funded', 'funded', 'prepared', 'created'];
 
-/** Funding, preparing, creating and the confirmation, each shown on its own and resumed after a reload. */
-const Creating = ({ session, setup, onCreated }: { session: Session; setup: Setup; onCreated: (wallet: OwnerWallet) => void }) => {
+/**
+ * Funding, preparing and creating, each shown on its own and resumed after a reload. Each step goes on as soon
+ * as the network has the transaction before it; none waits for a block (proposal section 7.9).
+ */
+const Creating = ({ session, setup, onCreated, onAgain }: { session: Session; setup: Setup; onCreated: (wallet: OwnerWallet) => void; onAgain: () => void }) => {
   const [wallet, setWallet] = useState<OwnerWallet | undefined>();
   const [problem, setProblem] = useState<string | undefined>();
   const [step, setStep] = useState<CreationStep | undefined>();
-  const [funding, setFunding] = useState<{ address: string; received: bigint; confirmed: boolean } | undefined>();
+  const [funding, setFunding] = useState<{ address: string; received: bigint } | undefined>();
+  const [lost, setLost] = useState(() => kept('lostCreation'));
+  const previous = useRef<CreationStep | undefined>(undefined);
   const task = useTask();
   const needed = creationFunding(setup.allowance ? { allowanceSatoshis: suggestedAllowance() } : {});
   const name = setup.recipient.name || 'your recoverer';
@@ -139,14 +144,22 @@ const Creating = ({ session, setup, onCreated }: { session: Session; setup: Setu
       if (wallet === undefined || task.busy !== undefined) return;
       const address = await wallet.fundingAddress();
       const coins = await session.chain.listUnspent(address);
+      // Coins at addresses given out before the wallet had to be made again count too: the new wallet is made from them.
+      const voided = wallet.voided.length > 0 ? (await wallet.balance()).voided : 0n;
       setFunding({
         address: addressOf(address, session.environment.network === 'mainnet' ? 'mainnet' : 'chipnet'),
-        received: coins.reduce((sum, coin) => sum + coin.valueSatoshis, 0n),
-        confirmed: coins.length > 0 && coins.every((coin) => coin.height > 0),
+        received: coins.reduce((sum, coin) => sum + coin.valueSatoshis, 0n) + voided,
       });
       const now = await wallet.creationStep();
+      // The wallet was created and the network no longer has its creation: it is made again.
+      if (previous.current === 'created' && now !== 'created') {
+        startCreationAgain(session);
+        setLost(kept('lostCreation'));
+        onAgain();
+      }
+      previous.current = now;
       setStep(now);
-      if (now === 'confirmed' && task.error === undefined) await finish(wallet);
+      if (now === 'created' && task.error === undefined) await finish(wallet);
     },
     [wallet, task.busy],
   );
@@ -199,7 +212,7 @@ const Creating = ({ session, setup, onCreated }: { session: Session; setup: Setu
     },
     {
       title: 'Create',
-      state: state(3) === 'done' ? 'done' : at === 1 || at === 2 ? 'current' : 'later',
+      state: at >= 3 ? 'done' : at === 1 || at === 2 ? 'current' : 'later',
       detail: (
         <>
           One transaction creates the wallet's controller, which names {name} and a waiting period of {describeDelay(setup.delay)}; it puts a coin aside for cancelling{setup.allowance ? ', gives the allowance' : ''}, and moves the rest into the wallet.
@@ -209,7 +222,7 @@ const Creating = ({ session, setup, onCreated }: { session: Session; setup: Setu
                 progress('Creating the wallet');
                 setStep(await wallet.create(options()));
               })}>
-                {at === 2 ? 'Continue creating' : 'Create the wallet'}
+                {at === 2 ? 'Continue creating' : lost !== undefined ? 'Make the wallet again' : 'Create the wallet'}
               </Button>
             </div>
           )}
@@ -218,20 +231,8 @@ const Creating = ({ session, setup, onCreated }: { session: Session; setup: Setu
       ),
     },
     {
-      title: 'Confirmed in a block',
-      state: state(4),
-      detail:
-        step === 'created' ? (
-          <Waiting session={session} blocks={1}>
-            Waiting for the network to put the new wallet in a block. Until then the wallet gives out no address: if the transaction were replaced, the wallet's identity would be another.
-          </Waiting>
-        ) : (
-          'No address is given out before this.'
-        ),
-    },
-    {
       title: `Send the recovery kit to ${name}`,
-      state: step === 'confirmed' ? 'current' : 'later',
+      state: step === 'created' ? 'current' : 'later',
       detail: (
         <>
           The kit is sealed so that only {name} can open it. You send it as a link.
@@ -249,6 +250,15 @@ const Creating = ({ session, setup, onCreated }: { session: Session; setup: Setu
   return (
     <div class="stack">
       <PageHead title="Making your wallet">Each step is kept on this phone. If the page closes, it continues from the step it reached.</PageHead>
+      {lost !== undefined && (
+        <Card title="Your wallet has to be made again" tone="warn">
+          <div class="stack-s">
+            <p>The network no longer has a payment that made your wallet: it was replaced by another, perhaps by whoever sent the first coins, or the block that held it was undone. No coin that reached your addresses is lost. This phone still holds their keys and moves them into the new wallet.</p>
+            <p>Payments this phone made from the wallet's first coins may have been undone with it. Look at them under Recent, and make them again if they are still needed.</p>
+            <p>Once the wallet is made again, send {name} the new recovery kit: the one they have is for the wallet that no longer exists, so recovery is off until they confirm the new one. Write your own backup down again too.</p>
+          </div>
+        </Card>
+      )}
       <Card>
         <Steps steps={steps} />
       </Card>

@@ -1,6 +1,17 @@
 import { type FeeView, type RecovererView, feeView, viewAsRecoverer } from '@grandmas-wallet/app';
 import { keyFingerprint } from '@grandmas-wallet/enrollment';
 import { Card, PageHead, Pill, shorten, useEvery } from '@grandmas-wallet/ui';
+
+/**
+ * Why a wallet cannot be read. A wallet whose creation the network no longer has is said so in plain words:
+ * its owner's wallet makes a new one and sends a new kit.
+ */
+export const describeProblem = (error: unknown): string => {
+  const message = (error as Error).message;
+  return /No transaction creating this identity|created by a different transaction/.test(message)
+    ? 'The network no longer has the transaction that made this wallet. The owner\'s wallet makes it again and sends you a new kit; this one can no longer be used.'
+    : message;
+};
 import { useState } from 'preact/hooks';
 
 import { type Session, openWalletPage, wallets } from './session.js';
@@ -15,7 +26,7 @@ export const Wallets = ({ session, onShowLink }: { session: Session; onShowLink:
       try {
         next[identity] = { view: await viewAsRecoverer(session.chain, looked.kept), fees: await feeView(session.chain, looked.kept) };
       } catch (error) {
-        next[identity] = { problem: (error as Error).message };
+        next[identity] = { problem: describeProblem(error) };
       }
     }
     setViews(next);

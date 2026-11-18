@@ -4,7 +4,7 @@ import { Button, Choice, Field, Fingerprint, Notice, Sat, TextArea, formatDurati
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
-import { type Activity, type Session, type StoredRecipient, keep, kept, readRecipientLink, recipientFingerprint } from './session.js';
+import { type Activity, type StoredRecipient, keep, kept, readRecipientLink, recipientFingerprint } from './session.js';
 
 /** Waiting periods to choose from. Counted in time, by the chain's clock, in steps of 512 seconds. */
 export const DELAYS: { delay: ChallengeDelay; hint: string }[] = [
@@ -74,18 +74,12 @@ export const RecipientCheck = ({ recipient, matched, onMatched, onClear }: { rec
 );
 
 /** What waiting looks like: what is awaited, and that the page may be closed meanwhile. */
-export const Waiting = ({ session, children, blocks }: { session: Session; children: ComponentChildren; blocks?: number }) => {
-  const minutes = Math.max(1, Math.round(session.environment.secondsPerBlock / 60));
-  return (
-    <Notice tone="wait" busy>
-      <div>{children}</div>
-      <div class="small muted">
-        {blocks !== undefined && `Blocks come about every ${minutes === 1 ? 'minute' : `${minutes} minutes`} on this network. `}
-        You can close this page; it carries on from here when you open it again.
-      </div>
-    </Notice>
-  );
-};
+export const Waiting = ({ children }: { children: ComponentChildren }) => (
+  <Notice tone="wait" busy>
+    <div>{children}</div>
+    <div class="small muted">You can close this page; it carries on from here when you open it again.</div>
+  </Notice>
+);
 
 /** When a waiting period ends, in words. */
 export const WaitEnds = ({ endsAt, secondsLeft }: { endsAt?: number | undefined; secondsLeft?: number | undefined }) => {

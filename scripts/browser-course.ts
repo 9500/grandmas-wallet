@@ -269,7 +269,7 @@ export const balanceOf = async (page: Page): Promise<bigint> => {
  * @returns the devices and the recoverer's link, or nothing when the run was asked to stop earlier
  */
 export const firstSteps = async (
-  { begin, device, log, pay, mine }: Course,
+  { begin, device, log, pay }: Course,
   shoot: (page: Page, name: string) => Promise<void>,
   /** Called once the owner's wallet has its words and before anything is paid to it: to keep them on disk. */
   beforeFunding: (old: Device) => Promise<void> = async () => undefined,
@@ -310,12 +310,9 @@ export const firstSteps = async (
   await beforeFunding(old);
   log(`   ${pay(funding, 120_000)}`);
   await click(old.page, 'Create the wallet');
-  await see(old.page, 'Waiting for the network to put the new wallet in a block');
-  log(chipnet ? '   created; waiting for a block' : '   created; waiting for a block, which the run makes now');
-  await shoot(old.page, 'wallet-create-waiting');
-  mine(1);
+  // The wallet goes on as soon as the network has its creation: no block is waited for.
   const kitLink = await valueOf(old.page, 'kit-link');
-  log(`   confirmed; the kit link has ${kitLink.length} characters`);
+  log(`   created; the kit link has ${kitLink.length} characters`);
   await see(old.page, /Recovery is not on yet|Checking the wallet's protection/);
   await shoot(old.page, 'wallet-home-kit-sent');
 
@@ -394,7 +391,7 @@ export const completeTakeover = async ({ log, mine, passTime }: Course, recovere
   // On chipnet the chain's clock has to pass 512 seconds: the button is enabled when it has.
   await click(recoverer.page, 'Complete the move', chipnet ? 360_000 : 120_000);
   await see(recoverer.page, 'The wallet is moved');
-  mine(1);
+  // The hand-over is made as soon as the network shows the completion: no block is waited for.
   const handOver = await valueOf(recoverer.page, 'handover-link', 120_000);
   log('   completed; the hand-over link is ready');
   await shoot(recoverer.page, 'recoverer-handover');

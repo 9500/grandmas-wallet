@@ -8,7 +8,7 @@ import { type Session, keep, kept, saveWallet, sealedOf, wallets } from './sessi
 
 type Outcome =
   | { kind: 'enroll'; stage: 'ask' | 'new recoverer'; reason?: string }
-  | { kind: 'enrolled'; label: string; identity: string; asNewRecoverer: boolean; confirmed: boolean; fees?: FeeView | undefined }
+  | { kind: 'enrolled'; label: string; identity: string; asNewRecoverer: boolean; fees?: FeeView | undefined }
   | { kind: 'takeover'; fingerprint: string; fresh: boolean }
   | { kind: 'update'; label: string; what: string };
 
@@ -85,7 +85,7 @@ export const Incoming = ({ session, onChanged, toast, onShowRequests }: { sessio
           },
         });
         keep('incoming', undefined);
-        setOutcome({ kind: 'enrolled', label: name, identity, asNewRecoverer, confirmed: taken.confirmed, fees: await feeView(session.chain, taken.kept).catch(() => undefined) });
+        setOutcome({ kind: 'enrolled', label: name, identity, asNewRecoverer, fees: await feeView(session.chain, taken.kept).catch(() => undefined) });
         toast('The kit is kept and your receipt is on the backup stores.');
         onChanged();
       } catch (error) {
@@ -147,7 +147,7 @@ export const Incoming = ({ session, onChanged, toast, onShowRequests }: { sessio
           <p>
             {outcome.asNewRecoverer
               ? 'Your receipt is prepared. As soon as the owner\'s wallet makes the change, you are its recoverer.'
-              : `Your receipt is on the backup stores; the owner's wallet will show that recovery is on${outcome.confirmed ? '' : ' once its latest change is confirmed'}.`}
+              : 'Your receipt is on the backup stores; the owner\'s wallet shows that recovery is on as soon as it finds it.'}
           </p>
           {outcome.fees !== undefined &&
             (outcome.fees.missing === 0n ? (

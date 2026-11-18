@@ -337,6 +337,61 @@ describe('a move to a new seed with the old device still working', () => {
     expect(await owner.balance()).toMatchObject({ recoverable: 0n, cancelling: 0n });
   });
 
+  it('MG01: the move goes on as soon as the network has the change; if it disappears, the old device owns the wallet again and makes it again, the new device follows the chain, and no coin is lost', async () => {
+    const { chain, storeAt, owner, first, recipient, recovererDevice, arrangement, kept, recoveryKey, next, preparation } = await prepared();
+    chain.blocksOnDemand = true;
+    const announced = await sendUpdate({ wallet: owner, seed: first, chain, arrangement, recipient, newSeed: preparation });
+    if (announced.handOver === undefined) throw new Error('a move hands the wallet over');
+    await acceptUpdate({ sealed: announced.sealed, privateKey: recovererDevice.privateKey, kept, chain, recoveryKey, storeAt });
+    const changed = await makeChange({ wallet: owner, chain, arrangement: announced.arrangement, storeAt, network: 'testnet' });
+    const changedIn = changed.sent?.transactionId as string;
+    expect(changed.arrangement.movedTo).toBe(preparation.proposedKeyHash);
+
+    // Not in a block: the new device takes the wallet over, sweeps and gives out an address at once.
+    const moved = await finishMove({ handOver: announced.handOver, preparation, seed: next, backend: new KeyBackend(chain, next), chain, storeAt });
+    expect(moved.recovery.on).toBe(true);
+    await moved.wallet.search({ passes: ['quick'] });
+    await moved.wallet.sweepEarlier();
+    const given = (await moved.wallet.receiveAddress()).address;
+    chain.fund(given.lockingBytecode, 3_000n);
+    const total = async () => {
+      const [a, b] = [await owner.balance(), await moved.wallet.balance()];
+      return a.recoverable + a.cancelling + a.vault + b.recoverable + b.cancelling + b.vault + b.toSweep;
+    };
+    const before = await total();
+
+    // The change disappears, and the sweep that was built on it with it.
+    chain.drop(changedIn);
+    // The new device follows the chain: another key owns the wallet, so it gives out nothing and takes on nothing.
+    expect(await moved.wallet.checkOwnership()).toBe('another key');
+    await expect(moved.wallet.receiveAddress()).rejects.toThrow(/another key owns this wallet/);
+    // What was paid to its address is still its own, by key; the swept coins are back at the old device's addresses.
+    expect((await moved.wallet.balance()).recoverable).toBe(3_000n);
+    expect(await owner.checkOwnership()).toBe('this device');
+    expect(await total()).toBeGreaterThan(before);
+
+    // The old device sees that its change is gone, owns the wallet again, and makes the change again.
+    const again = await makeChange({ wallet: owner, chain, arrangement: changed.arrangement, storeAt, network: 'testnet' });
+    expect(again.sent).toBeDefined();
+    expect(again.arrangement.movedTo).toBe(preparation.proposedKeyHash);
+    // The new device is the owner again, and goes on: it searches again, as after any transaction of its own
+    // that disappeared, and sweeps what came back.
+    expect(await moved.wallet.checkOwnership()).toBe('this device');
+    expect((await moved.wallet.receiveAddress()).address.number).toBe(given.number + 1);
+    await moved.wallet.search({ passes: ['quick'] });
+    await moved.wallet.sweepEarlier();
+    expect(await owner.balance()).toMatchObject({ recoverable: 0n, cancelling: 0n });
+    expect((await moved.wallet.balance()).recoverable).toBeGreaterThan(3_000n);
+    expect(moved.wallet.recovery).toBe('on');
+
+    // Once a block holds the change, the old device lets it go.
+    chain.mine();
+    const settled = await makeChange({ wallet: owner, chain, arrangement: again.arrangement, storeAt, network: 'testnet' });
+    expect(settled.sent).toBeUndefined();
+    expect(settled.arrangement.change).toBeUndefined();
+    expect(settled.arrangement.movedTo).toBe(preparation.proposedKeyHash);
+  });
+
   it('MG02: the new device is lost right after the move; the recoverer holds its viewing key and archive, and another recovery succeeds', async () => {
     const { chain, storeAt, owner, first, recipient, recovererDevice, arrangement, kept, recoveryKey, preparation, recover } = await prepared();
     const announced = await sendUpdate({ wallet: owner, seed: first, chain, arrangement, recipient, newSeed: preparation });
@@ -377,7 +432,12 @@ describe('a move to a new seed with the old device still working', () => {
     expect(changed.sent).toBeDefined();
     const repeated = await makeChange({ wallet: owner, chain, arrangement: announced.arrangement, storeAt, network: 'testnet' });
     expect(repeated.sent).toBeUndefined();
-    expect(repeated.arrangement).toEqual(changed.arrangement);
+    // The change is followed until a block holds it, which on this chain is at once; then it is let go.
+    expect(changed.arrangement.change?.made?.transactionId).toBe(changed.sent?.transactionId);
+    const settled = await makeChange({ wallet: owner, chain, arrangement: changed.arrangement, storeAt, network: 'testnet' });
+    expect(settled.sent).toBeUndefined();
+    expect(settled.arrangement.change).toBeUndefined();
+    expect(repeated.arrangement).toEqual(settled.arrangement);
 
     // Step 5 twice, as after a restart of the new device.
     if (announced.handOver === undefined) throw new Error('a move hands the wallet over');

@@ -52,12 +52,12 @@ const device = async (chain: SimulatedChain, options: { state?: OwnerWalletState
   return { wallet, seed, state: () => kept as OwnerWalletState, funding: p2pkhLockingBytecode(seed.fundingKey.keyHash) };
 };
 
-/** A wallet that is created and confirmed, with coins of the given values at addresses given out. */
+/** A wallet that is created, with coins of the given values at addresses given out. */
 const walletWith = async (...values: bigint[]) => {
   const chain = new SimulatedChain();
   const made = await device(chain);
   chain.fund(made.funding, 20_000n);
-  expect(await made.wallet.create(createOptions)).toBe('confirmed');
+  expect(await made.wallet.create(createOptions)).toBe('created');
   for (const value of values) chain.fund((await made.wallet.receiveAddress()).address.lockingBytecode, value);
   return { chain, ...made };
 };
@@ -85,7 +85,7 @@ describe('creating a wallet', () => {
     await expect(wallet.create(createOptions)).rejects.toThrow(/holds no coin yet/);
     const funded = chain.fund(funding, 20_000n);
     expect(await wallet.creationStep()).toBe('funded');
-    expect(await wallet.create(createOptions)).toBe('confirmed');
+    expect(await wallet.create(createOptions)).toBe('created');
     expect(state().identity).toBe(funded);
     expect(state().creation.prepareTransactionId).toBeUndefined();
     // Two transactions touched the funding address: the funding and the creation.
@@ -96,7 +96,7 @@ describe('creating a wallet', () => {
     const chain = new SimulatedChain();
     const { wallet, state, funding } = await device(chain);
     const funded = chain.fund(funding, 20_000n, 2);
-    expect(await wallet.create(createOptions)).toBe('confirmed');
+    expect(await wallet.create(createOptions)).toBe('created');
     expect(state().creation.prepareTransactionId).toBeDefined();
     expect(state().identity).toBe(state().creation.prepareTransactionId);
     expect(state().identity).not.toBe(funded);
@@ -116,7 +116,7 @@ describe('creating a wallet', () => {
       const chain = new SimulatedChain();
       const { wallet, funding } = await device(chain);
       chain.fund(funding, needed, position);
-      expect(await wallet.create(options)).toBe('confirmed');
+      expect(await wallet.create(options)).toBe('created');
       expect((await wallet.balance()).cancelling).toBe(cancellationCost());
     }
     // The controller, the coin for cancelling, the smallest first coin, and the two fees.
@@ -129,24 +129,131 @@ describe('creating a wallet', () => {
     await expect(wallet.create(createOptions)).rejects.toThrow(InsufficientFundsError);
   });
 
-  it('CR02: no address is given out before the identity and the controller are confirmed', async () => {
+  it('CR02: every step goes on as soon as the network has the transaction before it; nothing waits for a block', async () => {
     const chain = new SimulatedChain();
-    const confirmed = { yes: false };
-    const reader: ChainReader = {
-      getTransaction: (id) => chain.getTransaction(id),
-      listUnspent: (script) => chain.listUnspent(script),
-      getHistory: async (script) => (await chain.getHistory(script)).map((entry) => ({ ...entry, height: confirmed.yes ? entry.height : 0 })),
-    };
-    const { wallet, funding } = await device(chain, { reader });
+    chain.blocksOnDemand = true;
+    const { wallet, state, funding } = await device(chain);
+    // The first coins arrive and are not in a block; the wallet pays itself and creates its controller at once.
+    chain.fund(funding, 20_000n, 1);
+    expect(await wallet.create(createOptions)).toBe('created');
+    expect(state().creation).toMatchObject({ identitySeen: true, createSeen: true, confirmed: false, fixed: false });
+    // Addresses are given out, coins received there are spent, and recovery can be on, all before any block.
+    const given = (await wallet.receiveAddress()).address;
+    chain.fund(given.lockingBytecode, 9_000n);
+    await wallet.pay([{ lockingBytecode: payee, valueSatoshis: 1_000n }]);
+    wallet.noteRecoveryConfirmed(true);
+    expect(wallet.recovery).toBe('on');
+    // The one exception: a vault address has no key, so it waits until nobody but this wallet could undo the creation.
+    await expect(wallet.vaultAddress()).rejects.toThrow(/once the network has put the wallet's creation in a block/);
+    chain.mine();
+    expect(await wallet.creationStep()).toBe('created');
+    expect(state().creation).toMatchObject({ confirmed: true, fixed: true });
+    expect((await wallet.vaultAddress()).address.number).toBe(0);
+  });
+
+  it('CR02: when the first coins were in a block, only this wallet could undo its creation, and a vault address is given out at once', async () => {
+    const chain = new SimulatedChain();
+    chain.blocksOnDemand = true;
+    const { wallet, state, funding } = await device(chain);
+    chain.fund(funding, 20_000n, 1);
+    chain.mine();
+    expect(await wallet.create(createOptions)).toBe('created');
+    expect(state().creation).toMatchObject({ confirmed: false, fixed: true });
+    expect((await wallet.vaultAddress()).address.number).toBe(0);
+  });
+
+  it('CR02: the transaction that prepared the wallet is replaced after addresses were given out: no coin is lost; the wallet makes a new identity, collects the coins by key, and says recovery must be set up again', async () => {
+    const chain = new SimulatedChain();
+    chain.blocksOnDemand = true;
+    const { wallet, state, funding } = await device(chain);
+    // The first coins are not in a block: whoever sent them can still replace their transaction.
+    const fundedIn = chain.fund(funding, 20_000n, 1);
+    expect(await wallet.create(createOptions)).toBe('created');
+    const first = state().identity as string;
+    wallet.noteRecoveryConfirmed(true);
+    const paidAt = (await wallet.receiveAddress()).address;
+    const tokenAt = (await wallet.receiveAddress()).address;
+    chain.fund(paidAt.lockingBytecode, 8_000n);
+    payToken(chain, tokenAt.lockingBytecode);
+    const paidOut = await wallet.pay([{ lockingBytecode: payee, valueSatoshis: 1_000n }]);
+
+    // The sender replaces the first coins' transaction: the payment to itself, the creation and the payment
+    // made from the wallet's first coins disappear with it.
+    chain.drop(fundedIn);
+    expect(chain.knows(paidOut.transactionId)).toBe(false);
+    expect(await wallet.creationStep()).toBe('funded');
+    expect(state().identity).toBeUndefined();
+    expect(wallet.voided).toEqual([{ identity: first, givenOut: [0, 2], change: [0, 3] }]);
+    expect(wallet.recovery).toBe('off');
+    await expect(wallet.receiveAddress()).rejects.toThrow(/not created yet/);
+    // What others paid to the addresses given out is still the wallet's, by key, and counted as not recoverable.
+    const voided = await wallet.balance();
+    expect(voided.voided).toBe(8_000n);
+    expect(voided.tokens).toHaveLength(1);
+
+    // A new identity, made from those coins: no new funding is needed, and the first identity is not made again.
+    expect(await wallet.create(createOptions)).toBe('created');
+    const second = state().identity as string;
+    expect(second).not.toBe(first);
+    expect(state().creation.prepareTransactionId).toBe(second);
+    // Its numbers come after those the first identity gave out, so that every address stays the wallet's.
+    expect([state().cancelCoinNumber, state().firstCoinNumber]).toEqual([3, 4]);
+    expect((await wallet.receiveAddress()).address.number).toBe(2);
+    // The token is collected by key, unchanged, to an address of the new identity.
+    const collected = await wallet.collectVoided();
+    expect(collected).toBeDefined();
+    const after = await wallet.balance();
+    expect(after.voided).toBe(0n);
+    expect(after.tokens).toHaveLength(1);
+    expect(after.tokens[0]?.utxo.output.token?.amount).toBe(50n);
+    expect(chain.outputsAt(tokenAt.lockingBytecode)).toHaveLength(0);
+
+    // A payment that arrives later at an address of the first identity is found and collected the same way.
+    chain.fund(paidAt.lockingBytecode, 5_000n);
+    expect((await wallet.balance()).voided).toBe(5_000n);
+    // A device that starts again from what it stored knows every address, those of the first identity included.
+    const again = await device(chain, { state: state() });
+    expect((await again.wallet.balance()).voided).toBe(5_000n);
+    await again.wallet.collectVoided();
+    expect((await again.wallet.balance()).voided).toBe(0n);
+    expect(chain.outputsAt(paidAt.lockingBytecode)).toHaveLength(0);
+  });
+
+  it('CR02: a block that held the creation is undone and the first coins are spent elsewhere in its place: handled the same way', async () => {
+    const chain = new SimulatedChain();
+    chain.blocksOnDemand = true;
+    const { wallet, funding } = await device(chain);
+    const fundedIn = chain.fund(funding, 20_000n);
+    expect(await wallet.create(createOptions)).toBe('created');
+    const paidAt = (await wallet.receiveAddress()).address;
+    chain.fund(paidAt.lockingBytecode, 6_000n);
+    chain.mine();
+    // The block is undone before the wallet looked again, and the coin that defined the identity goes elsewhere.
+    chain.drop(fundedIn);
+    expect(await wallet.creationStep()).toBe('funded');
+    expect((await wallet.balance()).voided).toBe(6_000n);
+    expect(await wallet.create(createOptions)).toBe('created');
+    expect((await wallet.balance()).voided).toBe(0n);
+    expect((await wallet.balance()).recoverable).toBeGreaterThan(0n);
+  });
+
+  it('CR02: the creating transaction disappears while the identity\'s coin is there again: the controller is made again, for the same identity', async () => {
+    const chain = new SimulatedChain();
+    chain.blocksOnDemand = true;
+    const { wallet, state, funding } = await device(chain);
     chain.fund(funding, 20_000n);
     expect(await wallet.create(createOptions)).toBe('created');
-    await expect(wallet.receiveAddress()).rejects.toThrow(/not confirmed yet/);
-    await expect(wallet.vaultAddress()).rejects.toThrow(/not confirmed yet/);
-    await expect(wallet.pay([{ lockingBytecode: payee, valueSatoshis: 1_000n }])).rejects.toThrow(/not confirmed yet/);
-    expect((await wallet.balance()).notRecoverable).toBe(0n);
-    confirmed.yes = true;
-    expect(await wallet.creationStep()).toBe('confirmed');
-    expect((await wallet.receiveAddress()).address.number).toBe(0);
+    const identity = state().identity;
+    const given = (await wallet.receiveAddress()).address;
+    chain.drop(state().creation.createTransactionId as string);
+    expect(await wallet.creationStep()).toBe('prepared');
+    await expect(wallet.receiveAddress()).rejects.toThrow(/not created yet/);
+    expect(await wallet.create(createOptions)).toBe('created');
+    expect(state().identity).toBe(identity);
+    expect(wallet.voided).toEqual([]);
+    // The address given out before is still one of the identity's.
+    expect(wallet.address(givenOut, given.number).address).toBe(given.address);
+    expect(chain.outputsAt(controllerScript(hexToBin(identity as string)).lockingBytecode)).toHaveLength(1);
   });
 
   /** A key holder that stops, as a device does when it loses power, at the n-th transaction. */
@@ -177,7 +284,7 @@ describe('creating a wallet', () => {
 
     // The device starts again: a key holder with no memory, and the state the device stored.
     const again = await device(chain, { state: first.state() });
-    expect(await again.wallet.create(createOptions)).toBe('confirmed');
+    expect(await again.wallet.create(createOptions)).toBe('created');
     // A transaction that was built and never sent is built again, and is the same transaction.
     expect(again.state().identity).toBe(identityBefore);
     const identity = hexToBin(again.state().identity as string);
@@ -192,7 +299,7 @@ describe('creating a wallet', () => {
     expect(await again.wallet.canCancel()).toBe(true);
   });
 
-  it('CR02: when the transaction that defined the identity is gone, the identity is forgotten with it', async () => {
+  it('CR02: when the transaction that defined the identity is gone before any address was given out, the identity is forgotten with it', async () => {
     const chain = new SimulatedChain();
     const gone = new Set<string>();
     const reader: ChainReader = {
@@ -210,6 +317,8 @@ describe('creating a wallet', () => {
     expect(state().identity).toBeUndefined();
     expect(state().creation).toEqual({ confirmed: false });
     expect(state().cancelCoinNumber).toBeUndefined();
+    // Only the two change addresses of the creation were taken; they are kept, and the next identity's numbers follow them.
+    expect(wallet.voided).toEqual([{ identity, givenOut: [0, 0], change: [0, 2] }]);
   });
 
   it.each([

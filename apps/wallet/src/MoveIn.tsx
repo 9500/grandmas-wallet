@@ -17,14 +17,13 @@ export const readMoveLink = async (text: string): Promise<MoveContent> => {
 
 /**
  * The new phone's side of a move with the old phone still working (proposal section 9.7): it makes its seed
- * and a new archive, gives the old phone a link, takes the old phone's hand-over, and becomes the owner once
- * the change that names its key is confirmed. It gives out no address before.
+ * and a new archive, gives the old phone a link, takes the old phone's hand-over, and becomes the owner as
+ * soon as the network has the change that names its key, in a block or not. It gives out no address before.
  */
 export const MoveIn = ({ session, onBack, onDone }: { session: Session; onBack: () => void; onDone: (wallet: OwnerWallet) => void }) => {
   const [prepared, setPrepared] = useState(() => kept('preparation'));
   const [given, setGiven] = useState(() => kept('moveIn') as MoveContent | undefined);
   const [pasted, setPasted] = useState('');
-  const [waitingFor, setWaitingFor] = useState<string | undefined>();
   const task = useTask();
 
   const prepare = () =>
@@ -50,7 +49,7 @@ export const MoveIn = ({ session, onBack, onDone }: { session: Session; onBack: 
     if (prepared !== undefined && given === undefined && incoming?.kind === 'move') void takeIn(incoming.text);
   }, [prepared]);
 
-  // Once the old phone has handed over, this phone waits until the chain names its key, confirmed.
+  // Once the old phone has handed over, this phone goes on as soon as the chain names its key.
   useEvery(
     10_000,
     async () => {
@@ -68,10 +67,7 @@ export const MoveIn = ({ session, onBack, onDone }: { session: Session; onBack: 
           onDone(moved.wallet);
         } catch (error) {
           const message = (error as Error).message;
-          if (/not made the change yet|not confirmed yet/.test(message)) {
-            setWaitingFor(/not confirmed/.test(message) ? 'confirmed' : 'change');
-            return;
-          }
+          if (/not made the change yet/.test(message)) return;
           throw error;
         }
       });
@@ -142,11 +138,7 @@ export const MoveIn = ({ session, onBack, onDone }: { session: Session; onBack: 
           'It does so once your recoverer has taken in the link it sends them.'
         ) : (
           <>
-            <Waiting session={session} {...(waitingFor === 'confirmed' ? { blocks: 1 } : {})}>
-              {waitingFor === 'confirmed'
-                ? 'Your old phone has handed the wallet over. Waiting for the network to confirm it in a block.'
-                : 'Waiting for your old phone. It hands the wallet over as soon as your recoverer has taken in the link it was sent.'}
-            </Waiting>
+            <Waiting>Waiting for your old phone. It hands the wallet over as soon as your recoverer has taken in the link it was sent.</Waiting>
             <TaskStatus task={task} name="finish" />
           </>
         ),

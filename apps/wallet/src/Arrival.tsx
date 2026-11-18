@@ -83,7 +83,7 @@ export const Arrival = ({ owner, onDone }: { owner: Owner; onDone: () => void })
     {
       title: arrival.from === 'restore' ? 'This phone is the owner again' : 'This phone owns the wallet',
       state: 'done',
-      detail: arrival.from === 'takeover' ? 'Your recoverer completed the move, and this phone checked the wallet\'s history on the chain itself.' : arrival.from === 'move' ? 'Your old phone handed the wallet over, and the network confirmed it.' : 'The chain shows these words as the wallet\'s owner.',
+      detail: arrival.from === 'takeover' ? 'Your recoverer completed the move, and this phone checked the wallet\'s history on the chain itself.' : arrival.from === 'move' ? 'Your old phone handed the wallet over, and the network has the change.' : 'The chain shows these words as the wallet\'s owner.',
     },
     {
       title: 'Quick search',

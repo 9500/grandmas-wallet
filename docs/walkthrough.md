@@ -27,8 +27,7 @@ On the recoverer's page, open **Your link**, enter a name (say, Anna) and copy t
 3. Choose the waiting period. Take **about 9 minutes**, the one for trying things out.
 4. Leave the allowance ticked and press **Continue**.
 5. The page shows an address and the amount it needs. Send chipnet coins to it. When they have arrived, press **Create the wallet**.
-6. Wait for "Confirmed in a block". The wallet gives out no address before that.
-7. The page now shows the link of the **recovery kit**. Send it to the recoverer.
+6. The page shows the link of the **recovery kit** at once: the wallet does not wait for a block. Send it to the recoverer.
 
 The page can be closed and opened again at any step; it continues where it was.
 
@@ -52,14 +51,14 @@ This shows what protects Grandma when her recoverer is deceived, or the recovere
 2. On the recoverer's page, open that link, choose **See the request**, pick Grandma's wallet, tick **I have made sure who is asking**, and press **Save it for this wallet**. Then press **Ask the network to move the wallet**.
 3. Within a minute or so the old phone shows a red card: **Someone asked to move your wallet**, with the fingerprint of the key that would get it and the time until which it can be refused.
 4. Press **Refuse the request**. The wallet stays with the old phone. The recoverer's page shows that the request was refused.
-5. Refusing spent the coin that was kept for it, and the wallet says so: "This phone cannot refuse a request". Press **Put a coin aside**, and after the next block it is Protected again.
+5. Refusing spent the coin that was kept for it, and the wallet says so: "This phone cannot refuse a request". Press **Put a coin aside**, and it is Protected again.
 
 ## 6. The phone is lost, and the wallet comes back
 
 1. Close the old phone's profile and do not open it again. That is the lost phone.
 2. The new phone still shows its request from step 5, and the recoverer still has it saved. On the recoverer's page, open Grandma's wallet and press **Ask the network again**. (Starting fresh works too: repeat the first two parts of step 5.)
 3. The waiting period runs. The recoverer's page shows when it ends by the chain's clock. Both pages can be closed meanwhile.
-4. When it has passed, the recoverer presses **Complete the move**. Once that is in a block, the recoverer's page shows a link for the new phone. Send it there.
+4. When it has passed, the recoverer presses **Complete the move**. The recoverer's page then shows a link for the new phone at once. Send it there.
 5. The new phone opens the link, checks the wallet's history on the chain, and brings the coins over: it finds them with the old phone's viewing key, which the recoverer kept, and moves them to its own addresses. Press **Open the wallet**. The balance is back, less the fees, and after a short while the wallet is **Protected** again with the same recoverer.
 
 If you now open the old phone's profile again, it says **This wallet now belongs to another key**. It cannot spend what was moved, and it gives out no address.

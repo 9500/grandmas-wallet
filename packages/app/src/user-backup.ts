@@ -58,8 +58,8 @@ export const makeUserBackup = async (options: {
   arrangement?: RecoveryArrangement;
   complete?: boolean;
 }): Promise<UserBackup> => {
-  const { identity, creation } = options.wallet.stored;
-  if (identity === undefined || !creation.confirmed) throw new UserBackupError('The wallet\'s identity is not confirmed yet. A backup is made after that.');
+  const { identity } = options.wallet.stored;
+  if (identity === undefined || !options.wallet.created) throw new UserBackupError('The wallet is not created yet. A backup is made after that.');
   const backup: UserBackup = { network: options.network, addressScheme: ADDRESS_SCHEME_VERSION, identity, words: options.words.trim().split(/\s+/).join(' ') };
   if (options.complete !== true) return backup;
   const history = await readControllerHistory(options.chain, hexToBin(identity));
