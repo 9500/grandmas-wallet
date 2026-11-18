@@ -7,6 +7,8 @@ import {
   Card,
   Choice,
   Field,
+  Info,
+  InfoLabel,
   KeyValues,
   Loading,
   Notice,
@@ -17,6 +19,7 @@ import {
   TaskStatus,
   TextInput,
   Value,
+  formatBch,
   formatSatoshis,
   lockingBytecodeOfAddress,
   parseBch,
@@ -46,14 +49,15 @@ type Stage =
 /**
  * Paying (proposal section 8): the fee of the transaction is shown before approval, with any remainder too
  * small to return; "send everything" shows what will arrive, or, when it cannot be done, the three figures.
- * A wallet that holds tokens chooses first between Bitcoin Cash and a token.
+ * A wallet that holds tokens chooses first between Bitcoin Cash and a token. Explanations are behind a "?" where
+ * they belong; what guards against losing coins or tokens is always in view.
  */
 export const Send = ({ owner }: { owner: Owner }) => {
   const [chosen] = useState(takeChosenToken);
   const [what, setWhat] = useState<'coins' | 'token'>(chosen === undefined ? 'coins' : 'token');
   const holdsTokens = (owner.balance?.tokens.length ?? 0) > 0;
   return (
-    <div class="stack">
+    <div class="stack focus-page send-page">
       <PageHead title="Send" />
       {holdsTokens && (
         <div class="send-what">
@@ -135,22 +139,32 @@ const CoinSend = ({ owner }: { owner: Owner }) => {
 
   const back = () => setStage({ at: 'form' });
 
+  const hint = amountHint(amount);
   return (
-    <div class="grid two">
-      <div class="stack">
+    <div class="stack">
         {stage.at === 'form' && (
-          <Card>
-            <Field label="To" id="to" hint="A Bitcoin Cash address." error={errors.to}>
+          <Card cls="send-card">
+            <Field label="To" id="to" error={errors.to}>
               <WithScan filter={paymentAddress(network)} onScan={setTo}>
                 <TextInput id="to" value={to} onInput={setTo} placeholder={network === 'mainnet' ? 'bitcoincash:…' : 'bchtest:…'} invalid={errors.to !== undefined} />
               </WithScan>
             </Field>
-            <Field label="Amount" id="amount" error={errors.amount} hint={amountHint(amount)}>
+            {/* The names of the "?" buttons here hold neither "to" nor "amount": the scripted courses find the fields by those labels. */}
+            <div class="field">
+              <div class="field-head">
+                <InfoLabel htmlFor="amount" label="About BCH units" info="In BCH. One BCH is 100,000,000 satoshis.">
+                  Amount
+                </InfoLabel>
+                <Available info="What the wallet can spend now. The network fee comes out of it: one satoshi per byte of the transaction, which is what the network asks. The next step shows the fee exactly, before anything is sent.">
+                  {owner.balance === undefined ? '…' : <Amount satoshis={owner.balance.recoverable} />}
+                </Available>
+              </div>
               <div class="input-unit">
                 <TextInput id="amount" numeric value={amount} onInput={setAmount} placeholder="0.00" invalid={errors.amount !== undefined} />
                 <span>BCH</span>
               </div>
-            </Field>
+              {errors.amount !== undefined ? <div class="field-error">{errors.amount}</div> : hint !== undefined && <div class="hint">{hint}</div>}
+            </div>
             <TaskStatus task={task} />
             <div class="actions">
               <Button task={task} name="review" onClick={() => void review(false)}>
@@ -163,12 +177,15 @@ const CoinSend = ({ owner }: { owner: Owner }) => {
           </Card>
         )}
         {stage.at === 'review' && (
-          <Card title="Check and send">
+          <Card title="Check and send" cls="send-review">
+            <Hero label="You send" to={stage.to}>
+              {formatBch(stage.amount)}
+            </Hero>
             <KeyValues
               entries={[
                 ['To', <span class="mono">{shorten(stage.to, 16, 8)}</span>],
                 ['Amount', <Amount satoshis={stage.amount} exact />],
-                [<>Network fee<small>{stage.quote.bytes} bytes at one satoshi per byte</small></>, <Sat satoshis={stage.quote.feeSatoshis} />],
+                [<FeeName detail={`${stage.quote.bytes} bytes at one satoshi per byte, which is what the network asks.`} />, <Sat satoshis={stage.quote.feeSatoshis} />],
                 [<strong>Leaves the wallet</strong>, <strong><Amount satoshis={stage.amount + stage.quote.feeSatoshis} exact /></strong>],
               ]}
             />
@@ -189,12 +206,15 @@ const CoinSend = ({ owner }: { owner: Owner }) => {
           </Card>
         )}
         {stage.at === 'review-everything' && (
-          <Card title="Send everything">
+          <Card title="Send everything" cls="send-review">
+            <Hero label="You send everything" to={stage.to}>
+              {formatBch(stage.quote.sentSatoshis)}
+            </Hero>
             <KeyValues
               entries={[
                 ['To', <span class="mono">{shorten(stage.to, 16, 8)}</span>],
                 [<strong>Arrives</strong>, <strong><Amount satoshis={stage.quote.sentSatoshis} exact /></strong>],
-                [<>Network fee<small>{stage.quote.transactions === 1 ? 'one transaction' : `${stage.quote.transactions} transactions`}</small></>, <Sat satoshis={stage.quote.feeSatoshis} />],
+                [<FeeName detail={`${stage.quote.transactions === 1 ? 'One transaction' : `${stage.quote.transactions} transactions`}, at one satoshi per byte, which is what the network asks.`} />, <Sat satoshis={stage.quote.feeSatoshis} />],
               ]}
             />
             {(owner.balance?.tokens.length ?? 0) > 0 && <Notice>Tokens stay where they are.</Notice>}
@@ -259,25 +279,60 @@ const CoinSend = ({ owner }: { owner: Owner }) => {
             </div>
           </Card>
         )}
-      </div>
-      <div class="stack">
-        <Card flat>
-          <div class="stack-s">
-            <h3>Available</h3>
-            {owner.balance === undefined ? <p class="muted">…</p> : <p><Amount satoshis={owner.balance.recoverable} exact /></p>}
-            <p class="small muted">The fee is one satoshi per byte of the transaction, which is what the network asks.</p>
-          </div>
-        </Card>
-      </div>
     </div>
   );
 };
 
-const amountHint = (text: string): string => {
-  if (text.trim() === '') return 'In BCH. One BCH is 100,000,000 satoshis.';
+/** Under the amount, once it reads: the satoshis it comes to. */
+const amountHint = (text: string): string | undefined => {
+  if (text.trim() === '') return undefined;
   const parsed = parseBch(text);
-  return typeof parsed === 'string' ? 'In BCH.' : `${formatSatoshis(parsed)} satoshis`;
+  return typeof parsed === 'string' ? undefined : `${formatSatoshis(parsed)} satoshis`;
 };
+
+/** What the wallet can spend, beside the label of an amount. */
+const Available = ({ children, info }: { children: ComponentChildren; info?: ComponentChildren }) => (
+  <span class="available">
+    <span class="muted">Available</span>
+    <span class="available-figure">{children}</span>
+    {info !== undefined && <Info label="About what is available">{info}</Info>}
+  </span>
+);
+
+/** At the foot of the form for a token: the Bitcoin Cash its fee is paid from, with how behind a "?". */
+const FeeLine = ({ owner }: { owner: Owner }) => (
+  <div class="fee-line">
+    <span class="muted">Bitcoin Cash for fees</span>
+    <span class="available-figure">{owner.balance === undefined ? '…' : <Amount satoshis={owner.balance.recoverable} />}</span>
+    <Info label="About the network fee">
+      <span>The network fee is paid in Bitcoin Cash from the wallet's ordinary coins, never from a token's coin.</span>
+      <span>With the token goes the smallest amount of Bitcoin Cash an output with a token may hold.</span>
+    </Info>
+  </div>
+);
+
+/** The figure a review is about, large, and where it goes. */
+const Hero = ({ label, to, unit, children }: { label: string; to: string; unit?: ComponentChildren; children: ComponentChildren }) => (
+  <div class="send-hero">
+    <span class="send-hero-label">{label}</span>
+    <span class="send-hero-figure">
+      {children}
+      <span class="unit">{unit ?? 'BCH'}</span>
+    </span>
+    <span class="send-hero-to">
+      to <span class="mono">{shorten(to.replace(/^[a-z]+:/, ''), 12, 8)}</span>
+    </span>
+  </div>
+);
+
+/** A row's name with what it means behind a "?". */
+const Named = ({ name, label, detail }: { name: ComponentChildren; label: string; detail: ComponentChildren }) => (
+  <InfoLabel label={label} info={detail}>
+    {name}
+  </InfoLabel>
+);
+
+const FeeName = ({ detail }: { detail: string }) => <Named name="Network fee" label="About the network fee" detail={detail} />;
 
 // ------------------------------------------------------------------ tokens
 
@@ -430,28 +485,21 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
     });
 
   if (sendable === undefined) {
-    return (
-      <div class="grid two">
-        <Card>{reading.error === undefined ? <Loading>Reading the tokens and the chain…</Loading> : <TaskStatus task={reading} name="read" />}</Card>
-      </div>
-    );
+    return <Card>{reading.error === undefined ? <Loading>Reading the tokens and the chain…</Loading> : <TaskStatus task={reading} name="read" />}</Card>;
   }
   if (token === undefined) {
     return (
-      <div class="grid two">
-        <Card>
-          <p class="muted">This wallet holds no token it can send.</p>
-        </Card>
-      </div>
+      <Card>
+        <p class="muted">This wallet holds no token it can send.</p>
+      </Card>
     );
   }
   const place = token.kind === 'nft' ? token.token.place : token.amount > 0n ? 'address' : token.vault > 0n ? 'vault' : 'earlier';
 
   return (
-    <div class="grid two">
-      <div class="stack">
+    <div class="stack">
         {stage.at === 'form' && (
-          <Card cls="token-form-card">
+          <Card cls="token-form-card send-card">
             <div class="field">
               <span class="field-label">Token</span>
               <div class="token-picker" role="radiogroup" aria-label="Token">
@@ -465,7 +513,10 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
             {place === 'vault' && (
               <Notice>
                 <div class="stack-s">
-                  <span>This token is at a vault address. It is moved to an ordinary address of the wallet first; that goes through the wallet's controller and costs a fee.</span>
+                  <span>
+                    This token is at a vault address. It is moved to an ordinary address of the wallet first.{' '}
+                    <Info label="Why it is moved first">That goes through the wallet's controller and costs a fee.</Info>
+                  </span>
                   <div>
                     <Button small kind="secondary" task={task} name="move" onClick={() => void move('vault')}>
                       Move it to an ordinary address
@@ -489,7 +540,13 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
             {place === 'address' && (
               <>
                 {token.kind === 'fungible' && (
-                  <Field label="Amount" id="token-amount" error={errors.amount} hint={<TokenAmountHint text={amount} decimals={decimals} token={token} />}>
+                  <div class="field">
+                    <div class="field-head">
+                      <InfoLabel htmlFor="token-amount" label="About this token's units" info={<TokenAmountInfo decimals={decimals} token={token} />}>
+                        Amount
+                      </InfoLabel>
+                      <Available>{amountText(token.amount, token.names)}</Available>
+                    </div>
                     <div class="token-amount-row">
                       <div class="input-unit token-unit">
                         <TextInput id="token-amount" numeric value={amount} onInput={setAmount} placeholder={decimals === 0 ? '0' : `0.${'0'.repeat(decimals)}`} invalid={errors.amount !== undefined} />
@@ -499,13 +556,29 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
                         All
                       </Button>
                     </div>
-                  </Field>
+                    {errors.amount !== undefined ? <div class="field-error">{errors.amount}</div> : <TokenAmountHint text={amount} decimals={decimals} token={token} />}
+                  </div>
                 )}
-                <Field label="To" id="token-to" hint="The receiver's token address. A plain Bitcoin Cash address is not taken for a token." error={errors.to}>
+                <div class="field">
+                  <div class="field-head">
+                    <InfoLabel
+                      htmlFor="token-to"
+                      label="About token addresses"
+                      info={
+                        <>
+                          <span>The receiver's token address. A plain Bitcoin Cash address is not taken for a token.</span>
+                          <span>A token goes only to an address written for tokens. Such an address pays the same as the plain one; its form is the receiver's word that their wallet knows tokens.</span>
+                        </>
+                      }
+                    >
+                      To
+                    </InfoLabel>
+                  </div>
                   <WithScan filter={tokenAddress(network)} onScan={setTo}>
                     <TextInput id="token-to" value={to} onInput={(value) => { setTo(value); setPlain(false); }} placeholder={network === 'mainnet' ? 'bitcoincash:z…' : 'bchtest:z…'} invalid={errors.to !== undefined || plain} />
                   </WithScan>
-                </Field>
+                  {errors.to !== undefined && errors.to !== '' && <div class="field-error">{errors.to}</div>}
+                </div>
                 {plain && (
                   <Notice tone="bad">
                     <div class="stack-s plain-refusal">
@@ -516,6 +589,7 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
                   </Notice>
                 )}
                 {problem !== undefined && <Notice tone="warn">{problem}</Notice>}
+                <FeeLine owner={owner} />
                 <TaskStatus task={task} />
                 <div class="actions">
                   <Button task={task} name="review" onClick={() => void review()}>
@@ -528,7 +602,7 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
           </Card>
         )}
         {stage.at === 'review' && (
-          <Card title="Check and send" cls="token-review">
+          <Card title="Check and send" cls="token-review send-review">
             <TokenReview stage={stage} />
             {controls(stage.token) && stage.token.kind === 'nft' && <Controlled token={stage.token.token} understood={understood} onUnderstood={setUnderstood} />}
             <TaskStatus task={task} name="send" />
@@ -571,43 +645,42 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
             </div>
           </Card>
         )}
-      </div>
-      <div class="stack">
-        <Card flat>
-          <div class="stack-s">
-            <h3>Sending a token</h3>
-            <p class="small muted">A token goes only to an address written for tokens. Such an address pays the same as the plain one; its form is the receiver's word that their wallet knows tokens.</p>
-            <p class="small muted">The network fee is paid in Bitcoin Cash from the wallet's ordinary coins, never from a token's coin. With the token goes the smallest amount of Bitcoin Cash an output with a token may hold.</p>
-            {owner.balance !== undefined && (
-              <p class="small">
-                Bitcoin Cash for fees: <Amount satoshis={owner.balance.recoverable} />
-              </p>
-            )}
-          </div>
-        </Card>
-      </div>
     </div>
   );
 };
 
-/** Under the amount: the raw units it comes to, or that the tokens are counted in raw units. */
-const TokenAmountHint = ({ text, decimals, token }: { text: string; decimals: number; token: Extract<SendableToken, { kind: 'fungible' }> }) => {
-  const parsed = text.trim() === '' ? undefined : parseUnits(text, decimals);
+type Fungible = Extract<SendableToken, { kind: 'fungible' }>;
+
+/**
+ * Under the amount: the raw units it comes to, where the tokens are named; and, in view, that templates you
+ * trust disagree about their name.
+ */
+const TokenAmountHint = ({ text, decimals, token }: { text: string; decimals: number; token: Fungible }) => {
+  const parsed = text.trim() === '' || token.names?.named === undefined ? undefined : parseUnits(text, decimals);
+  if (typeof parsed !== 'bigint' && token.names?.disputed === undefined) return null;
+  return (
+    <span class="hint stack-xs">
+      {typeof parsed === 'bigint' && <span>{rawUnits(parsed)}</span>}
+      {token.names?.disputed !== undefined && <NameSource naming={token.names} />}
+    </span>
+  );
+};
+
+/** Behind the amount's "?": the token's units, where its name comes from, and what is not yet available. */
+const TokenAmountInfo = ({ decimals, token }: { decimals: number; token: Fungible }) => {
   const elsewhere = token.vault + token.earlier;
   return (
-    <span class="stack-xs">
+    <>
       <span>
         {token.names?.named === undefined
           ? 'In whole units: no template you trust gives these tokens a name or decimals.'
-          : typeof parsed === 'bigint'
-            ? `${rawUnits(parsed)}. ${token.names.named.symbol ?? ''} has ${decimals === 1 ? 'one decimal' : `${decimals} decimals`}.`
-            : `${token.names.named.symbol ?? ''} has ${decimals === 1 ? 'one decimal' : `${decimals} decimals`}; nothing is rounded.`}{' '}
+          : `${token.names.named.symbol ?? ''} has ${decimals === 1 ? 'one decimal' : `${decimals} decimals`}; nothing is rounded.`}{' '}
         Up to {amountText(token.amount, token.names)}.
       </span>
-      {token.names !== undefined && <NameSource naming={token.names} />}
-      {elsewhere > 0n && <span class="small muted">{amountText(elsewhere, token.names)} more {token.vault > 0n ? 'at vault addresses' : 'at addresses of an earlier phone'} {token.vault > 0n && token.earlier > 0n ? 'and elsewhere ' : ''}are moved to an ordinary address before they can be sent.</span>}
-      {token.withNfts > 0n && <span class="small muted">{amountText(token.withNfts, token.names)} more are on coins with an NFT, and move only with it.</span>}
-    </span>
+      {token.names?.named !== undefined && <NameSource naming={token.names} />}
+      {elsewhere > 0n && <span>{amountText(elsewhere, token.names)} more {token.vault > 0n ? 'at vault addresses' : 'at addresses of an earlier phone'} {token.vault > 0n && token.earlier > 0n ? 'and elsewhere ' : ''}are moved to an ordinary address before they can be sent.</span>}
+      {token.withNfts > 0n && <span>{amountText(token.withNfts, token.names)} more are on coins with an NFT, and move only with it.</span>}
+    </>
   );
 };
 
@@ -633,7 +706,7 @@ const TokenReview = ({ stage }: { stage: Extract<TokenStage, { at: 'review' }> }
   const rows: [ComponentChildren, ComponentChildren][] = [
     [
       <>
-        Sends
+        {naming?.named === undefined ? 'Sends' : <Named name="Sends" label="Where the name comes from" detail={<NameSource naming={naming} />} />}
         <small>{token.kind === 'fungible' ? (naming?.named === undefined ? 'Tokens without a name' : naming.named.name) : token.token.capability === 'none' ? 'An NFT, unchanged' : `An NFT with ${token.token.capability} capability, unchanged`}</small>
       </>,
       <strong>
@@ -644,19 +717,21 @@ const TokenReview = ({ stage }: { stage: Extract<TokenStage, { at: 'review' }> }
   ];
   if (quote.tokenChange !== undefined) {
     rows.push([
-      <>
-        Comes back as token change<small>To a new change address of this wallet</small>
-      </>,
+      <Named name="Comes back as token change" label="Where the rest goes" detail="To a new change address of this wallet." />,
       <TokenAmount amount={quote.tokenChange.amount} naming={token.kind === 'fungible' ? token.names : undefined} />,
     ]);
   }
-  rows.push([<>Bitcoin Cash with the token<small>The least an output with a token may hold; it goes to the receiver</small></>, <Sat satoshis={quote.sends.satoshis} />]);
-  rows.push([<>Network fee<small>{quote.bytes} bytes, from the wallet's ordinary coins</small></>, <Sat satoshis={quote.feeSatoshis} />]);
-  rows.push([<><strong>Leaves the wallet</strong><small>In Bitcoin Cash: the fee and what goes with the token</small></>, <strong><Amount satoshis={quote.leavesSatoshis} exact /></strong>]);
+  rows.push([<Named name="Bitcoin Cash with the token" label="About the Bitcoin Cash with the token" detail="The least an output with a token may hold; it goes to the receiver." />, <Sat satoshis={quote.sends.satoshis} />]);
+  rows.push([<FeeName detail={`${quote.bytes} bytes at one satoshi per byte, paid from the wallet's ordinary coins.`} />, <Sat satoshis={quote.feeSatoshis} />]);
+  rows.push([<Named name={<strong>Leaves the wallet</strong>} label="About what leaves the wallet" detail="In Bitcoin Cash: the fee and what goes with the token." />, <strong><Amount satoshis={quote.leavesSatoshis} exact /></strong>]);
+  const named = token.kind === 'fungible' && naming?.named?.symbol !== undefined && naming.named.decimals !== undefined ? naming.named : undefined;
   return (
     <div class="stack-s">
+      <Hero label="You send" to={stage.to} unit={token.kind === 'fungible' ? (named?.symbol ?? (quote.sends.amount === 1n ? 'unit' : 'units')) : ''}>
+        {token.kind === 'fungible' ? (named?.decimals === undefined ? quote.sends.amount.toLocaleString('en-US') : formatUnits(quote.sends.amount, named.decimals)) : tokenLabel(token)}
+      </Hero>
       <KeyValues entries={rows} />
-      {naming !== undefined && <NameSource naming={naming} />}
+      {naming?.disputed !== undefined && <NameSource naming={naming} />}
       {token.kind === 'nft' && token.token.meaning === 'unknown' && token.token.capability === 'none' && <p class="small muted">No template you trust says what this token stands for. It goes whole, as it is.</p>}
       {quote.remainderSatoshis > 0n && (
         <Notice>

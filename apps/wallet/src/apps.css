@@ -60,6 +60,117 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .moved-head > .amount { margin-left: auto; }
 
 .decide { margin-top: 0; }
+
+/*
+ * The decision on a request stays where a thumb reaches it: at the foot of the screen while the review scrolls
+ * under it, above the bar of a phone, at the foot of the card once it is reached.
+ */
+.request-card .decide {
+  position: sticky; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); z-index: 4;
+  margin: 0 -16px; padding: 12px 16px; border-top: 1px solid var(--line);
+  background: var(--surface); box-shadow: 0 -6px 16px -10px rgb(23 33 43 / 25%);
+}
+@media (min-width: 600px) { .request-card .decide { margin: 0 -24px; padding: 12px 24px; } }
+@media (min-width: 960px) { .request-card .decide { bottom: 0; } }
+
+/* ------------------------------------------------------------------ the review of an action */
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* The picture and the headline, set apart. */
+.review-summary {
+  container-type: inline-size; display: flex; flex-direction: column; gap: 16px;
+  padding: 16px; border-radius: var(--r-m); background: var(--sunken); border: 1px solid var(--line);
+}
+
+/* The picture: the wallet, the application, and what goes each way. On a narrow card the two stand above the arrows. */
+.flow { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'wallet app' 'lanes lanes'; gap: 14px 12px; }
+.flow-node { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.flow-node.mine { grid-area: wallet; }
+.flow-node.theirs { grid-area: app; align-items: flex-end; text-align: right; }
+.flow-icon {
+  flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--line); color: var(--accent);
+}
+.flow-node.theirs .flow-icon { color: var(--ink); }
+.flow-icon svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.flow-name { font-weight: 650; font-size: 14px; line-height: 1.3; min-width: 0; overflow-wrap: break-word; }
+.flow-lanes { grid-area: lanes; display: flex; flex-direction: column; justify-content: center; gap: 12px; min-width: 0; }
+.lane { display: flex; flex-direction: column; gap: 6px; }
+.lane-items { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; min-height: 28px; }
+.lane-line { --lane: color-mix(in srgb, var(--muted) 55%, transparent); position: relative; height: 2px; margin: 0 7px; border-radius: 2px; background: var(--lane); }
+.lane.back .lane-line { --lane: var(--accent); }
+.lane-line::after { content: ''; position: absolute; top: -5px; border-top: 6px solid transparent; border-bottom: 6px solid transparent; }
+.lane.out .lane-line::after { right: -7px; border-left: 9px solid var(--lane); }
+.lane.back .lane-line::after { left: -7px; border-right: 9px solid var(--lane); }
+.flow-bch { font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.flow-bch .unit { font-size: 13px; font-weight: 600; color: var(--muted); }
+.flow-nothing { color: var(--muted); font-size: 14px; }
+
+@container (min-width: 360px) {
+  .flow { grid-template-columns: 88px minmax(0, 1fr) 88px; grid-template-areas: 'wallet lanes app'; align-items: center; }
+  .flow-node, .flow-node.theirs { align-items: center; text-align: center; gap: 6px; }
+  .flow-icon { width: 44px; height: 44px; border-radius: 12px; }
+  .flow-icon svg { width: 22px; height: 22px; }
+  .flow-name { font-size: 13px; }
+}
+
+/* A token as a chip: amount and name, or raw units with the category. */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 10px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.chip-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.chip.nft .chip-dot { border-radius: 2px; transform: rotate(45deg); background: var(--warn); }
+.chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chip button.hex { font-size: 12px; color: var(--muted); }
+
+/* The headline: by how much the wallet goes up or down. */
+.headline { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; padding-top: 14px; border-top: 1px solid var(--line); }
+.headline-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.headline-figure { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.headline-figure .unit { font-size: 17px; font-weight: 600; color: var(--muted); margin-left: 6px; letter-spacing: 0; }
+.headline-sub { font-size: 13px; color: var(--muted); }
+.headline-sub .amount { color: var(--muted); }
+.headline-tokens { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 8px; margin-top: 8px; font-size: 14px; }
+.headline-tokens > span:first-child { color: var(--muted); font-weight: 600; font-size: 13px; }
+.headline-tokens .chips { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+
+/* What asks for care, in view. */
+.standing { padding: 12px 14px; border-radius: var(--r-s); background: var(--warn-soft); }
+.standing.bad { background: var(--bad-soft); }
+.standing .status-body { color: var(--ink); font-size: 14px; }
+.destroyed-warning strong { font-weight: 650; }
+.destroyed-list { list-style: none; margin: 2px 0 0; padding: 0; }
+.destroyed-list > li { margin: 0; padding: 8px 0 0; border-top: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); }
+.destroyed-list > li + li { margin-top: 8px; }
+.destroyed-name { font-weight: 600; }
+.destroyed-whose { display: inline-block; font-size: 12px; font-weight: 600; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 14%, transparent); }
+
+/* The action in the template's words, compact. */
+.review .their-words .quote .kv > div { padding: 7px 0; }
+.review .their-words .kv dt small { font-size: 12.5px; }
+.review .their-words .quote p { color: var(--ink); }
+
+/* Folded sections: the figures in full, the template. */
+.folds { border-top: 1px solid var(--line); }
+.fold { border-bottom: 1px solid var(--line); }
+.fold > summary {
+  display: grid; grid-template-columns: minmax(0, 1fr) 20px; column-gap: 12px; align-items: center;
+  min-height: 56px; padding: 10px 0; cursor: pointer; list-style: none;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::after {
+  content: ''; grid-column: 2; grid-row: 1 / span 2; justify-self: center; width: 8px; height: 8px; margin-top: -4px;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform 0.15s;
+}
+.fold[open] > summary::after { transform: rotate(-135deg); margin-top: 4px; }
+.fold > summary:hover .fold-title { color: var(--accent); }
+.fold-title { grid-column: 1; font-weight: 650; }
+.fold-hint { grid-column: 1; color: var(--muted); font-size: 13px; }
+.fold[open] { padding-bottom: 16px; }
+.fold > :not(summary) + :not(summary) { margin-top: 12px; }
+.fold > .moved-note:first-of-type { margin: 0; }
 .failure { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 
 /* Connections */
