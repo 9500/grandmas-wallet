@@ -254,6 +254,14 @@ The owner runs the wallet page on a phone and the recoverer's page and the appli
 
 The owner asked for tokens to be sent and received like Bitcoin Cash, and named. Every address has a token-aware form, which the Receive screen shows on request. The Send screen chooses between Bitcoin Cash and a token: an amount of a fungible token, gathered from the wallet's coins of the category with the rest coming back as token change, or one NFT whole; the fee from the wallet's ordinary coins only. A token goes only to a token-aware address; a plain one is refused with what to ask the receiver for. A token that controls a position, or an NFT with minting or mutable capability, says so in the review and needs a tick. A token at a vault address is moved to an ordinary address first. The owner chose that names come only from templates the user trusts, with no registry: a declaration may describe the tokens its template deals in (proposal section 13.3), and the ParyonUSD and Savings Jar declarations now name PUSD and the two keys. Their content hashes changed; a wallet that trusted the earlier declaration keeps working with it, and takes the new one, as a template to trust again, when a page presents it and the user approves; before, it refused such a request outright (AP01 was changed to say so). Closed by unit and simulated-chain tests (TK01 to TK10) and a scripted check of the screens in a browser from the fixtures page (`scripts/token-send-check.ts`). Still to do: a run on the local node and on chipnet, real phones, and the release of the wallet page before the pages that present the new declarations. The loan course's last step (`scripts/browser-run-loan.ts`) sends the loan key with the "Tokens" card, which is gone; it has to choose the key on the Send screen, give the token-aware form of the address and tick before it runs again.
 
+## The recoverer creates the wallet (18 November 2026)
+
+The owner found the set-up too long and unlike a wallet: the phone took in the recoverer's link, compared a fingerprint, showed a funding address, waited for coins, paid itself, created the wallet in visible steps and sent a kit. It should feel like enrolling in a bank's mobile app, for two uses served by one recoverer page: a bank, which holds its own Bitcoin Cash and gives a new customer a small starting balance as part of its service, and a friend or family member, who funds the first transaction. The first transaction is trusted, and the set-up is to be as simple as possible.
+
+Decided: **whoever has the coins creates the wallet.** The phone scans the recoverer's code and sends a signed, sealed request over the session the code offers; the recoverer creates the wallet from its own coins, with its own recovery key, the waiting period and the starting balance, keeps the kit it assembles itself and leaves its receipt; the phone checks the creation and opens its wallet (proposal sections 7.9, 9 and 14.4). Requests are carried out once, by their identifier, so a reload on either side or a lost answer gives the same wallet. A bank's page creates without asking; a friend's page asks once. A lost phone goes the same way: the recoverer's page shows a code for the new phone, the takeover request arrives over the session, the request follows at once, and the hand-over comes back over the session or as a code. The owner's allowance for the recoverer's fees is dropped: the recoverer puts a fee reserve at each wallet's fee address and tops it up from its balance. A creation that disappears means the set-up did not hold; the wallet says so and is set up again with the recoverer, and makes no identity of its own. The contracts did not change. The wallet's own creation from a funding address stays in the library for the tests and the scripts of earlier runs; no screen offers it. Replacing the recoverer, a move to a new phone and a new waiting period work as before, with links where they had them. The wallet's new screens have a title, the main figure and the main action; explanations are to go behind a "?" (places marked `info:` in the code).
+
+Closed by unit, protocol and simulated-chain tests (CR05 to CR10, RC14, RC15, SW09), a check of the screens in browsers through a relay on this machine (`scripts/session-check.ts`), and the wallet course in browsers on the local node (`docs/runs/wallet-set-up-local-node.md`). Still to do: real phones, public relays, chipnet, the jar and loan courses in browsers with the new first steps, and the release of both pages together.
+
 ## Which stage closes which test
 
 | Stage | Tests |
@@ -268,8 +276,9 @@ The owner asked for tokens to be sent and received like Bitcoin Cash, and named.
 | 8 | SJ01–SJ06, AP10 |
 | 9 | PY01–PY04 |
 | Tokens (18 November 2026) | TK01–TK10 |
+| The recoverer creates the wallet (18 November 2026) | CR05–CR10, RC14, RC15, SW09 |
 
-All 135 tests of the proposal's section 21 are in this table once.
+All 144 tests of the proposal's section 21 are in this table once.
 
 ## Decisions
 
