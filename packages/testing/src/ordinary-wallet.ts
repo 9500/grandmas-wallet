@@ -30,6 +30,8 @@ import {
  *   in which a push of 65 zero bytes is replaced by the signature and a push
  *   of 33 zero bytes by the public key
  * - every signature is Schnorr over all outputs and all spent outputs
+ * - a source output may carry a token (`category` and `commitment` as hex, `amount` as `<bigint: Nn>`); the
+ *   coin is still an ordinary address, and the token is part of what the signature covers
  */
 
 const CHAINS = { receive: 0, change: 1, defi: 7 } as const;
@@ -48,6 +50,20 @@ const amount = (value: unknown): bigint => {
   const match = typeof value === 'string' ? /^<bigint: (\d+)n>$/.exec(value) : null;
   if (match?.[1] === undefined) throw new Error('An amount is not in the expected form.');
   return BigInt(match[1]);
+};
+
+const CAPABILITIES = ['none', 'mutable', 'minting'] as const;
+
+const tokenOf = (value: unknown): Output['token'] => {
+  if (value === undefined) return undefined;
+  const { category, amount: fungible, nft } = (value ?? {}) as { category?: unknown; amount?: unknown; nft?: { capability?: unknown; commitment?: unknown } };
+  const read: NonNullable<Output['token']> = { category: bytes(category), amount: amount(fungible) };
+  if (nft !== undefined) {
+    const capability = CAPABILITIES.find((name) => name === nft.capability);
+    if (capability === undefined) throw new Error('A token\'s capability is not one the wallet knows.');
+    read.nft = { capability, commitment: bytes(nft.commitment ?? '') };
+  }
+  return read;
 };
 
 export interface OrdinaryWallet {
@@ -75,7 +91,10 @@ export const ordinaryWallet = (seed: Uint8Array, network: 'mainnet' | 'testnet' 
       const transaction = decodeTransactionBch(bytes(hex));
       if (typeof transaction === 'string') throw new Error(transaction);
       if (transaction.inputs.length !== sourceOutputs.length) throw new Error('Inputs and source outputs differ in number.');
-      const spent: Output[] = sourceOutputs.map((source) => ({ lockingBytecode: bytes(source['lockingBytecode']), valueSatoshis: amount(source['valueSatoshis']) }));
+      const spent: Output[] = sourceOutputs.map((source) => {
+        const token = tokenOf(source['token']);
+        return { lockingBytecode: bytes(source['lockingBytecode']), valueSatoshis: amount(source['valueSatoshis']), ...(token === undefined ? {} : { token }) };
+      });
       for (const [inputIndex, name, addressIndex] of request.inputPaths) {
         const input = transaction.inputs[inputIndex];
         const source = sourceOutputs[inputIndex];

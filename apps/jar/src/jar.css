@@ -1,0 +1,97 @@
+/*
+ * The Savings Jar page: the visual system of the wallet and recoverer pages, with the application's role
+ * colour of the design overview as its accent, so that it is not taken for the wallet itself. Only what
+ * those pages do not have is added here.
+ */
+
+:root[data-role='application'] {
+  --accent: #6a3fc4;
+  --accent-soft: #f0eafb;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-role='application'] {
+    --accent: #b79bff;
+    --accent-ink: #1b1233;
+    --accent-soft: #2a2242;
+  }
+}
+
+/* One column on a phone; on a desktop the jars and the form for a new one side by side. */
+:root[data-role='application'] .narrow .content { max-width: 1040px; }
+.columns { display: grid; gap: 16px; align-items: start; }
+@media (min-width: 960px) {
+  .columns { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; }
+  .columns > .stack { gap: 24px; }
+}
+
+.lead { color: var(--muted); font-size: 17px; max-width: 40em; }
+@media (min-width: 960px) { .intro { margin-bottom: 8px; } }
+
+/* the two kinds of wallet, under the connection address */
+.kinds { display: grid; gap: 12px; margin: 16px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); }
+.kinds > div { display: grid; gap: 2px; }
+.kinds dt { font-weight: 650; font-size: 15px; }
+.kinds dd { margin: 0; color: var(--muted); font-size: 15px; }
+
+.how { margin: 0; padding: 0; list-style: none; counter-reset: how; }
+.how > li { counter-increment: how; position: relative; padding-left: 36px; margin: 0; }
+.how > li + li { margin-top: 14px; }
+.how > li::before {
+  content: counter(how); position: absolute; left: 0; top: 1px; width: 24px; height: 24px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 13px; font-weight: 700; background: var(--accent-soft); color: var(--accent);
+}
+.how strong { display: block; font-weight: 650; }
+.how span { color: var(--muted); font-size: 15px; }
+
+.link-state { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; margin-top: 12px; }
+
+/* the wallet that is connected */
+.connected { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.connected .status { flex: 1 1 16em; min-width: 0; }
+.connected .button, .connected button { flex: none; }
+
+/* a jar */
+.jars { list-style: none; margin: 0; padding: 0; }
+.jar { margin: 0; padding: 16px 0; border-top: 1px solid var(--line); }
+.jar:first-child { border-top: 0; padding-top: 4px; }
+.jar:last-child { padding-bottom: 0; }
+.jar-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+.jar-amount { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.jar-amount .unit { font-size: 15px; font-weight: 600; color: var(--muted); margin-left: 5px; letter-spacing: 0; }
+.jar-amount.nothing { color: var(--muted); }
+.jar-when { margin-top: 2px; font-size: 15px; }
+.jar-note { margin-top: 4px; color: var(--muted); font-size: 14px; }
+.jar-key { margin-top: 4px; color: var(--muted); font-size: 13px; }
+.jar-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.jar-actions > button { flex: 1 1 auto; }
+@media (min-width: 600px) { .jar-actions > button { flex: 0 0 auto; } }
+.jar .notice { margin-top: 12px; }
+
+.panel { margin-top: 12px; padding: 12px; border-radius: var(--r-s); background: var(--sunken); border: 1px solid var(--line); }
+.panel .field { margin-bottom: 12px; }
+.panel .value { background: var(--surface); }
+.panel details.more { margin-top: 8px; }
+.inline-form { display: flex; gap: 8px; align-items: flex-start; }
+.inline-form .input-unit { flex: 1 1 auto; min-width: 0; }
+.inline-form button { flex: none; }
+
+/* the form for a new jar */
+input[type='datetime-local'] {
+  font: inherit; font-size: 16px; width: 100%; min-height: 44px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-s); background: var(--surface); color: var(--ink);
+}
+input[type='datetime-local'][aria-invalid='true'] { border-color: var(--bad); }
+.seg + input { margin-top: 8px; }
+.seg button { white-space: nowrap; }
+@media (max-width: 400px) { .seg button { font-size: 14px; padding: 8px 4px; } }
+.summary { padding: 12px; border-radius: var(--r-s); background: var(--accent-soft); font-size: 15px; margin-bottom: 16px; }
+.summary strong { font-variant-numeric: tabular-nums; }
+
+/* what is on its way */
+.steps.compact > li { min-height: 0; padding-bottom: 12px; }
+.steps.compact > li:last-child { padding-bottom: 0; }
+.on-way .card-head { margin-bottom: 8px; }
+.on-way .notice { margin-top: 12px; }
+
+.qr-small .qr { max-width: 180px; }
+.form-foot { margin-top: 12px; }

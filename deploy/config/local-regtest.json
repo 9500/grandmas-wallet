@@ -5,7 +5,7 @@
   "jarUrl": "http://localhost:8103/",
   "stores": ["http://localhost:8111", "http://localhost:8112"],
   "chain": ["ws://127.0.0.1:60403"],
-  "relays": [],
+  "relays": ["wss://relay.riften.net:443", "wss://relay.cauldron.quest:443"],
   "explorer": "",
   "secondsPerBlock": 600
 }
