@@ -2,9 +2,9 @@ import '@grandmas-wallet/ui/styles.css';
 import './apps.css';
 
 import { type Output, binToHex, encodeLockingBytecodeP2sh32 as p2sh32, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
-import type { ActionPreview, HeldToken, TemplateSummary, TokenNaming, TokenSendQuote, TokenSendRequest } from '@grandmas-wallet/app';
+import { type ActionPreview, type HeldToken, type TemplateSummary, type TokenNaming, TokenNames, type TokenSendQuote, type TokenSendRequest } from '@grandmas-wallet/app';
 import { INPUT_BYTES, smallestOutputValue, transactionBytes } from '@grandmas-wallet/core';
-import { Button, Card, Field, Frame, HandOff, TextArea, TextInput } from '@grandmas-wallet/ui';
+import { Button, Card, Field, Frame, HandOff, PageHead, Pill, TextArea, TextInput, formatTime } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useState } from 'preact/hooks';
 
@@ -20,16 +20,19 @@ import { RECOVERER_LINK, paymentAddress } from './scan.js';
 import { ScanDialog, WithScan } from './Scanner.js';
 import { SealedHandOff } from './SealedHandOff.js';
 import type { StoredRecipient } from './session.js';
+import { TokenNamesContext } from './token-words.js';
 
 /*
  * Parts of the wallet's screens, fed from fixed data, for looking at them in a browser without a wallet: the
- * Applications screen (`fixtures.html?show=tokens|review|closing`), the fields that take a scanned code
- * (`show=scan`, and `&open` to show the scanner already opened), and a recoverer's code taken in, with something
- * sealed handed to the recoverer's page over the session the code offers (`show=recoverer`), the Send screen with
- * tokens to choose from (`show=send-token`, `&nft` to open with the key chosen), and the Receive screen
- * (`show=receive`). Served by the
- * development server; the build of the page does not include it. The template here is an invented example, as
- * a template would describe itself, and what is handed to the recoverer is a sample that their page cannot open.
+ * Applications screen (`fixtures.html?show=tokens`), a request for a decision on an action (`show=review` to
+ * borrow, `closing` to repay and close, `box-open` and `box-empty` for the actions of a second template), the
+ * fields that take a scanned code (`show=scan`, and `&open` to show the scanner already opened), and a
+ * recoverer's code taken in, with something sealed handed to the recoverer's page over the session the code
+ * offers (`show=recoverer`), the Send screen for Bitcoin Cash (`show=send`) and with tokens to choose from
+ * (`show=send-token`, `&nft` to open with the key chosen), and the Receive screen (`show=receive`, `&again` for an
+ * address shown again). Served by the development server; the build of the page does not include it. The
+ * templates here are invented examples, as a template would describe itself, and what is handed to the recoverer
+ * is a sample that their page cannot open.
  */
 
 const CATEGORY = '5c1d8c7d635141a15d9d41747ebe30422ca50237c41c54c45714d09114439382';
@@ -168,6 +171,120 @@ const closing: ActionPreview = {
   firstUse: false,
 };
 
+// ------------------------------------------------------------------ a second template: money kept until a date
+
+const BOX_KEY = '41c7a9e3d2b8f0657a1c3e9d4b2f8a6c0e5d7b9a1f3c6e8d2b4a7f9c1e3d5b80';
+const box: TemplateSummary = {
+  identifier: '6f0b3d1e9c2a4857b6d1e0f3a9c8b7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0',
+  contentHash: 'd2e4f6a8b0c1d3e5f7a9b1c3d5e7f9a0b2c4d6e8f0a1b3c5d7e9f1a2b4c6d8e0',
+  declaration: '8c6e4a2f0d8b6a4c2e0f8d6b4a2c0e8f6d4b2a0c8e6f4d2b0a8c6e4f2d0b8a6c',
+  name: 'Example money box (test network)',
+  description: 'Money kept until a date. Anyone can pay into a box. From its date on, whoever holds the box\'s key can empty it.',
+  actions: [
+    { action: 'open', name: 'Open a money box', description: 'Make a new box with its key, and pay the first money in. It stays in the box until its date.' },
+    { action: 'deposit', name: 'Pay into a money box', description: 'Add money to a box. It stays there until the box\'s date.' },
+    { action: 'withdraw', name: 'Empty a money box', description: 'Take everything out of the box. Possible from the box\'s date on. The key stays with you, so the box can be used again.' },
+  ],
+  verdict: { statement: 'verified', basis: 'The checks this wallet can run have passed, and a token made with the template led to its position on chain. This does not mean that the contract was audited.' },
+  trusted: false,
+};
+const boxAt = 'aa20'.padEnd(70, '9');
+
+const boxOpening: ActionPreview = {
+  template: box,
+  words: {
+    action: { name: 'Open a money box', description: 'Make a new box with its key, and pay the first money in. It stays in the box until its date.' },
+    outcome: 'A money box was opened with 50000 satoshis.',
+    values: [
+      { name: 'Box key', description: 'The token category of the box\'s key.', value: BOX_KEY },
+      { name: 'Opens on', description: 'When the box can be emptied, as a Unix time.', value: '1798761600' },
+      { name: 'Amount to put in', description: 'Satoshis to put into the box.', value: '50000' },
+      { name: 'Key holder', description: 'Where the box\'s key goes: an address of the wallet.', value: 'aa20'.padEnd(70, 'b') },
+    ],
+  },
+  figures: {
+    givesSatoshis: 60_000n,
+    getsSatoshis: 9_550n,
+    feeSatoshis: 450n,
+    remainderSatoshis: 0n,
+    bytes: 450,
+    intoApplicationSatoshis: 50_000n,
+    fromApplication: { satoshis: 0n, coins: 0 },
+    applicationInputs: [],
+    toOthers: [{ name: 'Money box', lockingBytecode: boxAt, satoshis: 50_000n }],
+    toWallet: [
+      { kind: 'receive', satoshis: 1_000n, token: { category: BOX_KEY, amount: 0n, nft: { capability: 'none', commitment: '80f55e6b' } } },
+      { kind: 'left over', satoshis: 8_550n },
+    ],
+    tokensSpent: [],
+    tokensNet: [],
+    tokensDestroyed: [],
+    payingItself: { feeSatoshis: 219n },
+  },
+  firstUse: true,
+};
+
+const boxEmptying: ActionPreview = {
+  template: { ...box, trusted: true },
+  words: {
+    action: { name: 'Empty a money box', description: 'Take everything out of the box. Possible from the box\'s date on. The key stays with you, so the box can be used again.' },
+    outcome: 'Everything was taken out of a money box.',
+    values: [
+      { name: 'Box key', description: 'The token category of the box\'s key.', value: BOX_KEY },
+      { name: 'Opens on', description: 'When the box can be emptied, as a Unix time.', value: '1798761600' },
+    ],
+  },
+  figures: {
+    givesSatoshis: 1_000n,
+    getsSatoshis: 50_610n,
+    feeSatoshis: 390n,
+    remainderSatoshis: 0n,
+    bytes: 390,
+    intoApplicationSatoshis: -50_000n,
+    fromApplication: { satoshis: 50_000n, coins: 1 },
+    applicationInputs: [{ name: 'Money box', outpoint: `${'e1'.repeat(32)}:0`, satoshis: 50_000n }],
+    toOthers: [],
+    toWallet: [
+      { kind: 'receive', satoshis: 1_000n, token: { category: BOX_KEY, amount: 0n, nft: { capability: 'none', commitment: '80f55e6b' } } },
+      { kind: 'left over', satoshis: 49_610n },
+    ],
+    tokensSpent: [{ satoshis: 1_000n, token: { category: BOX_KEY, amount: 0n, nft: { capability: 'none', commitment: '80f55e6b' } } }],
+    tokensNet: [],
+    tokensDestroyed: [],
+    notBefore: 1_798_761_600,
+  },
+  firstUse: false,
+};
+
+/** What the templates the user trusts call the tokens of the reviews: the lending template names its dollar and its key, the box template its key. */
+const reviewNames = new TokenNames([
+  { description: { kind: 'fungible', category: UNITS, name: 'Example dollar', symbol: 'EXD', decimals: 2 }, template: { identifier: template.identifier, name: template.name } },
+  { description: { kind: 'nft', category: CATEGORY, name: 'Example key' }, template: { identifier: template.identifier, name: template.name } },
+  { description: { kind: 'nft', category: BOX_KEY, name: 'Box key' }, template: { identifier: box.identifier, name: box.name } },
+]);
+
+/** A request for a decision, as the Applications screen shows it, with the buttons that do nothing here. */
+const RequestFixture = ({ preview }: { preview: ActionPreview }) => (
+  <Card title={`${preview.template.name.replace(/ \(test network\)$/, '')} asks for your decision`} cls="request-card">
+    <div class="stack">
+      <div class="asker">
+        <Pill>Its own name, not verified</Pill>
+        <span class="small muted">Asked {formatTime(1_795_000_000)}</span>
+      </div>
+      <TokenNamesContext.Provider value={reviewNames}>
+        <ActionReview preview={preview} />
+      </TokenNamesContext.Provider>
+      <div class="actions decide">
+        <Button onClick={ignore}>Approve</Button>
+        <Button kind="quiet" onClick={ignore}>
+          Decline
+        </Button>
+      </div>
+      <p class="small muted">Nothing is signed or sent unless you approve.</p>
+    </div>
+  </Card>
+);
+
 /** Two fields that take a scanned code: the recoverer's link, and an address to pay. */
 const ScanFields = () => {
   const [link, setLink] = useState('');
@@ -274,6 +391,10 @@ const quoteOf = (request: TokenSendRequest): TokenSendQuote => {
   };
 };
 
+const again = new URLSearchParams(window.location.search).has('again');
+/** A payment of Bitcoin Cash from two coins, with change: the fee as the wallet would work it out. */
+const paymentBytes = transactionBytes([INPUT_BYTES.byKey, INPUT_BYTES.byKey], [{ lockingBytecode: destination, valueSatoshis: 0n }, { lockingBytecode: destination, valueSatoshis: 0n }]);
+
 /** A wallet that holds the tokens above, quotes as the wallet would, and sends nothing. */
 const tokenOwner = {
   session: { network: 'testnet', environment: { explorer: '' } },
@@ -282,8 +403,11 @@ const tokenOwner = {
   wallet: {
     quoteTokens: async (request: TokenSendRequest) => quoteOf(request),
     sendTokens: async (request: TokenSendRequest) => ({ transactionId: '3f'.repeat(32), bytes: quoteOf(request).bytes, feeSatoshis: quoteOf(request).feeSatoshis, remainderSatoshis: 0n, quote: quoteOf(request) }),
-    receiveAddress: async () => ({ address: { number: 7 }, again: false }),
-    vaultAddress: async () => ({ address: { number: 2 }, again: false }),
+    quotePay: async () => ({ feeSatoshis: BigInt(paymentBytes), remainderSatoshis: 0n, bytes: paymentBytes, change: true }),
+    quoteSendEverything: async () => ({ sentSatoshis: 52_340n - 175n, feeSatoshis: 175n, bytes: 175, transactions: 1, leftOut: 0 }),
+    pay: async () => ({ transactionId: '4e'.repeat(32), feeSatoshis: BigInt(paymentBytes), bytes: paymentBytes, remainderSatoshis: 0n }),
+    receiveAddress: async () => ({ address: { number: 7 }, again }),
+    vaultAddress: async () => ({ address: { number: 2 }, again }),
     address: (kind: number) => {
       const bytecode = p2sh32(new Uint8Array(32).fill(kind === 2 ? 0x5b : 0x3a));
       const text = (tokens: boolean) => (lockingBytecodeToCashAddress({ prefix: 'bchtest', bytecode, tokenSupport: tokens }) as { address: string }).address;
@@ -311,13 +435,17 @@ const Destinations = () => (
   </Card>
 );
 
+/** The same wallet with no tokens: the Send screen goes straight to Bitcoin Cash. */
+const coinOwner = { ...tokenOwner, balance: { ...tokenOwner.balance, tokens: [] } } as unknown as Owner;
+
 const show = new URLSearchParams(window.location.search).get('show') ?? 'tokens';
+const REVIEWS: Record<string, ActionPreview> = { review: borrowing, closing, 'box-open': boxOpening, 'box-empty': boxEmptying };
 if (show === 'send-token') chooseToken(new URLSearchParams(window.location.search).has('nft') ? `nft:${namedKey.outpoint}` : `fungible:${DOLLARS}`);
 const owner = { apps: { applications: { suggestions: [] } } } as unknown as Owner;
 const ignore = () => undefined;
 
 /** The wallet's own screens are shown in the frame the wallet gives them: with its navigation, and as wide. */
-const screen = show === 'send-token' ? 'send' : show === 'receive' ? 'receive' : undefined;
+const screen = show === 'send-token' || show === 'send' ? 'send' : show === 'receive' ? 'receive' : REVIEWS[show] !== undefined ? 'apps' : undefined;
 const navigation =
   screen === undefined
     ? {}
@@ -341,6 +469,11 @@ render(
           <Send owner={tokenOwner} />
           <Destinations />
         </>
+      ) : show === 'send' ? (
+        <>
+          <Send owner={coinOwner} />
+          <Destinations />
+        </>
       ) : show === 'receive' ? (
         <Receive owner={tokenOwner} />
       ) : show === 'scan' ? (
@@ -358,12 +491,22 @@ render(
           </Card>
         </div>
       ) : (
-        <div class="grid two">
-          <Card title="Check and carry out" cls="request-card">
+        <div class="stack">
+          <PageHead title="Applications" />
+          <div class="grid two apps-layout">
             <div class="stack">
-              <ActionReview preview={show === 'closing' ? closing : borrowing} />
+              <RequestFixture preview={REVIEWS[show] ?? borrowing} />
             </div>
-          </Card>
+            <div class="stack">
+              <Card title="Tokens">
+                <ul class="list tokens">
+                  {[open, unknown].map((token) => (
+                    <TokenRow owner={owner} token={token} onView={ignore} />
+                  ))}
+                </ul>
+              </Card>
+            </div>
+          </div>
         </div>
       )}
     </div>

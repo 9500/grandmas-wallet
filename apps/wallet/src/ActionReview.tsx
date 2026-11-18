@@ -1,15 +1,17 @@
 import type { ActionPreview, MovedOutput, TemplateSummary } from '@grandmas-wallet/app';
 import { InsufficientFundsError } from '@grandmas-wallet/core';
-import { Amount, KeyValues, More, Notice, Sat, Status, formatSatoshis, formatTime, plainError, shorten } from '@grandmas-wallet/ui';
+import { Amount, Icon, Info, KeyValues, More, Notice, Sat, Status, formatBch, formatSatoshis, formatTime, plainError, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useContext, useState } from 'preact/hooks';
 
 import { TokenNamesContext, amountText, rawUnits } from './token-words.js';
 
 /**
- * What the user sees before deciding on an action of an application's template: what the template is and
- * what the wallet can say about it; the action in the template's words; and the wallet's own figures from
- * the transaction it worked out. Nothing here knows any application: every name comes from the template.
+ * What the user sees before deciding on an action of an application's template. At the top, a picture of the
+ * action drawn from the wallet's own figures: the wallet on one side, the application on the other as its
+ * template names it, and what goes each way; under it, by how much the wallet goes up or down. Then whatever
+ * asks for care, always in view; the action in the template's words; and, folded, the wallet's own figures in
+ * full and the template. Nothing here knows any application: every name comes from the template.
  */
 
 /** A long hexadecimal value, shortened; a tap shows it whole. */
@@ -23,10 +25,18 @@ export const Hex = ({ value, head = 8, tail = 6 }: { value: string; head?: numbe
   );
 };
 
-/** A heading inside a card, small and quiet. */
-export const Part = ({ title, note, children, cls }: { title: string; note?: ComponentChildren; children: ComponentChildren; cls?: string }) => (
+/** A heading inside a card, small and quiet, with what it means behind a "?" or under it. */
+export const Part = ({ title, note, info, children, cls }: { title: string; note?: ComponentChildren; info?: ComponentChildren; children: ComponentChildren; cls?: string }) => (
   <section class={`part${cls === undefined ? '' : ` ${cls}`}`}>
-    <h3 class="part-title">{title}</h3>
+    <h3 class="part-title">
+      {title}
+      {info !== undefined && (
+        <>
+          {' '}
+          <Info label={`About "${title}"`}>{info}</Info>
+        </>
+      )}
+    </h3>
     {note !== undefined && <p class="small muted part-note">{note}</p>}
     {children}
   </section>
@@ -40,17 +50,18 @@ const RULES: Record<1 | 2 | 3 | 'names', string> = {
 };
 
 /** What the wallet can say about a template: verified, not verified, or a violation found. */
-export const Statement = ({ verdict }: { verdict: TemplateSummary['verdict'] }) => {
+export const Statement = ({ verdict, subject }: { verdict: TemplateSummary['verdict']; subject?: string }) => {
+  const prefix = subject === undefined ? '' : `${subject} `;
   if (verdict.statement === 'verified') {
     return (
-      <Status tone="good" title="Verified">
+      <Status tone="good" title={subject === undefined ? 'Verified' : `${prefix}verified`}>
         <p>{verdict.basis}</p>
       </Status>
     );
   }
   if (verdict.statement === 'not verified') {
     return (
-      <Status title="Not verified">
+      <Status tone={subject === undefined ? undefined : 'warn'} title={subject === undefined ? 'Not verified' : `${prefix}not verified`}>
         {verdict.reasons.map((reason) => (
           <p>{reason}</p>
         ))}
@@ -58,7 +69,7 @@ export const Statement = ({ verdict }: { verdict: TemplateSummary['verdict'] }) 
     );
   }
   return (
-    <Status tone="bad" title={verdict.violations.length === 1 ? 'A violation found' : `${verdict.violations.length} violations found`}>
+    <Status tone="bad" title={`${verdict.violations.length === 1 ? 'A violation found' : `${verdict.violations.length} violations found`}${subject === undefined ? '' : ` in the ${subject.toLowerCase()}`}`}>
       <ul class="violations">
         {verdict.violations.map((violation) => (
           <li>
@@ -73,13 +84,13 @@ export const Statement = ({ verdict }: { verdict: TemplateSummary['verdict'] }) 
 };
 
 /** A template: its own name and description, what the wallet can say about it, and what it can ask for. */
-export const TemplateView = ({ summary, showActions }: { summary: TemplateSummary; showActions?: boolean }) => (
+export const TemplateView = ({ summary, showActions, standing = true }: { summary: TemplateSummary; showActions?: boolean; standing?: boolean }) => (
   <div class="stack-s">
     <div>
       <div class="template-name">{summary.name}</div>
       {summary.description !== '' && <p class="template-description">{summary.description}</p>}
     </div>
-    <Statement verdict={summary.verdict} />
+    {standing && <Statement verdict={summary.verdict} />}
     {showActions === true && summary.actions.length > 0 && (
       <More summary={summary.actions.length === 1 ? 'The one action it has' : `The ${summary.actions.length} actions it has`}>
         <ul class="list">
@@ -105,9 +116,9 @@ export const TemplateView = ({ summary, showActions }: { summary: TemplateSummar
   </div>
 );
 
-/** The action as the template puts it. */
+/** The action as the template puts it: its name, what it does, and the values chosen for it. */
 export const TheirWords = ({ words }: { words: ActionPreview['words'] }) => (
-  <Part title="In the template's words" note="Written by whoever made the template. The wallet cannot tell whether they are true; the figures below are its own." cls="their-words">
+  <Part title="In the template's words" info="Written by whoever made the template. The wallet cannot tell whether they are true; the figures above are its own." cls="their-words">
     <div class="quote">
       <div class="quote-title">{words.action.name}</div>
       {words.action.description !== '' && <p>{words.action.description}</p>}
@@ -167,7 +178,6 @@ export const TypedValue = ({ type, value }: { type: string; value: string }) => 
   return /^[0-9a-f]{24,}$/i.test(value) ? <Hex value={value} /> : <span class="word-value">{value}</span>;
 };
 
-
 /** The earliest time the network accepts a transaction: a Unix time from 500,000,000, else a block height. */
 export const earliest = (notBefore: number): string => (notBefore >= 500_000_000 ? formatTime(notBefore) : `block ${notBefore.toLocaleString('en-US')}`);
 
@@ -185,7 +195,238 @@ const Moved = ({ output, label }: { output: MovedOutput; label: ComponentChildre
   </li>
 );
 
-/** The wallet's own figures from the transaction it worked out. The application cannot influence them. */
+// ------------------------------------------------------------------ the picture and the headline
+
+type Moving = NonNullable<MovedOutput['token']>;
+
+/** What moves one way between the wallet and the application. */
+interface Way {
+  satoshis: bigint;
+  /** Fungible tokens, by category, without a sign. */
+  fungible: { category: string; amount: bigint }[];
+  nfts: Moving[];
+}
+
+const sameNft = (one: Moving, other: Moving): boolean => one.category === other.category && one.nft?.capability === other.nft?.capability && one.nft?.commitment === other.nft?.commitment;
+
+/** NFTs in the first list that the second does not have, each counted once. */
+const without = (from: Moving[], taken: Moving[]): Moving[] => {
+  const left = [...taken];
+  return from.filter((token) => {
+    const index = left.findIndex((other) => sameNft(token, other));
+    if (index === -1) return true;
+    left.splice(index, 1);
+    return false;
+  });
+};
+
+/** What goes from the wallet to the application and back, from the wallet's own figures. The fee goes to neither. */
+export const ways = (figures: ActionPreview['figures']): { out: Way; back: Way } => {
+  const into = figures.intoApplicationSatoshis;
+  const nftsOf = (outputs: MovedOutput[]): Moving[] => outputs.flatMap((output) => (output.token?.nft === undefined ? [] : [output.token]));
+  const spent = nftsOf(figures.tokensSpent);
+  const arriving = nftsOf(figures.toWallet);
+  return {
+    out: { satoshis: into > 0n ? into : 0n, fungible: figures.tokensNet.filter((entry) => entry.amount < 0n).map((entry) => ({ category: entry.category, amount: -entry.amount })), nfts: without(spent, arriving) },
+    back: { satoshis: into < 0n ? -into : 0n, fungible: figures.tokensNet.filter((entry) => entry.amount > 0n), nfts: without(arriving, spent) },
+  };
+};
+
+const empty = (way: Way): boolean => way.satoshis === 0n && way.fungible.length === 0 && way.nfts.length === 0;
+
+/** A token as a small chip: its amount in its decimals where a template the user trusts names it, else raw units, with its category. */
+const TokenChip = ({ category, amount, nft, sign }: { category: string; amount?: bigint; nft?: Moving['nft']; sign?: '+' | '−' }) => {
+  const names = useContext(TokenNamesContext);
+  const fungible = amount === undefined ? undefined : names.fungible(category);
+  const nftName = nft === undefined ? undefined : names.nft(category)?.named?.name;
+  const named = fungible?.named?.symbol !== undefined && fungible.named.decimals !== undefined;
+  return (
+    <span class={`chip${nft === undefined ? '' : ' nft'}`}>
+      <span class="chip-dot" aria-hidden="true" />
+      <span class="chip-text">
+        {sign}
+        {nft === undefined ? amountText(amount ?? 0n, fungible) : (nftName ?? (nft.capability === 'none' ? 'NFT' : `NFT (${nft.capability})`))}
+      </span>
+      {(nft !== undefined ? nftName === undefined : !named) && <Hex value={category} head={4} tail={4} />}
+    </span>
+  );
+};
+
+const WayItems = ({ way }: { way: Way }) =>
+  empty(way) ? (
+    <span class="flow-nothing">Nothing</span>
+  ) : (
+    <>
+      {way.satoshis > 0n && (
+        <span class="flow-bch">
+          {formatBch(way.satoshis)} <span class="unit">BCH</span>
+        </span>
+      )}
+      {way.fungible.map((entry) => (
+        <TokenChip category={entry.category} amount={entry.amount} />
+      ))}
+      {way.nfts.map((token) => (
+        <TokenChip category={token.category} nft={token.nft} />
+      ))}
+    </>
+  );
+
+/** The action at a glance: the wallet, the application, and what goes each way. */
+export const Picture = ({ preview }: { preview: ActionPreview }) => {
+  const { out, back } = ways(preview.figures);
+  const name = preview.template.name;
+  return (
+    <figure class="flow" aria-label={`What goes between your wallet and ${name}`}>
+      <div class="flow-node wallet">
+        <span class="flow-icon" aria-hidden="true">
+          <Icon name="wallets" />
+        </span>
+        <span class="flow-name">Your wallet</span>
+      </div>
+      <div class="flow-lanes">
+        <div class="lane out">
+          <span class="visually-hidden">From your wallet to {name}:</span>
+          <div class="lane-items">
+            <WayItems way={out} />
+          </div>
+          <div class="lane-line" aria-hidden="true" />
+        </div>
+        <div class="lane back">
+          <span class="visually-hidden">From {name} to your wallet:</span>
+          <div class="lane-line" aria-hidden="true" />
+          <div class="lane-items">
+            <WayItems way={back} />
+          </div>
+        </div>
+      </div>
+      <div class="flow-node app">
+        <span class="flow-icon" aria-hidden="true">
+          <Icon name="apps" />
+        </span>
+        <span class="flow-name">{name}</span>
+      </div>
+    </figure>
+  );
+};
+
+/** By how much the wallet goes up or down, in Bitcoin Cash and in tokens, the fee included. */
+export const Headline = ({ figures }: { figures: ActionPreview['figures'] }) => {
+  const net = figures.getsSatoshis - figures.givesSatoshis;
+  const { out, back } = ways(figures);
+  const tokens: [string, ComponentChildren][] = [];
+  if (back.fungible.length > 0 || back.nfts.length > 0) {
+    tokens.push([
+      'Your wallet receives',
+      <>
+        {back.fungible.map((entry) => (
+          <TokenChip category={entry.category} amount={entry.amount} sign="+" />
+        ))}
+        {back.nfts.map((token) => (
+          <TokenChip category={token.category} nft={token.nft} />
+        ))}
+      </>,
+    ]);
+  }
+  if (out.fungible.length > 0 || out.nfts.length > 0) {
+    tokens.push([
+      'Your wallet pays',
+      <>
+        {out.fungible.map((entry) => (
+          <TokenChip category={entry.category} amount={entry.amount} sign="−" />
+        ))}
+        {out.nfts.map((token) => (
+          <TokenChip category={token.category} nft={token.nft} />
+        ))}
+      </>,
+    ]);
+  }
+  return (
+    <div class="headline">
+      <div class="headline-label">
+        {net < 0n ? 'Your wallet goes down by' : 'Your wallet goes up by'}{' '}
+        <Info label="Where these figures come from">Worked out by this wallet from the transaction it built. The application cannot change them.</Info>
+      </div>
+      <div class={`headline-figure ${net < 0n ? 'down' : 'up'}`}>
+        {net < 0n ? '−' : '+'}
+        {formatBch(net < 0n ? -net : net)}
+        <span class="unit">BCH</span>
+      </div>
+      <div class="headline-sub">
+        <Sat satoshis={net < 0n ? -net : net} />, the network fee of <Sat satoshis={figures.feeSatoshis} /> included
+      </div>
+      {tokens.map(([words, chips]) => (
+        <div class="headline-tokens">
+          <span>{words}</span>
+          <span class="chips">{chips}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ------------------------------------------------------------------ what asks for care, always in view
+
+/** Tokens the transaction destroys: whose they were and how. */
+const Destroyed = ({ figures }: { figures: ActionPreview['figures'] }) => (
+  <Notice tone="warn">
+    <div class="stack-s destroyed-warning">
+      <strong>{figures.tokensDestroyed.length === 1 ? 'A token is destroyed' : `${figures.tokensDestroyed.length} tokens are destroyed`}</strong>
+      <span>These tokens can never be used again after this transaction.</span>
+      <ul class="destroyed-list">
+        {figures.tokensDestroyed.map((entry) => (
+          <li>
+            <span class="destroyed-name">{entry.name}</span> <span class="destroyed-whose">{entry.wallet ? 'yours' : 'the application\'s'}</span>
+            <div class="small">
+              The <TokenWords token={entry.token} />, {entry.how === 'data output' ? 'sent to a data output, which no one can spend' : 'spent and not carried on'}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </Notice>
+);
+
+/** The standing of the template where it asks for care, and what else does: tokens destroyed, paying itself first, a time. */
+const Cautions = ({ preview, summary }: { preview: ActionPreview; summary: TemplateSummary }) => {
+  const { figures } = preview;
+  return (
+    <>
+      {summary.verdict.statement !== 'verified' && (
+        <div class={`standing ${summary.verdict.statement === 'violation' ? 'bad' : 'warn'}`}>
+          <Statement verdict={summary.verdict} subject="Template" />
+        </div>
+      )}
+      <FirstUse summary={summary} firstUse={preview.firstUse} />
+      {figures.tokensDestroyed.length > 0 && <Destroyed figures={figures} />}
+      {figures.payingItself !== undefined && (
+        <Notice tone="warn">
+          This wallet has no coin that can start a new token. It first pays itself, in a transaction of its own with a fee of <Sat satoshis={figures.payingItself.feeSatoshis} />, and then carries out the action.
+        </Notice>
+      )}
+      {figures.notBefore !== undefined && (
+        <Notice>
+          The network accepts this transaction from {earliest(figures.notBefore)} on, not earlier.
+          {figures.notBefore >= 500_000_000 && ' It goes by the chain\'s clock, which runs a little behind the real one.'}
+        </Notice>
+      )}
+    </>
+  );
+};
+
+// ------------------------------------------------------------------ folded: the figures in full, and the template
+
+/** A section folded away under a name, with a short line of what is in it. */
+const Fold = ({ title, hint, cls, children }: { title: string; hint?: string; cls?: string; children: ComponentChildren }) => (
+  <details class={`fold${cls === undefined ? '' : ` ${cls}`}`}>
+    <summary>
+      <span class="fold-title">{title}</span>
+      {hint !== undefined && <span class="fold-hint">{hint}</span>}
+    </summary>
+    {children}
+  </details>
+);
+
+/** The wallet's own figures from the transaction it worked out, in full. The application cannot influence them. */
 export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) => {
   const names = useContext(TokenNamesContext);
   const net = figures.getsSatoshis - figures.givesSatoshis;
@@ -196,11 +437,14 @@ export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) =
   ];
   if (into > 0n) rows.push([<>Goes into the application<small>To its contracts and others, less what comes back from them</small></>, <Amount satoshis={into} exact />]);
   if (into < 0n) rows.push([<>Comes back from the application<small>Out of its contracts, more than goes into them</small></>, <Amount satoshis={-into} exact />]);
-  rows.push([<>Network fee<small>{figures.bytes} bytes</small></>, <Sat satoshis={figures.feeSatoshis} />]);
+  rows.push([<>Network fee<small>{figures.bytes} bytes at one satoshi per byte</small></>, <Sat satoshis={figures.feeSatoshis} />]);
   rows.push([<strong>{net < 0n ? 'Your wallet goes down by' : 'Your wallet goes up by'}</strong>, <strong><Amount satoshis={net < 0n ? -net : net} exact /></strong>]);
+  const coins = figures.tokensSpent.length + figures.applicationInputs.length + figures.toOthers.length + figures.toWallet.length;
   return (
-    <Part title="This wallet's own figures" note="Worked out by this wallet from the transaction it built. The application cannot change them." cls="own-figures">
+    <Fold title="This wallet's own figures" hint={`The fee, and ${coins === 1 ? 'the one coin' : `all ${coins} coins`} in and out`} cls="own-figures">
+      <p class="small muted moved-note">Worked out by this wallet from the transaction it built. The application cannot change them.</p>
       <KeyValues entries={rows} />
+      {figures.remainderSatoshis > 0n && <Notice>The fee includes {formatSatoshis(figures.remainderSatoshis)} satoshis that are too few to come back as change.</Notice>}
       {figures.tokensNet.length > 0 && (
         <div class="moved-group">
           <div class="moved-title">Tokens</div>
@@ -293,35 +537,38 @@ export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) =
           </ul>
         </div>
       )}
-      <div class="stack-s">
-        {figures.remainderSatoshis > 0n && <Notice>The fee includes {formatSatoshis(figures.remainderSatoshis)} satoshis that are too few to come back as change.</Notice>}
-        {figures.notBefore !== undefined && (
-          <Notice>
-            The network accepts this transaction from {earliest(figures.notBefore)} on, not earlier.
-            {figures.notBefore >= 500_000_000 && ' It goes by the chain\'s clock, which runs a little behind the real one.'}
-          </Notice>
-        )}
-        {figures.payingItself !== undefined && (
-          <Notice>
-            This wallet has no coin that can start a new token. It first pays itself, in a transaction of its own with a fee of <Sat satoshis={figures.payingItself.feeSatoshis} />, and then carries out the action.
-          </Notice>
-        )}
-      </div>
-    </Part>
+    </Fold>
   );
 };
 
-/** The template, the words and the figures of an action, in that order. */
-export const ActionReview = ({ preview, summary }: { preview: ActionPreview; summary?: TemplateSummary }) => (
-  <>
-    <Part title="Template">
-      <TemplateView summary={summary ?? preview.template} showActions={!(summary ?? preview.template).trusted} />
-    </Part>
-    <FirstUse summary={summary ?? preview.template} firstUse={preview.firstUse} />
-    <TheirWords words={preview.words} />
-    <OwnFigures figures={preview.figures} />
-  </>
+/** The template folded away: its name and description, who vouches for it, its actions and identifiers. */
+const TheTemplate = ({ summary }: { summary: TemplateSummary }) => (
+  <Fold title="The template" hint={summary.verdict.statement === 'verified' ? 'Verified, and what that rests on' : 'What it is, and its identifiers'} cls="template-fold">
+    <TemplateView summary={summary} showActions={!summary.trusted} standing={summary.verdict.statement === 'verified'} />
+  </Fold>
 );
+
+/**
+ * An action, for a decision: the picture and the headline, what asks for care, the action in the template's
+ * words, and folded, the figures in full and the template.
+ */
+export const ActionReview = ({ preview, summary }: { preview: ActionPreview; summary?: TemplateSummary }) => {
+  const template = summary ?? preview.template;
+  return (
+    <div class="review stack">
+      <div class="review-summary">
+        <Picture preview={preview} />
+        <Headline figures={preview.figures} />
+      </div>
+      <Cautions preview={preview} summary={template} />
+      <TheirWords words={preview.words} />
+      <div class="folds">
+        <OwnFigures figures={preview.figures} />
+        <TheTemplate summary={template} />
+      </div>
+    </div>
+  );
+};
 
 /** What approving does to a template the wallet has not trusted or not yet stored. */
 export const FirstUse = ({ summary, firstUse }: { summary: TemplateSummary; firstUse: boolean }) => {
