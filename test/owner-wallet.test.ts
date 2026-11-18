@@ -290,11 +290,97 @@ describe('creating a wallet', () => {
     expect(await again.wallet.canCancel()).toBe(true);
   });
 
+  it.each([
+    ['a funding coin that is output 0', 0],
+    ['a funding coin at another position, first paid to the wallet itself', 1],
+  ] as const)('CR02: a server that lists a transaction it accepted only seconds later, %s: the creation is not taken for gone', async (_name, position) => {
+    // Fulcrum without notifications of new transactions lists those it took a few seconds later, and gives them
+    // out at once. A creation looked for in that moment was taken for one that had disappeared: the wallet
+    // forgot it and stood at "prepared" for good, its funding coin spent (or, with a payment to itself,
+    // made a new identity).
+    const chain = new SimulatedChain();
+    chain.blocksOnDemand = true;
+    const listed = new Set<string>();
+    const reader: ChainReader = {
+      getTransaction: (id) => chain.getTransaction(id),
+      listUnspent: (script) => chain.listUnspent(script),
+      getHistory: async (script) => (await chain.getHistory(script)).filter((entry) => entry.height > 0 || listed.has(entry.transactionId)),
+    };
+    const { wallet, state, funding } = await device(chain, { reader });
+    const funded = chain.fund(funding, 20_000n, position);
+    chain.mine();
+    expect(await wallet.create(createOptions)).toBe('created');
+    const identity = state().identity as string;
+    expect(state().creation.createTransactionId).toBeDefined();
+    expect(await wallet.creationStep()).toBe('created');
+    // Once the server lists them, nothing changes; a block holds them, and the creation is done.
+    for (const id of [identity, state().creation.createTransactionId as string]) listed.add(id);
+    expect(await wallet.creationStep()).toBe('created');
+    chain.mine();
+    expect(await wallet.creationStep()).toBe('created');
+    expect(state().identity).toBe(position === 0 ? funded : identity);
+    expect(state().creation).toMatchObject({ confirmed: true });
+    expect(wallet.voided).toEqual([]);
+  });
+
+  it('CR02: a look at the creation that began before the wallet sent it, and ends after, does not undo what the creation recorded', async () => {
+    // The page looks at where the creation stands every few seconds, also while "Create the wallet" runs. A look
+    // that read the state before the creating transaction was recorded, and whose reading of the chain came back
+    // after it was sent, wrote the old state back: the wallet forgot its creation, its funding coin spent, and
+    // stood at "prepared" for good.
+    const chain = new SimulatedChain();
+    chain.blocksOnDemand = true;
+    let held: Promise<void> | undefined;
+    let release = (): void => undefined;
+    const reader: ChainReader = {
+      getTransaction: (id) => chain.getTransaction(id),
+      listUnspent: (script) => chain.listUnspent(script),
+      // The first reading after `held` is set is answered from the chain as it was, and only once released.
+      getHistory: async (script) => {
+        const entries = await chain.getHistory(script);
+        const wait = held;
+        held = undefined;
+        if (wait !== undefined) await wait;
+        return entries;
+      },
+    };
+    let look: Promise<unknown> | undefined;
+    const made = await device(chain, {
+      reader,
+      backend: (inner) =>
+        new Proxy(inner, {
+          get: (target, name) =>
+            name === 'prepare'
+              ? async (request: Parameters<WalletBackend['prepare']>[0]) => {
+                  // While the creating transaction is being prepared, the page looks at the creation.
+                  if (look === undefined) {
+                    held = new Promise<void>((resolve) => {
+                      release = resolve;
+                    });
+                    look = made.wallet.creationStep();
+                    while (held !== undefined) await new Promise((resolve) => setTimeout(resolve, 1));
+                  }
+                  return target.prepare(request);
+                }
+              : (Reflect.get(target, name) as unknown),
+        }),
+    });
+    chain.fund(made.funding, 20_000n);
+    expect(await made.wallet.create(createOptions)).toBe('created');
+    release();
+    await look;
+    expect(made.state().creation).toMatchObject({ identitySeen: true, createSeen: true });
+    expect(made.state().creation.createTransactionId).toBeDefined();
+    expect(await made.wallet.creationStep()).toBe('created');
+    // A device that starts again from what was stored knows its creation too.
+    expect(await (await device(chain, { state: made.state() })).wallet.creationStep()).toBe('created');
+  });
+
   it('CR02: when the transaction that defined the identity is gone before any address was given out, the identity is forgotten with it', async () => {
     const chain = new SimulatedChain();
     const gone = new Set<string>();
     const reader: ChainReader = {
-      getTransaction: (id) => chain.getTransaction(id),
+      getTransaction: async (id) => (gone.has(id) ? undefined : chain.getTransaction(id)),
       listUnspent: (script) => chain.listUnspent(script),
       getHistory: async (script) => (await chain.getHistory(script)).filter((entry) => !gone.has(entry.transactionId)).map((entry) => ({ ...entry, height: 0 })),
     };

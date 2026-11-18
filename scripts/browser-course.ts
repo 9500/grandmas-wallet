@@ -9,6 +9,14 @@
 // stores' data and the log under `.chipnet/<name>/` (with `-chipnet` added on chipnet) instead of the course's
 // own directory, and `--record <file name>` writes the record to that file in docs/runs/ instead of the
 // course's own, so that a run does not touch an earlier run's profiles or record.
+//
+// The wallet is made with its recoverer as a person would first do it (proposal section 14.4): the owner's phone
+// reads the code on the recoverer's "Your link" screen, which carries the link and a session, and the wallet
+// sends the kit straight to the recoverer's page, which stays open on that screen. `--links` makes it with the
+// pasted links instead (the recoverer's link opened on the phone, the kit link opened on the recoverer's page),
+// and a recoverer's page whose code offers no session (an older public page, or one that reaches no relay)
+// is given the links in the same way. On the local node the pages' sessions go through a relay on this machine
+// (packages/connect/test/memory-relay.ts) that the run starts, and that the pages' configuration names.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +26,7 @@ import { controllerScript } from '@grandmas-wallet/core';
 import { type BrowserContext, type Page, chromium } from 'playwright';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
+import { type MemoryRelay, startMemoryRelay } from '../packages/connect/test/memory-relay.js';
 
 export const root = fileURLToPath(new URL('..', import.meta.url));
 export const chipnet = process.argv[2] === 'chipnet';
@@ -27,6 +36,8 @@ export const argument = (name: string): string | undefined => {
 };
 export const takeScreens = process.argv.includes('--screens');
 export const headed = process.argv.includes('--headed');
+/** The wallet is made with the pasted links, not over the session the recoverer's code offers. */
+export const viaLinks = process.argv.includes('--links');
 /** On chipnet: the pages of this checkout, served on this machine, instead of the public ones. */
 export const localPages = !chipnet || process.argv.includes('--local-pages');
 const configName = chipnet ? (localPages ? 'local' : 'production') : 'local-regtest';
@@ -235,6 +246,8 @@ export const course = (options: { directory: string; continuing: boolean; until:
     if (!(await answers(url))) throw new Error(`${name} did not start`);
   };
 
+  /** The relay on this machine that the pages' sessions go through, on the local node. */
+  let relay: MemoryRelay | undefined;
   /** What a run needs before its first step: the public pages' version on chipnet, or the pages and stores of this checkout on this machine. */
   const prepare = async (apps: App[]): Promise<void> => {
     if (chipnet && !localPages) {
@@ -250,6 +263,15 @@ export const course = (options: { directory: string; continuing: boolean; until:
     if (chipnet) log(`funding address: ${run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'balance'])}`);
     else log(`local node: ${run(`${root}deploy/regtest/regtest.sh`, ['status']).split('\n')[0]}`);
     for (const app of apps) if (!existsSync(`${root}apps/${app}/dist/index.html`)) throw new Error(`apps/${app} is not built`);
+    // On the local node the sessions between the pages go through a relay on this machine, named in a copy of
+    // the configuration that the run's pages are served with: nothing goes to a public relay.
+    let configFile = `deploy/config/${configName}.json`;
+    if (!chipnet) {
+      relay = await startMemoryRelay();
+      configFile = `${work}config.json`;
+      writeFileSync(configFile, JSON.stringify({ ...config, relays: [relay.url] }, null, 2));
+      log(`relay: ${relay.url}, on this machine, for the sessions between the pages`);
+    }
     mkdirSync(`${work}store1`, { recursive: true });
     mkdirSync(`${work}store2`, { recursive: true });
     const origins = ['--origin', 'http://localhost:8101', '--origin', 'http://localhost:8102'];
@@ -258,10 +280,13 @@ export const course = (options: { directory: string; continuing: boolean; until:
     // Each is started as a process of its own, not through a wrapper, so that it ends when the run does.
     for (const app of apps) {
       const port = PORTS[app];
-      await serve(`http://127.0.0.1:${port}/`, process.execPath, ['deploy/serve.mjs', '--root', `apps/${app}/dist`, '--config', `deploy/config/${configName}.json`, '--host', '127.0.0.1', '--port', String(port), ...(EXTRA[app] ?? [])], `the ${app} page`);
+      await serve(`http://127.0.0.1:${port}/`, process.execPath, ['deploy/serve.mjs', '--root', `apps/${app}/dist`, '--config', configFile, '--host', '127.0.0.1', '--port', String(port), ...(EXTRA[app] ?? [])], `the ${app} page`);
       const served = (await (await fetch(`http://127.0.0.1:${port}/version.json`)).json()) as { commit?: string; network?: string };
       if (served.network !== config.network) throw new Error(`the ${app} page on port ${port} serves ${served.network}, not ${config.network}: something else answers there`);
       log(`${app} page: http://localhost:${port}/, this checkout at ${served.commit}, ${served.network}`);
+      // Pages that something else serves may name other relays: said, so that the record shows where sessions went.
+      const relays = ((await (await fetch(`http://127.0.0.1:${port}/config.json`)).json()) as { relays?: string[] }).relays ?? [];
+      if (relay !== undefined && !(relays.length === 1 && relays[0] === relay.url)) log(`   the ${app} page was already served on port ${port}, with the relays ${relays.join(', ')}`);
     }
   };
 
@@ -408,6 +433,7 @@ export const course = (options: { directory: string; continuing: boolean; until:
     for (const gone of [...devices]) await keepStorage(gone).catch(() => undefined);
     for (const gone of [...devices]) await gone.context.close().catch(() => undefined);
     for (const child of children) child.kill();
+    await relay?.close();
   };
 
   return { work, started, lines, note, log, run, pay, mine, passTime, elsewhere, prepare, device, watchPage, close, keepStorage, freshEngine, devices, shot, state, begin, failed, end, mark, since, blockFacts, blockFact, standing, standingNow, height, sweepSent, nameNewest };
@@ -465,7 +491,7 @@ export const pagesUsed = (apps: string[], timed: string): string =>
     ? `The pages are the public ones, ${apps.join(', ')}, as served, on chipnet with the public backup stores. ${timed}`
     : chipnet
       ? `The pages are this checkout's production builds (\`deploy/preview.sh build\`), served on this machine by \`deploy/serve.mjs\` with the content security policy and \`deploy/config/local.json\` (${apps.join(', ')}), with two backup stores of the run's own, on chipnet. ${timed}`
-      : 'The pages are the production builds served by `deploy/serve.mjs` with the content security policy, against the regtest node and two backup stores on this machine. The run made the blocks and moved the chain\'s clock.';
+      : 'The pages are the production builds served by `deploy/serve.mjs` with the content security policy, against the regtest node, two backup stores and a relay for the sessions between the pages, all on this machine. The run made the blocks and moved the chain\'s clock.';
 
 // ------------------------------------------------------------------ waiting for a page
 
@@ -527,30 +553,45 @@ export const balanceOf = async (page: Page): Promise<bigint> => {
 // ------------------------------------------------------------------ the first steps of every course
 
 /**
- * Steps 1 to 4: the recoverer opens its page and gives its link; the owner creates a wallet with that recoverer;
- * the recoverer takes in the kit and recovery is on; the owner receives.
+ * Steps 1 to 4: the recoverer opens its page and shows its code; the owner creates a wallet with that recoverer;
+ * the recoverer takes in the kit and recovery is on; the owner receives. The owner's phone reads the code, which
+ * carries the recoverer's link and a session, and the wallet sends the kit straight to the recoverer's page, kept
+ * open on its "Your link" screen. With `--links`, or when the recoverer's page offers no session, the phone opens
+ * the recoverer's link and the recoverer's page opens the kit link, as before.
  * @param shoot - takes the screenshots of these screens, under their names in docs/screens
- * @returns the devices and the recoverer's link, or nothing when the run was asked to stop earlier
+ * @returns the devices, the recoverer's link (without a session), and whether the kit went over the session; or
+ * nothing when the run was asked to stop earlier
  */
 export const firstSteps = async (
   { begin, device, log, pay, mark, since, standingNow, keepStorage, work }: Course,
   shoot: (page: Page, name: string) => Promise<void>,
   /** Called once the owner's wallet has its words and before anything is paid to it: to keep them on disk. */
   beforeFunding: (old: Device) => Promise<void> = async () => undefined,
-): Promise<{ recoverer: Device; old: Device; recovererLink: string } | undefined> => {
+): Promise<{ recoverer: Device; old: Device; recovererLink: string; overSession: boolean } | undefined> => {
   // 1 ------------------------------------------------------------------
-  if (!begin('The recoverer opens its page and gives its link')) return;
+  if (!begin(viaLinks ? 'The recoverer opens its page and gives its link' : 'The recoverer opens its page and shows its code')) return;
   const recoverer = await device('recoverer');
+  await recoverer.page.goto(RECOVERER);
+  await see(recoverer.page, 'No wallets yet.');
+  await shoot(recoverer.page, 'recoverer-empty');
   await recoverer.page.goto(`${RECOVERER}link`);
   await recoverer.page.getByLabel('Your name, as their wallet shows it').fill('Anna');
   await wait(300);
   const recovererLink = await valueOf(recoverer.page, 'recoverer-link');
   const recovererFingerprint = (await recoverer.page.locator('.fingerprint').first().textContent()) ?? '';
   log(`   link of ${recovererLink.length} characters; fingerprint ${recovererFingerprint}`);
+  // The code carries the link and a session once the page reaches its relay; a page that cannot, or an older page
+  // without a session, shows the plain link: the course then goes on with the links.
+  let code: string | undefined;
+  if (!viaLinks) code = await sessionCode(recoverer.page, recovererLink);
+  const overSession = code !== undefined;
+  if (overSession) log(`   the code on "Your link" carries the link and a session, ${code?.length} characters; the page stays open on that screen`);
+  else if (!viaLinks) log('   the recoverer\'s page offers no session with its code: the wallet is made with the links');
   await shoot(recoverer.page, 'recoverer-link');
-  await recoverer.page.goto(RECOVERER);
-  await see(recoverer.page, 'No wallets yet.');
-  await shoot(recoverer.page, 'recoverer-empty');
+  if (!overSession) {
+    await recoverer.page.goto(RECOVERER);
+    await see(recoverer.page, 'No wallets yet.');
+  }
 
   // 2 ------------------------------------------------------------------
   if (!begin('The owner creates a wallet with Anna as recoverer')) return;
@@ -558,13 +599,25 @@ export const firstSteps = async (
   await old.page.goto(WALLET);
   await see(old.page, 'Make a new wallet');
   await shoot(old.page, 'wallet-welcome');
-  await old.page.goto(recovererLink);
-  await see(old.page, 'You opened the link of');
-  await click(old.page, /Make a new wallet/);
+  if (code !== undefined) {
+    // The phone reads the code: what its camera reads is put into the field (scripts/scan-check.ts covers the camera).
+    await click(old.page, /Make a new wallet/);
+    await old.page.locator('#recipient-link').fill(code);
+    await click(old.page, 'Use this link');
+  } else {
+    await old.page.goto(recovererLink);
+    await see(old.page, 'You opened the link of');
+    await click(old.page, /Make a new wallet/);
+  }
   await see(old.page, 'Fingerprint of their key');
   const seenFingerprint = (await old.page.locator('.fingerprint').first().textContent()) ?? '';
   if (seenFingerprint !== recovererFingerprint) throw new Error(`the fingerprints differ: ${seenFingerprint} and ${recovererFingerprint}`);
   log(`   the wallet shows the same fingerprint, ${seenFingerprint}`);
+  if (overSession) {
+    await see(recoverer.page, 'A phone is connected', 60_000);
+    log('   the recoverer\'s page shows that a phone is connected');
+    await shoot(recoverer.page, 'recoverer-link-code');
+  }
   await tick(old.page, 'The fingerprints are the same');
   await shoot(old.page, 'wallet-create-setup');
   await click(old.page, 'Continue');
@@ -579,16 +632,33 @@ export const firstSteps = async (
   mark('paid');
   await click(old.page, 'Create the wallet');
   // The wallet goes on as soon as the network has its creation: no block is waited for.
-  const kitLink = await valueOf(old.page, 'kit-link');
-  log(`   created; the kit link has ${kitLink.length} characters`);
-  await standingNow(old.page, `From the payment to the wallet in use, its kit link shown: ${since('paid')}`);
+  let kitLink: string;
+  if (overSession) {
+    // The kit goes to the recoverer's page; its link stays folded away under "Send it as a link instead".
+    await old.page.getByTestId('handed-enroll').first().waitFor({ state: 'visible', timeout: 180_000 * patience });
+    kitLink = (await old.page.getByTestId('kit-link').first().getAttribute('data-value')) ?? '';
+    log(`   created; the wallet sends the kit to Anna's page (its link, ${kitLink.length} characters, folded away)`);
+    await standingNow(old.page, `From the payment to the wallet in use, its kit on the way to Anna's page: ${since('paid')}`);
+    await see(old.page, 'Anna\'s page has the kit.', 60_000);
+    log('   the wallet shows that Anna\'s page has the kit');
+  } else {
+    kitLink = await valueOf(old.page, 'kit-link');
+    log(`   created; the kit link has ${kitLink.length} characters`);
+    await standingNow(old.page, `From the payment to the wallet in use, its kit link shown: ${since('paid')}`);
+  }
   await see(old.page, /Recovery is not on yet|Checking the wallet's protection/);
   await shoot(old.page, 'wallet-home-kit-sent');
 
   // 3 ------------------------------------------------------------------
   if (!begin('Anna takes in the kit; the wallet says that recovery is on')) return;
-  await recoverer.page.goto(kitLink);
-  await see(recoverer.page, 'A recovery kit has arrived');
+  if (overSession) {
+    // Nothing is opened on the recoverer's page: the kit arrived on the screen it was left on.
+    await see(recoverer.page, 'A recovery kit has arrived', 60_000);
+    log('   the kit arrived on Anna\'s page, still on "Your link"');
+  } else {
+    await recoverer.page.goto(kitLink);
+    await see(recoverer.page, 'A recovery kit has arrived');
+  }
   await recoverer.page.getByLabel('Whose wallet is this?').fill('Grandma');
   await shoot(recoverer.page, 'recoverer-kit-arrived');
   await click(recoverer.page, 'Check and keep the kit');
@@ -622,7 +692,27 @@ export const firstSteps = async (
   }
   log(`   the wallet holds ${(await old.page.getByTestId('balance').textContent())?.replace('BCH', ' BCH')}`);
   await shoot(old.page, 'wallet-home');
-  return { recoverer, old, recovererLink };
+  return { recoverer, old, recovererLink, overSession };
+};
+
+/**
+ * The code the recoverer's "Your link" screen shows, if it carries a session: it is longer than the plain link,
+ * which the screen shows instead when it cannot reach its relay. Nothing when the page has no such code.
+ */
+const sessionCode = async (page: Page, plain: string): Promise<string | undefined> => {
+  const shown = page.getByTestId('recoverer-code').first();
+  for (let attempt = 0; attempt < 60; attempt++) {
+    if ((await shown.count()) === 0) {
+      // An older page has no code of its own: the link is all there is.
+      if (attempt >= 10) return undefined;
+    } else {
+      const value = (await shown.getAttribute('data-value')) ?? '';
+      if (value !== plain && value.length > plain.length && (await page.getByText('Waiting for their phone').first().isVisible())) return value;
+      if (await page.getByText('Only the link').first().isVisible()) return undefined;
+    }
+    await wait(500);
+  }
+  return undefined;
 };
 
 // ------------------------------------------------------------------ a takeover

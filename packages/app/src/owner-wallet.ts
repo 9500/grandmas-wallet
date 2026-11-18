@@ -532,7 +532,10 @@ export class OwnerWallet {
   /** Whether a transaction is known to the servers, and whether it is in a block. */
   private async seen(transactionId: string, lockingBytecode: Uint8Array): Promise<'missing' | 'unconfirmed' | 'confirmed'> {
     const entry = (await this.chain.getHistory(lockingBytecode)).find((candidate) => candidate.transactionId === transactionId);
-    return entry === undefined ? 'missing' : entry.height > 0 ? 'confirmed' : 'unconfirmed';
+    if (entry !== undefined) return entry.height > 0 ? 'confirmed' : 'unconfirmed';
+    // A server may list a transaction it has just taken only seconds later (Fulcrum without notifications of new
+    // transactions does), while it gives the transaction out at once: one it still gives out is not gone.
+    return (await this.chain.getTransaction(transactionId)) === undefined ? 'missing' : 'unconfirmed';
   }
 
   /**
@@ -546,12 +549,17 @@ export class OwnerWallet {
    * - The creating transaction was seen and is gone while the identity's coin is there again: the controller
    *   is made again, for the same identity, so the addresses given out stay the wallet's.
    * - A transaction that was never seen is kept: it may be on its way, or the device stopped before sending it.
+   *
+   * A look that overlaps `create()` (the page looks every few seconds) may have read the chain before the
+   * creation went on: when the creation's record changed while it read, it looks again rather than write back
+   * what it read before.
    */
   async creationStep(): Promise<CreationStep> {
     if (this.state.identity !== undefined && !this.state.creation.confirmed) {
-      const { creation } = this.state;
-      const definedIn = await this.seen(this.state.identity, await this.fundingAddress());
+      const { identity, creation } = this.state;
+      const definedIn = await this.seen(identity, await this.fundingAddress());
       const createdIn = creation.createTransactionId === undefined ? 'missing' : await this.seen(creation.createTransactionId, controllerScript(this.identity).lockingBytecode);
+      if (this.state.identity !== identity || this.state.creation !== creation) return this.creationStep();
       if (definedIn === 'missing' && creation.identitySeen === true) {
         this.voidIdentity();
       } else if (createdIn === 'missing' && creation.createSeen === true) {

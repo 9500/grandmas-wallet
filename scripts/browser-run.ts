@@ -11,7 +11,10 @@
 //
 // usage (from the repository's root):
 //   npx tsx scripts/browser-run.ts [local|chipnet] [--local-pages] [--until <step number>] [--from 11|12] [--screens] [--headed] [--ask-again]
-//                                  [--directory <name>] [--record <file name>]
+//                                  [--directory <name>] [--record <file name>] [--links]
+//
+// The wallet is made with Anna through the session her page's code offers (scripts/browser-course.ts); --links
+// makes it with the pasted links, as before.
 //
 // --local-pages (chipnet): the pages of this checkout (deploy/preview.sh build), served on this machine with
 // deploy/config/local.json and two backup stores of the run's own, instead of the public ones.
@@ -54,19 +57,31 @@ const { work, started, lines, note, log, run, mine, prepare, device, close, shot
 
 // ------------------------------------------------------------------ the log
 
+/** Whether the wallet was made with Anna through the session her page's code offered, and not with the links. */
+let overSession = false;
+
 const writeLog = (outcome: string): void => {
   mkdirSync(`${root}docs/runs`, { recursive: true });
+  const made = overSession
+    ? ' The wallet was made with its recoverer through the session that the recoverer\'s code offers: the phone read the code, and the kit went straight to the recoverer\'s page.'
+    : '';
   const where = chipnet && localPages
     ? pagesUsed([WALLET, RECOVERER], 'Blocks and the waiting period took their real time.')
     : chipnet
       ? `The pages are the public ones, ${WALLET} and ${RECOVERER}, as served, on chipnet with the public backup stores. Blocks and the waiting period took their real time.`
-      : 'The pages are the production builds served by `deploy/serve.mjs` with the content security policy, against the regtest node and two backup stores on this machine. The run made the blocks and moved the chain\'s clock.';
+      : 'The pages are the production builds served by `deploy/serve.mjs` with the content security policy, against the regtest node, two backup stores and a relay for the sessions between the pages, all on this machine. The run made the blocks and moved the chain\'s clock.';
   writeFileSync(
     recordFile(`stage-6-${chipnet ? 'chipnet' : 'local-node'}.md`),
     [
-      chipnet && localPages ? '# The wallet course in a browser, on chipnet with the pages of this checkout' : `# Stage 6 scripted run in a browser, ${chipnet ? 'on chipnet with the public pages (run C)' : 'against the local node'}`,
+      chipnet && localPages
+        ? `# The wallet course in a browser, on chipnet with the pages of this checkout${overSession ? ', the recoverer set up with one scan' : ''}`
+        : chipnet
+          ? '# Stage 6 scripted run in a browser, on chipnet with the public pages (run C)'
+          : overSession
+            ? '# The wallet course in a browser, against the local node, the recoverer set up with one scan'
+            : '# Stage 6 scripted run in a browser, against the local node',
       '',
-      `Written by \`scripts/browser-run.ts${process.argv.slice(2).length === 0 ? '' : ` ${process.argv.slice(2).join(' ')}`}\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`. ${where} Times are seconds since the start.`,
+      `Written by \`scripts/browser-run.ts${process.argv.slice(2).length === 0 ? '' : ` ${process.argv.slice(2).join(' ')}`}\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`. ${where}${made} Times are seconds since the start.`,
       '',
       `Outcome: ${outcome}`,
       '',
@@ -88,6 +103,7 @@ const toStepTen = async (): Promise<{ recoverer: Device; newer: Device } | undef
   const reached = await firstSteps(theCourse, shot);
   if (reached === undefined) return;
   const { recoverer, old, recovererLink } = reached;
+  overSession = reached.overSession;
 
   // 5 ------------------------------------------------------------------
   if (!begin('The owner pays, and sees the fee before sending')) return;

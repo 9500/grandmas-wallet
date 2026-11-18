@@ -22,7 +22,7 @@ import {
   walletTemplateNumbers,
   writeRecord,
 } from '@grandmas-wallet/app';
-import { deriveSeedKeys, p2pkhLockingBytecode, readControllerHistory } from '@grandmas-wallet/core';
+import { type ChainReader, deriveSeedKeys, p2pkhLockingBytecode, readControllerHistory } from '@grandmas-wallet/core';
 import { type KeptKit, ENROLLMENT_LINK_BUDGET, credentialKeys, generateRecipientKeyPair } from '@grandmas-wallet/enrollment';
 import { KeyBackend, SimulatedChain } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
@@ -118,6 +118,44 @@ describe('enrolling a recoverer', () => {
     expect(waiting.status.reasons).toEqual(['A receipt does not count: it answers another message than the one this wallet sent.']);
     await acceptEnrollment({ link: again.link, privateKey: recovererDevice.privateKey, chain, network: 'testnet', storeAt });
     expect((await checkRecovery({ wallet: owner, chain, arrangement: again.arrangement, storeAt, network: 'testnet' })).status.on).toBe(true);
+  });
+
+  it('the kit is made right after the creation, while the server does not list the creation yet', async () => {
+    // Fulcrum lists a transaction it has just taken a second or so later, and gives it out at once. The wallet
+    // goes on as soon as the network has its creation; the kit, made at that moment, failed with "No transaction
+    // creating this identity was found at its controller address", and the page stopped at "Try again".
+    const chain = new SimulatedChain();
+    chain.blocksOnDemand = true;
+    const stores = new Map(STORES.map((address) => [address, new MemoryStore(address)]));
+    const storeAt = (address: string): MemoryStore => stores.get(address) as MemoryStore;
+    const first = seedOf(0);
+    const credential = credentialKeys(CREDENTIAL_WORDS, 'testnet', kitTemplates());
+    const owner = await OwnerWallet.open({ backend: new KeyBackend(chain, first), chain, seed: first });
+    chain.fund(p2pkhLockingBytecode(first.fundingKey.keyHash), 100_000n);
+    chain.mine();
+    expect(await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY })).toBe('created');
+    // The next two readings of a history leave out what is not in a block yet.
+    let lagging = 2;
+    const reader: ChainReader = {
+      getTransaction: (id) => chain.getTransaction(id),
+      listUnspent: (script) => chain.listUnspent(script),
+      getHistory: async (script) => {
+        const entries = await chain.getHistory(script);
+        if (lagging === 0) return entries;
+        lagging -= 1;
+        return entries.filter((entry) => entry.height > 0);
+      },
+    };
+    const recipient = { name: 'recoverer.example', page: 'https://recoverer.example/', publicKey: (await generateRecipientKeyPair()).publicKey };
+    const sent = await enroll({ wallet: owner, seed: first, chain: reader, credential: { words: CREDENTIAL_WORDS }, recipient, stores: STORES, storeAt, madeAt: 1_794_950_000 });
+    expect(lagging).toBe(0);
+    expect(sent.arrangement.creationTransactionId).toBe(owner.stored.creation.createTransactionId);
+    // A wallet whose creation is in a block does not ask again: the creation is listed, or the identity is not valid.
+    chain.mine();
+    expect(await owner.creationStep()).toBe('created');
+    lagging = 1;
+    const unlisted: ChainReader = { ...reader, getHistory: async () => [] };
+    await expect(enroll({ wallet: owner, seed: first, chain: unlisted, credential: { words: CREDENTIAL_WORDS }, recipient, stores: STORES, storeAt, madeAt: 1_794_950_000 })).rejects.toThrow(/No transaction creating this identity/);
   });
 
   it('a recoverer is not enrolled when no store confirms the viewing-key record, and nothing is sent', async () => {

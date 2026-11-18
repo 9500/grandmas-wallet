@@ -26,6 +26,7 @@ import {
   type WalletBackend,
   ADDRESS_SCHEME_VERSION,
   CONTROLLER_STATE_VERSION,
+  IdentityValidationError,
   afterOwnerUpdate,
   readControllerHistory,
 } from '@grandmas-wallet/core';
@@ -159,6 +160,23 @@ export interface Recipient {
 }
 
 /**
+ * The controller's history, read as soon as the network has the wallet's creation. A server lists a transaction it
+ * has just taken a moment later (Fulcrum asks its node every second or two), while it already gives it out: until
+ * a block holds the creation, a history without it is read again, every half second for up to ten seconds, before
+ * the wallet says it is not there.
+ */
+const historyAfterCreation = async (chain: ChainReader, identity: Uint8Array, creationInBlock: boolean): Promise<ControllerHistory> => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await readControllerHistory(chain, identity);
+    } catch (error) {
+      if (creationInBlock || !(error instanceof IdentityValidationError) || attempt >= 20) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+};
+
+/**
  * Enroll a recoverer (section 11.1, step 0). The viewing-key record goes to the backup stores first; then
  * the kit is made, signed with the controller key and sealed to the recoverer. The result is the link the
  * recoverer's device reads. Recovery is not on until the recoverer's receipt is found (`checkRecovery`).
@@ -189,7 +207,7 @@ export const enroll = async (options: {
   const { identity } = wallet.stored;
   // The network having the creating transaction is enough; a block is not waited for (section 7.9).
   if (identity === undefined || !wallet.created) throw new Error('The wallet is not created yet. A recoverer is enrolled after that.');
-  const history = await readControllerHistory(options.chain, hexToBin(identity));
+  const history = await historyAfterCreation(options.chain, hexToBin(identity), wallet.stored.creation.confirmed);
   const creationTransactionId = history.transactions[0]?.transactionId;
   if (creationTransactionId === undefined) throw new Error('The transaction that created the wallet was not found.');
   const arrangement: RecoveryArrangement = { ...(options.arrangement ?? { archive: newArchive(options.stores), earlierArchives: [], earlierViewingKeyRecords: [] }), creationTransactionId };

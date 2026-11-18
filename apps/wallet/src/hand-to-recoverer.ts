@@ -120,6 +120,9 @@ export const useHanding = (slot: HandingSlot): Handing | undefined => {
   useEffect(() => {
     const listener = () => setHanding(kept('handing')?.[slot]);
     listeners.add(listener);
+    // An answer that came between the first rendering and now (the recoverer's page answers within a moment,
+    // while the screen is still being put together) is read here: no later change would bring it.
+    listener();
     return () => void listeners.delete(listener);
   }, [slot]);
   return handing;
