@@ -5,6 +5,7 @@ import { keyFingerprint, recoveryKeyOf, undoHandOver } from '@grandmas-wallet/en
 import { Button, Card, Fingerprint, HandOff, KeyValues, Loading, More, Notice, PageHead, QrCode, Sat, Status, TaskStatus, Value, formatDuration, formatTime, plainError, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
+import { ChainClock, clockTime, useChainClock } from './ChainClock.js';
 import { FundsCard, useBalance } from './Funds.js';
 import { handOverNow, handleTakeovers, heldForSetUps, resumeDesk, useDesk } from './offered-session.js';
 import { type Looked, type Session, fundsOf, modeOf, openWalletPage, recovererLink, saveWallet, wallets } from './session.js';
@@ -24,6 +25,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
   const [timing, setTiming] = useState<RequestTiming | undefined>();
   const task = useTask();
   const balance = useBalance(funds, task.busy);
+  const clock = useChainClock(session);
   const fees = recoveryFees();
   const { kit } = looked.kept;
   const update = (next: Looked) => {
@@ -147,6 +149,15 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
                         ? 'The waiting period counts from the block that holds the request, so it starts with the next block. Only the chain can measure it: nobody can claim a time for a request that is not in a block.'
                         : `The waiting period ends in about ${formatDuration(timing.secondsLeft ?? 0)}${timing.endsAt === undefined ? '' : `, when the chain's clock passes ${formatTime(timing.endsAt)}`}.`}
                 </p>
+                {timing !== undefined && !timing.eligibility.ready && timing.eligibility.waitingFor === 'time' && timing.endsAt !== undefined && clock !== undefined && (
+                  <KeyValues
+                    entries={[
+                      ['Chain\'s clock now', <span class="mono" data-testid="waiting-clock">{clockTime(clock.clock)}</span>],
+                      ['The waiting period ends when it passes', <span class="mono" data-testid="waiting-ends">{clockTime(timing.endsAt)}</span>],
+                      ['Still to go', clock.clock >= timing.endsAt ? 'nothing: the next check opens the completion' : `about ${formatDuration(timing.endsAt - clock.clock)} of the chain's clock`],
+                    ]}
+                  />
+                )}
                 <p>Until then the owner's phone can refuse it. You can close this page and come back to complete.</p>
                 {!mine && <p>If you did not send it, your credential for this wallet may be in other hands. Tell the owner.</p>}
               </Status>
@@ -217,6 +228,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
           <TaskStatus task={task} name="handover" />
         </div>
         <div class="stack">
+          <ChainClock reading={clock} />
           <FundsCard
             session={session}
             funds={funds}

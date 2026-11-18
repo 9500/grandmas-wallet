@@ -3,6 +3,7 @@ import { keyFingerprint } from '@grandmas-wallet/enrollment';
 import { Amount, Button, Card, PageHead, Pill, TaskStatus, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
 import { useState } from 'preact/hooks';
 
+import { ChainClock, useChainClock } from './ChainClock.js';
 import { FundsCard, useFunds } from './Funds.js';
 import { type Session, modeOf, openWalletPage, settingsOf, wallets } from './session.js';
 
@@ -28,6 +29,7 @@ export const Wallets = ({ session, onNew }: { session: Session; onNew: () => voi
   const [views, setViews] = useState<Record<string, { view?: RecovererView; problem?: string }>>({});
   const [earlier, setEarlier] = useState<GivenInput[]>([]);
   const { funds, problem } = useFunds(session);
+  const clock = useChainClock(session);
   const takeIn = useTask();
   useEvery(20_000, async () => {
     const next: typeof views = {};
@@ -119,17 +121,20 @@ export const Wallets = ({ session, onNew }: { session: Session; onNew: () => voi
             </Card>
           )}
         </div>
-        <FundsCard
-          session={session}
-          funds={funds}
-          problem={problem}
-          note={
+        <div class="stack">
+          <ChainClock reading={clock} />
+          <FundsCard
+            session={session}
+            funds={funds}
+            problem={problem}
+            note={
             <>
               Each new wallet takes about <Amount satoshis={each} exact />: its starting balance and the network's fees. What you do for a wallet later is paid from here too.
             </>
           }
-          short={(balance) => balance < each && 'Your balance does not cover a new wallet. Add coins to the address below.'}
-        />
+            short={(balance) => balance < each && 'Your balance does not cover a new wallet. Add coins to the address below.'}
+          />
+        </div>
       </div>
     </div>
   );

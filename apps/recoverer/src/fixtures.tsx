@@ -26,12 +26,20 @@ import { Wallets } from './Wallets.js';
  * a figure given here, and nothing reads or checks the chain: a wallet asked for here is not created.
  */
 
+const loaded = Date.now();
 const environment = await loadEnvironment();
 const key = await generateRecipientKeyPair();
 const session: Session = {
   environment,
   network: keyNetwork(environment),
-  chain: {} as AppChain,
+  // No chain here, only its clock: a block every twenty seconds, each ten minutes of block time after the last.
+  chain: {
+    tip: async () => {
+      const height = 290_100 + Math.floor((Date.now() - loaded) / 20_000);
+      return { height, time: Math.floor(loaded / 1000) + (height - 290_100) * 20 };
+    },
+    headerTime: async (height: number) => Math.floor(loaded / 1000) - (290_100 - height) * 600,
+  } as unknown as AppChain,
   servers: [],
   storeAt: () => {
     throw new Error('The fixtures have no backup stores.');

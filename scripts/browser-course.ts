@@ -739,7 +739,21 @@ export const completeTakeover = async ({ log, mine, passTime, mark, since, block
   mine(1);
   await see(recoverer.page, 'Your request is waiting');
   log('   the request is in a block; the waiting period runs');
+  // The recoverer's page shows the chain's clock, and the waiting period measured against it.
+  const shown = async (testId: string): Promise<string> => {
+    const element = recoverer.page.getByTestId(testId).first();
+    await element.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    return ((await element.textContent()) ?? '').trim();
+  };
+  const clockBefore = await valueOf(recoverer.page, 'chain-clock');
+  log(`   the recoverer's page shows the chain's clock at ${await shown('waiting-clock')}, block ${await valueOf(recoverer.page, 'chain-height')}; the waiting period ends when it passes ${await shown('waiting-ends')}`);
   log(`   ${passTime(700)}`);
+  if (!chipnet) {
+    // The clock on the page moves with the blocks that were made.
+    const moved = recoverer.page.locator(`[data-testid="chain-clock"]:not([data-value="${clockBefore}"])`).first();
+    await moved.waitFor({ state: 'visible', timeout: 60_000 });
+    log(`   the chain's clock on the page moved on by ${Number(await moved.getAttribute('data-value')) - Number(clockBefore)} seconds, to block ${await valueOf(recoverer.page, 'chain-height')}`);
+  }
   // On chipnet the chain's clock has to pass 512 seconds: the button is enabled when it has.
   await click(recoverer.page, 'Complete the move', chipnet ? 360_000 : 120_000);
   await see(recoverer.page, 'The wallet is moved');

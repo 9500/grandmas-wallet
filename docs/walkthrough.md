@@ -56,7 +56,7 @@ This shows what protects Grandma when her recoverer is deceived, or the recovere
 
 1. Close the old phone's profile and do not open it again. That is the lost phone.
 2. On the recoverer's page, open Grandma's wallet and press **Grandma lost their phone** again; on the new phone, scan the new code (choose **Scan again** first if it still shows the earlier request). The request is sent.
-3. The waiting period runs. The recoverer's page shows when it ends by the chain's clock. Both pages can stay open; closing them is fine too.
+3. The waiting period runs. The recoverer's page shows the chain's clock, which moves with each block, and the time it has to pass. Both pages can stay open; closing them is fine too.
 4. When it has passed, the recoverer presses **Complete the move**. If the new phone is still open on its waiting screen, the wallet reaches it over the connection by itself. Otherwise the recoverer's page shows a code: on the new phone, open **Scan the code they show after the waiting period** and scan it.
 5. The new phone checks the wallet's history on the chain and brings the coins over: it finds them with the old phone's viewing key, which the recoverer kept, and moves them to its own addresses. Press **Open the wallet**. The balance is back, less the fees, and after a short while the wallet is **Protected** again with the same recoverer.
 
