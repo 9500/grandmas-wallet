@@ -15,8 +15,11 @@ import {
   SealedDesk,
   SealedRefusedError,
   readRecovererMessage,
+  ENROLL,
+  ENROLL_ANSWER,
+  HAND_OVER,
 } from '../src/recoverer.js';
-import { joinDeskSession, openDeskSession } from '../src/recoverer-session.js';
+import { type DeskCredentials, joinDeskSession, openDeskSession } from '../src/recoverer-session.js';
 import { type LinkStatus, newLinkKey, openWalletLink } from '../src/wizard.js';
 import { type MemoryRelay, startMemoryRelay } from './memory-relay.js';
 
@@ -239,4 +242,132 @@ describe('over a WizardConnect session, through a relay', () => {
     expect((await courier.send({ expected: ANNA, kind: 'takeover', sealed: KIT, timeoutMs: 10_000 })).status).toBe('received');
     expect(received.map((sealed) => sealed.kind)).toEqual(['takeover']);
   }, 30_000);
+
+  it('RC14: a page loaded again opens the same session with what it kept, and the phone that joined it is answered there', async () => {
+    let paired: DeskCredentials | undefined;
+    const firstDesk = new SealedDesk({ particulars: () => ({ ...ANNA, offer: OFFER }), onSealed: () => undefined });
+    const first = openDeskSession({ name: 'Anna', relays: [relay.url], onStatus: (status) => void (status.state === 'connected' ? firstDesk.introduce() : undefined), onPaired: (credentials) => void (paired = credentials) });
+    firstDesk.attach(first.channel);
+    const joined = joinDeskSession({ uri: first.uri, privateKey: newLinkKey(), name: 'A wallet', onStatus: () => undefined });
+    closing.push(() => joined.close());
+    const courier = new SealedCourier(joined.channel);
+    expect((await courier.particulars(10_000)).offer).toEqual(OFFER);
+    await until(() => paired !== undefined);
+    expect(paired?.privateKey).toBe(first.credentials.privateKey);
+    // The page is loaded again: the session it offered is gone with it, and comes back with what it kept.
+    first.close();
+    const asked: string[] = [];
+    const desk: SealedDesk = new SealedDesk({ particulars: () => ({ ...ANNA, offer: OFFER }), onSealed: () => undefined, onEnroll: ({ id }) => (asked.push(id), void desk.answerEnroll(id, { status: 'created', created: CREATED })) });
+    const again = openDeskSession({ name: 'Anna', relays: [relay.url], resume: paired as DeskCredentials, onStatus: (status) => void (status.state === 'connected' ? desk.introduce() : undefined) });
+    closing.push(() => again.close());
+    expect(again.uri).toBe(first.uri);
+    desk.attach(again.channel);
+    expect(await courier.enroll({ expected: ANNA, id: 'request-1', sealed: KIT, silentMs: 15_000, timeoutMs: 15_000, resendMs: 500 })).toEqual(CREATED);
+    expect(asked[0]).toBe('request-1');
+  }, 40_000);
+});
+
+const OFFER = { challengeDelay: { unit: 'time512' as const, value: 1 }, startingSatoshis: '20000' };
+const CREATED = { identity: '1d'.repeat(32), creationTransactionId: '2e'.repeat(32), recoveryKeyHash: '3f'.repeat(20) };
+
+describe('a phone\'s set-up request over a session', () => {
+  const page = (behaviour: (desk: SealedDesk, id: string, count: number) => void) => {
+    const wires = queues();
+    const counts = new Map<string, number>();
+    const courier = new SealedCourier(wires.wallet);
+    const desk: SealedDesk = new SealedDesk({
+      particulars: () => ({ ...ANNA, offer: OFFER }),
+      onSealed: () => undefined,
+      onEnroll: ({ id }) => {
+        const count = (counts.get(id) ?? 0) + 1;
+        counts.set(id, count);
+        behaviour(desk, id, count);
+      },
+    });
+    desk.attach(wires.desk);
+    return { wires, desk, counts, courier };
+  };
+
+  it('are read only in the form this version knows', () => {
+    expect(readRecovererMessage({ action: PARTICULARS, time: 1, ...ANNA, offer: OFFER })).toMatchObject({ offer: OFFER });
+    expect(readRecovererMessage({ action: PARTICULARS, time: 1, ...ANNA, offer: { ...OFFER, startingSatoshis: '-5' } })).toBeUndefined();
+    expect(readRecovererMessage({ action: ENROLL, time: 1, id: 'one', sealed: 'abcd' })).toMatchObject({ id: 'one', sealed: 'abcd' });
+    expect(readRecovererMessage({ action: ENROLL_ANSWER, time: 1, id: 'one', status: 'created', created: CREATED })).toMatchObject({ created: CREATED });
+    // A wallet created needs its particulars; a refusal carries none.
+    expect(readRecovererMessage({ action: ENROLL_ANSWER, time: 1, id: 'one', status: 'created' })).toBeUndefined();
+    expect(readRecovererMessage({ action: ENROLL_ANSWER, time: 1, id: 'one', status: 'refused', created: CREATED })).toBeUndefined();
+    expect(readRecovererMessage({ action: HAND_OVER, time: 1, id: 'one', sealed: 'abc' })).toBeUndefined();
+  });
+
+  it('RC14: is sent until the page answers with the wallet; the page that asks a person first says that it has it meanwhile', async () => {
+    let decide: (() => void) | undefined;
+    const { desk, courier, counts } = page((desk, id, count) => {
+      void desk.answerEnroll(id, { status: 'received' });
+      if (count === 1) decide = () => void desk.answerEnroll(id, { status: 'created', created: CREATED });
+    });
+    let received = 0;
+    const asking = courier.enroll({ expected: ANNA, id: 'request-1', sealed: KIT, silentMs: 1_000, timeoutMs: 5_000, resendMs: 100, onReceived: () => (received += 1) });
+    await new Promise((done) => setTimeout(done, 400));
+    // A person has not said yes yet: the phone goes on asking, past the time a silent page would have.
+    expect(received).toBe(1);
+    expect(counts.get('request-1')).toBeGreaterThan(2);
+    decide?.();
+    expect(await asking).toEqual(CREATED);
+    void desk;
+  });
+
+  it('RC14: a refusal comes back with its reason; a page that never answers is given up on in time', async () => {
+    const refusing = page((desk, id) => void desk.answerEnroll(id, { status: 'refused', reason: 'Anna cannot set up a wallet just now: their balance is too low.' }));
+    await expect(refusing.courier.enroll({ expected: ANNA, id: 'request-1', sealed: KIT, silentMs: 1_000, timeoutMs: 2_000, resendMs: 100 })).rejects.toThrow(new SealedRefusedError('Anna cannot set up a wallet just now: their balance is too low.'));
+    const silent = page(() => undefined);
+    const started = Date.now();
+    await expect(silent.courier.enroll({ expected: ANNA, id: 'request-1', sealed: KIT, silentMs: 500, timeoutMs: 5_000, resendMs: 100 })).rejects.toBeInstanceOf(RecovererSilentError);
+    expect(Date.now() - started).toBeLessThan(1_500);
+  });
+
+  it('RC14: is not sent to a page that speaks for another recoverer', async () => {
+    const wires = queues();
+    const courier = new SealedCourier(wires.wallet);
+    new SealedDesk({ particulars: () => ({ ...ANNA, publicKey: 'b2'.repeat(32) }), onSealed: () => undefined, onEnroll: () => undefined }).attach(wires.desk);
+    await expect(courier.enroll({ expected: ANNA, id: 'request-1', sealed: KIT, silentMs: 500, timeoutMs: 500 })).rejects.toBeInstanceOf(OtherRecovererError);
+    expect(wires.sentToDesk.filter((message) => message.action === ENROLL)).toEqual([]);
+  });
+
+  it('RC14: an answer that is lost is given again when the request arrives again', async () => {
+    const { wires, courier } = page((desk, id) => void desk.answerEnroll(id, { status: 'created', created: CREATED }));
+    // The first answers do not arrive.
+    wires.state.dropping = false;
+    let lost = 2;
+    const stop = courier.onEnrollAnswer(() => undefined);
+    const original = wires.desk.send.bind(wires.desk);
+    wires.desk.send = async (message) => {
+      if (message.action === ENROLL_ANSWER && lost > 0) {
+        lost -= 1;
+        return;
+      }
+      await original(message);
+    };
+    expect(await courier.enroll({ expected: ANNA, id: 'request-1', sealed: KIT, silentMs: 2_000, timeoutMs: 2_000, resendMs: 100 })).toEqual(CREATED);
+    expect(lost).toBe(0);
+    stop();
+  });
+
+  it('RC15: the hand-over after a recovery is sent until the new phone says it kept it', async () => {
+    const wires = queues();
+    const courier = new SealedCourier(wires.wallet);
+    const desk = new SealedDesk({ particulars: () => ANNA, onSealed: () => undefined });
+    desk.attach(wires.desk);
+    const arrived: Uint8Array[] = [];
+    courier.onHandOver(({ id, sealed }) => {
+      arrived.push(sealed);
+      if (arrived.length === 2) void courier.acknowledge(id);
+    });
+    expect(await desk.handOver('hand-over-1', KIT, { timeoutMs: 2_000, resendMs: 100 })).toBe(true);
+    expect(arrived[0]).toEqual(KIT);
+    expect(arrived).toHaveLength(2);
+    // Nobody there: it gives up, and the page shows the hand-over's code instead.
+    const alone = new SealedDesk({ particulars: () => ANNA, onSealed: () => undefined });
+    alone.attach(queues().desk);
+    expect(await alone.handOver('hand-over-2', KIT, { timeoutMs: 300, resendMs: 100 })).toBe(false);
+  });
 });

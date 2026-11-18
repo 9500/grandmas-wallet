@@ -44,14 +44,26 @@ export interface DeskSession {
   /** The address the wallet opens. */
   uri: string;
   channel: RecovererChannel;
+  /** This page's key and the pairing secret, to keep: with the wallet's key they open the same session after a reload. */
+  credentials: { privateKey: string; secret: string };
   close(): void;
+}
+
+/** What opens the same session again after the page is loaded again: once a wallet has joined, its key is known. */
+export interface DeskCredentials {
+  privateKey: string;
+  secret: string;
+  walletPublicKey: string;
 }
 
 /**
  * Offer a session for one wallet. The first wallet that opens the address with its secret is the one the
  * session serves; the relay takes no other.
+ *
+ * @param options.resume - a session this page offered before it was loaded again, with the key of the wallet that joined it
+ * @param options.onPaired - called with what opens this session again, once a wallet has joined it
  */
-export const openDeskSession = (options: { name: string; relays?: string[]; onStatus(status: LinkStatus): void }): DeskSession => {
+export const openDeskSession = (options: { name: string; relays?: string[]; onStatus(status: LinkStatus): void; resume?: DeskCredentials; onPaired?: (credentials: DeskCredentials) => void }): DeskSession => {
   let client: RelayClient | undefined;
   let listening = false;
   let walletDiscovered = false;
@@ -110,12 +122,20 @@ export const openDeskSession = (options: { name: string; relays?: string[]; onSt
         options.onStatus({ state: 'disconnected' });
       }
     },
-    options.relays === undefined || options.relays.length === 0 ? {} : { explicitRelayUrls: options.relays },
+    {
+      ...(options.relays === undefined || options.relays.length === 0 ? {} : { explicitRelayUrls: options.relays }),
+      ...(options.resume === undefined ? {} : { existingCredentials: options.resume }),
+    },
   );
+  // Once a wallet has joined, what opens this session again is handed to the page to keep.
+  relay.events.on('keyexchangecomplete', (walletPublicKey) => {
+    options.onPaired?.({ privateKey: relay.credentials.privateKey, secret: relay.credentials.secret, walletPublicKey: binToHex(walletPublicKey) });
+  });
 
   return {
     uri: relay.uri,
     channel,
+    credentials: { privateKey: relay.credentials.privateKey, secret: relay.credentials.secret },
     close: () => {
       closed = true;
       const ending = client?.relay({ action: RelayMsgAction.Disconnect, reason: 'user_disconnect', time: seconds() } as Outgoing);

@@ -1,4 +1,4 @@
-import { binToHex, decodeTransactionBch, hashTransactionUiOrder, hexToBin } from '@bitauth/libauth';
+import { binToHex, decodeTransactionBch, generateBip39Mnemonic, hashTransactionUiOrder, hexToBin } from '@bitauth/libauth';
 import { signViewingKeyRecord, viewingKeyRecordHash } from '@grandmas-wallet/archive';
 import {
   type ChainReader,
@@ -31,7 +31,7 @@ import {
 } from '@grandmas-wallet/enrollment';
 
 import { type OwnerWalletState, OwnerWallet } from './owner-wallet.js';
-import { type CreationRecord, type RecovererFunds } from './recoverer-funds.js';
+import { type CreationRecord, type RecovererFunds, FundsMissingError } from './recoverer-funds.js';
 import { type RecoveryArrangement, type StoreAt, keepOnStores, kitTemplates, newArchive } from './recovery-flow.js';
 
 /**
@@ -287,3 +287,162 @@ export const setUpForRequest = async (options: {
   await keepOnStores(request.archive, options.storeAt, 'receipt', receipt, 'the receipt');
   return { answer: { identity: created.identity, creationTransactionId: created.creationTransactionId, recoveryKeyHash: hex(recoveryKey.keyHash) }, kept, recoveryKey };
 };
+
+// ------------------------------------------------------------------ the recoverer's page
+
+/** What the recoverer's page keeps about one phone's request, by the request's identifier. Plain data. */
+export interface SetUpRecord {
+  requestId: string;
+  /** The sealed request, hex, so that the page can carry it on after a reload. */
+  sealed: string;
+  /** Unix seconds. */
+  receivedAt: number;
+  /** The recoverer's own name for the wallet. */
+  label: string;
+  /** A person has said yes, or the page sets wallets up without asking. */
+  approved: boolean;
+  creation: CreationRecord;
+  /** The wallet, once created. The same answer goes to the phone however often it asks. */
+  answer?: SetUpAnswer;
+  /** Final: the request was refused, with the reason the phone is told. */
+  refused?: string;
+  /** Not final: what stopped the last attempt, for the recoverer's page. */
+  problem?: string;
+}
+
+/** Where the page keeps its records; the page stores them in the browser, a test in memory. */
+export interface SetUpRecords {
+  get(requestId: string): SetUpRecord | undefined;
+  set(record: SetUpRecord): void | Promise<void>;
+  all(): SetUpRecord[];
+}
+
+/** What the page sends the phone about its request. */
+export interface SetUpReply {
+  status: 'received' | 'created' | 'refused';
+  reason?: string;
+  created?: SetUpAnswer;
+}
+
+/**
+ * The recoverer's page answering phones that ask to have their wallet set up (proposal section 14.4). Every request
+ * is kept by its identifier before anything is done for it, and every step of the creation is recorded before it is
+ * sent, so that a request that arrives again (the phone sends it until it has its answer, after a reload too) is
+ * answered from what is kept: with the same wallet once it exists, never with a second one. A page that was loaded
+ * again carries on what it had begun ({@link resume}).
+ *
+ * A bank's page sets wallets up without asking (`automatic`); a friend's page asks first, and creates on one tap
+ * ({@link approve}).
+ */
+export class SetUpDesk {
+  private readonly busy = new Set<string>();
+
+  constructor(
+    private readonly options: {
+      records: SetUpRecords;
+      network: SeedKeys['network'];
+      /** The recoverer's encryption key. */
+      privateKey: Uint8Array;
+      /** Send a reply to the phone, over the session the request came on. */
+      reply: (requestId: string, reply: SetUpReply) => Promise<void>;
+      /** Create the wallet and keep its kit: `setUpForRequest` with the page's funds, chain, stores and offer. */
+      create: (read: ReadEnrollmentRequest, record: SetUpRecord, save: (creation: CreationRecord) => Promise<void>) => Promise<SetUpAnswer>;
+      /** Whether to set wallets up without asking. Read at every request, so that a change of mode applies at once. */
+      automatic: () => boolean;
+      /** The recoverer's name, for what the phone is told. */
+      name: () => string;
+      /** The label of a request that arrives, as the page has it at that moment. */
+      label?: () => string;
+      onChange?: () => void;
+    },
+  ) {}
+
+  private async store(record: SetUpRecord): Promise<void> {
+    await this.options.records.set(record);
+    this.options.onChange?.();
+  }
+
+  /** A request arrived over the session, for the first time or again. */
+  async received(requestId: string, sealed: Uint8Array): Promise<void> {
+    const known = this.options.records.get(requestId);
+    if (known?.answer !== undefined) return this.options.reply(requestId, { status: 'created', created: known.answer });
+    if (known?.refused !== undefined) return this.options.reply(requestId, { status: 'refused', reason: known.refused });
+    if (known === undefined) {
+      try {
+        await openSetUpRequest(sealed, this.options.privateKey, this.options.network);
+      } catch (error) {
+        return this.options.reply(requestId, { status: 'refused', reason: `The request could not be read: ${(error as Error).message}` });
+      }
+      await this.store({ requestId, sealed: hex(sealed), receivedAt: Math.floor(Date.now() / 1000), label: this.options.label?.() ?? '', approved: this.options.automatic(), creation: { credentialWords: generateBip39Mnemonic() } });
+    }
+    await this.options.reply(requestId, { status: 'received' });
+    const record = this.options.records.get(requestId) as SetUpRecord;
+    if (record.approved || this.options.automatic()) await this.carryOut(requestId);
+  }
+
+  /** A person said yes to a request: the wallet is created now. */
+  async approve(requestId: string, label?: string): Promise<void> {
+    const record = this.options.records.get(requestId);
+    if (record === undefined || record.answer !== undefined || record.refused !== undefined) return;
+    await this.store({ ...record, approved: true, ...(label === undefined ? {} : { label }) });
+    await this.carryOut(requestId);
+  }
+
+  /** A person said no. The phone is told. */
+  async decline(requestId: string, reason = 'The recoverer did not set the wallet up.'): Promise<void> {
+    const record = this.options.records.get(requestId);
+    if (record === undefined || record.answer !== undefined || record.creation.identity !== undefined) return;
+    await this.store({ ...record, refused: reason });
+    await this.options.reply(requestId, { status: 'refused', reason });
+  }
+
+  /** After the page is loaded again: carry on every request that was said yes to and is not done. */
+  async resume(): Promise<void> {
+    for (const record of this.options.records.all()) {
+      if (record.answer === undefined && record.refused === undefined && record.approved && record.creation.identity !== undefined) await this.carryOut(record.requestId);
+    }
+  }
+
+  /** Identities that other unfinished creations are named after, so that no other creation spends their coins. */
+  reserved(except: string): Set<string> {
+    return new Set(this.options.records.all().flatMap((record) => (record.requestId !== except && record.answer === undefined && record.creation.identity !== undefined ? [record.creation.identity] : [])));
+  }
+
+  private async carryOut(requestId: string): Promise<void> {
+    if (this.busy.has(requestId)) return;
+    this.busy.add(requestId);
+    try {
+      const first = this.options.records.get(requestId);
+      if (first === undefined || first.answer !== undefined || first.refused !== undefined) return;
+      const read = await openSetUpRequest(hexToBin(first.sealed), this.options.privateKey, this.options.network);
+      const { problem: _earlier, ...clean } = first;
+      await this.store(clean);
+      let answer: SetUpAnswer;
+      try {
+        answer = await this.options.create(read, clean, async (creation) => {
+          const current = this.options.records.get(requestId) ?? clean;
+          await this.store({ ...current, creation });
+        });
+      } catch (error) {
+        const current = this.options.records.get(requestId) ?? clean;
+        if (error instanceof SetUpRefusal) {
+          await this.store({ ...current, refused: error.message });
+          await this.options.reply(requestId, { status: 'refused', reason: error.message });
+          return;
+        }
+        // Not final: the recoverer can add coins, or the network or a store can come back; a request that arrives
+        // again is tried again.
+        await this.store({ ...current, problem: (error as Error).message });
+        const name = this.options.name() || 'Your helper';
+        const reason = error instanceof FundsMissingError ? `${name} cannot set up a wallet just now: their balance is too low. Ask them to add coins, then try again.` : `${name}'s page could not set the wallet up just now. Try again in a moment.`;
+        await this.options.reply(requestId, { status: 'refused', reason });
+        return;
+      }
+      const current = this.options.records.get(requestId) ?? clean;
+      await this.store({ ...current, answer });
+      await this.options.reply(requestId, { status: 'created', created: answer });
+    } finally {
+      this.busy.delete(requestId);
+    }
+  }
+}
