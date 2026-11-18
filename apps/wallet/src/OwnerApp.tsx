@@ -16,7 +16,7 @@ import { MovedAway, OwnedElsewhere } from './Elsewhere.js';
 import { Receive } from './Receive.js';
 import { Recovery } from './Recovery.js';
 import { Send } from './Send.js';
-import { type Session, deviceWords, keep, kept, noteActivity, openWallet, seedOf, startCreationAgain } from './session.js';
+import { type Session, deviceWords, keep, kept, noteActivity, openWallet, seedOf, setUpAgain } from './session.js';
 import { type Watch, useWatch } from './watch.js';
 
 const ROUTES = ['home', 'receive', 'send', 'apps', 'recovery', 'details'] as const;
@@ -106,11 +106,12 @@ const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: O
   useEvery(8_000, refresh);
 
   // The wallet is in use as soon as the network has its creation. Until a block holds it, every check looks
-  // at it again: if it is gone, the wallet is made again from the coins this phone has (proposal section 7.9).
-  // Coins at addresses given out before that are moved to the new wallet's addresses, by their keys.
+  // at it again: if it is gone, the set-up did not hold, and the phone goes back to its first screen to set it
+  // up again with the recoverer (proposal section 7.9). Coins at addresses given out before that stay the
+  // phone's by key, and are moved to the new wallet's addresses once it exists.
   useEvery(10_000, async () => {
     if (!wallet.stored.creation.confirmed && (await wallet.creationStep()) !== 'created') {
-      startCreationAgain(session);
+      setUpAgain();
       onLost();
       return;
     }
@@ -136,7 +137,7 @@ const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: O
     setRecovery(checked.status);
     if (checked.status.on) {
       keep('lostCreation', undefined);
-      // The credential's words are with the recoverer now; this phone forgets them.
+      // A credential a phone made for its recoverer in an earlier version is with the recoverer now; it is forgotten.
       const setup = kept('setup');
       if (setup?.credentialWords !== undefined) {
         const { credentialWords: _forgotten, ...rest } = setup;

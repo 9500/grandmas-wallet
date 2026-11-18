@@ -67,7 +67,17 @@ export const useWatch = (session: Session, wallet: OwnerWallet, ownerKeyHash: Ui
   useEffect(() => {
     let stopped = false;
     const start = async () => {
-      const history = await readControllerHistory(session.chain, hexToBin(identity));
+      // A wallet opened right after its creation: the servers give the creation out at once and list it a moment
+      // later. The history is read again until they do, and the watching starts then.
+      let history: ControllerHistory | undefined;
+      while (history === undefined && !stopped) {
+        history = await readControllerHistory(session.chain, hexToBin(identity)).catch((error: unknown) => {
+          setWatch((before) => ({ ...before, problem: (error as Error).message }));
+          return undefined;
+        });
+        if (history === undefined) await new Promise((resolve) => setTimeout(resolve, 3_000));
+      }
+      if (history === undefined) return;
       const genesis = history.transactions[0]?.transactionId;
       if (genesis === undefined || stopped) return;
       const watcher = new Monitor({

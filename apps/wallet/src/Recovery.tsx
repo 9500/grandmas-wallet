@@ -8,7 +8,7 @@ import { useEffect, useState } from 'preact/hooks';
 
 import type { Owner } from './OwnerApp.js';
 import { DELAYS, DelayPicker, RecipientCheck, RecipientEntry, Waiting, sameDelay } from './parts.js';
-import { KitCard, ProtectionStatus } from './Protection.js';
+import { ProtectionStatus } from './Protection.js';
 import { type StoredRecipient, deviceWords, keep, kept, recipientFingerprint, recipientOf, sealedContent } from './session.js';
 import { handToRecoverer } from './hand-to-recoverer.js';
 import { PREPARE_LINK } from './scan.js';
@@ -52,7 +52,6 @@ export const Recovery = ({ owner }: { owner: Owner }) => {
             />
             <p class="small muted">This page checks the wallet every 15 seconds while it is open. A phone with the page closed, or switched off, does not watch; keep it open, or open it at least once within every waiting period.</p>
           </Card>
-          <KitCard owner={owner} />
           {pending !== undefined && (
             <Card title={pending.kind === 'new seed' ? 'Moving to a new phone' : pending.kind === 'new recoverer' ? 'Changing your recoverer' : 'Changing the waiting period'} tone="warn">
               <ChangeState owner={owner} />

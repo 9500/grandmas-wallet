@@ -1,25 +1,28 @@
 import '@grandmas-wallet/ui/styles.css';
 import './apps.css';
+import './set-up.css';
 
-import { type Output, binToHex, encodeLockingBytecodeP2sh32 as p2sh32, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
-import type { ActionPreview, HeldToken, TemplateSummary, TokenNaming, TokenSendQuote, TokenSendRequest } from '@grandmas-wallet/app';
-import { INPUT_BYTES, smallestOutputValue, transactionBytes } from '@grandmas-wallet/core';
-import { Button, Card, Field, Frame, HandOff, TextArea, TextInput } from '@grandmas-wallet/ui';
+import { type Output, binToHex, encodeLockingBytecodeP2sh32 as p2sh32, generateBip39Mnemonic, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
+import { type ActionPreview, type HeldToken, type TemplateSummary, type TokenNaming, type TokenSendQuote, type TokenSendRequest, walletTemplateNumbers } from '@grandmas-wallet/app';
+import { type ChallengeDelay, INPUT_BYTES, deriveSeedKeys, smallestOutputValue, transactionBytes } from '@grandmas-wallet/core';
+import { sealPackage, signEnrollmentRequest } from '@grandmas-wallet/enrollment';
+import { Card, Field, Frame, TextArea, TextInput } from '@grandmas-wallet/ui';
 import { render } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 
 import { ActionReview } from './ActionReview.js';
 import { TokenRow } from './Apps.js';
 import { Receive } from './Receive.js';
 import { Send } from './Send.js';
 import { chooseToken } from './token-choice.js';
-import { handToRecoverer } from './hand-to-recoverer.js';
+import { askToSetUp, meetRecoverer } from './hand-to-recoverer.js';
 import type { Owner } from './OwnerApp.js';
-import { RecipientCheck, RecipientEntry } from './parts.js';
 import { RECOVERER_LINK, paymentAddress } from './scan.js';
 import { ScanDialog, WithScan } from './Scanner.js';
-import { SealedHandOff } from './SealedHandOff.js';
-import type { StoredRecipient } from './session.js';
+import { ScanCode } from './ScanCode.js';
+import type { Session, StoredRecipient } from './session.js';
+import { Ready, SettingUpView } from './SetUp.js';
+import { Welcome } from './Welcome.js';
 
 /*
  * Parts of the wallet's screens, fed from fixed data, for looking at them in a browser without a wallet: the
@@ -191,48 +194,37 @@ const ScanFields = () => {
 };
 
 /**
- * A recoverer's code taken in as on the first step of making a wallet, and something sealed handed to their page
- * as after the wallet is made. The sample is random bytes: the recoverer's page receives it and refuses it.
+ * Setting a wallet up, as on a phone: the recoverer's code scanned (or its text pasted), then a real request, signed
+ * and sealed to the recoverer, sent over the session the code offers, and "Setting up…" for as long as the page has
+ * not answered. The fixtures have no backup stores and no engine: the request is made without writing the viewing
+ * key to a store, and a wallet that comes back is not opened.
  */
-const RecovererFixture = () => {
+const SetUpFixture = ({ kind }: { kind: 'bank' | 'friend' }) => {
   const [recipient, setRecipient] = useState<StoredRecipient | undefined>();
-  const [matched, setMatched] = useState(false);
-  const [sample, setSample] = useState<string | undefined>();
-  if (recipient === undefined) {
-    return (
-      <Card title="1. Your recoverer">
-        <RecipientEntry onRead={setRecipient} purpose="It holds their name and the key your wallet seals their kit to." />
-      </Card>
-    );
-  }
-  const name = recipient.name || 'your recoverer';
-  return (
-    <div class="stack">
-      <Card title="1. Your recoverer">
-        <RecipientCheck recipient={recipient} matched={matched} onMatched={setMatched} onClear={() => setRecipient(undefined)} />
-      </Card>
-      <Card title={`Send the recovery kit to ${name}`} tone="warn">
-        {sample === undefined ? (
-          <Button
-            disabled={!matched}
-            onClick={() => {
-              const sealed = crypto.getRandomValues(new Uint8Array(900));
-              handToRecoverer(recipient, 'enroll', sealed);
-              setSample(`${recipient.page}#enroll=sample`);
-            }}
-          >
-            Send a sample to their page
-          </Button>
-        ) : (
-          <SealedHandOff kind="enroll" name={name}>
-            <HandOff text={sample} qrLabel="QR code of the recovery kit link" copyLabel="Copy link" testId="kit-link">
-              <p>Send this link to {name}, by message or by letting them scan the code. Only they can open it.</p>
-            </HandOff>
-          </SealedHandOff>
-        )}
-      </Card>
-    </div>
-  );
+  const [stage, setStage] = useState('meeting');
+  const [delay, setDelay] = useState<ChallengeDelay | undefined>();
+  const [problem, setProblem] = useState<string | undefined>();
+  const [created, setCreated] = useState(false);
+  useEffect(() => {
+    if (recipient === undefined) return;
+    const run = async () => {
+      const said = await meetRecoverer(recipient);
+      if (said.offer === undefined) throw new Error('This code does not set wallets up.');
+      setDelay(said.offer.challengeDelay);
+      const seed = deriveSeedKeys(generateBip39Mnemonic(), 'testnet', walletTemplateNumbers());
+      const archive = { stores: [], archiveId: '00'.repeat(16), contentKey: '00'.repeat(32) };
+      const requestId = binToHex(crypto.getRandomValues(new Uint8Array(16)));
+      const sealed = await sealPackage(signEnrollmentRequest(seed, { requestId, archive, challengeDelay: said.offer.challengeDelay, firstAddress: 0 }), hexToBin(recipient.publicKey));
+      const pending = { requestId, archive, requestHash: '', viewingKeyRecordHash: '', challengeDelay: said.offer.challengeDelay, firstAddress: 0, sealed: binToHex(sealed) };
+      setStage('asking');
+      await askToSetUp(recipient, pending, () => setStage('waiting'));
+      setCreated(true);
+    };
+    run().catch((error: unknown) => setProblem((error as Error).message));
+  }, [recipient]);
+  if (recipient === undefined) return <ScanCode title={kind === 'bank' ? 'Scan your bank\'s code' : 'Scan the code on their screen'} onRead={setRecipient} onBack={() => undefined} />;
+  if (created) return <Ready name={recipient.name} startingSatoshis={20_000n} onOpen={() => undefined} />;
+  return <SettingUpView name={recipient.name || 'your helper'} kind={kind} stage={stage} challengeDelay={delay} problem={problem} onRetry={() => setProblem(undefined)} onAgain={() => setRecipient(undefined)} />;
 };
 
 // ------------------------------------------------------------------ sending and receiving tokens
@@ -345,8 +337,12 @@ render(
         <Receive owner={tokenOwner} />
       ) : show === 'scan' ? (
         <ScanFields />
-      ) : show === 'recoverer' ? (
-        <RecovererFixture />
+      ) : show === 'welcome' ? (
+        <Welcome session={{ environment: { network: 'chipnet' } } as unknown as Session} onChoose={ignore} />
+      ) : show === 'setup-bank' || show === 'setup-friend' ? (
+        <SetUpFixture kind={show === 'setup-bank' ? 'bank' : 'friend'} />
+      ) : show === 'ready' ? (
+        <Ready name="Example Bank" startingSatoshis={20_000n} onOpen={ignore} />
       ) : show === 'tokens' ? (
         <div class="grid two apps-layout">
           <Card title="Tokens">
