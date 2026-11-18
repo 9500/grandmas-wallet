@@ -26,6 +26,7 @@ import { type ChainReader, deriveSeedKeys, p2pkhLockingBytecode, readControllerH
 import { type KeptKit, ENROLLMENT_LINK_BUDGET, credentialKeys, generateRecipientKeyPair } from '@grandmas-wallet/enrollment';
 import { KeyBackend, SimulatedChain } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
+import { recovererFunds } from './support/recoverer.js';
 
 /**
  * The three devices relying on each other, with the wallets' own code on the simulated chain and backup
@@ -56,13 +57,12 @@ const start = async () => {
   const owner = await OwnerWallet.open({ backend: new KeyBackend(chain, first), chain, seed: first });
   chain.fund(p2pkhLockingBytecode(first.fundingKey.keyHash), 100_000n);
   await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY });
-  // The recoverer's own coins for its fees.
-  chain.fund(p2pkhLockingBytecode(credential.feeKey.keyHash), 20_000n);
+  // The recoverer's own balance, from which it pays its fees.
+  const { funds } = await recovererFunds(chain);
   const identity = hexToBin(owner.stored.identity as string);
   const recovererDevice = await generateRecipientKeyPair();
   const recipient = { name: 'recoverer.example', page: 'https://recoverer.example/', publicKey: recovererDevice.publicKey };
-  const recovererWallet = () =>
-    RecovererWallet.open({ backend: new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey }), chain, identity });
+  const recovererWallet = () => RecovererWallet.open({ funds, chain, identity, recoveryKey: credential.recoveryKey });
   /** The owner enrolls the recoverer; the recoverer takes the link in and leaves its receipt. */
   const enrolled = async () => {
     const sent = await enroll({ wallet: owner, seed: first, chain, credential: { words: CREDENTIAL_WORDS }, recipient, stores: STORES, storeAt, madeAt: 1_794_950_000 });
@@ -538,7 +538,7 @@ describe('a new recoverer and a new waiting period', () => {
     // The first recoverer's receipt no longer makes recovery on, and its key no longer works on the controller.
     const old = await checkRecovery({ wallet: owner, chain, arrangement, storeAt, network: 'testnet' });
     expect(old.status.on).toBe(false);
-    const firstRecoverer = RecovererWallet.open({ backend: new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey }), chain, identity: hexToBin(owner.stored.identity as string) });
+    const firstRecoverer = RecovererWallet.open({ funds: (await recovererFunds(chain)).funds, chain, identity: hexToBin(owner.stored.identity as string), recoveryKey: credential.recoveryKey });
     await expect(firstRecoverer).rejects.toThrow(/not the recoverer named in the wallet's controller/);
   });
 

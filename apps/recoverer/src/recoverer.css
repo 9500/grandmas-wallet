@@ -6,3 +6,8 @@
 .code-box .qr { width: 100%; max-width: 300px; height: auto; }
 
 .funds .balance-main { font-size: 28px; }
+
+/* Sending the whole balance elsewhere: closed, one button under the address; open, a part of the card of its own. */
+.send-all.stack { border-top: 1px solid var(--line); padding-top: 16px; }
+.send-all h3 { margin: 0; }
+.send-all .kv { margin: 0; }

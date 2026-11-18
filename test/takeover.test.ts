@@ -3,6 +3,7 @@ import { type AccountCoin, ADDRESS_KIND, buildTransaction, controllerScript, dec
 import { type OwnerWalletState, type Sent, OwnerWallet, RecovererWallet, walletTemplateNumbers } from '@grandmas-wallet/app';
 import { KeyBackend, SimulatedChain, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
+import { recovererFunds } from './support/recoverer.js';
 
 /**
  * Acceptance tests of the proposal for a new device taking over: SW01, SW03 to SW07, KV06, FE09, and the
@@ -31,14 +32,13 @@ const start = async () => {
   const owner = await OwnerWallet.open({ backend: new KeyBackend(chain, first), chain, seed: first, save: (state) => (kept = state) });
   chain.fund(p2pkhLockingBytecode(first.fundingKey.keyHash), 100_000n);
   await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY });
-  // The recoverer's own coins for its fees.
-  chain.fund(p2pkhLockingBytecode(credential.feeKey.keyHash), 20_000n);
+  // The recoverer's own balance, from which it pays its fees.
+  const { funds } = await recovererFunds(chain);
   const identity = hexToBin(owner.stored.identity as string);
-  const recovererBackend = () => new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey });
-  const recoverer = await RecovererWallet.open({ backend: recovererBackend(), chain, identity });
+  const recoverer = await RecovererWallet.open({ funds, chain, identity, recoveryKey: credential.recoveryKey });
   /** A recovery to the seed with the given index: request, wait, complete. */
   const recoverTo = async (index: number): Promise<void> => {
-    const again = await RecovererWallet.open({ backend: recovererBackend(), chain, identity });
+    const again = await RecovererWallet.open({ funds, chain, identity, recoveryKey: credential.recoveryKey });
     await again.request(seedOf(index).controllerKey.keyHash);
     chain.nowMs += 2 * 512 * 1000;
     await again.complete();
@@ -56,7 +56,7 @@ const start = async () => {
     const [utxo] = chain.outputsAt(controllerScript(identity).lockingBytecode);
     return decodeControllerState(utxo?.output.token?.nft?.commitment as Uint8Array);
   };
-  return { chain, owner, first, identity, recoverer, recoverTo, takeOver, state, kept: () => kept as OwnerWalletState };
+  return { chain, owner, first, identity, funds, recoverer, recoverTo, takeOver, state, kept: () => kept as OwnerWalletState };
 };
 const token = (chain: SimulatedChain, lockingBytecode: Uint8Array, kind: Omit<NonNullable<Output['token']>, 'category'>): string => {
   const minter = testKey(0xa0 + chain.outputsAt(lockingBytecode).length + Math.floor(Number(kind.amount % 7n)));
@@ -187,13 +187,13 @@ describe('a new device takes over', () => {
   });
 
   it('SW06: a sweep while a request is pending cancels the request', async () => {
-    const { chain, owner, recoverer, recoverTo, takeOver, state } = await start();
+    const { chain, owner, funds, recoverer, recoverTo, takeOver, state } = await start();
     chain.fund((await owner.receiveAddress()).address.lockingBytecode, 10_000n);
     await recoverTo(1);
     const { wallet } = await takeOver(1);
     await wallet.search({ passes: ['quick'] });
     // The recoverer asks again, for another key, before the new device has swept.
-    const again = await RecovererWallet.open({ backend: new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey }), chain, identity: recoverer.identity });
+    const again = await RecovererWallet.open({ funds, chain, identity: recoverer.identity, recoveryKey: credential.recoveryKey });
     await again.request(testKey(0x99).keyHash);
     expect(state().status).toBe('pending');
     await wallet.sweepEarlier();
@@ -201,14 +201,14 @@ describe('a new device takes over', () => {
   });
 
   it('a new device that holds nothing at its own addresses yet refuses a request with a coin at an earlier seed\'s address', async () => {
-    const { chain, owner, recoverer, recoverTo, takeOver, state } = await start();
+    const { chain, owner, funds, recoverer, recoverTo, takeOver, state } = await start();
     chain.fund((await owner.receiveAddress()).address.lockingBytecode, 10_000n);
     await recoverTo(1);
     const { wallet } = await takeOver(1);
     await wallet.search({ passes: ['quick'] });
     const before = await wallet.balance();
     expect(before.recoverable).toBe(0n);
-    const again = await RecovererWallet.open({ backend: new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey }), chain, identity: recoverer.identity });
+    const again = await RecovererWallet.open({ funds, chain, identity: recoverer.identity, recoveryKey: credential.recoveryKey });
     await again.request(testKey(0x99).keyHash);
     expect(state().status).toBe('pending');
     expect(await wallet.canCancel()).toBe(true);
@@ -322,7 +322,7 @@ describe('moving on without a loss', () => {
   });
 
   it('MG03: replacing the recoverer while a request is pending clears the request; the earlier recoverer\'s key can neither request nor complete', async () => {
-    const { chain, owner, identity, recoverer, state } = await start();
+    const { chain, owner, identity, funds, recoverer, state } = await start();
     chain.fund((await owner.receiveAddress()).address.lockingBytecode, 10_000n);
     await recoverer.request(testKey(0x99).keyHash);
     expect(state().status).toBe('pending');
@@ -333,29 +333,33 @@ describe('moving on without a loss', () => {
     chain.nowMs += 2 * 512 * 1000;
     await expect(recoverer.complete()).rejects.toThrow();
     await expect(recoverer.request(testKey(0x98).keyHash)).rejects.toThrow();
-    const earlierAccount = new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey });
-    await expect(RecovererWallet.open({ backend: earlierAccount, chain, identity })).rejects.toThrow(/not the recoverer named/);
+    await expect(RecovererWallet.open({ funds, chain, identity, recoveryKey: credential.recoveryKey })).rejects.toThrow(/not the recoverer named/);
     expect(state().status).toBe('active');
   });
 
-  it('MG04: what the earlier recoverer holds is not counted as available; the new one has a fee address of its own, which it fills from its own coins', async () => {
-    const { chain, owner, identity } = await start();
-    const earlierFeeAddress = p2pkhLockingBytecode(credential.feeKey.keyHash);
-    expect(chain.balanceOf(earlierFeeAddress)).toBe(20_000n);
+  it('MG04: a recoverer that is replaced keeps its whole balance; the new one pays from a balance of its own', async () => {
+    const { chain, owner, identity, funds, recoverer } = await start();
+    // The earlier recoverer paid for a request, which the owner refused.
+    await recoverer.request(testKey(0x99).keyHash);
+    await owner.cancel();
+    const earlierHolds = await funds.balance();
+    expect(earlierHolds).toBe(20_000n - 991n);
     const replacement = deriveCredentialKeys(WORDS[2] as string, 'testnet', numbers);
     const balance = await owner.balance();
     await owner.changeSettings({ recovererKeyHash: replacement.recoveryKey.keyHash });
-    // The wallet's balance never included the recoverer's fee coins, and the earlier recoverer keeps them.
+    // The wallet's balance never included the recoverer's coins. Nothing of the earlier recoverer's stays with the
+    // wallet: no coin is at an address of the wallet's credential, and its balance is as it was.
     expect((await owner.balance()).recoverable).toBeLessThan(balance.recoverable);
-    expect(chain.balanceOf(earlierFeeAddress)).toBe(20_000n);
-    const account = new KeyBackend(chain, { controllerKey: replacement.recoveryKey, fundingKey: replacement.feeKey, addressKey: () => replacement.feeKey });
-    const next = await RecovererWallet.open({ backend: account, chain, identity });
-    expect(hex(await next.feeAddress())).not.toBe(hex(earlierFeeAddress));
-    // Nothing is there yet: the new recoverer says what it needs.
-    expect(await next.feeReadiness()).toMatchObject({ holds: 0n, canRequest: false });
-    // It pays its own fees: coins of its own arrive at the new fee address.
-    chain.fund(await next.feeAddress(), 4_900n);
-    expect(await next.feeReadiness()).toMatchObject({ holds: 4_900n, canRecover: true });
+    expect(chain.balanceOf(p2pkhLockingBytecode(credential.feeKey.keyHash))).toBe(0n);
+    expect(await funds.balance()).toBe(earlierHolds);
+    // The new recoverer has a balance of its own. Empty, it is told what a request takes; with coins, it acts.
+    const own = await recovererFunds(chain, 0n, WORDS[1] as string);
+    const next = await RecovererWallet.open({ funds: own.funds, chain, identity, recoveryKey: replacement.recoveryKey });
+    await expect(next.request(testKey(0x98).keyHash)).rejects.toThrow(/Your balance is 0 satoshis and a request takes 957/);
+    chain.fund(own.address, 4_900n);
+    await next.request(testKey(0x98).keyHash);
+    expect(await own.funds.balance()).toBe(4_900n - 991n);
+    expect(await funds.balance()).toBe(earlierHolds);
   });
 
   it('MG05: a device that sees another key own the wallet stops giving out addresses and offers to move unswept coins out; nothing is offered for vault coins', async () => {
@@ -387,9 +391,9 @@ describe('moving on without a loss', () => {
   });
 
   it('MG05: a completion that is not in a block pauses the device; when the owner\'s cancellation wins, it goes on by itself', async () => {
-    const { chain, owner, identity } = await start();
+    const { chain, owner, identity, funds } = await start();
     chain.blocksOnDemand = true;
-    const recoverer = await RecovererWallet.open({ backend: new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey }), chain, identity });
+    const recoverer = await RecovererWallet.open({ funds, chain, identity, recoveryKey: credential.recoveryKey });
     await recoverer.request(seedOf(1).controllerKey.keyHash);
     chain.mine();
     chain.nowMs += 2 * 512 * 1000;

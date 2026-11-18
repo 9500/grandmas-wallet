@@ -1,5 +1,5 @@
 import { binToHex, generateBip39Mnemonic, hexToBin } from '@bitauth/libauth';
-import { type Account, type AppChain, type LinkField, type SetUpRecord, type StoreAt, RecovererFunds } from '@grandmas-wallet/app';
+import { type AppChain, type LinkField, type SetUpRecord, type StoreAt, RecovererFunds } from '@grandmas-wallet/app';
 import { linkKind, makeLink, readLink } from '@grandmas-wallet/app/links';
 import { HttpStore } from '@grandmas-wallet/archive';
 import type { ChainReader, ChallengeDelay } from '@grandmas-wallet/core';
@@ -56,12 +56,12 @@ export interface Kept {
   name: string;
   wallets: Record<string, Looked>;
   inbox: InboxEntry[];
-  /** The wallet open in this page: its credential's account is the engine of the page. */
+  /** The wallet open in this page. */
   current: string;
   incoming: { kind: LinkField | 'enroll'; text: string };
   mode: Mode;
   settings: Settings;
-  /** The twelve words of the recoverer's own coins: its balance, from which it creates wallets and pays its fees. */
+  /** The twelve words of the recoverer's own coins: its one balance, from which it creates wallets and pays every fee. */
   fundsWords: string;
   /** Phones' requests to have a wallet set up, by request. */
   setUps: Record<string, SetUpRecord>;
@@ -146,16 +146,6 @@ export const sealedOf = async (text: string, field: 'takeover' | 'update'): Prom
   return hexToBin(read.sealed);
 };
 
-let account: Promise<Account> | undefined;
-/** The account of one wallet's credential. Only one engine can be open in a page; switching wallets loads the page again. */
-export const credentialAccount = (session: Session, words: string): Promise<Account> => {
-  account ??= openAccount(words, session.environment).catch((error: unknown) => {
-    account = undefined;
-    throw error;
-  });
-  return account;
-};
-
 /** The words of the recoverer's own coins, made the first time they are needed. */
 const fundsWords = (): string => {
   const known = kept('fundsWords');
@@ -171,11 +161,12 @@ export const useFixedFunds = (fixed: RecovererFunds): void => {
   funds = Promise.resolve(fixed);
 };
 /**
- * The recoverer's own coins: the engine of the page's first screens, from which wallets are created. A page that
- * opens one wallet's credential instead loads again.
+ * The recoverer's own coins: the one engine of the page, on every screen. Wallets are created from it, and a
+ * request and a completion for any wallet are paid from it; the key for a wallet's controller comes from that
+ * wallet's credential and is used by the page's own code, so no wallet needs an engine of its own.
  */
 export const fundsOf = (session: Session): Promise<RecovererFunds> => {
-  funds ??= credentialAccount(session, fundsWords())
+  funds ??= openAccount(fundsWords(), session.environment)
     .then((opened) => RecovererFunds.open({ backend: opened, chain: session.chain }))
     .catch((error: unknown) => {
       funds = undefined;
@@ -184,7 +175,7 @@ export const fundsOf = (session: Session): Promise<RecovererFunds> => {
   return funds;
 };
 
-/** Open another wallet: the page loads again, so that its engine opens with that wallet's credential. */
+/** Open another wallet, or none: the page loads again and shows it. */
 export const openWalletPage = (identity: string | undefined, path = '/'): void => {
   keep('current', identity);
   window.location.assign(path);

@@ -127,8 +127,10 @@ const templateNamed = (templates: TemplateReference[], name: string): string =>
   templates.find((template) => template.name === name)?.identifier ?? fail(`The kit does not name the wallet's ${name} template.`);
 
 /**
- * The two keys of a credential (proposal section 9.2): the recovery key is the first key under the
- * controller template, the fee key the first under XO's standard wallet template, of the credential's own words.
+ * The keys of a credential (proposal section 9.2): the recovery key is the first key under the controller
+ * template of the credential's own words. The first key under XO's standard wallet template is the key of the fee
+ * address, where the recoverer kept coins for its fees until 18 November 2026; it is derived so that what is
+ * still there can be brought into the recoverer's balance.
  */
 export const credentialKeys = (words: string, network: XoNetwork, templates: TemplateReference[]): { recoveryKey: KeyPair; feeKey: KeyPair } => ({
   recoveryKey: deriveXoTemplateKey(words, templateNamed(templates, 'controller'), 0, network),

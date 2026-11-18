@@ -1,7 +1,7 @@
 import { binToHex } from '@bitauth/libauth';
-import { type FeeView, acceptEnrollment, acceptUpdate, describeDelay, feeView } from '@grandmas-wallet/app';
+import { acceptEnrollment, acceptUpdate, describeDelay } from '@grandmas-wallet/app';
 import { EnrollmentError, keyFingerprint, openPackage, readTakeover, readUpdate, recoveryKeyOf } from '@grandmas-wallet/enrollment';
-import { Amount, Button, Card, Field, Notice, TaskStatus, TextInput, plainError, useTask } from '@grandmas-wallet/ui';
+import { Button, Card, Field, Notice, TaskStatus, TextInput, plainError, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import { answerIncoming } from './offered-session.js';
@@ -9,7 +9,7 @@ import { type Session, keep, kept, saveWallet, sealedOf, wallets } from './sessi
 
 type Outcome =
   | { kind: 'enroll'; stage: 'ask' | 'new recoverer'; reason?: string }
-  | { kind: 'enrolled'; label: string; identity: string; asNewRecoverer: boolean; fees?: FeeView | undefined }
+  | { kind: 'enrolled'; label: string; identity: string; asNewRecoverer: boolean }
   | { kind: 'takeover'; fingerprint: string; fresh: boolean }
   | { kind: 'update'; label: string; what: string };
 
@@ -83,7 +83,7 @@ export const Incoming = ({ session, onChanged, toast, onShowRequests }: { sessio
       let identity = '';
       const name = label.trim();
       try {
-        const taken = await acceptEnrollment({
+        await acceptEnrollment({
           link: incoming.text,
           privateKey: session.privateKey,
           chain: session.chain,
@@ -99,7 +99,7 @@ export const Incoming = ({ session, onChanged, toast, onShowRequests }: { sessio
         });
         keep('incoming', undefined);
         answerIncoming('kept');
-        setOutcome({ kind: 'enrolled', label: name, identity, asNewRecoverer, fees: await feeView(session.chain, taken.kept).catch(() => undefined) });
+        setOutcome({ kind: 'enrolled', label: name, identity, asNewRecoverer });
         toast('The kit is kept and your receipt is on the backup stores.');
         onChanged();
       } catch (error) {
@@ -164,16 +164,6 @@ export const Incoming = ({ session, onChanged, toast, onShowRequests }: { sessio
               ? 'Your receipt is prepared. As soon as the owner\'s wallet makes the change, you are its recoverer.'
               : 'Your receipt is on the backup stores; the owner\'s wallet shows that recovery is on as soon as it finds it.'}
           </p>
-          {outcome.fees !== undefined &&
-            (outcome.fees.missing === 0n ? (
-              <Notice tone="good">
-                The fee address holds <Amount satoshis={outcome.fees.holds} exact />: enough for a request and its completion.
-              </Notice>
-            ) : (
-              <Notice tone="warn">
-                The fee address holds <Amount satoshis={outcome.fees.holds} exact />. A recovery needs <Amount satoshis={outcome.fees.missing} exact /> more. Open the wallet to see the address.
-              </Notice>
-            ))}
         </Card>
       )}
       {outcome.kind === 'takeover' && (

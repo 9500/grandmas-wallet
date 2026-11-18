@@ -1,10 +1,10 @@
-import { type FeeView, type RecovererView, feeReserve, feeView, viewAsRecoverer } from '@grandmas-wallet/app';
+import { type GivenInput, type RecovererView, creationCost, earlierFeeCoins, viewAsRecoverer } from '@grandmas-wallet/app';
 import { keyFingerprint } from '@grandmas-wallet/enrollment';
-import { Button, Card, PageHead, Pill, TaskStatus, lockingBytecodeOfAddress, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, PageHead, Pill, TaskStatus, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
 import { useState } from 'preact/hooks';
 
 import { FundsCard, useFunds } from './Funds.js';
-import { type Session, modeOf, openWalletPage, wallets } from './session.js';
+import { type Session, modeOf, openWalletPage, settingsOf, wallets } from './session.js';
 
 /**
  * Why a wallet cannot be read. A wallet whose creation the network no longer has is said so in plain words: the
@@ -18,30 +18,34 @@ export const describeProblem = (error: unknown): string => {
 };
 
 /**
- * The wallets this recoverer looks after, each with where it stands on chain, and the recoverer's balance, from
- * which it sets new wallets up. A wallet whose fee address runs short is topped up from the balance.
+ * The wallets this recoverer looks after, each with where it stands on chain, and the recoverer's one balance,
+ * from which it sets new wallets up and pays every fee. Coins that an earlier version of this page kept at a
+ * wallet's fee address are offered to be brought into the balance.
  */
 export const Wallets = ({ session, onNew }: { session: Session; onNew: () => void }) => {
   const bank = modeOf() === 'bank';
   const all = Object.entries(wallets()).sort(([, a], [, b]) => b.addedAt - a.addedAt);
-  const [views, setViews] = useState<Record<string, { view?: RecovererView; fees?: FeeView | undefined; problem?: string }>>({});
+  const [views, setViews] = useState<Record<string, { view?: RecovererView; problem?: string }>>({});
+  const [earlier, setEarlier] = useState<GivenInput[]>([]);
   const { funds, problem } = useFunds(session);
-  const topUp = useTask();
+  const takeIn = useTask();
   useEvery(20_000, async () => {
     const next: typeof views = {};
+    const found: GivenInput[] = [];
     for (const [identity, looked] of all) {
       try {
-        next[identity] = { view: await viewAsRecoverer(session.chain, looked.kept), fees: await feeView(session.chain, looked.kept) };
+        next[identity] = { view: await viewAsRecoverer(session.chain, looked.kept) };
       } catch (error) {
         next[identity] = { problem: describeProblem(error) };
       }
+      found.push(...(await earlierFeeCoins(session.chain, looked.kept).catch(() => [])));
     }
     setViews(next);
-  }, [all.length, topUp.busy]);
-  const short = all.filter(([identity]) => {
-    const entry = views[identity];
-    return entry?.fees !== undefined && entry.fees.missing > 0n && entry.view?.standing.kind !== 'not named' && entry.view?.standing.kind !== 'closed';
-  });
+    setEarlier(found);
+  }, [all.length, takeIn.busy]);
+  // What is still at earlier fee addresses, when it is worth its own fee to move.
+  const waiting = funds === undefined || takeIn.busy !== undefined ? undefined : funds.takeInQuote(earlier);
+  const each = creationCost(BigInt(settingsOf().startingSatoshis));
   return (
     <div class="stack">
       <PageHead title={bank ? 'Customers' : 'People you help'}>
@@ -74,7 +78,7 @@ export const Wallets = ({ session, onNew }: { session: Session; onNew: () => voi
                         ) : entry.problem !== undefined ? (
                           entry.problem
                         ) : (
-                          <WalletLine view={entry.view as RecovererView} fees={entry.fees} asNew={looked.asNewRecoverer === true} pending={looked.kept.pending !== undefined} />
+                          <WalletLine view={entry.view as RecovererView} asNew={looked.asNewRecoverer === true} pending={looked.kept.pending !== undefined} />
                         )}
                       </small>
                     </span>
@@ -85,45 +89,53 @@ export const Wallets = ({ session, onNew }: { session: Session; onNew: () => voi
           </ul>
         </Card>
           )}
-          {short.length > 0 && (
-            <Card title="Fee coins running short" tone="warn">
-              <p class="small muted">A request and its completion are paid from each wallet's own fee address. Top these up from your balance.</p>
-              <ul class="list">
-                {short.map(([identity, looked]) => (
-                  <li class="list-item">
+          {(waiting !== undefined || takeIn.error !== undefined) && (
+            <Card title="Coins kept with wallets">
+              <div class="stack-s">
+                <p class="small muted">An earlier version of this page kept coins for fees with each wallet. Every fee is now paid from your balance, so they can come back to it.</p>
+                <TaskStatus task={takeIn} />
+                {waiting !== undefined && (
+                  <div class="row spread">
                     <span>
-                      {looked.label || shorten(identity, 6, 4)} <span class="small muted">· {views[identity]?.fees?.missing.toLocaleString('en-US')} sat missing</span>
+                      <Amount satoshis={waiting.arrives} exact /> <span class="small muted">after the fee</span>
                     </span>
                     <Button
-                      small
                       kind="secondary"
-                      task={topUp}
-                      name={identity}
-                      disabled={funds === undefined}
+                      task={takeIn}
+                      name="take-in"
                       onClick={() =>
-                        void topUp.run(identity, async () => {
-                          const fees = views[identity]?.fees;
-                          if (funds === undefined || fees === undefined) return;
-                          await funds.pay(lockingBytecodeOfAddress(fees.address, session.network), feeReserve());
+                        void takeIn.run('take-in', async (progress) => {
+                          progress('Moving them to your balance');
+                          await funds?.takeIn(earlier);
+                          setEarlier([]);
                         })
                       }
                     >
-                      Top up
+                      Move to your balance
                     </Button>
-                  </li>
-                ))}
-              </ul>
-              <TaskStatus task={topUp} />
+                  </div>
+                )}
+              </div>
             </Card>
           )}
         </div>
-        <FundsCard session={session} funds={funds} problem={problem} />
+        <FundsCard
+          session={session}
+          funds={funds}
+          problem={problem}
+          note={
+            <>
+              Each new wallet takes about <Amount satoshis={each} exact />: its starting balance and the network's fees. What you do for a wallet later is paid from here too.
+            </>
+          }
+          short={(balance) => balance < each && 'Your balance does not cover a new wallet. Add coins to the address below.'}
+        />
       </div>
     </div>
   );
 };
 
-const WalletLine = ({ view, fees, asNew, pending }: { view: RecovererView; fees?: FeeView | undefined; asNew: boolean; pending: boolean }) => {
+const WalletLine = ({ view, asNew, pending }: { view: RecovererView; asNew: boolean; pending: boolean }) => {
   const { standing } = view;
   const parts = [];
   if (standing.kind === 'quiet') parts.push(<Pill tone="good">Quiet</Pill>);
@@ -131,6 +143,5 @@ const WalletLine = ({ view, fees, asNew, pending }: { view: RecovererView; fees?
   if (standing.kind === 'closed') parts.push(<Pill>Closed</Pill>);
   if (standing.kind === 'not named') parts.push(<Pill>{asNew ? 'Waiting for the owner to name you' : 'No longer names you'}</Pill>);
   if (pending && standing.kind === 'quiet') parts.push(<Pill tone="accent">Takeover request saved</Pill>);
-  if (fees !== undefined && standing.kind !== 'not named' && standing.kind !== 'closed') parts.push(fees.missing === 0n ? <span>fee coins: enough</span> : <span>fee coins: {fees.missing.toLocaleString('en-US')} sat missing</span>);
   return <span class="row">{parts}</span>;
 };

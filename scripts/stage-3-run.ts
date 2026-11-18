@@ -1,5 +1,5 @@
 // The stage 3 run on the local node: the owner's wallet on the XO engine, from creation to closing.
-// Create a wallet with an allowance, receive at fresh addresses, pay with change, receive and send a
+// Create a wallet, receive at fresh addresses, pay with change, receive and send a
 // token, receive at a vault address, send everything, and close.
 //
 // usage (from packages/app, with the local node running; see deploy/regtest/regtest.sh):
@@ -91,13 +91,13 @@ try {
   await until('the funding coin', async () => (await wallet.creationStep()) === 'funded');
   const before = await wallet.creationStep();
   const afterCreate = await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
-  // The recoverer's fee coins, paid here from the run's own coins; the owner gives no allowance.
+  // Coins for the recoverer, paid here from the run's own coins; the owner gives the recoverer nothing.
   await wallet.pay([{ lockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), valueSatoshis: 6_000n }]);
   const identity = hexToBin(wallet.stored.identity as string);
   say(`  identity ${hex(identity)}; creation was "${before}", is "${afterCreate}"`);
   // The wallet is in use as soon as the network has its creation; no block is waited for.
   const created = await server.getTransaction(wallet.stored.creation.createTransactionId as string);
-  record('create', { transactionId: wallet.stored.creation.createTransactionId as string, bytes: (created as string).length / 2, feeSatoshis: BigInt((created as string).length / 2) }, 'with an allowance of 6,000 for the recoverer');
+  record('create', { transactionId: wallet.stored.creation.createTransactionId as string, bytes: (created as string).length / 2, feeSatoshis: BigInt((created as string).length / 2) }, '6,000 satoshis were then paid to the recoverer from the run\'s own coins');
   say(`  recovery is shown as "${wallet.recovery}"; the wallet's coins pay for a cancellation: ${await wallet.canCancel()}`);
 
   say('Receiving and paying');

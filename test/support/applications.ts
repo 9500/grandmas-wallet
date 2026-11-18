@@ -9,7 +9,6 @@ import {
   Applications,
   OwnerWallet,
   RECOVERY_PROFILE,
-  RecovererWallet,
   RECOVERY_PROFILE_VERSION,
   applicationArchive,
   copyEarlierArchives,
@@ -20,6 +19,7 @@ import {
 import { deriveSeedKeys, p2pkhLockingBytecode, readTemplate, textHash } from '@grandmas-wallet/core';
 import { credentialKeys } from '@grandmas-wallet/enrollment';
 import { KeyBackend, SimulatedChain, bondDeclaration, bondTemplate, strongboxDeclaration, strongboxTemplate, templateText } from '@grandmas-wallet/testing';
+import { recovererOf } from './recoverer.js';
 
 /**
  * What the tests of applications share: a wallet on the simulated chain with a backup archive on stores in
@@ -95,7 +95,8 @@ const assemble = (chain: SimulatedChain, wallet: OwnerWallet, backend: KeyBacken
   };
   const recover = async (): Promise<void> => {
     const keys = credential();
-    const recoverer = await RecovererWallet.open({ backend: new KeyBackend(chain, { controllerKey: keys.recoveryKey, fundingKey: keys.feeKey, addressKey: () => keys.feeKey }), chain, identity });
+    // The recoverer pays from a balance of its own.
+    const recoverer = await recovererOf(chain, identity, keys.recoveryKey);
     await recoverer.request(seedOf(seedIndex + 1).controllerKey.keyHash);
     chain.nowMs += 2 * 512 * 1000;
     await recoverer.complete();
@@ -125,8 +126,6 @@ export const deviceWith = async (values: bigint[], options: { stores?: Map<strin
   const wallet = await OwnerWallet.open({ backend, chain, seed, save: (state) => (kept = state) });
   chain.fund(p2pkhLockingBytecode(seed.fundingKey.keyHash), 100_000n);
   await wallet.create({ recovererKeyHash: keys.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
-  // The recoverer's own coins for its fees.
-  chain.fund(p2pkhLockingBytecode(keys.feeKey.keyHash), 20_000n);
   // What is left of the funding coin is moved out of the way, so that the tests' figures start from the coins they name.
   const rest = (await wallet.balance()).recoverable;
   if (rest > 0n) await wallet.sendEverything(p2pkhLockingBytecode(new Uint8Array(20).fill(0x77)));

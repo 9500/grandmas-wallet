@@ -66,7 +66,7 @@ import {
 import { paryonArtifacts } from '@paryonusd/contracts';
 import { Engine, XO_SUPPORTED_NETWORKS, resolveElectrumServersForNetwork } from '@xo-cash/engine';
 
-import { type OwnerWalletState, Account, OwnerWallet, RecovererWallet, feeReserve, walletTemplateNumbers } from '../packages/app/src/index.js';
+import { type OwnerWalletState, Account, OwnerWallet, RecovererFunds, walletTemplateNumbers } from '../packages/app/src/index.js';
 import { Electrum } from '../packages/chipnet/src/electrum.js';
 import { type NodeRpcSettings, nodeRpc, testMempoolAccept } from '../packages/chipnet/src/node-rpc.js';
 
@@ -84,7 +84,7 @@ const DEBT = BigInt(LOAN_PUSD) * 100n;
 const WITH_REPAYMENT = DEBT >= 2n * MINIMUM_DEBT;
 /** The exit code of a part that stopped at a step of its own and said why. */
 const STOPPED = 3;
-const PHASES = ['the owner creates a wallet', 'the loan is opened', 'the loan is managed', 'the loan is closed', 'the wallet is closed', 'the recoverer returns its fee coins', 'the run returns what is left'];
+const PHASES = ['the owner creates a wallet', 'the loan is opened', 'the loan is managed', 'the loan is closed', 'the wallet is closed', 'the recoverer returns its balance', 'the run returns what is left'];
 mkdirSync(`${root}.chipnet`, { recursive: true });
 const stateFile = `${root}.chipnet/run-e-chipnet${WITH_REPAYMENT ? `-${LOAN_PUSD}` : ''}.json`;
 const logFile = `${root}docs/runs/stage-9-loan-chipnet${WITH_REPAYMENT ? `-${LOAN_PUSD}` : ''}.md`;
@@ -101,7 +101,7 @@ const FLOOR_PERCENT = 112n;
 const MANAGE_ADD = 100_000n;
 /** Kept in the wallet for network fees and the outputs of 1,000 satoshis each transaction makes. */
 const MARGIN = 50_000n;
-/** What creating the wallet takes from the funder: the controller, the allowance, the rest. */
+/** What creating the wallet takes from the funder: the controller, the recoverer's balance, the rest. */
 const WALLET_CREATION = 80_000n;
 /** No interest: see the record (the period of the Borrowing thread is moved on as well). */
 const STARTING_INTEREST = 0;
@@ -248,6 +248,8 @@ console.error = () => undefined;
 
 const numbers = walletTemplateNumbers();
 const credential = deriveCredentialKeys(facts.words.credential, 'testnet', numbers);
+/** What the run gives the recoverer's balance: enough for four requests and a completion. */
+const RECOVERER_COINS = 5_000n;
 const ownerSeed = deriveSeedKeys(facts.words.owner, 'testnet', numbers);
 
 const server = await Electrum.connect('wss://chipnet.9500.cash:443');
@@ -565,15 +567,16 @@ try {
     if ((await wallet.creationStep()) !== 'created') {
       await until('the funding coin in the engine', async () => (await wallet.creationStep()) !== 'not funded');
       await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
-      // The recoverer's fee coins, paid here from the run's own coins; the owner gives no allowance.
-      await wallet.pay([{ lockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), valueSatoshis: feeReserve() }]);
+      // The recoverer's balance, paid here from the run's own coins; the owner gives the recoverer nothing. In this
+      // run the recoverer keeps its balance under the same words as its credential for the wallet.
+      await wallet.pay([{ lockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), valueSatoshis: RECOVERER_COINS }]);
       facts.identity = wallet.stored.identity as string;
       keep();
       // The wallet is in use as soon as the network has its creation; no block is waited for.
     }
     for (const [step, transactionId, about] of [
       ['prepare', wallet.stored.creation.prepareTransactionId, 'the wallet pays itself, to have a coin that is output 0; this transaction is the identity'],
-      ['create', wallet.stored.creation.createTransactionId, 'the controller, an allowance for the recoverer, and the rest'],
+      ['create', wallet.stored.creation.createTransactionId, 'the controller and the rest'],
     ] as const) {
       if (transactionId === undefined) continue;
       const bytes = ((await until('the transaction', async () => server.getTransaction(transactionId))) as string).length / 2;
@@ -875,14 +878,14 @@ try {
     note(`The controller's history: ${history.transitions.map((step) => step.kind).join(', ') || 'no transition'}, then closed.`);
   }
 
-  if (phase === 'the recoverer returns its fee coins') {
-    await once('the recoverer returns its fee coins', async () => {
+  if (phase === 'the recoverer returns its balance') {
+    await once('the recoverer returns its balance', async () => {
       account = await openAccount(facts.words.credential);
-      const recoverer = await RecovererWallet.open({ backend: account, chain, identity: hexToBin(facts.identity as string) });
-      await until('the recoverer\'s fee coins', async () => (await recoverer.feeReadiness()).holds > 0n);
-      const sent = await recoverer.returnFeeCoins(funderLocking);
+      const funds = await RecovererFunds.open({ backend: account, chain });
+      await until('the recoverer\'s balance', async () => (await funds.balance()) > 0n);
+      const [sent] = (await funds.sendEverything(funderLocking)).transactions;
       if (sent === undefined) return {};
-      record('return the allowance', sent, 'what the recoverer did not use');
+      record('return the recoverer\'s balance', sent, 'what the recoverer did not use');
       return { transactionIds: [sent.transactionId] };
     });
   }
@@ -904,7 +907,7 @@ try {
     const total = await until('the funder\'s coins', async () => { const value = await funderBalance(); return value > 0n ? value : undefined; });
     const places: [string, Uint8Array][] = [
       ['the wallet\'s funding address', p2pkhLockingBytecode(ownerSeed.fundingKey.keyHash)],
-      ['the recoverer\'s fee address', p2pkhLockingBytecode(credential.feeKey.keyHash)],
+      ['the recoverer\'s balance', p2pkhLockingBytecode(credential.feeKey.keyHash)],
     ];
     const left: string[] = [];
     for (const [name, lockingBytecode] of places) {

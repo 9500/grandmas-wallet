@@ -153,10 +153,10 @@ export const viewingKeyHash = (viewingKey: ViewingKey, kind: KeyedAddressKind, n
   hash160(viewingKeyPublicKey(viewingKey, kind, number));
 
 /**
- * The two keys of a recoverer's credential (proposal section 9.2), from its own twelve words: the recovery
- * key, whose hash is in the controller, and the fee key, whose ordinary address holds the coins that pay
- * for a request and a completion. They are at the places the owner's controller key and funding key have
- * in the owner's tree, and they differ so that the fee address cannot be computed from the controller's state.
+ * The keys of a recoverer's credential (proposal section 9.2), from its own twelve words: the recovery key, whose
+ * hash is in the controller, and the key of the fee address, where the recoverer kept coins for its fees until
+ * 18 November 2026. They are at the places the owner's controller key and funding key have in the owner's tree,
+ * and they differ so that the fee address cannot be computed from the controller's state.
  */
 export const deriveCredentialKeys = (mnemonic: string, network: XoNetwork, numbers: TemplateNumbers): { recoveryKey: KeyPair; feeKey: KeyPair } => {
   const { controllerKey, fundingKey } = deriveSeedKeys(mnemonic, network, numbers);

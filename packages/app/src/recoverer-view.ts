@@ -1,15 +1,14 @@
 import { binToHex, hexToBin } from '@bitauth/libauth';
-import { type ChainReader, type ControllerHistory, p2pkhLockingBytecode, readControllerHistory } from '@grandmas-wallet/core';
+import { type ChainReader, type ControllerHistory, INPUT_BYTES, p2pkhInput, p2pkhLockingBytecode, readControllerHistory } from '@grandmas-wallet/core';
 import { type KeptKit, credentialKeys, recoveryKeyOf } from '@grandmas-wallet/enrollment';
 
-import { type FeeReadiness, feeReadinessOf } from './recoverer-wallet.js';
+import type { GivenInput } from './recoverer-funds.js';
 import { kitTemplates } from './recovery-flow.js';
-import { addressOf } from './support.js';
 
 /**
- * What a recoverer reads from the chain about a wallet it looks after, without opening an account for it:
- * where the controller stands, and what the fee address holds (proposal sections 9.6 and 11.1). A
- * recoverer that looks after several wallets shows all of them this way.
+ * What a recoverer reads from the chain about a wallet it looks after: where the controller stands (proposal
+ * section 11.1), and coins an earlier version of this software left at the wallet's fee address (section 9.6).
+ * A recoverer that looks after several wallets shows all of them this way.
  */
 
 const hex = binToHex;
@@ -41,18 +40,18 @@ export const viewAsRecoverer = async (chain: ChainReader, kept: KeptKit): Promis
   return { history, standing, takenOver: proposed !== undefined && hex(state.ownerKeyHash) === proposed };
 };
 
-/** The fee address of a wallet's credential, and whether it holds what a recovery takes. */
-export interface FeeView extends FeeReadiness {
-  address: string;
-}
-
 /**
- * @returns `undefined` for a kit whose recoverer holds a key of its own, not a credential: its fee coins are wherever it keeps them
+ * Coins at the fee address of a wallet's credential. Until 18 November 2026 the recoverer kept a reserve for its
+ * fees there; since then every fee is paid from its balance. What is still there is the recoverer's own, and its
+ * page brings it into the balance: each coin comes back ready to be spent with the credential's fee key.
+ *
+ * A kit whose recoverer holds a key of its own has no such address.
  */
-export const feeView = async (chain: ChainReader, kept: KeptKit, feeRate = 1): Promise<FeeView | undefined> => {
-  if (!('words' in kept.kit.credential)) return undefined;
-  const locking = p2pkhLockingBytecode(credentialKeys(kept.kit.credential.words, kept.kit.network, kitTemplates()).feeKey.keyHash);
-  const coins = await chain.listUnspent(locking);
-  const holds = coins.filter((coin) => !coin.hasToken).reduce((sum, coin) => sum + coin.valueSatoshis, 0n);
-  return { address: addressOf(locking, kept.kit.network === 'mainnet' ? 'mainnet' : 'chipnet'), ...feeReadinessOf(holds, feeRate) };
+export const earlierFeeCoins = async (chain: ChainReader, kept: KeptKit): Promise<GivenInput[]> => {
+  if (!('words' in kept.kit.credential)) return [];
+  const { feeKey } = credentialKeys(kept.kit.credential.words, kept.kit.network, kitTemplates());
+  const lockingBytecode = p2pkhLockingBytecode(feeKey.keyHash);
+  return (await chain.listUnspent(lockingBytecode))
+    .filter((coin) => !coin.hasToken)
+    .map((coin) => ({ ...p2pkhInput({ transactionHash: hexToBin(coin.transactionId), index: coin.index, output: { lockingBytecode, valueSatoshis: coin.valueSatoshis } }, feeKey), inputBytes: INPUT_BYTES.p2pkh }));
 };

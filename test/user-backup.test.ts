@@ -21,6 +21,7 @@ import { credentialKeys, generateRecipientKeyPair } from '@grandmas-wallet/enrol
 import { KeyBackend, SimulatedChain, testKey } from '@grandmas-wallet/testing';
 import { hexToBin } from '@bitauth/libauth';
 import { describe, expect, it } from 'vitest';
+import { recovererFunds } from './support/recoverer.js';
 
 /**
  * A backup the user keeps (proposal section 18.1): what the least of it restores, what it leaves out, what
@@ -43,8 +44,8 @@ const start = async () => {
   const owner = await OwnerWallet.open({ backend: new KeyBackend(chain, first), chain, seed: first });
   chain.fund(p2pkhLockingBytecode(first.fundingKey.keyHash), 100_000n);
   await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
-  // The recoverer's own coins for its fees.
-  chain.fund(p2pkhLockingBytecode(credential.feeKey.keyHash), 20_000n);
+  // The recoverer's own balance, from which it pays its fees.
+  const { funds } = await recovererFunds(chain);
   chain.fund((await owner.receiveAddress()).address.lockingBytecode, 10_000n);
   chain.fund((await owner.vaultAddress()).address.lockingBytecode, 5_000n);
   const recovererDevice = await generateRecipientKeyPair();
@@ -55,7 +56,7 @@ const start = async () => {
     const seed = deriveSeedKeys(WORDS[1] as string, 'testnet', numbers);
     const asked = await startTakeover({ seed, stores: STORES, storeAt, recovererPublicKey: recovererDevice.publicKey });
     const saved = await acceptTakeover({ sealed: asked.sealed, privateKey: recovererDevice.privateKey, kept: taken.kept, chain });
-    const recoverer = await RecovererWallet.open({ backend: new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey }), chain, identity: hexToBin(owner.stored.identity as string) });
+    const recoverer = await RecovererWallet.open({ funds: funds, chain, identity: hexToBin(owner.stored.identity as string), recoveryKey: credential.recoveryKey });
     await recoverer.request(saved.proposedKeyHash);
     chain.nowMs += 2 * 512 * 1000;
     await recoverer.complete();

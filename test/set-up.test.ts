@@ -15,7 +15,7 @@ import {
   checkRecovery,
   completeTakeover,
   creationCost,
-  feeReserve,
+  earlierFeeCoins,
   finishSetUp,
   finishTakeover,
   firstAddressFor,
@@ -87,8 +87,8 @@ describe('the recoverer creates the wallet, the phone opens it', () => {
     const pending = await ask();
     const { answer, kept } = await recover(hexToBin(pending.sealed));
 
-    // The creation: the controller naming the phone's key, the recoverer's key for this wallet and the waiting period;
-    // the starting balance at the phone's address; the fee reserve at the wallet's fee address.
+    // The creation: the controller naming the phone's key, the recoverer's key for this wallet and the waiting period,
+    // and the starting balance at the phone's address. Nothing is kept apart for the recoverer's fees.
     const history = await readControllerHistory(chain, hexToBin(answer.identity));
     expect(history.transactions[0]?.transactionId).toBe(answer.creationTransactionId);
     expect(hex(history.current.state.ownerKeyHash)).toBe(hex(phone.controllerKey.keyHash));
@@ -96,7 +96,8 @@ describe('the recoverer creates the wallet, the phone opens it', () => {
     expect(history.current.state.challengeDelay).toEqual(DELAY);
     const words = ((kits.get(answer.identity) as KeptKit).kit.credential as { words: string }).words;
     const feeAddress = p2pkhLockingBytecode(credentialKeys(words, 'testnet', kitTemplates()).feeKey.keyHash);
-    expect(chain.balanceOf(feeAddress)).toBe(feeReserve());
+    expect(chain.balanceOf(feeAddress)).toBe(0n);
+    expect((await chain.getTransaction(answer.creationTransactionId))?.length).toBeGreaterThan(0);
     // The recoverer paid for everything; no more than the cost it states.
     const spent = before - (await funds.balance());
     expect(spent).toBeLessThanOrEqual(creationCost(STARTING));
@@ -323,7 +324,7 @@ describe('a creation that disappears', () => {
 
 describe('a recovery of a wallet set up this way', () => {
   it('SW09: the recoverer requests with its own key, completes after the wait, hands over; the new phone sweeps everything', async () => {
-    const { chain, storeAt, device, recover, ask, open, kits } = await start();
+    const { chain, storeAt, device, funds, recover, ask, open, kits } = await start();
     const pending = await ask();
     const { answer, recoveryKey } = await recover(hexToBin(pending.sealed));
     const { wallet } = await open(answer, pending);
@@ -337,11 +338,11 @@ describe('a recovery of a wallet set up this way', () => {
     const asked = await startTakeover({ seed, stores: STORES, storeAt, recovererPublicKey: device.publicKey });
     const kept = kits.get(answer.identity) as KeptKit;
     const saved = await acceptTakeover({ sealed: asked.sealed, privateKey: device.privateKey, kept, chain });
-    // The recoverer's key for this wallet, from its own credential; the fee reserve pays.
+    // The recoverer's key for this wallet, from its own credential; its balance pays, as it paid for the creation.
     const words = (kept.kit.credential as { words: string }).words;
     const credential = credentialKeys(words, 'testnet', kitTemplates());
-    const recoverer = await RecovererWallet.open({ backend: new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey }), chain, identity: hexToBin(answer.identity) });
-    expect((await recoverer.feeReadiness()).canRecover).toBe(true);
+    const recoverer = await RecovererWallet.open({ funds, chain, identity: hexToBin(answer.identity), recoveryKey: credential.recoveryKey });
+    expect(await earlierFeeCoins(chain, kept)).toEqual([]);
     await recoverer.request(saved.proposedKeyHash);
     chain.nowMs += 2 * 512 * 1000;
     await recoverer.complete();

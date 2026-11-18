@@ -3,6 +3,7 @@ import { type OwnerWalletState, type Sent, OwnerWallet, RecovererWallet, walletT
 import { ADDRESS_KIND, deriveCredentialKeys, deriveSeedKeys, p2pkhLockingBytecode, walletAddress } from '@grandmas-wallet/core';
 import { KeyBackend, SimulatedChain, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
+import { recovererFunds } from './support/recoverer.js';
 
 /**
  * Acceptance test PV03 of the proposal: what ties a coin to the wallet's identity, in public (section 16.3).
@@ -70,23 +71,24 @@ describe('what ties a coin to the identity', () => {
     const first = deriveSeedKeys(WORDS[0] as string, 'testnet', numbers);
     const next = deriveSeedKeys(WORDS[1] as string, 'testnet', numbers);
     const credential = deriveCredentialKeys(CREDENTIAL_WORDS, 'testnet', numbers);
-    const feeAddress = p2pkhLockingBytecode(credential.feeKey.keyHash);
+    // The recoverer's own balance: a seed of its own, which no wallet names.
+    const recovererBalance = await recovererFunds(chain, 0n);
     const fundingAddress = p2pkhLockingBytecode(first.fundingKey.keyHash);
     const owner = await OwnerWallet.open({ backend: new KeyBackend(chain, first), chain, seed: first });
 
     // --- Creating the wallet: the coins it was funded with, and the first addresses they move to.
     const fundingCoin = fund(chain, fundingAddress, 100_000n);
     await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
-    // The recoverer's fee coins are its own, from elsewhere.
-    fund(chain, feeAddress, 20_000n);
+    // The recoverer's coins are its own, from elsewhere.
+    fund(chain, recovererBalance.address, 20_000n);
     const identity = hexToBin(owner.stored.identity as string);
     const changeAt = (number: number) => walletAddress(identity, first.viewingKey, ADDRESS_KIND.change, number).lockingBytecode;
     let seen = observe(chain, identity);
     expect(seen.showing.size).toBe(1);
     expect(seen.tied.has(fundingCoin)).toBe(true);
     expect(seen.tiedAt(changeAt(owner.stored.firstCoinNumber as number))).toBe(true);
-    // Nothing leads from the creation to the recoverer's fee address.
-    expect(seen.tiedAt(feeAddress)).toBe(false);
+    // Nothing leads from the creation to the recoverer's balance.
+    expect(seen.tiedAt(recovererBalance.address)).toBe(false);
 
     // --- An everyday payment from an address that was given out: nothing of the wallet is shown, nothing is tied.
     const given = (await owner.receiveAddress()).address;
@@ -98,9 +100,8 @@ describe('what ties a coin to the identity', () => {
     expect(seen.tied.has(received)).toBe(false);
     expect(seen.tied.has(`${everyday.transactionId}:0`)).toBe(false);
 
-    // --- A request and its cancellation: the recoverer's fee coin, and the wallet coin that pays the cancellation's fee, with its change.
-    const recovererBackend = () => new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey });
-    const requested = await (await RecovererWallet.open({ backend: recovererBackend(), chain, identity })).request(next.controllerKey.keyHash);
+    // --- A request and its cancellation: the coin of the recoverer's balance that pays for the request, and the wallet coin that pays the cancellation's fee, with its change.
+    const requested = await (await RecovererWallet.open({ funds: recovererBalance.funds, chain, identity, recoveryKey: credential.recoveryKey })).request(next.controllerKey.keyHash);
     const cancelled = await owner.cancel();
     seen = observe(chain, identity);
     expect(seen.showing.has(requested.transactionId)).toBe(true);
@@ -117,7 +118,7 @@ describe('what ties a coin to the identity', () => {
     for (const outpoint of [...quietCoins, vaultCoin]) expect(seen.tied.has(outpoint)).toBe(false);
 
     // --- A recovery and a sweep: every address swept, and the new addresses the coins go to.
-    const recoverer = await RecovererWallet.open({ backend: recovererBackend(), chain, identity });
+    const recoverer = await RecovererWallet.open({ funds: recovererBalance.funds, chain, identity, recoveryKey: credential.recoveryKey });
     await recoverer.request(next.controllerKey.keyHash);
     chain.nowMs += 2 * 512 * 1000;
     await recoverer.complete();

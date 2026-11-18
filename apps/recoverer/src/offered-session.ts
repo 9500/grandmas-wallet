@@ -73,6 +73,13 @@ const records = {
 export const setUpRecords = records;
 
 /**
+ * Identities that set-ups still under way are named after: the coin each is named after pays for nothing else,
+ * and stays when the balance is sent elsewhere.
+ */
+export const heldForSetUps = (): Set<string> =>
+  new Set(records.all().flatMap((record) => (record.answer === undefined && record.refused === undefined && record.creation.identity !== undefined ? [record.creation.identity] : [])));
+
+/**
  * Answering phones that ask to have their wallet set up: a bank's page creates without asking, a friend's page
  * when they say yes. The wallet is created from the recoverer's own coins and its kit kept with the other wallets.
  */
