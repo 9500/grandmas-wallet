@@ -4,6 +4,7 @@ import { testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
 import { enrollmentLink, envelopeFromLink, generateRecipientKeyPair, openPackage, recipientKeyFingerprint, sealPackage } from '../src/index.js';
+import { openBytes, sealBytes } from '../src/envelope.js';
 
 const owner = testKey(0x22);
 const IDENTITY = 'ab'.repeat(32);
@@ -53,6 +54,20 @@ describe('delivery to the recoverer (R01)', () => {
     await expect(openPackage(envelope.slice(0, 20), bank.privateKey)).rejects.toThrow('incomplete');
   });
 
+  it('opens an envelope written without making its content smaller, as earlier versions wrote all of them', async () => {
+    const bank = await generateRecipientKeyPair();
+    // Content that deflate cannot make smaller is sealed as it is, and says so in its first byte.
+    const noise = Uint8Array.from({ length: 64 }, (_, index) => (index * 97 + 13) % 251);
+    const envelope = await sealBytes(noise, bank.publicKey);
+    expect(envelope[0]).toBe(1);
+    expect(envelope.length).toBe(noise.length + 49);
+    expect(await openBytes(envelope, bank.privateKey)).toEqual(noise);
+    // The first byte is part of what is checked: an envelope cannot be passed off as the other kind.
+    const relabelled = Uint8Array.from(envelope);
+    relabelled[0] = 2;
+    await expect(openBytes(relabelled, bank.privateKey)).rejects.toThrow('cannot be opened with this key');
+  });
+
   it('travels in the part of a link that is not sent to the server, and fits a QR code', async () => {
     const { signed } = setup();
     const bank = await generateRecipientKeyPair();
@@ -67,9 +82,12 @@ describe('delivery to the recoverer (R01)', () => {
 
     // A version 40 QR code at the lowest error correction holds 2,953 bytes.
     expect(link.length).toBeLessThan(2_953);
-    // Overhead of sealing: one version byte, a 32-byte key share and a 16-byte tag.
+    // Overhead of sealing: one byte that says how the content is written, a 32-byte key share and a 16-byte tag.
+    // The content, text with long runs of hexadecimal digits, is made smaller before it is sealed.
     const plaintextLength = utf8ToBin(JSON.stringify({ message: signed.message, publicKey: binToHex(signed.publicKey), signature: binToHex(signed.signature) })).length;
-    expect(envelope.length).toBe(plaintextLength + 49);
+    expect(envelope[0]).toBe(2);
+    expect(envelope.length).toBeLessThan(plaintextLength);
+    expect(await openPackage(envelope, bank.privateKey)).toEqual(signed);
   });
 
   it('gives a short form of the recoverer key for people to compare', async () => {

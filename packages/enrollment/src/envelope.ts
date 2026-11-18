@@ -22,7 +22,15 @@ export class EnrollmentError extends Error {
  * signature inside it, not by the encryption.
  */
 
-const ENVELOPE_VERSION = 0x01;
+/**
+ * The first byte of an envelope says how its content was written: as it is (1), or made smaller first with
+ * deflate (2). What is sealed is text with long runs of hexadecimal digits, which deflate about halves; the
+ * smaller of the two is sent, so that a sealed message fits a QR code a phone's camera reads. Both are opened.
+ */
+const ENVELOPE_PLAIN = 0x01;
+const ENVELOPE_DEFLATED = 0x02;
+/** The most an opened envelope may hold once it is made large again: far above any message of this project. */
+const LARGEST_CONTENT = 4 * 1024 * 1024;
 const INFO = utf8ToBin('grandmas-wallet/enrollment/v1');
 const ENCAPSULATED_KEY_LENGTH = 32;
 const LINK_FIELD = 'enroll';
@@ -30,6 +38,27 @@ const LINK_FIELD = 'enroll';
 const suite = (): CipherSuite => new CipherSuite({ kem: new DhkemX25519HkdfSha256(), kdf: new HkdfSha256(), aead: new Chacha20Poly1305() });
 
 const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => bytes.slice().buffer;
+
+const deflate = async (bytes: Uint8Array): Promise<Uint8Array> =>
+  new Uint8Array(await new Response(new Blob([toArrayBuffer(bytes)]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+
+/** Undo `deflate`, reading no more than the largest content: an envelope cannot make this code hold more. */
+const inflate = async (bytes: Uint8Array): Promise<Uint8Array> => {
+  const reader = new Blob([toArrayBuffer(bytes)]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+  const parts: Uint8Array[] = [];
+  let length = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.length;
+    if (length > LARGEST_CONTENT) {
+      await reader.cancel();
+      throw new EnrollmentError('The enrollment envelope holds more than a message of this kind can.');
+    }
+    parts.push(value);
+  }
+  return flattenBinArray(parts);
+};
 
 /** The recoverer's encryption key. Not a wallet key: it can open packages and nothing else. */
 export interface RecipientKeyPair {
@@ -51,17 +80,20 @@ export const recipientKeyFingerprint = (publicKey: Uint8Array): string =>
   (binToHex(sha256.hash(publicKey)).slice(0, 16).match(/.{4}/g) ?? []).join(' ');
 
 /**
- * Encrypt bytes to the holder of an encryption key. Sealing adds 49 bytes: a version byte, the 32 bytes
- * the recipient needs to open it, and a 16-byte tag. Sealing the same bytes twice gives unrelated results.
+ * Encrypt bytes to the holder of an encryption key. The bytes are made smaller first when that helps. Sealing
+ * adds 49 bytes to what is encrypted: the byte that says how it was written, the 32 bytes the recipient needs to
+ * open it, and a 16-byte tag. Sealing the same bytes twice gives unrelated results.
  */
 export const sealBytes = async (plaintext: Uint8Array, recipientPublicKey: Uint8Array): Promise<Uint8Array> => {
   const hpke = suite();
+  const smaller = await deflate(plaintext);
+  const [written, content] = smaller.length < plaintext.length ? [ENVELOPE_DEFLATED, smaller] : [ENVELOPE_PLAIN, plaintext];
   const { enc, ct } = await hpke.seal(
     { recipientPublicKey: await hpke.kem.deserializePublicKey(toArrayBuffer(recipientPublicKey)), info: toArrayBuffer(INFO) },
-    toArrayBuffer(plaintext),
-    toArrayBuffer(Uint8Array.of(ENVELOPE_VERSION)),
+    toArrayBuffer(content),
+    toArrayBuffer(Uint8Array.of(written)),
   );
-  return flattenBinArray([Uint8Array.of(ENVELOPE_VERSION), new Uint8Array(enc), new Uint8Array(ct)]);
+  return flattenBinArray([Uint8Array.of(written), new Uint8Array(enc), new Uint8Array(ct)]);
 };
 
 /**
@@ -69,11 +101,13 @@ export const sealBytes = async (plaintext: Uint8Array, recipientPublicKey: Uint8
  * @throws EnrollmentError if the envelope is not for this key or was altered
  */
 export const openBytes = async (envelope: Uint8Array, recipientPrivateKey: Uint8Array): Promise<Uint8Array> => {
-  if (envelope[0] !== ENVELOPE_VERSION) throw new EnrollmentError('This kind of enrollment envelope is not supported.');
+  const written = envelope[0];
+  if (written !== ENVELOPE_PLAIN && written !== ENVELOPE_DEFLATED) throw new EnrollmentError('This kind of enrollment envelope is not supported.');
   if (envelope.length <= 1 + ENCAPSULATED_KEY_LENGTH) throw new EnrollmentError('The enrollment envelope is incomplete.');
   const hpke = suite();
+  let content: Uint8Array;
   try {
-    return new Uint8Array(
+    content = new Uint8Array(
       await hpke.open(
         {
           recipientKey: await hpke.kem.deserializePrivateKey(toArrayBuffer(recipientPrivateKey)),
@@ -81,11 +115,18 @@ export const openBytes = async (envelope: Uint8Array, recipientPrivateKey: Uint8
           info: toArrayBuffer(INFO),
         },
         toArrayBuffer(envelope.slice(1 + ENCAPSULATED_KEY_LENGTH)),
-        toArrayBuffer(Uint8Array.of(ENVELOPE_VERSION)),
+        toArrayBuffer(Uint8Array.of(written)),
       ),
     );
   } catch {
     throw new EnrollmentError('The enrollment envelope cannot be opened with this key.');
+  }
+  if (written === ENVELOPE_PLAIN) return content;
+  try {
+    return await inflate(content);
+  } catch (error) {
+    if (error instanceof EnrollmentError) throw error;
+    throw new EnrollmentError('The enrollment envelope does not hold what it says.');
   }
 };
 

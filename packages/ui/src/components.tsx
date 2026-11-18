@@ -432,9 +432,6 @@ export const Value = ({ text, clamp, copyLabel, open, testId }: { text: string; 
   </div>
 );
 
-/** Beyond this many characters a code is too dense for a phone's camera to read reliably. */
-const QR_LONGEST = 2_400;
-
 /** A QR code, drawn as one path. Text of capital letters, digits and a few signs makes a smaller code. */
 export const QrCode = ({ text, label }: { text: string; label: string }) => {
   const path = useMemo(() => {
@@ -453,12 +450,13 @@ export const QrCode = ({ text, label }: { text: string; label: string }) => {
         if (code.isDark(row, column)) drawn += `M${column + 4} ${row + 4}h1v1h-1z`;
       }
     }
-    return { drawn, extent: count + 8 };
+    return { drawn, extent: count + 8, count };
   }, [text]);
-  if (path === undefined || text.length > QR_LONGEST) return <p class="small muted qr-none">Too long for a QR code. Copy the link and send it as a message.</p>;
+  if (path === undefined) return <p class="small muted qr-none">Too long for a QR code. Copy the link and send it as a message.</p>;
   return (
     <div class="qr-wrap">
-      <svg class={`qr${text.length > 1_000 ? ' dense' : ''}`} role="img" aria-label={label} viewBox={`0 0 ${path.extent} ${path.extent}`} shape-rendering="crispEdges">
+      {/* A code with many squares is drawn larger, three points to a square where the screen has the room, so that a camera can tell them apart. */}
+      <svg class={`qr${text.length > 1_000 ? ' dense' : ''}`} style={path.count > 100 ? { maxWidth: `${path.extent * 3}px` } : undefined} role="img" aria-label={label} viewBox={`0 0 ${path.extent} ${path.extent}`} shape-rendering="crispEdges">
         <rect width={path.extent} height={path.extent} fill="#fff" />
         <path d={path.drawn} fill="#000" />
       </svg>
