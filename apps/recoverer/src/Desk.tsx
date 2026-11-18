@@ -2,11 +2,11 @@ import { binToHex, hexToBin } from '@bitauth/libauth';
 import { type FeeView, type RecovererView, type RequestTiming, RecovererWallet, acceptTakeover, completeTakeover, describeDelay, feeView, requestTiming, viewAsRecoverer } from '@grandmas-wallet/app';
 import { makeLink } from '@grandmas-wallet/app/links';
 import { keyFingerprint, recoveryKeyOf, undoHandOver } from '@grandmas-wallet/enrollment';
-import { Amount, Button, Card, Field, Fingerprint, HandOff, KeyValues, Loading, More, Notice, PageHead, QrCode, Sat, Status, TaskStatus, TextInput, formatDuration, formatTime, lockingBytecodeOfAddress, plainError, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Field, Fingerprint, HandOff, KeyValues, Loading, More, Notice, PageHead, QrCode, Sat, Status, TaskStatus, TextInput, Value, formatDuration, formatTime, lockingBytecodeOfAddress, plainError, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import { handOverNow, handleTakeovers, resumeDesk, useDesk } from './offered-session.js';
-import { type Looked, type Session, credentialAccount, kept, modeOf, openWalletPage, recovererLink, saveWallet, wallets } from './session.js';
+import { type Looked, type Session, credentialAccount, modeOf, openWalletPage, recovererLink, saveWallet, wallets } from './session.js';
 import { describeProblem } from './Wallets.js';
 
 /**
@@ -206,7 +206,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
               </HandOff>
             </Card>
           )}
-          {standing?.kind === 'quiet' && view?.takenOver !== true && looked.kept.pending === undefined && <LostPhone session={session} identity={identity} recoverer={recoverer} toast={toast} onTaken={() => setLooked(wallets()[identity] ?? looked)} />}
+          {standing?.kind === 'quiet' && view?.takenOver !== true && <LostPhone session={session} identity={identity} recoverer={recoverer} toast={toast} onTaken={() => setLooked(wallets()[identity] ?? looked)} />}
           <TaskStatus task={task} name="handover" />
         </div>
         <div class="stack">
@@ -224,7 +224,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
  * the new phone at once. Whoever pressed the button has made sure who is asking. The waiting period then runs.
  */
 const LostPhone = ({ session, identity, recoverer, toast, onTaken }: { session: Session; identity: string; recoverer: RecovererWallet | undefined; toast: (text: string) => void; onTaken: () => void }) => {
-  const [showing, setShowing] = useState(() => kept('deskSession')?.for === identity);
+  const [showing, setShowing] = useState(false);
   const bank = modeOf() === 'bank';
   const label = wallets()[identity]?.label;
   const owner = bank ? 'Customer' : label || 'The owner';
@@ -260,7 +260,7 @@ const LostPhone = ({ session, identity, recoverer, toast, onTaken }: { session: 
 };
 
 const LostPhoneCode = ({ session, identity, onClose }: { session: Session; identity: string; onClose: () => void }) => {
-  const desk = useDesk(session, { kind: 'lost phone', identity });
+  const desk = useDesk(session, { kind: 'lost phone', identity }, true);
   const [code, setCode] = useState<string | undefined>();
   useEffect(() => {
     void recovererLink(session, desk.uri).then(setCode);
@@ -275,6 +275,11 @@ const LostPhoneCode = ({ session, identity, onClose }: { session: Session; ident
           <div data-testid="lost-phone-code" data-value={code} class="code-box">
             <QrCode text={code} label="Code for the new phone to scan" />
           </div>
+        )}
+        {code !== undefined && (
+          <More summary="The code as text">
+            <Value text={code} clamp copyLabel="Copy" />
+          </More>
         )}
         {desk.arrived?.kind === 'takeover' ? (
           desk.arrived.answered === 'refused' ? <Status tone="warn" title="The request was not taken" /> : <Status tone="good" title="The new phone's request has arrived" />

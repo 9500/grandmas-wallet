@@ -1,5 +1,5 @@
 import { type SetUpRecord, describeDelay } from '@grandmas-wallet/app';
-import { Amount, Button, Card, Field, Loading, Notice, PageHead, QrCode, Status, TextInput, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Field, Loading, More, Notice, PageHead, QrCode, Status, TextInput, Value, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import { FundsCard, useFunds } from './Funds.js';
@@ -87,6 +87,10 @@ const CodeScreen = ({ session, bank, label, onDone }: { session: Session; bank: 
               ) : (
                 <SetUpLine session={session} record={record} bank={bank} />
               )}
+              <More summary="The code as text">
+                <Value text={code} clamp copyLabel="Copy" />
+                <p class="small muted">For a phone without a camera: it can paste this under "No camera?".</p>
+              </More>
             </div>
           )}
           <p class="small muted">

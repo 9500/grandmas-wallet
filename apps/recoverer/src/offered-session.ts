@@ -208,14 +208,15 @@ export const answerIncoming = (status: 'kept' | 'refused', reason?: string): voi
  * The session offered with the code, for as long as the screen shows it. Once a phone has been served, a moment later
  * the code offers a new session, for the next phone.
  */
-export const useDesk = (session: Session, purpose: Purpose): DeskState & { renew: () => void } => {
-  const [state, setState] = useState<DeskState>(() => offer(session, purpose));
+export const useDesk = (session: Session, purpose: Purpose, fresh = false): DeskState & { renew: () => void } => {
+  const [state, setState] = useState<DeskState>(() => offer(session, purpose, fresh));
   useEffect(() => {
     let renewing: ReturnType<typeof setTimeout> | undefined;
     const listener = () => {
       if (offered === undefined) return;
       setState(offered.state);
-      if (served(offered.state) && renewing === undefined) {
+      // A lost phone's session stays open after its request: the hand-over goes the same way.
+      if (purpose.kind === 'set up' && served(offered.state) && renewing === undefined) {
         renewing = setTimeout(() => {
           renewing = undefined;
           setState(offer(session, purpose, true));

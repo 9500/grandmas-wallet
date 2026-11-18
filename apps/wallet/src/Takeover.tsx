@@ -62,7 +62,8 @@ const Waiting = ({ session, onDone, onAgain }: { session: Session; onDone: (wall
       keep('arrival', { from: 'takeover', missing: taken.missing });
       keep('takeover', undefined);
       keep('incoming', undefined);
-      leaveRecoverer(asked.recipient.session);
+      // The session is left a moment later: a hand-over that came over it is acknowledged first, so that the page stops sending it.
+      setTimeout(() => leaveRecoverer(asked.recipient.session), 3_000);
       onDone(taken.wallet);
   };
   const takeLink = async (text: string) => {

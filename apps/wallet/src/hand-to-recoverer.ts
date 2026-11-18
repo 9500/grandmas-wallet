@@ -96,8 +96,9 @@ export const handToRecoverer = (recipient: StoredRecipient, kind: SealedKind, se
     note(slot, { status: answer.status, ...(answer.reason === undefined ? {} : { reason: answer.reason }), at: answer.time, sent });
     if (answer.status !== 'received') {
       stop();
-      // Done with this recoverer: the session is left a moment later, once the answer is acknowledged.
-      setTimeout(() => leaveRecoverer(recipient.session), 2_000);
+      // Done with this recoverer: the session is left a moment later, once the answer is acknowledged. A new phone
+      // whose takeover request was kept stays: the hand-over comes back over the same session after the waiting period.
+      if (kind !== 'takeover' || answer.status === 'refused') setTimeout(() => leaveRecoverer(recipient.session), 2_000);
     }
   });
   courier.send({ expected: particularsOf(recipient), kind, sealed, id: sent, timeoutMs: ANSWER_WITHIN_MS }).then(
