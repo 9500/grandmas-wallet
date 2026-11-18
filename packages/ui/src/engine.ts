@@ -8,10 +8,12 @@ import type { Environment } from './environment.js';
 /**
  * The XO engine account of a page: the keys of one set of twelve words, held in this browser.
  *
- * The engine is given one server, the first the page is configured with. With several it takes the first
- * answer to a request for a new block's header, and a server that has not seen the block yet can answer
- * first, with nothing, which ends the engine's work. Reading the chain for the wallet's own decisions goes
- * through all configured servers (`connectChain`), not through the engine.
+ * The engine is given one server: the first of the configured ones that answers. With several it takes the
+ * first answer to a request for a new block's header, and a server that has not seen the block yet can
+ * answer first, with nothing, which ends the engine's work. A server that is down or refuses a new
+ * connection, as one at its limit of connections does, is passed over when the account is opened; the page
+ * is loaded again to change server later. Reading the chain for the wallet's own decisions goes through all
+ * configured servers (`connectChain`), not through the engine.
  *
  * Only one engine can be open in a page. A page that needs another account loads again.
  */
@@ -26,10 +28,24 @@ const parse = (endpoint: string): { host: string; port: number; encrypted: boole
   return { host: url.hostname, port: url.port === '' ? (encrypted ? 443 : 80) : Number(url.port), encrypted };
 };
 
+/** The first of the configured servers that takes a connection now. */
+const firstAnswering = async (endpoints: string[]): Promise<string> => {
+  if (endpoints.length === 0) throw new Error('This site is not configured: no server of the network is named.');
+  for (const endpoint of endpoints) {
+    try {
+      const server = await Electrum.connect(endpoint);
+      await server.disconnect();
+      return endpoint;
+    } catch {
+      // the next one
+    }
+  }
+  throw new Error('None of the network\'s servers could be reached. Check the connection and reload.');
+};
+
 /** The server entry the engine is created with. */
 const engineServers = async (environment: Environment): Promise<unknown[]> => {
-  const [endpoint] = environment.chain;
-  if (endpoint === undefined) throw new Error('This site is not configured: no server of the network is named.');
+  const endpoint = await firstAnswering(environment.chain);
   const { host, port, encrypted } = parse(endpoint);
   if (environment.network === 'regtest') {
     // The engine connects to listed servers over TLS only, so it is handed a prepared socket. It also needs a
