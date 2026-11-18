@@ -84,6 +84,10 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .token-head > :first-child { min-width: 0; }
 .token-head .pill { flex: none; }
 .token-title { font-weight: 650; }
+.token-of { font-weight: 400; color: var(--muted); }
+.token-head .name-source { margin-top: 2px; }
+.token-head .raw-units { color: var(--muted); font-size: 12px; }
+.token-send { display: flex; justify-content: flex-end; margin-top: -4px; }
 .token-id { overflow-wrap: anywhere; }
 .token-body { display: flex; flex-direction: column; gap: 6px; }
 .token-body p { margin: 0; }

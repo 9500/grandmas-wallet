@@ -2,7 +2,9 @@ import type { ActionPreview, MovedOutput, TemplateSummary } from '@grandmas-wall
 import { InsufficientFundsError } from '@grandmas-wallet/core';
 import { Amount, KeyValues, More, Notice, Sat, Status, formatSatoshis, formatTime, plainError, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
-import { useState } from 'preact/hooks';
+import { useContext, useState } from 'preact/hooks';
+
+import { TokenNamesContext, amountText, rawUnits } from './token-words.js';
 
 /**
  * What the user sees before deciding on an action of an application's template: what the template is and
@@ -125,20 +127,26 @@ export const TheirWords = ({ words }: { words: ActionPreview['words'] }) => (
   </Part>
 );
 
-/** A token that moves, in words. */
-export const TokenWords = ({ token }: { token: NonNullable<MovedOutput['token']> }) => (
-  <span class="token-words">
-    {token.nft === undefined ? `${token.amount.toLocaleString('en-US')} units of token ` : `${token.nft.capability === 'none' ? 'NFT' : `NFT (${token.nft.capability})`} of token `}
-    <Hex value={token.category} />
-    {token.nft !== undefined && token.nft.commitment !== '' && (
-      <>
-        {' '}
-        with <Hex value={token.nft.commitment} head={6} tail={4} />
-      </>
-    )}
-    {token.nft !== undefined && token.amount > 0n && `, and ${token.amount.toLocaleString('en-US')} units`}
-  </span>
-);
+/** A token that moves, in words: named where a template the user trusts names it. */
+export const TokenWords = ({ token }: { token: NonNullable<MovedOutput['token']> }) => {
+  const names = useContext(TokenNamesContext);
+  const fungible = token.amount > 0n ? names.fungible(token.category) : undefined;
+  const amount = fungible?.named?.decimals === undefined ? rawUnits(token.amount) : `${amountText(token.amount, fungible)} (${rawUnits(token.amount)})`;
+  const nft = token.nft === undefined ? undefined : names.nft(token.category)?.named?.name;
+  return (
+    <span class="token-words">
+      {token.nft === undefined ? `${amount} of token ` : `${nft === undefined ? '' : `"${nft}", `}${token.nft.capability === 'none' ? 'NFT' : `NFT (${token.nft.capability})`} of token `}
+      <Hex value={token.category} />
+      {token.nft !== undefined && token.nft.commitment !== '' && (
+        <>
+          {' '}
+          with <Hex value={token.nft.commitment} head={6} tail={4} />
+        </>
+      )}
+      {token.nft !== undefined && token.amount > 0n && `, and ${amount}`}
+    </span>
+  );
+};
 
 const KINDS: Record<string, string> = {
   receive: 'to a receiving address',
@@ -159,8 +167,6 @@ export const TypedValue = ({ type, value }: { type: string; value: string }) => 
   return /^[0-9a-f]{24,}$/i.test(value) ? <Hex value={value} /> : <span class="word-value">{value}</span>;
 };
 
-/** Fungible tokens, more or fewer, in plain words. */
-const tokenAmount = (amount: bigint): string => `${(amount < 0n ? -amount : amount).toLocaleString('en-US')} ${amount === 1n || amount === -1n ? 'unit' : 'units'}`;
 
 /** The earliest time the network accepts a transaction: a Unix time from 500,000,000, else a block height. */
 export const earliest = (notBefore: number): string => (notBefore >= 500_000_000 ? formatTime(notBefore) : `block ${notBefore.toLocaleString('en-US')}`);
@@ -181,6 +187,7 @@ const Moved = ({ output, label }: { output: MovedOutput; label: ComponentChildre
 
 /** The wallet's own figures from the transaction it worked out. The application cannot influence them. */
 export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) => {
+  const names = useContext(TokenNamesContext);
   const net = figures.getsSatoshis - figures.givesSatoshis;
   const into = figures.intoApplicationSatoshis;
   const rows: [ComponentChildren, ComponentChildren][] = [
@@ -205,7 +212,7 @@ export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) =
                   Of token <Hex value={entry.category} />
                 </small>
               </>,
-              <span class={`token-net ${entry.amount > 0n ? 'up' : 'down'}`}>{`${entry.amount > 0n ? '+' : '−'}${tokenAmount(entry.amount)}`}</span>,
+              <span class={`token-net ${entry.amount > 0n ? 'up' : 'down'}`}>{`${entry.amount > 0n ? '+' : '−'}${amountText(entry.amount, names.fungible(entry.category))}`}</span>,
             ])}
           />
         </div>
@@ -322,7 +329,9 @@ export const FirstUse = ({ summary, firstUse }: { summary: TemplateSummary; firs
   if ((summary.trusted && !firstUse) || (!summary.trusted && summary.verdict.statement === 'violation')) return null;
   return (
     <Notice tone="wait">
-      {summary.trusted
+      {summary.replacesDeclaration === true
+        ? 'You trust this template on this phone with an earlier recovery declaration. This request comes with a new one. Approving takes the new one in its place and stores it in your backup first, before anything is signed; declining keeps the one you have.'
+        : summary.trusted
         ? 'You trust this template on this phone, and it is not in your backup yet. Approving stores it there first, before anything is signed.'
         : 'This wallet does not have this template yet. Approving trusts it on this phone, and stores it in your backup first, before anything is signed, so that a new phone can operate what is made with it.'}
     </Notice>

@@ -1,13 +1,18 @@
 import '@grandmas-wallet/ui/styles.css';
 import './apps.css';
 
-import type { ActionPreview, HeldToken, TemplateSummary } from '@grandmas-wallet/app';
+import { type Output, binToHex, encodeLockingBytecodeP2sh32 as p2sh32, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
+import type { ActionPreview, HeldToken, TemplateSummary, TokenNaming, TokenSendQuote, TokenSendRequest } from '@grandmas-wallet/app';
+import { INPUT_BYTES, smallestOutputValue, transactionBytes } from '@grandmas-wallet/core';
 import { Button, Card, Field, Frame, HandOff, TextArea, TextInput } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useState } from 'preact/hooks';
 
 import { ActionReview } from './ActionReview.js';
 import { TokenRow } from './Apps.js';
+import { Receive } from './Receive.js';
+import { Send } from './Send.js';
+import { chooseToken } from './token-choice.js';
 import { handToRecoverer } from './hand-to-recoverer.js';
 import type { Owner } from './OwnerApp.js';
 import { RecipientCheck, RecipientEntry } from './parts.js';
@@ -20,7 +25,9 @@ import type { StoredRecipient } from './session.js';
  * Parts of the wallet's screens, fed from fixed data, for looking at them in a browser without a wallet: the
  * Applications screen (`fixtures.html?show=tokens|review|closing`), the fields that take a scanned code
  * (`show=scan`, and `&open` to show the scanner already opened), and a recoverer's code taken in, with something
- * sealed handed to the recoverer's page over the session the code offers (`show=recoverer`). Served by the
+ * sealed handed to the recoverer's page over the session the code offers (`show=recoverer`), the Send screen with
+ * tokens to choose from (`show=send-token`, `&nft` to open with the key chosen), and the Receive screen
+ * (`show=receive`). Served by the
  * development server; the build of the page does not include it. The template here is an invented example, as
  * a template would describe itself, and what is handed to the recoverer is a sample that their page cannot open.
  */
@@ -30,7 +37,7 @@ const UNITS = 'e7979ccdae259293c7d0bee45ce8b7ad7660ea99477f802ed6a5161b0d30e6b8'
 const template: TemplateSummary = {
   identifier: 'aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be',
   contentHash: '99b19cdebc79ac9ece0dcd7773f0ce846ec2adabd27e763e781dfb75600aaf61',
-  declaration: 'f514e6506e88a440d33f81259d73c707b8b10bf7369401d0e64d5a14139ddeda',
+  declaration: '24bd88dd8112304e6b6a2beab24fe36d182a810b52bb60c8e8050b16b6a6ed96',
   name: 'Example lending (test network)',
   description: 'Borrow a dollar token against BCH held by a contract, manage the collateral and repay.',
   actions: [
@@ -228,14 +235,115 @@ const RecovererFixture = () => {
   );
 };
 
+// ------------------------------------------------------------------ sending and receiving tokens
+
+const DOLLARS = 'a1d53bd8fa94e1c3a42e6d5c3e6d0b0a6b9f0e2c5d17c8f9e3b1a20475c6d8e9';
+const fromTemplate = [{ identifier: template.identifier, name: template.name }];
+const dollarNames: TokenNaming = { named: { name: 'Example dollar', symbol: 'EXD', decimals: 2, from: fromTemplate } };
+const dollars: HeldToken = { category: DOLLARS, commitment: '', amount: 25_000n, place: 'address', outpoint: `${'7b'.repeat(32)}:1`, satoshis: 1_000n, meaning: 'unknown', names: { fungible: dollarNames } };
+const namedKey: HeldToken = { ...open, names: { nft: { named: { name: 'Example key', from: fromTemplate } } } };
+const held: HeldToken[] = [dollars, unknown, namedKey];
+
+/** Where the fixtures send to: a script, written in either form. */
+const destination = p2sh32(new Uint8Array(32).fill(0x2c));
+const written = (tokens: boolean): string => (lockingBytecodeToCashAddress({ prefix: 'bchtest', bytecode: destination, tokenSupport: tokens }) as { address: string }).address;
+
+/** What the wallet would work out: one token coin and one ordinary coin in, the tokens, any token change and the change out. */
+const quoteOf = (request: TokenSendRequest): TokenSendQuote => {
+  const token = request.kind === 'fungible' ? held.find((entry) => entry.category === request.category && entry.capability === undefined) : held.find((entry) => entry.outpoint === request.outpoint);
+  if (token === undefined) throw new Error('No such token.');
+  const amount = request.kind === 'fungible' ? request.amount : token.amount;
+  const category = hexToBin(token.category);
+  const sent: Output = { lockingBytecode: request.to, valueSatoshis: 0n, token: { category, amount, ...(token.capability === undefined ? {} : { nft: { capability: token.capability, commitment: hexToBin(token.commitment) } }) } };
+  const left = token.amount - amount;
+  const change: Output[] = left > 0n && token.capability === undefined ? [{ lockingBytecode: destination, valueSatoshis: 0n, token: { category, amount: left } }] : [];
+  const outputs = [sent, ...change].map((output) => ({ ...output, valueSatoshis: smallestOutputValue(output) }));
+  const bytes = transactionBytes([INPUT_BYTES.byKey, INPUT_BYTES.byKey], [...outputs, { lockingBytecode: destination, valueSatoshis: 0n }]);
+  const fee = BigInt(bytes);
+  const [sends, back] = outputs as [Output, Output | undefined];
+  return {
+    sends: { category: token.category, amount, ...(token.capability === undefined ? {} : { nft: { capability: token.capability, commitment: token.commitment } }), satoshis: sends.valueSatoshis },
+    ...(back === undefined ? {} : { tokenChange: { category: token.category, amount: left, satoshis: back.valueSatoshis } }),
+    changeSatoshis: 48_211n,
+    feeSatoshis: fee,
+    remainderSatoshis: 0n,
+    bytes,
+    tokenCoins: 1,
+    payingCoins: 1,
+    leavesSatoshis: sends.valueSatoshis + fee,
+  };
+};
+
+/** A wallet that holds the tokens above, quotes as the wallet would, and sends nothing. */
+const tokenOwner = {
+  session: { network: 'testnet', environment: { explorer: '' } },
+  balance: { recoverable: 52_340n, vault: 0n, notRecoverable: 0n, voided: 0n, toSweep: 0n, tokens: held.map(() => ({})) },
+  apps: { version: 0, applications: { tokens: async () => held, suggestions: [] } },
+  wallet: {
+    quoteTokens: async (request: TokenSendRequest) => quoteOf(request),
+    sendTokens: async (request: TokenSendRequest) => ({ transactionId: '3f'.repeat(32), bytes: quoteOf(request).bytes, feeSatoshis: quoteOf(request).feeSatoshis, remainderSatoshis: 0n, quote: quoteOf(request) }),
+    receiveAddress: async () => ({ address: { number: 7 }, again: false }),
+    vaultAddress: async () => ({ address: { number: 2 }, again: false }),
+    address: (kind: number) => {
+      const bytecode = p2sh32(new Uint8Array(32).fill(kind === 2 ? 0x5b : 0x3a));
+      const text = (tokens: boolean) => (lockingBytecodeToCashAddress({ prefix: 'bchtest', bytecode, tokenSupport: tokens }) as { address: string }).address;
+      return { number: 7, lockingBytecode: bytecode, address: text(false), tokenAddress: text(true) };
+    },
+  },
+  navigate: () => undefined,
+  sent: () => undefined,
+  toast: () => undefined,
+} as unknown as Owner;
+
+/** The two forms of the fixtures' destination, to paste. */
+const Destinations = () => (
+  <Card flat>
+    <div class="stack-s small">
+      <span class="muted">Addresses to try</span>
+      <span>
+        Token address: <span class="mono" data-testid="fixture-token-address">{written(true)}</span>
+      </span>
+      <span>
+        Plain address: <span class="mono" data-testid="fixture-plain-address">{written(false)}</span>
+      </span>
+      <span class="muted">{binToHex(destination).slice(0, 12)}…, the same script in both forms.</span>
+    </div>
+  </Card>
+);
+
 const show = new URLSearchParams(window.location.search).get('show') ?? 'tokens';
+if (show === 'send-token') chooseToken(new URLSearchParams(window.location.search).has('nft') ? `nft:${namedKey.outpoint}` : `fungible:${DOLLARS}`);
 const owner = { apps: { applications: { suggestions: [] } } } as unknown as Owner;
 const ignore = () => undefined;
 
+/** The wallet's own screens are shown in the frame the wallet gives them: with its navigation, and as wide. */
+const screen = show === 'send-token' ? 'send' : show === 'receive' ? 'receive' : undefined;
+const navigation =
+  screen === undefined
+    ? {}
+    : {
+        nav: [
+          { route: 'home', label: 'Home', icon: 'home' as const },
+          { route: 'receive', label: 'Receive', icon: 'receive' as const },
+          { route: 'send', label: 'Send', icon: 'send' as const },
+          { route: 'apps', label: 'Apps', icon: 'apps' as const },
+          { route: 'recovery', label: 'Recovery', icon: 'shield' as const },
+        ],
+        current: screen,
+        onNavigate: ignore,
+      };
+
 render(
-  <Frame brand="Grandma's Wallet" role="Fixtures" environment={{ network: 'chipnet', walletUrl: '', recovererUrl: '', stores: [], chain: [], relays: [], explorer: '', secondsPerBlock: 60 }}>
+  <Frame brand="Grandma's Wallet" role="Fixtures" environment={{ network: 'chipnet', walletUrl: '', recovererUrl: '', stores: [], chain: [], relays: [], explorer: '', secondsPerBlock: 60 }} {...navigation}>
     <div class="stack">
-      {show === 'scan' ? (
+      {show === 'send-token' ? (
+        <>
+          <Send owner={tokenOwner} />
+          <Destinations />
+        </>
+      ) : show === 'receive' ? (
+        <Receive owner={tokenOwner} />
+      ) : show === 'scan' ? (
         <ScanFields />
       ) : show === 'recoverer' ? (
         <RecovererFixture />
@@ -243,7 +351,7 @@ render(
         <div class="grid two apps-layout">
           <Card title="Tokens">
             <ul class="list tokens">
-              {[open, closed, unknown].map((token) => (
+              {[open, closed, unknown, dollars].map((token) => (
                 <TokenRow owner={owner} token={token} onView={ignore} />
               ))}
             </ul>

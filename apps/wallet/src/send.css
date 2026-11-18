@@ -1,0 +1,26 @@
+/*
+ * The Send screen's parts for tokens: the choice between Bitcoin Cash and a token, the list of tokens to
+ * choose from, the amount with its unit, and the review of a token that gives its holder more than itself.
+ */
+
+.send-what { max-width: 420px; }
+
+.token-picker { display: flex; flex-direction: column; }
+.token-picker .choice-text { min-width: 0; }
+.token-picker .choice-text > span { font-weight: 600; }
+.token-picker .choice-text small { overflow-wrap: anywhere; }
+
+.token-amount-row { display: flex; gap: 8px; align-items: center; }
+.token-amount-row .input-unit { flex: 1 1 auto; min-width: 0; }
+.token-amount-row > button { flex: none; }
+.token-unit input { padding-right: 76px; }
+.token-unit span { max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.stack-xs { display: flex; flex-direction: column; gap: 4px; }
+.raw-units { color: var(--muted); font-size: 13px; font-weight: 400; white-space: nowrap; }
+.name-source { display: block; }
+.name-source.disputed { color: color-mix(in srgb, var(--warn) 70%, var(--ink)); }
+.plain-refusal strong, .controls strong { font-weight: 650; }
+.token-review .kv dd strong { font-weight: 650; }
+.controls .choice { margin-top: 4px; }
+.token-review .controls { margin-top: 12px; }

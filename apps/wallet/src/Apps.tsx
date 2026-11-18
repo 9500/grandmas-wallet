@@ -11,7 +11,9 @@ import { type ApplicationsPart, type PositionsAsk, relayOf } from './connections
 import type { Owner } from './OwnerApp.js';
 import { CONNECTION_ADDRESS } from './scan.js';
 import { WithScan } from './Scanner.js';
+import { chooseToken } from './token-choice.js';
 import { type Connection, keep, kept } from './session.js';
+import { NameSource, TokenAmount, TokenNamesContext } from './token-words.js';
 import './apps.css';
 
 /**
@@ -46,9 +48,19 @@ export const Apps = ({ owner }: { owner: Owner }) => {
     setView({ at: 'main' });
     window.scrollTo(0, 0);
   };
-  if (view.at === 'act') return <ActOnToken owner={owner} token={view.token} action={view.action} onBack={back} />;
-  if (view.at === 'trust') return <TrustSuggested owner={owner} token={view.token} onBack={back} />;
-  return <Main owner={owner} onView={(next) => { setView(next); window.scrollTo(0, 0); }} />;
+  // What the templates the user trusts call the tokens, for every figure on this screen.
+  const names = useMemo(() => apps.applications.names(), [apps.version]);
+  return (
+    <TokenNamesContext.Provider value={names}>
+      {view.at === 'act' ? (
+        <ActOnToken owner={owner} token={view.token} action={view.action} onBack={back} />
+      ) : view.at === 'trust' ? (
+        <TrustSuggested owner={owner} token={view.token} onBack={back} />
+      ) : (
+        <Main owner={owner} onView={(next) => { setView(next); window.scrollTo(0, 0); }} />
+      )}
+    </TokenNamesContext.Provider>
+  );
 };
 
 const Main = ({ owner, onView }: { owner: Owner; onView: (view: View) => void }) => {
@@ -496,7 +508,7 @@ const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void 
 };
 
 /** What a position holds, read from the chain as the template's declaration says, in the template's words. */
-const PositionState = ({ state }: { state: NonNullable<NonNullable<HeldToken['position']>['state']> }) => (
+export const PositionState = ({ state }: { state: NonNullable<NonNullable<HeldToken['position']>['state']> }) => (
   <div class="position-state">
     <div class="small muted">In the template's words, read from the chain:</div>
     <KeyValues
@@ -517,20 +529,34 @@ export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldTo
   const suggestion = token.meaning === 'incomplete' && token.template !== undefined ? owner.apps.applications.suggestions.find((candidate) => candidate.identifier === token.template?.identifier) : undefined;
   const position = token.position;
   const usable = token.place === 'address';
+  // A name only where a template the user trusts gives one: the NFT's, else the amount's.
+  const naming = token.capability === undefined ? token.names?.fungible : token.names?.nft;
+  const name = naming?.named?.name;
+  const title = name ?? (token.meaning === 'unknown' ? 'A token of unknown meaning' : (token.template?.name ?? 'A token'));
   return (
     <li class="token">
       <div class="token-head">
         <div>
-          <div class="token-title">{token.meaning === 'unknown' ? 'A token of unknown meaning' : (token.template?.name ?? 'A token')}</div>
+          <div class="token-title">
+            {title}
+            {name !== undefined && token.meaning !== 'unknown' && token.template !== undefined && <span class="token-of"> · {token.template.name}</span>}
+          </div>
           <div class="small muted token-id">
-            {token.capability === undefined ? `${token.amount.toLocaleString('en-US')} units` : token.capability === 'none' ? 'NFT' : `NFT, ${token.capability}`} · <Hex value={token.category} />
+            {token.capability === undefined ? <TokenAmount amount={token.amount} naming={token.names?.fungible} /> : token.capability === 'none' ? 'NFT' : `NFT, ${token.capability}`} · <Hex value={token.category} />
             {token.commitment !== '' && (
               <>
                 {' '}
                 · <Hex value={token.commitment} head={6} tail={4} />
               </>
             )}
+            {token.capability !== undefined && token.amount > 0n && (
+              <>
+                {' '}
+                · with <TokenAmount amount={token.amount} naming={token.names?.fungible} />
+              </>
+            )}
           </div>
+          {naming !== undefined && <NameSource naming={naming} />}
         </div>
         {shown !== undefined && <Pill {...(shown.tone === undefined ? {} : { tone: shown.tone })}>{shown.label}</Pill>}
       </div>
@@ -592,6 +618,19 @@ export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldTo
       {token.noteRefused !== undefined && <p class="small muted">{token.noteRefused}</p>}
       {token.place === 'earlier' && <Notice tone="warn">This token is at an address of an earlier phone, where that phone's words could still move it. It is moved to this phone's addresses first, with the other coins at earlier addresses; until then it cannot be used here.</Notice>}
       {token.place === 'vault' && <Notice>This token is at a vault address. It is moved to an ordinary address of the wallet before it can be used here.</Notice>}
+      <div class="token-send">
+        <Button
+          small
+          kind="quiet"
+          onClick={() => {
+            chooseToken(token.capability === undefined ? `fungible:${token.category}` : `nft:${token.outpoint}`);
+            owner.navigate('send');
+            window.scrollTo(0, 0);
+          }}
+        >
+          Send
+        </Button>
+      </div>
     </li>
   );
 };
