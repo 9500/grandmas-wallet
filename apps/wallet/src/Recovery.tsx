@@ -2,6 +2,7 @@ import { generateBip39Mnemonic } from '@bitauth/libauth';
 import { type NewSeedPreparation, describeDelay, enroll, kitTemplates, makeUserBackup, sendUpdate, suggestedAllowance, userBackupText } from '@grandmas-wallet/app';
 import { makeLink, readLink } from '@grandmas-wallet/app/links';
 import { type ChallengeDelay, p2pkhLockingBytecode } from '@grandmas-wallet/core';
+import { sealedOfLink } from '@grandmas-wallet/app/hand-off';
 import { credentialKeys } from '@grandmas-wallet/enrollment';
 import { Button, Card, Choice, Field, Fingerprint, HandOff, KeyValues, LinkRow, Notice, PageHead, Sat, Segmented, TaskStatus, TextArea, CopyButton, download, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
@@ -10,6 +11,10 @@ import type { Owner } from './OwnerApp.js';
 import { DELAYS, DelayPicker, RecipientCheck, RecipientEntry, Waiting, sameDelay } from './parts.js';
 import { KitCard, ProtectionStatus } from './Protection.js';
 import { type StoredRecipient, deviceWords, keep, kept, recipientFingerprint, recipientOf, sealedContent } from './session.js';
+import { handToRecoverer } from './hand-to-recoverer.js';
+import { PREPARE_LINK } from './scan.js';
+import { WithScan } from './Scanner.js';
+import { SealedHandOff } from './SealedHandOff.js';
 
 type View = 'main' | 'move' | 'recoverer' | 'delay' | 'backup';
 
@@ -189,7 +194,9 @@ const MoveOut = ({ owner, onBack }: { owner: Owner; onBack: () => void }) => {
           <div class="stack-s">
             <p>On the new phone, open this wallet's page and choose "Move from my other phone". It shows a link. Open that link on this phone, or paste it here.</p>
             <Field label="The new phone's link" id="prepare" error={task.error?.name === 'read' ? task.error.message : undefined}>
-              <TextArea id="prepare" value={pasted} onInput={setPasted} placeholder="https://…#prepare=…" />
+              <WithScan filter={PREPARE_LINK} onScan={setPasted}>
+                <TextArea id="prepare" value={pasted} onInput={setPasted} placeholder="https://…#prepare=…" />
+              </WithScan>
             </Field>
             <div>
               <Button task={task} name="read" disabled={pasted.trim() === ''} onClick={() => void readPreparation(pasted)}>
@@ -246,6 +253,8 @@ const NewRecoverer = ({ owner, onBack }: { owner: Owner; onBack: () => void }) =
       const made = { recipient, credentialWords, link: sent.link };
       keep('arrangement', sent.arrangement);
       keep('newRecoverer', made);
+      // Straight to the new recoverer's page when its code offered a session; the link stays the second way.
+      handToRecoverer(recipient, 'enroll', await sealedOfLink('enroll', sent.link), 'new recoverer');
       setPending(made);
       deviceWords();
     });
@@ -259,9 +268,11 @@ const NewRecoverer = ({ owner, onBack }: { owner: Owner; onBack: () => void }) =
         <Back onBack={onBack} />
         <PageHead title="Change your recoverer">{changing ? `Waiting for ${name}.` : `${name} is your recoverer now.`}</PageHead>
         <Card title={`1. Send this to ${name}`}>
-          <HandOff text={pending.link} qrLabel="QR code of the kit for the new recoverer" copyLabel="Copy link" testId="new-recoverer-link">
-            <p class="small muted">A complete kit, sealed so that only {name} can open it. They check it and leave a receipt.</p>
-          </HandOff>
+          <SealedHandOff kind="enroll" slot="new recoverer" name={name}>
+            <HandOff text={pending.link} qrLabel="QR code of the kit for the new recoverer" copyLabel="Copy link" testId="new-recoverer-link">
+              <p class="small muted">A complete kit, sealed so that only {name} can open it. They check it and leave a receipt.</p>
+            </HandOff>
+          </SealedHandOff>
         </Card>
         <Card title="2. The change">
           {changing ? <ChangeState owner={owner} /> : <Notice tone="good">The wallet names {name} as its recoverer.</Notice>}

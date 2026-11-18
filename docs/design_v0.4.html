@@ -573,6 +573,7 @@ contract VaultAddress(bytes32 tag) {
   <h3>The recovery kit and the recoverer's key</h3>
   <ul>
     <li><strong>The kit contains</strong> the identity, the recoverer's credential for this wallet, the viewing key of every seed, where the sealed backups are kept and how to read them, and the settings as the owner saw them, for the recoverer to compare with the chain. The first kit arrives in one link or one QR code. The recoverer keeps the kit and adds to it whenever the wallet gets a new seed.</li>
+    <li><strong>One scan, when both pages are open.</strong> The recoverer's page shows one QR code that holds its link and the address of a WizardConnect session it keeps open while it is shown. The owner's phone scans it and shows the recoverer's fingerprint, as for a link. Once the wallet is made, it sends the sealed kit over the session, and the recoverer's page takes it in as if the kit's link had been opened, through the same checks. The session only carries what is already sealed. It needs both pages open at once, so the links stay: a link sent as a message works at any time, and the phone shows the link when the recoverer's page does not answer.</li>
     <li><strong>The recoverer's key is one per wallet, not one per coin.</strong> Only its hash is on chain, in the controller. No address contains it, and the recoverer never signs for a coin of the wallet. It signs two kinds of transaction: the request and the completion.</li>
     <li><strong>The recoverer uses a different key for every wallet,</strong> so two wallets with the same recoverer show nothing in common. By default the owner's phone makes this key as a separate set of twelve words, puts its hash into the controller, seals the words into the kit and does not keep them. The same words give a separate fee key.</li>
     <li><strong>The recoverer pays its own fees,</strong> about 2,000 satoshis for a request and a completion, from an ordinary address of the fee key. Its software shows that address, what it holds and what is needed, and anyone can send coins there. The owner may give an allowance when the wallet is created; the suggested amount covers four requests and one completion. It is offered, not required, and once given it is the recoverer's own.</li>
@@ -773,7 +774,7 @@ contract VaultAddress(bytes32 tag) {
 <!-- ============================== CONNECT -->
 <section id="connect">
   <h2>Talking to applications</h2>
-  <p>WizardConnect gives an application and a wallet an encrypted channel, started from an address the application shows as text or a QR code. What travels over it depends on what the wallet offers when it connects.</p>
+  <p>WizardConnect gives an application and a wallet an encrypted channel, started from an address the application shows as text or a QR code; the wallet page reads such a code with the phone's camera. What travels over it depends on what the wallet offers when it connects.</p>
   <div class="widget">
     <div class="wtitle"><span>Who builds the transaction</span>
       <div class="seg" id="cx-seg" role="group" aria-label="Kind of wallet">
@@ -813,6 +814,18 @@ contract VaultAddress(bytes32 tag) {
     <li><strong>A token that carries authority is spent only in transactions the wallet built itself</strong> from a template the user trusts. Whoever gets such a token spent in a transaction of their own shape can use its authority.</li>
     <li><strong>A standard signing request is refused.</strong> The wallet builds every transaction itself, so it answers no request to sign one that an application built.</li>
   </ul>
+  <h3>Between the wallet and a recoverer's page</h3>
+  <p>The same kind of session carries the recovery kit from the owner's phone to the recoverer's page, under a second extension of this project's own, separate from <code>xo_v1</code>. The recoverer's page shows the session's address inside its own link, in its QR code; the wallet announces only this extension and offers nothing else.</p>
+<pre class="code">{ "gw_recoverer_v1": { "version": 1 } }</pre>
+  <div class="scroll">
+  <table>
+    <tr><th>Message</th><th>Direction</th><th>Meaning</th></tr>
+    <tr><td><code>gw_recoverer_particulars</code></td><td>recoverer's page → wallet</td><td>Its name, page and encryption key, as its link gives them. The wallet sends nothing to a page with another key.</td></tr>
+    <tr><td><code>gw_recoverer_sealed</code></td><td>wallet → recoverer's page</td><td>The sealed bytes a link would carry, and what they are: a kit, for a first or a new recoverer, or a new phone's takeover request</td></tr>
+    <tr><td><code>gw_recoverer_sealed_answer</code></td><td>recoverer's page → wallet</td><td>Received; kept; or refused with a reason. Kept is not a receipt: recovery is on only when the wallet finds the receipt.</td></tr>
+  </table>
+  </div>
+  <p>The hand-over after a recovery stays a link, because it comes after the waiting period; the new phone can scan its code from the recoverer's screen.</p>
   <div class="note"><p><strong>This is the part that most needs XO.</strong> XO has invitations and a sync client but no protocol between a website and a wallet. A standard would best come from XO, or as a WizardConnect extension that both projects agree on.</p></div>
 </section>
 

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'preact/hooks';
 
 import { Desk } from './Desk.js';
 import { Incoming } from './Incoming.js';
+import { useArrivals } from './offered-session.js';
 import { Requests } from './Requests.js';
 import { type Session, boot, kept, openWalletPage, wallets } from './session.js';
 import { Wallets } from './Wallets.js';
@@ -21,6 +22,8 @@ const Root = () => {
   const [route, navigate] = useRoute(ROUTES, 'wallets');
   const [version, setVersion] = useState(0);
   const [toastElement, toast] = useToast();
+  // What arrives over the session the page's code offers is shown as a link opened on the page.
+  const arrivals = useArrivals();
   useEffect(() => {
     boot().then(setSession, (error: unknown) => setProblem(plainError(error)));
     const onHash = () => window.location.reload();
@@ -64,7 +67,7 @@ const Root = () => {
       }
       navigate(next);
     }}>
-      <Incoming session={session} onChanged={changed} toast={toast} onShowRequests={() => (looked === undefined ? navigate('requests') : openWalletPage(undefined, '/requests'))} />
+      <Incoming key={arrivals} session={session} onChanged={changed} toast={toast} onShowRequests={() => (looked === undefined ? navigate('requests') : openWalletPage(undefined, '/requests'))} />
       {looked !== undefined && current !== undefined ? (
         <Desk session={session} identity={current} looked={looked} toast={toast} />
       ) : route === 'requests' ? (

@@ -4,6 +4,9 @@ import { Button, Choice, Field, Fingerprint, Notice, Sat, TextArea, formatDurati
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
+import { joinRecoverer, leaveRecoverer } from './hand-to-recoverer.js';
+import { RECOVERER_LINK } from './scan.js';
+import { WithScan } from './Scanner.js';
 import { type Activity, type StoredRecipient, keep, kept, readRecipientLink, recipientFingerprint } from './session.js';
 
 /** Waiting periods to choose from. Counted in time, by the chain's clock, in steps of 512 seconds. */
@@ -27,26 +30,34 @@ export const DelayPicker = ({ value, onChange, name }: { value: ChallengeDelay; 
 );
 
 /**
- * Taking in a recoverer's link: from the page's address when the page was opened with one, or pasted.
+ * Taking in a recoverer's link: from the page's address when the page was opened with one, scanned, or pasted.
+ * When it came from the code on the recoverer's page, it names a session too, which is joined at once: the
+ * recoverer's page then shows that a phone is connected, and what is sealed for it can go there directly.
  */
 export const RecipientEntry = ({ onRead, purpose }: { onRead: (recipient: StoredRecipient) => void; purpose: string }) => {
   const [text, setText] = useState('');
   const task = useTask();
+  const use = (recipient: StoredRecipient): void => {
+    joinRecoverer(recipient);
+    onRead(recipient);
+  };
   useEffect(() => {
     const incoming = kept('incoming');
     if (incoming?.kind !== 'recoverer') return;
     void task.run('read', async () => {
       const recipient = await readRecipientLink(incoming.text);
       keep('incoming', undefined);
-      onRead(recipient);
+      use(recipient);
     });
   }, []);
   return (
     <div>
-      <Field label="Your recoverer's link" id="recipient-link" hint={`Your recoverer's page shows this link under "Your link". Open it on this phone, or paste it here. ${purpose}`} error={task.error?.message}>
-        <TextArea id="recipient-link" value={text} onInput={setText} placeholder="https://…#recoverer=…" invalid={task.error !== undefined} />
+      <Field label="Your recoverer's link" id="recipient-link" hint={`Your recoverer's page shows this link under "Your link". Scan its code, open the link on this phone, or paste it here. ${purpose}`} error={task.error?.message}>
+        <WithScan filter={RECOVERER_LINK} onScan={setText}>
+          <TextArea id="recipient-link" value={text} onInput={setText} placeholder="https://…#recoverer=…" invalid={task.error !== undefined} />
+        </WithScan>
       </Field>
-      <Button task={task} name="read" disabled={text.trim() === ''} onClick={() => void task.run('read', async () => onRead(await readRecipientLink(text)))}>
+      <Button task={task} name="read" disabled={text.trim() === ''} onClick={() => void task.run('read', async () => use(await readRecipientLink(text)))}>
         Use this link
       </Button>
     </div>
@@ -66,7 +77,13 @@ export const RecipientCheck = ({ recipient, matched, onMatched, onClear }: { rec
     <p class="small muted">Ask your recoverer to read out the fingerprint their page shows, by phone or in person. If it is different, someone may have changed the link: do not go on.</p>
     <Choice type="checkbox" checked={matched} onChange={onMatched} title="The fingerprints are the same" />
     {onClear !== undefined && (
-      <Button kind="link" onClick={onClear}>
+      <Button
+        kind="link"
+        onClick={() => {
+          leaveRecoverer(recipient.session);
+          onClear();
+        }}
+      >
         Use another link
       </Button>
     )}

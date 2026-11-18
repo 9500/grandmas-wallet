@@ -16,6 +16,7 @@
     "@grandmas-wallet/core": "0.0.0",
     "@grandmas-wallet/enrollment": "0.0.0",
     "@grandmas-wallet/ui": "0.0.0",
-    "preact": "^11.2.0"
+    "preact": "^11.2.0",
+    "qr-scanner": "1.4.2"
   }
 }

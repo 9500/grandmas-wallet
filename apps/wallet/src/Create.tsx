@@ -1,10 +1,12 @@
 import { binToHex, generateBip39Mnemonic, hexToBin } from '@bitauth/libauth';
 import { type CreationStep, type OwnerWallet, addressOf, creationFunding, describeDelay, enroll, kitTemplates, suggestedAllowance } from '@grandmas-wallet/app';
 import { type ChallengeDelay, p2pkhLockingBytecode } from '@grandmas-wallet/core';
+import { sealedOfLink } from '@grandmas-wallet/app/hand-off';
 import { credentialKeys } from '@grandmas-wallet/enrollment';
 import { Amount, Button, Card, Choice, HandOff, Loading, Notice, PageHead, Sat, type Step, Steps, TaskStatus, useEvery, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 
+import { handToRecoverer } from './hand-to-recoverer.js';
 import { DELAYS, DelayPicker, RecipientCheck, RecipientEntry } from './parts.js';
 import { type Session, type Setup, type StoredRecipient, deviceWords, keep, kept, openWallet, recipientOf, seedOf, startCreationAgain } from './session.js';
 
@@ -26,6 +28,8 @@ export const sendKit = async (session: Session, wallet: OwnerWallet, setup: Setu
   keep('arrangement', sent.arrangement);
   keep('recipient', setup.recipient);
   keep('kitLink', sent.link);
+  // Straight to the recoverer's page when its code offered a session; the link stays the second way.
+  handToRecoverer(setup.recipient, 'enroll', await sealedOfLink('enroll', sent.link));
   return sent.link;
 };
 
@@ -235,7 +239,8 @@ const Creating = ({ session, setup, onCreated, onAgain }: { session: Session; se
       state: step === 'created' ? 'current' : 'later',
       detail: (
         <>
-          The kit is sealed so that only {name} can open it. You send it as a link.
+          The kit is sealed so that only {name} can open it.{' '}
+          {setup.recipient.session === undefined ? 'You send it as a link.' : `It goes straight to ${name}'s page if it is still open; otherwise you send it as a link.`}
           <TaskStatus task={task} name="kit" />
           {task.error?.name === 'kit' && (
             <div class="actions">

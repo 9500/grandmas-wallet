@@ -5,6 +5,8 @@ import { Amount, Button, Card, Field, KeyValues, Notice, PageHead, Sat, TaskStat
 import { useState } from 'preact/hooks';
 
 import type { Owner } from './OwnerApp.js';
+import { paymentAddress } from './scan.js';
+import { WithScan } from './Scanner.js';
 
 type Stage =
   | { at: 'form' }
@@ -87,7 +89,9 @@ export const Send = ({ owner }: { owner: Owner }) => {
           {stage.at === 'form' && (
             <Card>
               <Field label="To" id="to" hint="A Bitcoin Cash address." error={errors.to}>
-                <TextInput id="to" value={to} onInput={setTo} placeholder={network === 'mainnet' ? 'bitcoincash:…' : 'bchtest:…'} invalid={errors.to !== undefined} />
+                <WithScan filter={paymentAddress(network)} onScan={setTo}>
+                  <TextInput id="to" value={to} onInput={setTo} placeholder={network === 'mainnet' ? 'bitcoincash:…' : 'bchtest:…'} invalid={errors.to !== undefined} />
+                </WithScan>
               </Field>
               <Field label="Amount" id="amount" error={errors.amount} hint={amountHint(amount)}>
                 <div class="input-unit">
@@ -254,7 +258,9 @@ const Tokens = ({ owner }: { owner: Owner }) => {
               {open === coin && (
                 <div class="stack-s">
                   <Field label="To" id="token-to">
-                    <TextInput id="token-to" value={to} onInput={setTo} />
+                    <WithScan filter={paymentAddress(owner.session.network)} onScan={setTo}>
+                      <TextInput id="token-to" value={to} onInput={setTo} />
+                    </WithScan>
                   </Field>
                   <TaskStatus task={task} name="token" />
                   <Button

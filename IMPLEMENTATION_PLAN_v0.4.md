@@ -246,6 +246,10 @@ The wallet kept a small coin apart to pay for refusing a recovery request: set a
 
 This is tested on the simulated chain. Earlier run records stay as they were run; the browser courses wait for words of the pages that are gone and have to follow the pages before they run again.
 
+## Scanning codes, and a session with the recoverer's page (18 November 2026)
+
+The owner runs the wallet page on a phone and the recoverer's page and the applications on a desktop, and asked for less copying between the two. Every field of the wallet that takes a link or an address from another screen has a QR code scanner (`apps/wallet/src/Scanner.tsx`, library `qr-scanner` 1.4.2). The recoverer's code also offers a WizardConnect session under a second extension of the project's own, `gw_recoverer_v1` (proposal section 14.4), over which the wallet sends the kit, the kit for a new recoverer and a takeover request; the links remain the second way. Closed by unit and protocol tests (RC12, RC13) and by two scripted checks in browsers that need no chain and no coins (`scripts/scan-check.ts`, `scripts/session-check.ts`; OP04). Still to do: the scanner on real phones, and the scripted course of stage 6 taking the recoverer's code over the session instead of opening its links.
+
 ## Which stage closes which test
 
 | Stage | Tests |
@@ -255,12 +259,12 @@ This is tested on the simulated chain. Earlier run records stay as they were run
 | 3 | CR01–CR04, FE04–FE08 |
 | 4 | RC01–RC11, BK01–BK03, BK07, BK08, OP01 |
 | 5 | SW01–SW08, MG01–MG08, KV06, BK09, PV03, FE09 |
-| 6 | OP02, OP03 |
+| 6 | OP02, OP03, OP04, RC12, RC13 |
 | 7 | AP01–AP09, AP11–AP15, BK04–BK06, BK10 |
 | 8 | SJ01–SJ06, AP10 |
 | 9 | PY01–PY04 |
 
-All 122 tests of the proposal's section 21 are in this table once.
+All 125 tests of the proposal's section 21 are in this table once.
 
 ## Decisions
 

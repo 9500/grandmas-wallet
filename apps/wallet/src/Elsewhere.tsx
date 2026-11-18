@@ -4,6 +4,8 @@ import { useState } from 'preact/hooks';
 
 import { Erase } from './Details.js';
 import type { Owner } from './OwnerApp.js';
+import { paymentAddress } from './scan.js';
+import { WithScan } from './Scanner.js';
 
 /**
  * The chain names another key as the owner, and this phone did not hand the wallet over (proposal section
@@ -55,7 +57,9 @@ export const OwnedElsewhere = ({ owner }: { owner: Owner }) => {
             This phone's keys can still spend <Amount satoshis={spendable} exact /> that the new owner has not moved yet. Send it to an address of another wallet, one that does not share this wallet's recoverer, now: the new owner may move it first.
           </p>
           <Field label="Send to" id="out" error={error}>
-            <TextInput id="out" value={to} onInput={setTo} invalid={error !== undefined} />
+            <WithScan filter={paymentAddress(owner.session.network)} onScan={setTo}>
+              <TextInput id="out" value={to} onInput={setTo} invalid={error !== undefined} />
+            </WithScan>
           </Field>
           <TaskStatus task={task} name="out" />
           <div class="actions">

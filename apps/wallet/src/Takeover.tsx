@@ -4,7 +4,11 @@ import { makeLink } from '@grandmas-wallet/app/links';
 import { Button, Card, Field, Fingerprint, HandOff, PageHead, type Step, Steps, TaskStatus, TextArea, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
+import { SealedHandOff } from './SealedHandOff.js';
+import { handToRecoverer } from './hand-to-recoverer.js';
 import { RecipientCheck, RecipientEntry } from './parts.js';
+import { HANDOVER_LINK } from './scan.js';
+import { WithScan } from './Scanner.js';
 import { type Session, type StoredRecipient, deviceAccount, deviceWords, keep, kept, recipientFingerprint, saveState, sealedContent, sealedOf, seedOf } from './session.js';
 
 /**
@@ -27,6 +31,8 @@ export const Takeover = ({ session, onBack, onDone }: { session: Session; onBack
       const link = await makeLink(recipient.page, 'takeover', sealedContent(sealed));
       const made = { pending, recipient, link };
       keep('takeover', made);
+      // Straight to the recoverer's page when its code offered a session; the link stays the second way.
+      handToRecoverer(recipient, 'takeover', sealed);
       setAsked(made);
     });
 
@@ -82,7 +88,9 @@ export const Takeover = ({ session, onBack, onDone }: { session: Session; onBack
       detail: (
         <div class="stack-s">
           <p>It is sealed: only your recoverer can open it. It does not say which wallet is yours; your recoverer decides that.</p>
-          <HandOff text={asked.link} qrLabel="QR code of the request for your recoverer" copyLabel="Copy link" testId="takeover-link" />
+          <SealedHandOff kind="takeover" name={asked.recipient.name || 'your recoverer'}>
+            <HandOff text={asked.link} qrLabel="QR code of the request for your recoverer" copyLabel="Copy link" testId="takeover-link" />
+          </SealedHandOff>
         </div>
       ),
     },
@@ -102,9 +110,11 @@ export const Takeover = ({ session, onBack, onDone }: { session: Session; onBack
       state: 'later',
       detail: (
         <div class="stack-s">
-          <p>After the waiting period your recoverer completes the move and sends you a link. Open it on this phone, or paste it here.</p>
+          <p>After the waiting period your recoverer completes the move and sends you a link. Open it on this phone, scan its code, or paste it here.</p>
           <Field label="The link from your recoverer" id="handover">
-            <TextArea id="handover" value={pasted} onInput={setPasted} placeholder="https://…#handover=…" />
+            <WithScan filter={HANDOVER_LINK} onScan={setPasted}>
+              <TextArea id="handover" value={pasted} onInput={setPasted} placeholder="https://…#handover=…" />
+            </WithScan>
           </Field>
           <TaskStatus task={task} name="handover" />
           <div>
