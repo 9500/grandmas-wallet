@@ -80,13 +80,6 @@ export interface OwnerWalletState {
      * if one disappears it makes a new identity (`voided`).
      */
     confirmed: boolean;
-    /**
-     * Only this wallet could still replace the transaction that defines the identity: it is in a block, or
-     * every coin it spends was in a block and at an address of this wallet. Vault addresses wait for this
-     * (proposal section 7.9): they have no key, so a payment to one of an identity that disappeared could
-     * never be spent.
-     */
-    fixed?: boolean;
   };
   /**
    * Identities this wallet made whose creation the network no longer has: the transaction that defined one,
@@ -375,7 +368,7 @@ export class OwnerWallet {
     const state: OwnerWalletState = {
       ...newOwnerWalletState(),
       identity: hex(options.identity),
-      creation: { identitySeen: true, createSeen: true, confirmed: true, fixed: true },
+      creation: { identitySeen: true, createSeen: true, confirmed: true },
       earlierSeeds: (options.earlierViewingKeys ?? []).map((viewingKey, index) => storedViewingKey(`earlier seed ${index + 1}`, viewingKey)),
     };
     options.save?.(state);
@@ -530,7 +523,6 @@ export class OwnerWallet {
             ...creation,
             ...(definedIn !== 'missing' ? { identitySeen: true } : {}),
             ...(createdIn !== 'missing' ? { createSeen: true } : {}),
-            ...(definedIn === 'confirmed' ? { fixed: true } : {}),
             confirmed: definedIn === 'confirmed' && createdIn === 'confirmed',
           },
         });
@@ -603,9 +595,7 @@ export class OwnerWallet {
   /** Make and send the payment to itself that defines the identity. It is recorded before it is sent. */
   private async prepareIdentity(coins: AccountCoin[]): Promise<void> {
     const prepared = await this.selfPayment(coins);
-    // Only this wallet can replace a transaction that spends coins of its own that are in a block.
-    const fixed = coins.every((coin) => coin.height > 0);
-    this.store({ identity: prepared.transactionId, creation: { prepareTransactionId: prepared.transactionId, confirmed: false, fixed } });
+    this.store({ identity: prepared.transactionId, creation: { prepareTransactionId: prepared.transactionId, confirmed: false } });
     await this.sendPrepared(prepared);
     // A server took it: the network has it.
     this.store({ creation: { ...this.state.creation, identitySeen: true } });
@@ -638,7 +628,7 @@ export class OwnerWallet {
       // A token category is the transaction whose output 0 is spent: the wallet needs a coin that is output 0.
       const first = coins.find((coin) => coin.template === 'coins' && coin.utxo.index === 0);
       if (first !== undefined && coins.every((coin) => coin.template === 'coins')) {
-        this.store({ identity: hex(first.utxo.transactionHash), creation: { identitySeen: true, confirmed: false, fixed: first.height > 0 } });
+        this.store({ identity: hex(first.utxo.transactionHash), creation: { identitySeen: true, confirmed: false } });
       } else {
         await this.prepareIdentity(coins);
       }
@@ -748,22 +738,6 @@ export class OwnerWallet {
     if (!this.created) throw new Error('The wallet is not created yet.');
   }
 
-  /**
-   * A vault address has no key: only the identity's controller ever releases what is paid to it. One is
-   * therefore given out only once nobody but this wallet could undo the creation (`creation.fixed`).
-   */
-  private requireFixed(): void {
-    // A creation in a block is fixed too; a wallet stored before `fixed` existed has only `confirmed`.
-    if (this.state.creation.fixed !== true && !this.state.creation.confirmed) {
-      throw new Error('A vault address is given out once the network has put the wallet\'s creation in a block, usually within minutes. A vault address has no key: if the creation were undone, nobody could ever spend a payment to it. Ordinary addresses can be used meanwhile.');
-    }
-  }
-
-  /** Whether a vault address can be given out: nobody but this wallet could undo its creation any more. */
-  get vaultReady(): boolean {
-    return this.created && (this.state.creation.fixed === true || this.state.creation.confirmed);
-  }
-
   /** Whether recovery is on: the recoverer has confirmed that it holds what a recovery needs. Coins in the wallet do not mean that it is. */
   get recovery(): 'on' | 'off' {
     return this.created && this.state.recoveryConfirmed ? 'on' : 'off';
@@ -860,7 +834,6 @@ export class OwnerWallet {
       },
       reserve: (kinds) => reserve(kinds).reserved,
       hold: async (reserved) => {
-        if (reserved.some(({ address }) => address.kind === ADDRESS_KIND.vault)) this.requireFixed();
         // The numbers are recorded as held before anything is built with them.
         const again = reserve(reserved.map(({ address }) => address.kind as 1 | 2));
         if (again.reserved.some((entry, index) => entry.address.number !== reserved[index]?.address.number)) throw new Error('The wallet\'s addresses changed while the action was being worked out. Try again.');
@@ -902,14 +875,17 @@ export class OwnerWallet {
     return this.giveOut(ADDRESS_KIND.givenOut);
   }
 
-  /** An address without a key, for a payer who will use it for years. */
+  /**
+   * An address without a key, for a payer who will use it for years. It is given out as soon as the wallet
+   * is created, like any other. Only the identity's controller releases what is paid to it, so a payment to
+   * one of an identity that disappeared (proposal section 7.9) could not be spent.
+   */
   async vaultAddress(): Promise<{ address: WalletAddress; again: boolean }> {
     return this.giveOut(ADDRESS_KIND.vault);
   }
 
   private async giveOut(kind: 0 | 1 | 2): Promise<{ address: WalletAddress; again: boolean }> {
     this.requireCreated();
-    if (kind === ADDRESS_KIND.vault) this.requireFixed();
     const taken = takeNumber(this.state.allocation, kind);
     const number = 'number' in taken ? taken.number : taken.refused.offer;
     if ('number' in taken) {

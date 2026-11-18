@@ -136,30 +136,17 @@ describe('creating a wallet', () => {
     // The first coins arrive and are not in a block; the wallet pays itself and creates its controller at once.
     chain.fund(funding, 20_000n, 1);
     expect(await wallet.create(createOptions)).toBe('created');
-    expect(state().creation).toMatchObject({ identitySeen: true, createSeen: true, confirmed: false, fixed: false });
-    // Addresses are given out, coins received there are spent, and recovery can be on, all before any block.
+    expect(state().creation).toMatchObject({ identitySeen: true, createSeen: true, confirmed: false });
+    // Addresses of every kind are given out, coins received there are spent, and recovery can be on, all before any block.
     const given = (await wallet.receiveAddress()).address;
+    expect((await wallet.vaultAddress()).address.number).toBe(0);
     chain.fund(given.lockingBytecode, 9_000n);
     await wallet.pay([{ lockingBytecode: payee, valueSatoshis: 1_000n }]);
     wallet.noteRecoveryConfirmed(true);
     expect(wallet.recovery).toBe('on');
-    // The one exception: a vault address has no key, so it waits until nobody but this wallet could undo the creation.
-    await expect(wallet.vaultAddress()).rejects.toThrow(/once the network has put the wallet's creation in a block/);
     chain.mine();
     expect(await wallet.creationStep()).toBe('created');
-    expect(state().creation).toMatchObject({ confirmed: true, fixed: true });
-    expect((await wallet.vaultAddress()).address.number).toBe(0);
-  });
-
-  it('CR02: when the first coins were in a block, only this wallet could undo its creation, and a vault address is given out at once', async () => {
-    const chain = new SimulatedChain();
-    chain.blocksOnDemand = true;
-    const { wallet, state, funding } = await device(chain);
-    chain.fund(funding, 20_000n, 1);
-    chain.mine();
-    expect(await wallet.create(createOptions)).toBe('created');
-    expect(state().creation).toMatchObject({ confirmed: false, fixed: true });
-    expect((await wallet.vaultAddress()).address.number).toBe(0);
+    expect(state().creation).toMatchObject({ confirmed: true });
   });
 
   it('CR02: the transaction that prepared the wallet is replaced after addresses were given out: no coin is lost; the wallet makes a new identity, collects the coins by key, and says recovery must be set up again', async () => {

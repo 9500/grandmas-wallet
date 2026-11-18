@@ -595,11 +595,10 @@ contract VaultAddress(bytes32 tag) {
   <div class="note"><p><strong>If a recovery completes against the owner's will,</strong> the owner's keys still spend every coin that has not been swept. A wallet that finds itself owned by a key it does not hold stops giving out addresses, makes sure of what it sees on more than one server, and offers to move its coins out at once, to a wallet with a new identity. That is a race against the new owner's sweep. Coins at vault addresses cannot be saved this way.</p></div>
 
   <h3>What still waits for a block, and why</h3>
-  <p>Everything that can go on before a block does. A transaction that disappears later takes with it only what was built on it: the wallet follows the chain at every check, and coins at addresses of a device stay that device's by key. Four things wait, each for a reason that cannot be designed away:</p>
+  <p>Everything that can go on before a block does. A transaction that disappears later takes with it only what was built on it: the wallet follows the chain at every check, and coins at addresses of a device stay that device's by key. Three things wait, each for a reason that cannot be designed away:</p>
   <ul>
     <li><strong>The waiting period of a recovery counts from the block that holds the request.</strong> It is a time lock that the network enforces, and a transaction that is not in a block has no age yet. The period is the owner's whole protection, so it is measured by the chain and not by a clock anyone could claim. The owner's wallet shows the request and warns as soon as it is seen; only the count starts with the block.</li>
     <li><strong>A phone stops for good only when a block holds another owner.</strong> The moment the network shows another key as the owner, the phone gives out nothing and takes on nothing. A completion that is not in a block can still lose to the owner's cancellation, so until a block holds it the phone only pauses, and carries on by itself if the change disappears.</li>
-    <li><strong>A vault address waits until nobody but the wallet could undo its creation.</strong> It has no key: if the identity disappeared, a payment to it could never be spent, and a vault address is meant to be published and paid for years. When the wallet's first coins were already in a block this is at once; otherwise it is the first block after the creation. Ordinary addresses do not wait.</li>
     <li><strong>Time locks of applications</strong>, such as a savings jar's date or a loan's periods, belong to their contracts, not to the wallet.</li>
   </ul>
 </section>
@@ -985,7 +984,7 @@ contract VaultAddress(bytes32 tag) {
   <h3>Open points</h3>
   <ul>
     <li><strong>The ranges.</strong> The sizes proposed from measurement are 10,000 addresses given out, 10,000 for change and 1,000 vault addresses for each seed, with the full search repeated once a week.</li>
-    <li><strong>Confidence in the chain.</strong> The phone takes what is in a block from the servers it is set up with, the user's own node among them. It shows it as information, and waits for it only for the four things under "What still waits for a block". Checking block headers on the phone is later work, and until then the wallet does not call chain state verified.</li>
+    <li><strong>Confidence in the chain.</strong> The phone takes what is in a block from the servers it is set up with, the user's own node among them. It shows it as information, and waits for it only for the three things under "What still waits for a block". Checking block headers on the phone is later work, and until then the wallet does not call chain state verified.</li>
     <li><strong>Watching on a phone.</strong> A phone that is switched on is not thereby watching the chain. Background operation on phones has to be shown before protection is claimed.</li>
     <li><strong>Whether closing stays.</strong> A released wallet could keep the action in the controller, keep it out of the interface as now, or offer it.</li>
     <li><strong>Who makes the recoverer's key.</strong> The owner's phone by default; the recoverer could make it instead.</li>

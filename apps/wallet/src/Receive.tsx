@@ -1,5 +1,5 @@
 import { ADDRESS_KIND } from '@grandmas-wallet/core';
-import { Button, Card, CopyButton, Loading, Notice, PageHead, QrCode, Segmented, TaskStatus, useEvery, useTask } from '@grandmas-wallet/ui';
+import { Button, Card, CopyButton, Loading, Notice, PageHead, QrCode, Segmented, TaskStatus, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import type { Owner } from './OwnerApp.js';
@@ -19,10 +19,6 @@ export const Receive = ({ owner }: { owner: Owner }) => {
   const [vault, setVault] = useState(() => kept('vaultReceive'));
   const task = useTask();
   const shown = kind === 'once' ? once : vault;
-  // A vault address has no key, so it waits until nobody but this wallet could undo the wallet's creation.
-  const [vaultReady, setVaultReady] = useState(wallet.vaultReady);
-  useEvery(5_000, () => setVaultReady(wallet.vaultReady));
-  const waitingForVault = kind === 'vault' && vault === undefined && !vaultReady;
 
   const give = (which: Kind) =>
     task.run('give', async () => {
@@ -38,8 +34,8 @@ export const Receive = ({ owner }: { owner: Owner }) => {
     });
 
   useEffect(() => {
-    if (shown === undefined && task.busy === undefined && !waitingForVault) void give(kind);
-  }, [kind, vaultReady]);
+    if (shown === undefined && task.busy === undefined) void give(kind);
+  }, [kind]);
 
   const address = shown === undefined ? undefined : wallet.address(kind === 'once' ? ADDRESS_KIND.givenOut : ADDRESS_KIND.vault, shown.number).address;
   const [prefix, rest] = address === undefined ? ['', ''] : address.includes(':') ? [`${address.split(':')[0]}:`, address.split(':')[1] ?? ''] : ['', address];
@@ -58,11 +54,7 @@ export const Receive = ({ owner }: { owner: Owner }) => {
                 { value: 'vault', label: 'For regular payments' },
               ]}
             />
-            {waitingForVault ? (
-              <Notice tone="wait" busy>
-                A lasting address is ready once the network has put your wallet's creation in a block, usually within a few minutes. It has no key of its own, so it is given out only when nothing can undo the wallet it belongs to. An address for one payment works right now.
-              </Notice>
-            ) : address === undefined ? (
+            {address === undefined ? (
               task.error === undefined ? (
                 <Loading>Making an address…</Loading>
               ) : null

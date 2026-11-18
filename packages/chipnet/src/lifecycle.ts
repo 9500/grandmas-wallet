@@ -82,8 +82,6 @@ export const MINIMUM_FUNDING = 30_000n;
 export const CHALLENGE_DELAY = { unit: 'time512', value: 1 } as const;
 const DEFAULT_RETRY_INTERVAL_MS = 30_000;
 const RETRY_LIMIT_MS = 90 * 60_000;
-const CONFIRMATION_POLL_MS = 15_000;
-const CONFIRMATION_LIMIT_MS = 30 * 60_000;
 /** How many addresses of each kind, and how many vault addresses, the run recognises as its own for each seed. */
 const ADDRESS_NUMBERS = 4;
 const VAULT_NUMBERS = 2;
@@ -456,31 +454,6 @@ export class Run {
     }
   }
 
-  /**
-   * Wait until a step's transaction is in a block. The run pays a vault address right after creating the
-   * wallet, and a vault address waits until nobody but the wallet could undo its creation (proposal section
-   * 7.9); ordinary addresses do not wait.
-   */
-  async waitConfirmed(name: string): Promise<void> {
-    const record = this.state.steps[name];
-    if (record === undefined) throw new Error(`There is no step "${name}" to wait for.`);
-    if (record.note?.includes('confirmed') === true) return;
-    const lockingBytecode = controllerScript(this.identity).lockingBytecode;
-    const deadline = this.env.now() + CONFIRMATION_LIMIT_MS;
-    let announced = false;
-    for (;;) {
-      const history = await this.chain.getHistory(lockingBytecode);
-      if (history.some((entry) => entry.transactionId === record.transactionId && entry.height > 0)) {
-        this.record(name, { ...record, note: [record.note, 'confirmed before the next step'].filter((part) => part !== undefined).join('; ') });
-        return;
-      }
-      if (this.env.now() > deadline) throw new Error(`Step "${name}" was not confirmed within ${CONFIRMATION_LIMIT_MS / 60_000} minutes.`);
-      if (!announced) this.env.log(`  wait   ${name}: waiting for its first confirmation`);
-      announced = true;
-      await this.env.sleep(CONFIRMATION_POLL_MS);
-    }
-  }
-
   /** A controller action by the recoverer, with the fee paid from the recoverer's own fee address. */
   recovererAction(action: ControllerAction, attached: InputSpec[] = []): BuiltTransaction {
     const { utxo, state } = this.controller();
@@ -613,8 +586,6 @@ export const runLifecycle = async (run: Run): Promise<void> => {
   // The check any client makes before it trusts an identity.
   validateGenesis(decode(created.transactionHex), hexToBin(created.transactionId), run.identity);
   run.env.log(`  identity ${state.identity ?? ''}`);
-  // The next step pays a vault address, which has no key: it waits until the creation is in a block.
-  await run.waitConfirmed('create');
 
   const givenOutFirst = run.address('old', ADDRESS_KIND.givenOut, 0);
   const givenOutSecond = run.address('old', ADDRESS_KIND.givenOut, 1);
