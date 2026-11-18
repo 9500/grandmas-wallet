@@ -65,6 +65,8 @@ export interface JarSource {
   open(satoshis: bigint, unlockTime: number, progress: (step: Progress) => void): Promise<Done>;
   deposit(jar: JarView, satoshis: bigint, progress: (step: Progress) => void): Promise<Done>;
   withdraw(jar: JarView, progress: (step: Progress) => void): Promise<Done>;
+  /** For a wallet that carries out actions itself: offer it this page's template without an action. */
+  offerTemplate?(): Promise<boolean>;
   /** Stop listening to the connection. */
   close?(): void;
 }
@@ -92,6 +94,7 @@ export const xoSource = (requests: DappRequests, store: PendingStore): JarSource
     kind: 'xo',
     jars,
     list: () => jars.list(),
+    offerTemplate: () => jars.offerTemplate(),
     open: (satoshis, unlockTime, progress) => explained(jars.open(satoshis, unlockTime, follow(progress))),
     deposit: (jar, satoshis, progress) => explained(jars.deposit(jar.category, satoshis, follow(progress))),
     withdraw: (jar, progress) => explained(jars.withdraw(jar.category, follow(progress))),

@@ -76,6 +76,8 @@ export interface KeptTemplate {
   stored: boolean;
   /** A token made with the template has led to its position on chain, as the declaration says. */
   positionFound?: boolean;
+  /** How many times the user had stopped trusting it before this trust. The backup's record of it carries the same number. */
+  renewal?: number;
 }
 
 /** Which template made a token, and which authority entry of its declaration the token stands for. A hint, checked before use. */
@@ -85,10 +87,18 @@ export interface TokenNote {
   authority: string;
 }
 
-/** A template found in the backup that an earlier owner of the wallet stored. It is a suggestion, not trusted here. */
+/**
+ * A template the backup holds that is not trusted here: one an earlier owner of the wallet stored, or one
+ * the user stopped trusting. It is a suggestion.
+ */
 export interface SuggestedTemplate extends TemplateNames {
   name: string;
   texts: PresentedTexts;
+  /**
+   * The user of this seed stopped trusting it; the backup still holds it. `renewal` is the number of that
+   * withdrawal, and `stored` whether a backup store has confirmed the withdrawal's record.
+   */
+  withdrawn?: { renewal: number; stored: boolean };
 }
 
 export interface ApplicationsState {
@@ -126,7 +136,7 @@ export interface ApplicationAction {
 export interface ApplicationArchive {
   write(entry: RecordEntry): Promise<WriteResult>;
   /** The templates and notes in the archive, each with whose it is: the current owner's, or an earlier one's. */
-  read(): Promise<{ templates: { entry: TemplateEntry; standing: Standing }[]; tokenNotes: { entry: TokenNoteEntry; standing: Standing }[] }>;
+  read(): Promise<{ templates: { entry: TemplateEntry; standing: Standing; withdrawn?: number }[]; tokenNotes: { entry: TokenNoteEntry; standing: Standing }[] }>;
 }
 
 /** The archive in use of a recovery arrangement, for templates and token notes. */
@@ -461,7 +471,7 @@ export class Applications {
     return this.state.templates;
   }
 
-  /** Templates an earlier owner of the wallet stored in the backup, which this device has not been told to trust. */
+  /** Templates the backup holds which this device does not trust: an earlier owner's, or ones the user stopped trusting. */
   get suggestions(): SuggestedTemplate[] {
     return (this.state.suggested ?? []).filter((suggested) => !this.state.templates.some((kept) => kept.identifier === suggested.identifier && kept.contentHash === suggested.contentHash));
   }
@@ -543,10 +553,17 @@ export class Applications {
       });
     }
     if (kept === undefined) {
-      const texts = presented ?? this.suggestions.find((suggested) => suggested.identifier === names.identifier && suggested.contentHash === names.contentHash)?.texts;
+      const suggestion = this.suggestions.find((suggested) => suggested.identifier === names.identifier && suggested.contentHash === names.contentHash);
+      const texts = presented ?? suggestion?.texts;
       if (texts === undefined) return refuse('This wallet does not have that template.');
+      // Trust given again after it was withdrawn. Where the backup has the withdrawal, the template is stored
+      // again under the next number, which the withdrawal does not reach; where it has not, nothing there changed.
+      const withdrawn = suggestion?.withdrawn;
+      const renewal = withdrawn === undefined ? 0 : withdrawn.stored ? withdrawn.renewal + 1 : withdrawn.renewal;
       const read = readPresented(names, texts);
       const verdict = checkTemplate(read.template, read.declaration);
+      // The backup's record of the withdrawn trust serves again only if it is of the same declaration.
+      const asStored = withdrawn !== undefined && !withdrawn.stored && read.declaration?.contentHash === suggestion?.declaration;
       if (verdict.statement === 'violation') {
         return refuse(`This wallet does not take the template in: ${verdict.violations.map((violation) => `${violation.rule === 'names' ? 'the names it gives tokens' : `rule ${violation.rule}`}: ${violation.what} ${violation.consequence}`).join(' ')}`);
       }
@@ -559,9 +576,13 @@ export class Applications {
         name: read.template.definition.name ?? 'Unnamed template',
         trustedAt: this.options.now?.() ?? Math.floor(Date.now() / 1000),
         applications: [],
-        stored: false,
+        stored: asStored,
+        ...(renewal === 0 ? {} : { renewal }),
       };
-      this.change({ templates: [...this.state.templates, kept] });
+      this.change({
+        templates: [...this.state.templates, kept],
+        ...(withdrawn === undefined ? {} : { suggested: (this.state.suggested ?? []).filter((suggested) => !(suggested.identifier === names.identifier && suggested.contentHash === names.contentHash)) }),
+      });
     }
     if (application !== undefined && !kept.applications.includes(application)) kept = this.updateTemplate(kept.identifier, { applications: [...kept.applications, application] });
     return kept;
@@ -575,11 +596,82 @@ export class Applications {
     if (kept.stored) return kept;
     const { archive } = this.options;
     if (archive === undefined) throw new NotStoredError('This wallet has no backup store. A template is stored there before its first action, so that a new device can operate what was made with it.');
-    const result = await archive.write(templateEntry(kept.identifier, kept.text, kept.declaration?.text, (kept.references ?? []).map((reference) => reference.text)));
+    const result = await archive.write(templateEntry(kept.identifier, kept.text, kept.declaration?.text, (kept.references ?? []).map((reference) => reference.text), kept.renewal ?? 0));
     if (!safelyStored(result)) {
       throw new NotStoredError(`No backup store confirmed the template: ${result.failed.map((failure) => `${failure.store}: ${failure.reason}`).join('; ') || 'none is configured'}. Nothing was signed. Try again when a store can be reached.`);
     }
     return this.updateTemplate(kept.identifier, { stored: true });
+  }
+
+  /**
+   * Store a trusted template in the backup now, where a store can be reached, and not only before its first
+   * action: a token that came from elsewhere may already depend on it.
+   * @returns whether the backup holds it
+   */
+  async storeNow(identifier: string): Promise<boolean> {
+    const kept = this.state.templates.find((template) => template.identifier === identifier);
+    if (kept === undefined) return false;
+    try {
+      return (await this.ensureStored(kept)).stored;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Stop trusting a template, on the user's word. Tokens made with it stay in the wallet and move in a sweep
+   * or a recovery like any other coin; what they control is no longer shown or operated, and no application
+   * is told about them, until the template is trusted again.
+   *
+   * The backup keeps the template, as a suggestion, and is told of the withdrawal, so that reading it does
+   * not trust the template again. Where no store confirms that now, it is written the next time the backup is read.
+   *
+   * @returns whether the backup knows: `true` also when it never held the template
+   */
+  async forget(identifier: string): Promise<{ name: string; backupTold: boolean }> {
+    const kept = this.state.templates.find((template) => template.identifier === identifier);
+    if (kept === undefined) return refuse('This wallet does not trust that template.');
+    const others = (this.state.suggested ?? []).filter((suggested) => !(suggested.identifier === kept.identifier && suggested.contentHash === kept.contentHash));
+    const templates = this.state.templates.filter((template) => template !== kept);
+    if (!kept.stored) {
+      // The backup never held this trust: nothing depends on it there. A record of an earlier trust keeps its withdrawal.
+      this.change({ templates, suggested: this.state.suggested ?? [] });
+      return { name: kept.name, backupTold: true };
+    }
+    const suggestion: SuggestedTemplate = {
+      identifier: kept.identifier,
+      contentHash: kept.contentHash,
+      ...(kept.declaration === undefined ? {} : { declaration: kept.declaration.contentHash }),
+      name: kept.name,
+      texts: { template: kept.text, ...(kept.declaration === undefined ? {} : { declaration: kept.declaration.text }), ...(kept.references === undefined ? {} : { references: kept.references.map((reference) => reference.text) }) },
+      withdrawn: { renewal: kept.renewal ?? 0, stored: false },
+    };
+    this.change({ templates, suggested: [...others, suggestion] });
+    return { name: kept.name, backupTold: (await this.tellWithdrawals()) === 0 };
+  }
+
+  /** Write the withdrawals the backup does not have yet. @returns how many it still lacks */
+  private async tellWithdrawals(): Promise<number> {
+    const { archive } = this.options;
+    const waiting = (): SuggestedTemplate[] => (this.state.suggested ?? []).filter((suggested) => suggested.withdrawn?.stored === false);
+    if (archive === undefined) return waiting().length;
+    for (const suggestion of waiting()) {
+      const { renewal } = suggestion.withdrawn as { renewal: number };
+      const confirmed = await archive.write({ kind: 'template-withdrawal', identifier: suggestion.identifier, contentHash: suggestion.contentHash, renewal }).then(safelyStored, () => false);
+      if (!confirmed) continue;
+      this.change({
+        suggested: (this.state.suggested ?? []).map((suggested) =>
+          suggested.identifier === suggestion.identifier && suggested.contentHash === suggestion.contentHash && suggested.withdrawn?.stored === false ? { ...suggested, withdrawn: { renewal, stored: true } } : suggested,
+        ),
+      });
+    }
+    return waiting().length;
+  }
+
+  /** No longer let an application see the tokens of a template. The template stays trusted. */
+  disallow(templateIdentifier: string, application: string): void {
+    const kept = this.state.templates.find((template) => template.identifier === templateIdentifier);
+    if (kept !== undefined) this.updateTemplate(kept.identifier, { applications: kept.applications.filter((known) => known !== application) });
   }
 
   // ------------------------------------------------------------------ working an action out
@@ -1260,15 +1352,29 @@ export class Applications {
     const { archive } = this.options;
     if (archive === undefined) return { suggested: 0, notes: 0 };
     const { templates, tokenNotes } = await archive.read();
-    const suggested = [...(this.state.suggested ?? [])];
-    for (const { entry, standing } of templates) {
+    const same = (a: Pick<TemplateNames, 'identifier' | 'contentHash'>, b: Pick<TemplateNames, 'identifier' | 'contentHash'>): boolean => a.identifier === b.identifier && a.contentHash === b.contentHash;
+    let suggested = [...(this.state.suggested ?? [])];
+    for (const { entry, standing, withdrawn } of templates) {
       const names: TemplateNames = { identifier: entry.identifier, contentHash: entry.contentHash, ...(entry.declaration === undefined ? {} : { declaration: entry.declaration.contentHash }) };
       const texts: PresentedTexts = { template: entry.text, ...(entry.declaration === undefined ? {} : { declaration: entry.declaration.text }), ...(entry.references === undefined ? {} : { references: entry.references.map((reference) => reference.text) }) };
       if (this.keptTemplate(names) !== undefined) continue;
       try {
-        if (standing === 'current owner') {
+        const renewal = entry.renewal ?? 0;
+        const local = suggested.find((known) => same(known, names))?.withdrawn;
+        if (standing === 'current owner' && withdrawn !== undefined) {
+          // This seed stopped trusting it: a suggestion, which remembers the withdrawal's number.
+          const known = suggested.find((candidate) => same(candidate, names));
+          if (known?.withdrawn === undefined || known.withdrawn.renewal < withdrawn || !known.withdrawn.stored) {
+            suggested = [...suggested.filter((candidate) => !same(candidate, names)), { ...names, name: readPresented(names, texts).template.definition.name ?? 'Unnamed template', texts, withdrawn: { renewal: Math.max(withdrawn, known?.withdrawn?.renewal ?? 0), stored: true } }];
+          }
+        } else if (standing === 'current owner' && local !== undefined && local.renewal >= renewal) {
+          // Withdrawn on this device, and the backup has not been told yet.
+        } else if (standing === 'current owner') {
+          // A record the withdrawals do not reach: trusted, as it was when it was stored.
+          suggested = suggested.filter((candidate) => !(same(candidate, names) && candidate.withdrawn !== undefined));
+          this.change({ suggested });
           await this.trust(names, texts);
-          this.updateTemplate(names.identifier, { stored: true });
+          this.updateTemplate(names.identifier, { stored: true, ...(renewal === 0 ? {} : { renewal }) });
         } else if (!suggested.some((known) => known.identifier === names.identifier && known.contentHash === names.contentHash)) {
           suggested.push({ ...names, name: readPresented(names, texts).template.definition.name ?? 'Unnamed template', texts });
         }
@@ -1281,6 +1387,7 @@ export class Applications {
       if (!notes.some((note) => note.category === entry.category)) notes.push({ category: entry.category, templateIdentifier: entry.templateIdentifier, authority: entry.authority });
     }
     this.change({ suggested, notes });
+    await this.tellWithdrawals();
     return { suggested: this.suggestions.length, notes: notes.length };
   }
 
@@ -1318,7 +1425,9 @@ export class Applications {
           reason:
             suggested === undefined
               ? 'A note says which template made this token, and that template is not on this device. The token is safe; what it controls cannot be shown or operated until the template is had again.'
-              : `A note says the template "${suggested.name}" made this token. An earlier owner of the wallet stored that template; it is not trusted on this device yet.`,
+              : suggested.withdrawn !== undefined
+                ? `A note says the template "${suggested.name}" made this token. You stopped trusting that template.`
+                : `A note says the template "${suggested.name}" made this token. An earlier owner of the wallet stored that template; it is not trusted on this device yet.`,
           ...(suggested === undefined ? {} : { template: { identifier: suggested.identifier, name: suggested.name } }),
         });
         continue;

@@ -13,6 +13,9 @@ import {
   POSITIONS,
   POSITIONS_REQUEST,
   ProtocolError,
+  TEMPLATE_ANSWER,
+  TEMPLATE_OFFER,
+  parseOffer,
   parseRequest,
   sameRequest,
 } from './protocol.js';
@@ -63,6 +66,18 @@ export interface Proposal {
   decline(): Promise<void>;
 }
 
+/** A template an application presents without an action, for the user to trust or not. Kept only while the wallet is open. */
+export interface Offer {
+  application: string;
+  template: TemplateName;
+  definition: TemplateTexts;
+  /** Unix seconds, by the wallet's clock, when it first arrived. */
+  receivedAt: number;
+  /** Trust the template in a session with this application. @throws with the reason if the wallet does not take it in */
+  accept(): Promise<void>;
+  decline(): Promise<void>;
+}
+
 export interface WalletConnectorOptions {
   /** Whether the wallet has the template a request names: the same identifier, text and recovery declaration. */
   has(template: TemplateName): boolean;
@@ -84,6 +99,15 @@ export interface WalletConnectorOptions {
   positions(templateIdentifier: string, application: string): Promise<ReportedPosition[] | undefined>;
   /** Called when a request needs the user's decision, and again whenever the list of open proposals changes. */
   onProposals(proposals: Proposal[]): void;
+  /**
+   * Whether the user trusts the template in a session with this application already. An offer is then
+   * answered at once; it tells the application nothing a positions request does not.
+   */
+  trustedWith?(template: TemplateName, application: string): boolean;
+  /** Trust a template an application offered, on the user's word. Without this, the wallet declines every offer. */
+  trustOffered?(template: TemplateName, texts: TemplateTexts, application: string): Promise<void>;
+  /** Called whenever the list of templates offered, and not yet decided on, changes. */
+  onOffers?(offers: Offer[]): void;
   /** Requests whose time is further than this from the wallet's clock are refused. Default 10 minutes. */
   maximumAgeSeconds?: number;
   /** How long outcomes are kept. Default 30 days. */
@@ -96,6 +120,8 @@ export class WalletConnector {
   private readonly storage: LedgerStorage;
   /** The open channel of each pairing. */
   private readonly channels = new Map<string, Channel>();
+  /** Templates offered and not decided on, with every identifier each was offered under. */
+  private offered: { offer: Offer; ids: string[] }[] = [];
 
   constructor(private readonly options: WalletConnectorOptions) {
     this.storage = options.storage ?? temporaryLedger();
@@ -141,6 +167,7 @@ export class WalletConnector {
       const kind = (message as { action?: unknown } | null)?.action;
       if (kind === ACTION_REQUEST) void this.receive(application, message);
       if (kind === POSITIONS_REQUEST) void this.report(application, channel, message);
+      if (kind === TEMPLATE_OFFER) void this.takeOffer(application, message);
     });
     // Whoever connects sees what is waiting for a decision.
     this.announce();
@@ -189,6 +216,76 @@ export class WalletConnector {
     const trusted = positions !== undefined || error !== undefined;
     // An error is reported only for a template the application may ask about: otherwise it would say whether the wallet has the template.
     await channel.send({ action: POSITIONS, time: this.now(), id, trusted, positions: positions ?? [], ...(error === undefined ? {} : { error }) }).catch(() => undefined);
+  }
+
+  private announceOffers(): void {
+    this.options.onOffers?.(this.offered.map(({ offer }) => offer));
+  }
+
+  /** The offers of an application that is no longer connected to are dropped, unanswered. */
+  dropOffers(application: string): void {
+    this.offered = this.offered.filter(({ offer }) => offer.application !== application);
+    this.announceOffers();
+  }
+
+  /** Take in a template an application presents without an action. The user decides; until then nothing is answered. */
+  private async takeOffer(application: string, message: unknown): Promise<void> {
+    const answer = (id: string, trusted: boolean, reason?: string): Promise<void> => this.send(application, { action: TEMPLATE_ANSWER, time: this.now(), id, trusted, ...(reason === undefined ? {} : { reason }) });
+    let read;
+    try {
+      read = parseOffer(message);
+    } catch (error) {
+      const { id } = (message ?? {}) as { id?: unknown };
+      if (typeof id === 'string' && id.length <= 80 && error instanceof ProtocolError) await answer(id, false, error.message);
+      return;
+    }
+    const { id, template, definition } = read;
+    const { trustOffered } = this.options;
+    if (trustOffered === undefined) {
+      await answer(id, false, 'This wallet does not take a template in without an action.');
+      return;
+    }
+    if (Math.abs(this.now() - read.time) > (this.options.maximumAgeSeconds ?? 600)) {
+      await answer(id, false, 'The offer is too old, or the clocks disagree.');
+      return;
+    }
+    if (this.options.trustedWith?.(template, application) === true) {
+      await answer(id, true);
+      return;
+    }
+    const same = this.offered.find(({ offer }) => offer.application === application && offer.template.identifier === template.identifier && offer.template.contentHash === template.contentHash && offer.template.declaration === template.declaration);
+    if (same !== undefined) {
+      // Asked again while the user decides: the answer will go to this identifier too.
+      if (!same.ids.includes(id)) same.ids.push(id);
+      return;
+    }
+    try {
+      this.options.check(template, definition);
+    } catch (error) {
+      await answer(id, false, (error as Error).message);
+      return;
+    }
+    const entry: { offer: Offer; ids: string[] } = { ids: [id], offer: undefined as unknown as Offer };
+    const close = async (trusted: boolean, reason?: string): Promise<void> => {
+      if (!this.offered.includes(entry)) return;
+      this.offered = this.offered.filter((known) => known !== entry);
+      this.announceOffers();
+      for (const asked of entry.ids) await answer(asked, trusted, reason);
+    };
+    entry.offer = {
+      application,
+      template,
+      definition,
+      receivedAt: this.now(),
+      accept: async () => {
+        if (!this.offered.includes(entry)) return;
+        await trustOffered(template, definition, application);
+        await close(true);
+      },
+      decline: () => close(false, 'The user declined.'),
+    };
+    this.offered.push(entry);
+    this.announceOffers();
   }
 
   /** Take in one message that claims to be a request. */

@@ -117,6 +117,8 @@ const movedItems = (locator: Locator): Promise<string[]> =>
 
 /** What a review of an action shows: the template and the wallet's statement, the template's words, and the wallet's own figures. */
 const readReview = async (card: Locator, who: string): Promise<void> => {
+  // The figures in full and the template are folded under named sections: they are opened to be read.
+  await card.evaluate((element) => element.querySelectorAll('details').forEach((fold) => (fold.open = true)));
   const template = await textOf(card.locator('.template-name'));
   const statement = await textOf(card.locator('.status-title'));
   const reasons = flat(await card.locator('.status-body').first().innerText().catch(() => ''));
@@ -500,6 +502,32 @@ const steps = async (): Promise<void> => {
   log(`   allowed; the Savings Jar page lists, from the wallet's answer: ${await textOf(listed.locator('.jar-top'))}, "${await textOf(listed.locator('.jar-when'))}", "${await textOf(listed.locator('.jar-note'))}"`);
   fact(`Connected to the Savings Jar page, the new phone's wallet asked whether the page may see the tokens of its template; once allowed, the page listed the jar from the wallet's answer: ${await textOf(listed.locator('.jar-top'))}, "${await textOf(listed.locator('.jar-note'))}".`);
   await shot(nextJar, 'jar-listed-new-phone');
+
+  // The user stops trusting the template, from the wallet's list of templates. The key stays; the page is told nothing.
+  await shot(next.page, 'apps-templates');
+  await next.page.getByTestId('template-row').first().click();
+  await next.page.getByTestId('template-stop').getByRole('button').click();
+  await shot(next.page, 'apps-template');
+  await next.page.getByTestId('template-stop-confirm').getByRole('button', { name: 'Stop trusting' }).click();
+  await next.page.getByTestId('template-row-untrusted').first().waitFor({ state: 'visible', timeout: 120_000 * patience });
+  log(`   the wallet no longer trusts the template: its list says "${await textOf(next.page.getByTestId('template-row-untrusted').first())}"`);
+  const stopped = keyRow(next.page, jar.category);
+  await stopped.getByText('You stopped trusting that template').waitFor({ state: 'visible', timeout: 120_000 * patience });
+  log(`   the key is still in the wallet: "${await textOf(stopped.locator('.token-body p').first())}"`);
+  // The page asks again in time, is answered with nothing, and offers its template without an action.
+  const offering = nextJar.getByTestId('template-offer');
+  await offering.waitFor({ state: 'visible', timeout: 180_000 * patience });
+  await shot(nextJar, 'jar-offers-template');
+  await offering.getByRole('button').click();
+  const offered = next.page.locator('.offer-card').first();
+  await offered.waitFor({ state: 'visible', timeout: 120_000 * patience });
+  log(`   the page offers its template; the wallet: "${await textOf(offered.locator('h2, .card-title'))}", ${await textOf(offered.locator('.template-name'))}`);
+  await shot(next.page, 'apps-template-offer');
+  await offered.getByRole('button', { name: 'Trust this template' }).click();
+  await next.page.getByTestId('template-row').first().waitFor({ state: 'visible', timeout: 120_000 * patience });
+  await nextJar.getByTestId('jar').first().waitFor({ state: 'visible', timeout: 120_000 * patience });
+  log(`   trusted again in the wallet ("${await textOf(next.page.getByTestId('template-row').first())}"); the Savings Jar page lists the jar again`);
+  fact('The new phone then stopped trusting the template from the wallet\'s list of templates: the key stayed in the wallet, shown as a token of a template no longer trusted, and the page was told nothing. From its button the page offered its template without an action; the wallet showed the template, the user trusted it, and the page listed the jar again.');
   await lastStep(recoverer, next);
 };
 
@@ -589,7 +617,8 @@ try {
   if (from > 1) note(`       continued from step ${from} on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC with the same browser profiles; the times below are seconds since then`);
   await prepare(['wallet', 'recoverer', 'jar']);
   await steps();
-  const all = state.step >= 12 && until >= 12;
+  // The course has eleven steps since the recoverer creates the wallet.
+  const all = state.step >= 11 && until >= 11;
   // Where a run stopped before it was continued, in the words of its log.
   const stops = lines.filter((line) => / FAILED at step \d+: /.test(line)).map((line) => line.replace(/^ *\d+ s +/, ''));
   if (from > 1) continued.push(...stops.map((stop) => `A part of the run stopped: "${stop.slice(0, 300)}" It was continued from the next "continued from step" line of the log.`));

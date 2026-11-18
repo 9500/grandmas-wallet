@@ -464,7 +464,21 @@ const appsOwner = {
     asks: [],
     connections: params.has('connected') ? [{ uri: 'wiz://relay.example.org/?p=example', privateKey: '', pairing, name: 'Example app', addedAt: 1_795_000_000 }] : [],
     statuses: params.has('connected') ? { [pairing]: { state: 'connected', peerName: 'Example app' } } : {},
-    applications: { readBackup: async () => undefined, names: () => reviewNames, tokens: async () => appsHeld, suggestions: [], describeAction: () => undefined },
+    // Templates with `&templates`: one trusted, one the user stopped trusting; an app's offer of one with `&offer`.
+    offers: params.has('offer')
+      ? [{ application: pairing, template: { identifier: template.identifier, contentHash: template.contentHash }, definition: { template: '' }, receivedAt: 1_795_000_600, accept: async () => undefined, decline: async () => undefined }]
+      : [],
+    stopTrusting: async () => ({ name: box.name, backupTold: true }),
+    applications: {
+      readBackup: async () => undefined,
+      names: () => reviewNames,
+      tokens: async () => appsHeld,
+      templates: params.has('templates') ? [{ identifier: box.identifier, contentHash: box.contentHash, name: box.name, trustedAt: 1_794_000_000, applications: [pairing], stored: true }] : [],
+      suggestions: params.has('templates') ? [{ identifier: template.identifier, contentHash: template.contentHash, name: template.name, texts: { template: '' }, withdrawn: { renewal: 0, stored: true } }] : [],
+      describe: (names: { identifier: string }, presented?: unknown) => (names.identifier === box.identifier ? box : { ...template, trusted: presented === undefined }),
+      disallow: () => undefined,
+      describeAction: () => undefined,
+    },
     changed: () => undefined,
     connect: () => undefined,
     retry: () => undefined,

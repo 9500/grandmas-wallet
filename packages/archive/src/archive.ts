@@ -2,7 +2,7 @@ import { binToHex, hash160 } from '@bitauth/libauth';
 import type { ControllerHistory, XoNetwork } from '@grandmas-wallet/core';
 
 import { type Receipt, readReceipt } from './receipt.js';
-import { type ArchiveRecord, type Blob, type LabelEntry, type TemplateEntry, type TokenNoteEntry, decodeBlob, encodeBlob, readRecord } from './records.js';
+import { type ArchiveRecord, type Blob, type LabelEntry, type TemplateEntry, type TemplateWithdrawalEntry, type TokenNoteEntry, decodeBlob, encodeBlob, readRecord } from './records.js';
 import { blobIdOf, seal, unseal } from './seal.js';
 import type { SignedMessage } from './signing.js';
 import type { ArchiveStore } from './store.js';
@@ -215,7 +215,10 @@ export interface Assessment {
    * Templates signed by an owner. One signed by the current owner is trusted; one from an earlier seed is
    * a suggestion from that time, and does not make a template trusted on this device.
    */
-  templates: AssessedRecord<TemplateEntry>[];
+  templates: (AssessedRecord<TemplateEntry> & {
+    /** The same owner stopped trusting the template after this record: the number of that withdrawal. */
+    withdrawn?: number;
+  })[];
   tokenNotes: AssessedRecord<TokenNoteEntry>[];
   labels: AssessedRecord<LabelEntry>[];
   /** Receipts signed with the recovery key the controller names now. */
@@ -261,6 +264,7 @@ export const assessArchive = (contents: ArchiveContents, authority: Authority): 
     assessment.refused.push({ blobId, reason });
   };
 
+  const withdrawals: { entry: TemplateWithdrawalEntry; signerKeyHash: string }[] = [];
   const viewingKeys: { blobId: string; record: ViewingKeyRecord; signed: SignedMessage; seedKeyHash: string }[] = [];
   for (const { blobId, blob } of contents.blobs) {
     try {
@@ -287,6 +291,7 @@ export const assessArchive = (contents: ArchiveContents, authority: Authority): 
         }
         const assessed = { hash: record.hash, signerKeyHash: record.signerKeyHash, standing: (record.signerKeyHash === currentOwner ? 'current owner' : 'earlier owner') as Standing };
         if (record.entry.kind === 'template') assessment.templates.push({ entry: record.entry, ...assessed });
+        else if (record.entry.kind === 'template-withdrawal') withdrawals.push({ entry: record.entry, signerKeyHash: record.signerKeyHash });
         else if (record.entry.kind === 'token-note') assessment.tokenNotes.push({ entry: record.entry, ...assessed });
         else assessment.labels.push({ entry: record.entry, ...assessed });
       }
@@ -343,6 +348,13 @@ export const assessArchive = (contents: ArchiveContents, authority: Authority): 
       assessment.viewingKeys.push({ record: entry.record, signed: entry.signed, seedKeyHash, inForce: named.has(entry.record.hash) });
     }
   }
+  // A withdrawal reaches the template records of the key that signed it, up to its own number.
+  for (const template of assessment.templates) {
+    const reaching = withdrawals
+      .filter(({ entry, signerKeyHash }) => signerKeyHash === template.signerKeyHash && entry.identifier === template.entry.identifier && entry.contentHash === template.entry.contentHash && entry.renewal >= (template.entry.renewal ?? 0))
+      .map(({ entry }) => entry.renewal);
+    if (reaching.length > 0) template.withdrawn = Math.max(...reaching);
+  }
   for (const template of assessment.templates) {
     if (template.standing === 'earlier owner') {
       assessment.notices.push(`Template ${template.entry.identifier.slice(0, 12)}… was stored by an earlier seed. It is kept as a suggestion and is not trusted on this device.`);
@@ -377,7 +389,7 @@ export const templateStanding = (assessment: Assessment, identifier: string, con
   const [first] = matching;
   return {
     stored: matching.length > 0,
-    trusted: matching.some((template) => template.standing === 'current owner'),
+    trusted: matching.some((template) => template.standing === 'current owner' && template.withdrawn === undefined),
     signedBy: [...new Set(matching.map((template) => template.signerKeyHash))],
     ...(first === undefined ? {} : { text: first.entry.text }),
   };

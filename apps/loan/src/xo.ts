@@ -205,6 +205,15 @@ export class XoLoans {
   }
 
   /**
+   * Offer this page's template to the wallet, without an action: for a wallet that holds a loan key it was sent
+   * and has never used this page. The user decides in the wallet.
+   * @returns whether the wallet trusts the template with this page now
+   */
+  offerTemplate(): Promise<boolean> {
+    return this.requests.offerTemplate(LOAN_TEMPLATE.names, LOAN_TEMPLATE.texts);
+  }
+
+  /**
    * Loan keys made from this page that wait for a loan. A key whose outputs were spent is forgotten; one made
    * in the last minutes counts as waiting even where a server does not list its outputs yet.
    */

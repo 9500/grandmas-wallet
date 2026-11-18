@@ -1,6 +1,6 @@
 import { hexToBin } from '@bitauth/libauth';
 import { type ActionOutcome, type ApplicationAction, type OwnerWallet, Applications, applicationArchive, applicationConnector, walletAnnouncement } from '@grandmas-wallet/app';
-import type { Proposal, WalletConnector } from '@grandmas-wallet/connect';
+import type { Offer, Proposal, WalletConnector } from '@grandmas-wallet/connect';
 import { type LinkStatus, type WalletLink, newLinkKey, openWalletLink, pairingOf } from '@grandmas-wallet/connect/wizard';
 import type { SeedKeys } from '@grandmas-wallet/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -96,6 +96,13 @@ export interface ApplicationsPart {
   asks: PositionsAsk[];
   /** Let the application see the template's tokens, or not for as long as the page is open. */
   answerAsk(ask: PositionsAsk, allow: boolean): void;
+  /** Templates that applications present without an action, waiting for the user's word. */
+  offers: Offer[];
+  /**
+   * Stop trusting a template. Requests of it that wait for a decision are declined.
+   * @returns whether the backup has been told
+   */
+  stopTrusting(identifier: string): Promise<{ name: string; backupTold: boolean }>;
   /** Connect to the application whose address this is. @throws if the address cannot be used */
   connect(uri: string, name?: string): Connection;
   /** Close a connection and forget it. Requests it made, and their outcomes, are kept. */
@@ -110,6 +117,8 @@ export interface ApplicationsPart {
 export const useApplications = ({ session, wallet, seed, onSent }: { session: Session; wallet: OwnerWallet; seed: SeedKeys; onSent: (what: string, outcome: ActionOutcome) => void }): ApplicationsPart => {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [asks, setAsks] = useState<PositionsAsk[]>([]);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const open_ = useRef<Proposal[]>([]);
   /** Asks the user answered with "not now": the application asks again and again, and the user is not asked again while the page is open. */
   const notNow = useRef(new Set<string>());
   const [connections, setConnections] = useState<Connection[]>(() => kept('connections') ?? []);
@@ -141,7 +150,12 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
       applicationConnector(applications, {
         storage: { load: () => kept('ledger') ?? [], save: (entries) => keep('ledger', entries) },
         onProposals: (open) => {
+          open_.current = open;
           setProposals(open);
+          changed();
+        },
+        onOffers: (open) => {
+          setOffers(open);
           changed();
         },
         onPositionsAsked: (identifier, application) => {
@@ -215,6 +229,16 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
       setAsks((known) => known.filter((candidate) => candidate !== ask));
       changed();
     },
+    offers,
+    stopTrusting: async (identifier) => {
+      for (const proposal of open_.current.filter((candidate) => candidate.entry.template.identifier === identifier)) await proposal.decline();
+      setAsks((known) => known.filter((ask) => ask.template.identifier !== identifier));
+      try {
+        return await applications.forget(identifier);
+      } finally {
+        changed();
+      }
+    },
     connect: (text, name) => {
       const uri = normalAddress(text);
       const pairing = pairingOf(uri);
@@ -228,6 +252,7 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
     },
     end: (pairing) => {
       close(pairing);
+      connector.dropOffers(pairing);
       setAsks((known) => known.filter((ask) => ask.application !== pairing));
       save((kept('connections') ?? []).filter((connection) => connection.pairing !== pairing));
       setStatuses(({ [pairing]: _gone, ...rest }) => rest);

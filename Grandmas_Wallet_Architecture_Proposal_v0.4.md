@@ -701,11 +701,14 @@ No per-payment and no per-address record is needed. This is what keeps the backu
 | --- | --- | --- |
 | Viewing-key record | As in section 7.6 | When the wallet is created; by a new device before a recovery request or a move to a new seed |
 | Template | The template, whole and as the text it arrived in; its identifier and content hash; the recovery declaration that came with it (section 13.3) and anything else it refers to, each named by its content hash | When the user trusts a template, before its first action |
+| Template withdrawal | The template's identifier and content hash, and a number | When the user stops trusting a template the backup holds |
 | Token note | Token category; identifier of the template; which authority entry of its declaration | When an action creates an authority token |
 | Label | A name the user gave | When given |
 | Receipt | The recoverer's signed statement of what it holds (section 9.5) | By the recoverer |
 
 A template is kept whole because its identifier depends on the order of its fields; a registry or the application's site may not exist later. A template that an open position was made with is kept after a newer one replaces it.
+
+**Stopping to trust a template.** The user can stop trusting a template from the wallet's list of templates. Its tokens stay in the wallet and move in a sweep or a recovery like any other coin; what they control is no longer shown or operated, no application is told about them, and requests of the template that wait are declined. The template's record stays in the backup, so that a position made with it can be operated once it is trusted again. Because records carry no order, a withdrawal names a number: it reaches the template records of the same key with that number or a lower one, and such a record is read as a suggestion, as an earlier owner's is. A template trusted again is stored under the next number. Where no store confirms the withdrawal at once, the device keeps it and writes it the next time it reads the backup; a template the backup never held is simply dropped.
 
 ### 10.3 Sealing, stores and authenticity
 
@@ -1083,6 +1086,7 @@ The announcement lists no templates. A list of what the user trusts would tell e
 | `xo_action_response` | wallet → application | Taken on; refused with a reason; or "the template is needed", after which the same request is sent again with the texts |
 | `xo_invitation_update` | wallet → application | Approved by the user; sent |
 | `xo_action_result` | wallet → application | The transaction and the tokens the wallet received, or an error |
+| `xo_template_offer` / `xo_template_answer` | application → wallet, and back | The application presents its template, with the texts, without asking for an action: for a wallet that holds a token of the template and has never used the application, a loan key that was sent to it for one. The wallet shows the template as it does with a first action and answers only when the user has decided: trusted in a session with this application, or declined. Trusted, the template goes to the backup at once where a store answers, since a token may already depend on it. An offer of a template already trusted with this application is answered at once. |
 | `xo_positions_request` / `xo_positions` | both | Which tokens of this template does the wallet hold? Answered only for a template the user trusted in a session with this application. A template trusted on the device in another way, from the backup after a recovery for one, is not answered for until the user allows this application; the wallet asks the user then, and only then. |
 
 The messages use only the session's pairing and custom messages. (`packages/connect`; the announcement there still has to be changed to the form above.)
@@ -1530,6 +1534,7 @@ These are tests an implementation must pass. Except where the status table above
 | BK08 | A store hands back an older set that was once genuine | Noticed against the latest receipt, or reported as possibly out of date; never taken as current without notice |
 | BK09 | The earlier archive is copied into a new one while a store cannot be reached, or the device stops | Nothing is removed before the copy is complete; the earlier kit stays usable |
 | BK10 | A signature for the first action of a new template is asked for before a store has confirmed the template | Refused; a note of the action on the device does not count as a stored template |
+| BK11 | The user stops trusting a stored template; the backup is read again, also on a device that starts from it; the template is trusted again | The tokens stay and are listed; reading the backup does not trust it again; trusted again, a later reading trusts it |
 | **Applications** | | |
 | AP01 | An unknown template; a template, declaration or referred file that is not the one the request names by hash | Shown as not verified and trusted only on the user's word; refused |
 | AP02 | A template worded to mislead | The wallet's own figures are unaffected |
@@ -1546,6 +1551,7 @@ These are tests an implementation must pass. Except where the status table above
 | AP13 | A standard `sign_transaction_request` | Refused with a reason |
 | AP14 | A look-alike of a companion coin, made by the holder of a token; two candidates; a position that needs data the chain does not hold | Not taken for the position; reported as ambiguous; reported as incomplete |
 | AP15 | A transaction of an application's template with inputs and outputs of the wallet, built by the route the trials settled on | Accepted by the network; the same code serves two unrelated templates; what the engine did not build is not called an invitation |
+| AP16 | An application offers its template without an action to a wallet that holds a token of it; the user trusts, or declines; the text is not the one named | Nothing is answered before the user decides; trusted, the token leads to its position and the application is answered; declined, nothing is trusted; a wrong text is refused |
 | **Tokens** | | |
 | TK01 | The token-aware form of each kind of the wallet's addresses | Decodes to the same locking bytecode as the plain form; the Receive screen shows it on request |
 | TK02 | A token sent to a plain address and to a token-aware one, of the key-hash and the script type | The plain one is refused before anything is built, with what to ask for; the token-aware ones are taken |

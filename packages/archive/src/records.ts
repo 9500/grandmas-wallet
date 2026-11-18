@@ -50,6 +50,25 @@ export interface TemplateEntry {
   declaration?: NamedText;
   /** Anything else the template or its declaration refers to. */
   references?: NamedText[];
+  /**
+   * How many times the user had stopped trusting the template before this record was written. Absent for
+   * none. A withdrawal does not reach a record with a higher number: that is how trust given again is told
+   * from the trust that was withdrawn, without a date.
+   */
+  renewal?: number;
+}
+
+/**
+ * The user stopped trusting a template. The template's record stays in the archive, as a suggestion: a
+ * position made with it can then still be operated once it is trusted again. Without this record, reading
+ * the archive would trust the template again.
+ */
+export interface TemplateWithdrawalEntry {
+  kind: 'template-withdrawal';
+  identifier: string;
+  contentHash: string;
+  /** Template records of the same signer with this number or a lower one are withdrawn. */
+  renewal: number;
 }
 
 /** Which template made a token, and which authority entry of its declaration the token stands for. */
@@ -69,7 +88,7 @@ export interface LabelEntry {
   name: string;
 }
 
-export type RecordEntry = TemplateEntry | TokenNoteEntry | LabelEntry;
+export type RecordEntry = TemplateEntry | TemplateWithdrawalEntry | TokenNoteEntry | LabelEntry;
 
 /** A record as it was read: checked for form and signature, not yet for who signed it. */
 export interface ArchiveRecord {
@@ -88,12 +107,13 @@ export const contentHashOf = (text: string): string => binToHex(sha256.hash(utf8
 const named = (text: string): NamedText => ({ contentHash: contentHashOf(text), text });
 
 /** A template record for a template as the text it arrived in. */
-export const templateEntry = (identifier: string, text: string, declaration?: string, references: string[] = []): TemplateEntry => ({
+export const templateEntry = (identifier: string, text: string, declaration?: string, references: string[] = [], renewal = 0): TemplateEntry => ({
   kind: 'template',
   identifier,
   ...named(text),
   ...(declaration === undefined ? {} : { declaration: named(declaration) }),
   ...(references.length === 0 ? {} : { references: references.map(named) }),
+  ...(renewal === 0 ? {} : { renewal }),
 });
 
 /** Sign a record with the controller key of the seed that writes it. */
@@ -103,6 +123,8 @@ export const signRecord = (entry: RecordEntry, wallet: { network: XoNetwork; ide
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isHash = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 const text = (value: unknown, name: string): string => (typeof value === 'string' && value !== '' ? value : fail(`The record has no ${name}.`));
+
+const count = (value: unknown, what: string): number => (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 1_000_000 ? value : fail(`The record's ${what} is not a count.`));
 
 const namedText = (value: unknown, what: string): NamedText => {
   if (!isObject(value) || typeof value['text'] !== 'string' || !isHash(value['contentHash'])) return fail(`The record's ${what} is not a text with its hash.`);
@@ -121,8 +143,16 @@ const parseEntry = (value: unknown): RecordEntry => {
         ...whole,
         ...(value['declaration'] === undefined ? {} : { declaration: namedText(value['declaration'], 'declaration') }),
         ...(value['references'] === undefined ? {} : { references: Array.isArray(value['references']) ? value['references'].map((entry) => namedText(entry, 'reference')) : fail('The template record\'s references are not a list.') }),
+        ...(value['renewal'] === undefined ? {} : { renewal: count(value['renewal'], 'renewal') }),
       };
     }
+    case 'template-withdrawal':
+      return {
+        kind: 'template-withdrawal',
+        identifier: isHash(value['identifier']) ? value['identifier'] : fail('The withdrawal names no template.'),
+        contentHash: isHash(value['contentHash']) ? value['contentHash'] : fail('The withdrawal names no template text.'),
+        renewal: count(value['renewal'], 'renewal'),
+      };
     case 'token-note':
       return {
         kind: 'token-note',

@@ -111,16 +111,21 @@ describe('a savings jar through the loss of a device, as recorded', () => {
   it('SJ04: in real browsers, a new phone found the jar from the swept key and the template without a request to the jar page, and emptied it twice', () => {
     const record = readFileSync(new URL('../docs/runs/stage-8-browser-local-node.md', import.meta.url), 'utf8');
     expect(record).toMatch(/^Outcome: every step was carried out\.$/m);
-    expect(record).toMatch(/template "Savings Jar", "Not verified"/);
+    expect(record).toMatch(/template "Savings Jar", "Template not verified"/);
     expect(record).toMatch(/stores it in your backup first, before anything is signed/);
     expect(record).toMatch(/"Not carried out": "The network does not take this transaction yet/);
     expect(record).toMatch(/it is not trusted on this device yet/);
-    expect(record).toMatch(/trusted; the key: "Savings Jar" \(Open\), "Holds 0\.0003 BCH · 30,000 sat"/);
+    expect(record).toMatch(/trusted; the key: "Jar key · Savings Jar" \(Open\), "Holds 0\.0003 BCH · 30,000 sat"/);
     expect(record).toMatch(/the new phone's browser made \d+ requests, to [^;]+; none to the Savings Jar page/);
-    expect(record).toMatch(/the key is still listed: "Savings Jar" \(Closed\)/);
+    expect(record).toMatch(/the key is still listed: "Jar key · Savings Jar" \(Closed\)/);
     expect(record).toMatch(/the key: \(Open\), "Holds 0\.00008 BCH · 8,000 sat"/);
     expect(record.match(/^ +\d+ s {5}done: [0-9a-f]{64}$/gm)?.length).toBe(2);
     expect(record).toMatch(/allowed; the Savings Jar page lists, from the wallet's answer/);
+    // The template stopped being trusted, the key stayed, and the page's offer of its template brought the jar back.
+    expect(record).toMatch(/the wallet no longer trusts the template: its list says "Savings Jar Not trusted · you stopped trusting it/);
+    expect(record).toMatch(/the key is still in the wallet: "A note says the template "Savings Jar" made this token\. You stopped trusting that template\."/);
+    expect(record).toMatch(/the page offers its template; the wallet: "Savings Jar offers its template"/);
+    expect(record).toMatch(/trusted again in the wallet \("Savings Jar Trusted · in your backup[^)]*"\); the Savings Jar page lists the jar again/);
   });
 
   // The same course on chipnet with the public pages. A run that stopped and was continued says so, and what that means.

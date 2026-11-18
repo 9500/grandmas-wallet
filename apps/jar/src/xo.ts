@@ -176,6 +176,11 @@ export class XoJars {
    * The jars whose keys the wallet holds. `trusted: false` means the user has not used this page with this
    * wallet yet: the wallet then reports nothing, whatever it holds.
    */
+  /** Offer this page's template to the wallet, without an action. @returns whether the wallet trusts it with this page now */
+  offerTemplate(): Promise<boolean> {
+    return this.requests.offerTemplate(JAR_TEMPLATE.names, JAR_TEMPLATE.texts);
+  }
+
   async list(): Promise<{ trusted: boolean; jars: JarView[] }> {
     const { trusted, positions } = await this.requests.positions(JAR_TEMPLATE.names.identifier);
     return { trusted, jars: positions.flatMap((position) => jarOfPosition(position) ?? []).sort(byDate) };

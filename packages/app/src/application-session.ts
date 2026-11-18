@@ -1,4 +1,4 @@
-import { type LedgerEntry, type LedgerStorage, type Proposal, type ReportedPosition, type XoAdvertisement, WalletConnector, XO_EXTENSION_VERSION } from '@grandmas-wallet/connect';
+import { type LedgerEntry, type LedgerStorage, type Offer, type Proposal, type ReportedPosition, type XoAdvertisement, WalletConnector, XO_EXTENSION_VERSION } from '@grandmas-wallet/connect';
 
 import { type ApplicationAction, type Applications, type HeldToken } from './applications.js';
 import { BINDING_KINDS, RECOVERY_PROFILE } from './declaration.js';
@@ -57,6 +57,8 @@ export const applicationConnector = (
      * them (`Applications.allow`); its next request is then answered.
      */
     onPositionsAsked?: (templateIdentifier: string, application: string) => void;
+    /** Templates that applications present without an action, for the user to trust or not. */
+    onOffers?: (offers: Offer[]) => void;
     now?: () => number;
   },
 ): WalletConnector =>
@@ -74,6 +76,13 @@ export const applicationConnector = (
       return held?.map(reported);
     },
     onProposals: options.onProposals,
+    trustedWith: (template, application) => applications.has(template) && !applications.mayAllow(template.identifier, application),
+    trustOffered: async (template, texts, application) => {
+      const kept = await applications.trust(template, texts, application);
+      // A token the wallet already holds may depend on the template: it goes to the backup now, where a store answers.
+      await applications.storeNow(kept.identifier);
+    },
+    ...(options.onOffers === undefined ? {} : { onOffers: options.onOffers }),
     ...(options.storage === undefined ? {} : { storage: options.storage }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });

@@ -26,6 +26,8 @@ export const INVITATION_UPDATE = 'xo_invitation_update';
 export const ACTION_RESULT = 'xo_action_result';
 export const POSITIONS_REQUEST = 'xo_positions_request';
 export const POSITIONS = 'xo_positions';
+export const TEMPLATE_OFFER = 'xo_template_offer';
+export const TEMPLATE_ANSWER = 'xo_template_answer';
 
 /**
  * A template as a request names it: by its XO identifier and by the SHA-256 of its text, so that both sides
@@ -158,7 +160,27 @@ export interface PositionsResponse extends Envelope {
   error?: string;
 }
 
-export type XoMessage = ActionRequest | ActionResponse | InvitationUpdate | ActionResult | PositionsRequest | PositionsResponse;
+/**
+ * An application presents its template without asking for an action: for a wallet that holds tokens of the
+ * template and has never used the application. The wallet shows the template to the user as it does with a
+ * first action, and answers when the user has decided.
+ */
+export interface TemplateOffer extends Envelope {
+  action: typeof TEMPLATE_OFFER;
+  id: string;
+  template: TemplateName;
+  definition: TemplateTexts;
+}
+
+export interface TemplateAnswer extends Envelope {
+  action: typeof TEMPLATE_ANSWER;
+  id: string;
+  /** The user trusts the template in a session with this application; a positions request is answered from now on. */
+  trusted: boolean;
+  reason?: string;
+}
+
+export type XoMessage = ActionRequest | ActionResponse | InvitationUpdate | ActionResult | PositionsRequest | PositionsResponse | TemplateOffer | TemplateAnswer;
 
 export class ProtocolError extends Error {
   constructor(message: string) {
@@ -254,8 +276,26 @@ export const parseRequest = (message: unknown): ActionRequest => {
   };
 };
 
+/**
+ * Check a message that claims to offer a template.
+ * @throws ProtocolError if it is not one this version understands
+ */
+export const parseOffer = (message: unknown): TemplateOffer => {
+  if (!isObject(message) || message['action'] !== TEMPLATE_OFFER) throw new ProtocolError('Not an offer of a template.');
+  const { time, id, template, definition } = message;
+  if (typeof time !== 'number' || !isText(id, 80)) throw new ProtocolError('The offer is missing something or has a field of the wrong kind.');
+  if (!isTemplateName(template)) throw new ProtocolError('The offer does not name its template by identifier and content hash.');
+  return {
+    action: TEMPLATE_OFFER,
+    time,
+    id,
+    template: { identifier: template.identifier, contentHash: template.contentHash, ...(template.declaration === undefined ? {} : { declaration: template.declaration }) },
+    definition: readTexts(definition),
+  };
+};
+
 export const isXoMessage = (message: unknown): message is XoMessage =>
-  isObject(message) && [ACTION_REQUEST, ACTION_RESPONSE, INVITATION_UPDATE, ACTION_RESULT, POSITIONS_REQUEST, POSITIONS].includes(message['action'] as string);
+  isObject(message) && [ACTION_REQUEST, ACTION_RESPONSE, INVITATION_UPDATE, ACTION_RESULT, POSITIONS_REQUEST, POSITIONS, TEMPLATE_OFFER, TEMPLATE_ANSWER].includes(message['action'] as string);
 
 const sameValues = (a: Record<string, ParameterValue> = {}, b: Record<string, ParameterValue> = {}): boolean => {
   const names = Object.keys(a).sort();

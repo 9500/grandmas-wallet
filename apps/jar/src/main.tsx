@@ -132,6 +132,8 @@ const Jars = ({ environment, source, peerName, chain, onDisconnect }: { environm
           <JarList
             jars={listing?.jars}
             trusted={listing?.trusted ?? true}
+            onOffer={source.offerTemplate}
+            onTrusted={() => void refresh()}
             problem={listProblem}
             facts={facts}
             state={state}

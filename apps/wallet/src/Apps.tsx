@@ -1,7 +1,7 @@
 import { binToHex } from '@bitauth/libauth';
-import { type ActionOutcome, type ActionPreview, type ApplicationAction, type HeldToken, type TemplateSummary, type TokenAction, NotStoredError, actionOf } from '@grandmas-wallet/app';
+import { type ActionOutcome, type ActionPreview, type ApplicationAction, type HeldToken, type TemplateSummary, type TokenAction, NotStoredError, WALLET_TEMPLATES, actionOf } from '@grandmas-wallet/app';
 import { readLink } from '@grandmas-wallet/app/links';
-import type { LedgerEntry, Proposal } from '@grandmas-wallet/connect';
+import type { LedgerEntry, Offer, Proposal } from '@grandmas-wallet/connect';
 import { Amount, Button, Card, Field, Info, KeyValues, Loading, Notice, PageHead, Pill, Spinner, TaskStatus, TextInput, Value, formatTime, lockingBytecodeOfAddress, useTask } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
@@ -22,7 +22,7 @@ import './apps.css';
  * shows about one comes from the application's template, and its name for itself is marked as unverified.
  */
 
-type View = { at: 'main' } | { at: 'act'; token: HeldToken; action: TokenAction } | { at: 'trust'; token: HeldToken };
+type View = { at: 'main' } | { at: 'act'; token: HeldToken; action: TokenAction } | { at: 'trust'; identifier: string } | { at: 'template'; identifier: string };
 
 /** Requests the user decided while the page has been open: their outcome stays on the screen until dismissed. */
 const followed = new Set<string>();
@@ -55,7 +55,9 @@ export const Apps = ({ owner }: { owner: Owner }) => {
       {view.at === 'act' ? (
         <ActOnToken owner={owner} token={view.token} action={view.action} onBack={back} />
       ) : view.at === 'trust' ? (
-        <TrustSuggested owner={owner} token={view.token} onBack={back} />
+        <TrustSuggested owner={owner} identifier={view.identifier} onBack={back} />
+      ) : view.at === 'template' ? (
+        <TemplatePage owner={owner} identifier={view.identifier} onBack={back} />
       ) : (
         <Main owner={owner} onView={(next) => { setView(next); window.scrollTo(0, 0); }} />
       )}
@@ -89,11 +91,15 @@ const Main = ({ owner, onView }: { owner: Owner; onView: (view: View) => void })
           {apps.asks.map((ask) => (
             <AskCard key={`${ask.application}/${ask.template.identifier}`} owner={owner} ask={ask} />
           ))}
+          {apps.offers.map((offer) => (
+            <OfferCard key={`${offer.application}/${offer.template.identifier}/${offer.template.contentHash}`} owner={owner} offer={offer} />
+          ))}
           <Tokens owner={owner} onView={onView} />
         </div>
         <div class="stack">
           <Connect owner={owner} />
           <Connected owner={owner} />
+          <Templates owner={owner} onView={onView} />
           <EarlierRequests owner={owner} />
         </div>
       </div>
@@ -459,6 +465,254 @@ const AskCard = ({ owner, ask }: { owner: Owner; ask: PositionsAsk }) => {
   );
 };
 
+/** An application presents its template without asking for an action: the template, and the user's word on it. */
+const OfferCard = ({ owner, offer }: { owner: Owner; offer: Offer }) => {
+  const { apps } = owner;
+  const name = nameOf(apps, offer.application);
+  const task = useTask();
+  const [summary, unusable] = useMemo((): [TemplateSummary | undefined, string | undefined] => {
+    try {
+      return [apps.applications.describe(offer.template, offer.definition), undefined];
+    } catch (error) {
+      return [undefined, refusalOf(error)];
+    }
+  }, [apps.version]);
+  const violation = summary?.verdict.statement === 'violation';
+  const trust = () =>
+    task.run('trust', async () => {
+      await offer.accept();
+      apps.changed();
+      owner.toast('The template is trusted on this phone.');
+    });
+  return (
+    <Card title={`${name ?? 'An application'} offers its template`} cls="request-card offer-card">
+      <div class="stack">
+        <div class="asker">
+          {name !== undefined && <Pill>Its own name, not verified</Pill>}
+          <span class="small muted">Offered {formatTime(offer.receivedAt)}</span>
+        </div>
+        {summary === undefined ? (
+          <Notice tone="bad">The template cannot be used: {unusable}</Notice>
+        ) : (
+          <Part title="Template" info="If you trust it, this wallet shows what your tokens of this template control, tells this application which of them you hold, and can carry out the template's actions. Each action still waits for your approval.">
+            <TemplateView summary={summary} showActions={!summary.trusted} />
+          </Part>
+        )}
+        {violation && <Notice tone="bad">This wallet does not take in a template with a violation. You can only decline.</Notice>}
+        <TaskStatus task={task} name="trust" />
+        <div class="actions decide">
+          {summary !== undefined && !violation && (
+            <Button task={task} name="trust" onClick={() => void trust()}>
+              {summary.trusted ? 'Allow' : 'Trust this template'}
+            </Button>
+          )}
+          <Button kind="quiet" disabled={task.busy !== undefined} onClick={() => void offer.decline()}>
+            Decline
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+};
+
+/**
+ * The templates this wallet works with: those the user trusts, those the backup holds and this phone does not
+ * trust, and the wallet's own.
+ */
+const Templates = ({ owner, onView }: { owner: Owner; onView: (view: View) => void }) => {
+  const { applications } = owner.apps;
+  const trusted = applications.templates;
+  const others = applications.suggestions;
+  const own = Object.values(WALLET_TEMPLATES);
+  return (
+    <Card cls="templates-card">
+      <TitleInfo
+        title="Templates"
+        label="About templates"
+        info="A template tells this wallet what an app's tokens control and how to carry out its actions. You trust one when you approve an app's first action, or when an app offers it to you."
+      />
+      {trusted.length === 0 && others.length === 0 ? (
+        <p class="templates-none">None yet.</p>
+      ) : (
+        <ul class="list templates">
+          {trusted.map((template) => (
+            <li>
+              <button type="button" class="template-row" data-testid="template-row" onClick={() => onView({ at: 'template', identifier: template.identifier })}>
+                <span>
+                  <span class="template-row-name">{template.name}</span>
+                  <span class="small muted">{template.stored ? 'Trusted · in your backup' : 'Trusted · not in your backup yet'}</span>
+                </span>
+                <span class="template-row-go" aria-hidden="true">›</span>
+              </button>
+            </li>
+          ))}
+          {others.map((template) => (
+            <li>
+              <button type="button" class="template-row" data-testid="template-row-untrusted" onClick={() => onView({ at: 'trust', identifier: template.identifier })}>
+                <span>
+                  <span class="template-row-name">{template.name}</span>
+                  <span class="small muted">{template.withdrawn !== undefined ? 'Not trusted · you stopped trusting it' : 'Not trusted · from an earlier owner'}</span>
+                </span>
+                <span class="template-row-go" aria-hidden="true">›</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <details class="more templates-own">
+        <summary>Built into this wallet ({own.length})</summary>
+        <ul class="list">
+          {own.map((template) => (
+            <li>
+              <div>{template.name}</div>
+              {template.description !== undefined && template.description !== '' && <div class="small muted">{template.description}</div>}
+            </li>
+          ))}
+        </ul>
+        <p class="small muted">The wallet's own templates. They cannot be removed.</p>
+      </details>
+    </Card>
+  );
+};
+
+/** One trusted template: what it is, what depends on it, who may see its tokens, and the way to stop trusting it. */
+const TemplatePage = ({ owner, identifier, onBack }: { owner: Owner; identifier: string; onBack: () => void }) => {
+  const { apps } = owner;
+  const { applications } = apps;
+  const kept = applications.templates.find((template) => template.identifier === identifier);
+  const task = useTask();
+  const [confirming, setConfirming] = useState(false);
+  const [tokens, setTokens] = useState<HeldToken[] | undefined>();
+  useEffect(() => {
+    applications.tokens().then(
+      (held) => setTokens(held.filter((token) => token.template?.identifier === identifier && token.meaning !== 'unknown')),
+      () => setTokens([]),
+    );
+  }, []);
+  const summary = useMemo((): TemplateSummary | undefined => {
+    if (kept === undefined) return undefined;
+    try {
+      return applications.describe({ identifier: kept.identifier, contentHash: kept.contentHash, ...(kept.declaration === undefined ? {} : { declaration: kept.declaration.contentHash }) });
+    } catch {
+      return undefined;
+    }
+  }, [apps.version]);
+  if (kept === undefined) {
+    return (
+      <div class="stack">
+        <PageHead title="Template" />
+        <Card>
+          <div class="stack">
+            <p>This phone does not trust that template.</p>
+            <div>
+              <Button kind="secondary" onClick={onBack}>
+                Back
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+  const tokenName = (token: HeldToken): string => token.names?.nft?.named?.name ?? token.names?.fungible?.named?.name ?? `Token ${token.category.slice(0, 8)}…`;
+  const open = (tokens ?? []).filter((token) => token.position?.status === 'open');
+  const stop = () =>
+    task.run('stop', async () => {
+      const { name, backupTold } = await apps.stopTrusting(identifier);
+      owner.toast(backupTold ? `"${name}" is no longer trusted.` : `"${name}" is no longer trusted. Your backup will be told when a store can be reached.`);
+      onBack();
+    });
+  return (
+    <div class="stack">
+      <PageHead title="Template" />
+      <div class="grid two">
+        <div class="stack">
+          <Card cls="request-card">
+            <div class="stack">
+              {summary !== undefined && <TemplateView summary={summary} showActions />}
+              <KeyValues
+                entries={[
+                  ['Trusted since', formatTime(kept.trustedAt)],
+                  ['Backup', kept.stored ? 'Stored' : <span>Not stored yet<Info label="About the backup">A template is stored in your backup before its first action, so that a new phone can operate what was made with it.</Info></span>],
+                  ['Your tokens of it', tokens === undefined ? <Spinner /> : tokens.length === 0 ? 'None' : tokens.map(tokenName).join(', ')],
+                ]}
+              />
+              <div>
+                <Button kind="quiet" onClick={onBack}>
+                  Back
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+        <div class="stack">
+          <Card>
+            <TitleInfo title="Apps that see its tokens" label="About apps that see its tokens" info="These apps are told which tokens of this template you hold and where their positions stand, whenever they ask. They learn nothing else, and every action still waits for your approval." />
+            {kept.applications.length === 0 ? (
+              <p class="templates-none">None.</p>
+            ) : (
+              <ul class="list">
+                {kept.applications.map((application) => {
+                  const connected = apps.connections.some((connection) => connection.pairing === application);
+                  return (
+                    <li>
+                      <div class="list-item">
+                        <div>
+                          <div>{nameOf(apps, application) ?? 'An application'}</div>
+                          <div class="small muted">{connected ? 'Connected' : 'No longer connected'}</div>
+                        </div>
+                        <Button
+                          small
+                          kind="quiet"
+                          onClick={() => {
+                            applications.disallow(identifier, application);
+                            apps.changed();
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+          <Card title="Stop trusting">
+            <div class="stack">
+              {!confirming ? (
+                <div data-testid="template-stop">
+                  <Button kind="secondary" onClick={() => setConfirming(true)}>
+                    Stop trusting this template
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  {open.length > 0 && (
+                    <Notice tone="warn">
+                      You hold {open.length === 1 ? 'a token' : `${open.length} tokens`} of this template with an open position: {open.map(tokenName).join(', ')}. This wallet will no longer show or operate {open.length === 1 ? 'it' : 'them'} until you trust the template again.
+                    </Notice>
+                  )}
+                  <p class="small muted">Your tokens stay in the wallet and still move in a recovery. Your backup keeps the template, so you can trust it again later.</p>
+                  <TaskStatus task={task} name="stop" />
+                  <div class="actions" data-testid="template-stop-confirm">
+                    <Button kind="danger" task={task} name="stop" onClick={() => void stop()}>
+                      Stop trusting
+                    </Button>
+                    <Button kind="quiet" disabled={task.busy !== undefined} onClick={() => setConfirming(false)}>
+                      Keep it
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /** Requests answered before, most recent first. */
 const EarlierRequests = ({ owner }: { owner: Owner }) => {
   const { apps } = owner;
@@ -656,7 +910,7 @@ export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldTo
           <p class="small muted">The token is safe: it is held and swept like any other.</p>
           {suggestion !== undefined && (
             <div>
-              <Button small kind="secondary" onClick={() => onView({ at: 'trust', token })}>
+              <Button small kind="secondary" onClick={() => onView({ at: 'trust', identifier: suggestion.identifier })}>
                 Trust this template
               </Button>
             </div>
@@ -901,9 +1155,9 @@ const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: Hel
 
 // ------------------------------------------------------------------ a template an earlier owner stored
 
-const TrustSuggested = ({ owner, token, onBack }: { owner: Owner; token: HeldToken; onBack: () => void }) => {
+const TrustSuggested = ({ owner, identifier, onBack }: { owner: Owner; identifier: string; onBack: () => void }) => {
   const { applications } = owner.apps;
-  const suggestion = applications.suggestions.find((candidate) => candidate.identifier === token.template?.identifier);
+  const [suggestion] = useState(() => applications.suggestions.find((candidate) => candidate.identifier === identifier));
   const task = useTask();
   const [summary, problem] = useMemo((): [TemplateSummary | undefined, string | undefined] => {
     if (suggestion === undefined) return [undefined, 'The template is no longer among those found in the backup.'];
@@ -916,8 +1170,9 @@ const TrustSuggested = ({ owner, token, onBack }: { owner: Owner; token: HeldTok
   const trust = () =>
     task.run('trust', async () => {
       if (suggestion === undefined) return;
-      const { identifier, contentHash, declaration } = suggestion;
-      await applications.trust({ identifier, contentHash, ...(declaration === undefined ? {} : { declaration }) }, undefined);
+      const { contentHash, declaration } = suggestion;
+      const kept = await applications.trust({ identifier, contentHash, ...(declaration === undefined ? {} : { declaration }) }, undefined);
+      await applications.storeNow(kept.identifier);
       owner.apps.changed();
       owner.toast('The template is trusted on this phone.');
       onBack();
@@ -928,7 +1183,10 @@ const TrustSuggested = ({ owner, token, onBack }: { owner: Owner; token: HeldTok
       <div class="grid two">
         <Card cls="request-card">
           <div class="stack">
-            <p>An earlier owner of this wallet stored this template in the backup, and a note says that it made the token. It is not trusted on this phone until you say so. Trusting it lets this wallet show what the token controls and carry out the template's actions when you ask.</p>
+            <p>
+              {suggestion?.withdrawn !== undefined ? 'You stopped trusting this template. Your backup still holds it.' : 'An earlier owner of this wallet stored this template in the backup. It is not trusted on this phone until you say so.'}
+              <Info label="About trusting it">Trusting it lets this wallet show what your tokens of this template control, and carry out the template's actions when you ask.</Info>
+            </p>
             {summary === undefined ? <Notice tone="bad">{problem}</Notice> : (
               <Part title="Template">
                 <TemplateView summary={summary} showActions />

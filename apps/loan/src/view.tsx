@@ -1,6 +1,6 @@
 import type { RequestStage } from '@grandmas-wallet/connect';
 import { collateralRatio } from '@grandmas-wallet/paryon';
-import { Amount, Button, Card, Field, HandOff, KeyValues, More, Notice, Pill, Segmented, Spinner, Status, Steps, type Step, formatBch, formatSatoshis, formatTime, parseBch, shorten } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Field, HandOff, KeyValues, More, Notice, Pill, Segmented, Spinner, TemplateOffer, Status, Steps, type Step, formatBch, formatSatoshis, formatTime, parseBch, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 
@@ -463,6 +463,9 @@ export const LoanItem = ({
 export const LoanList = (props: {
   loans: LoanView[] | undefined;
   trusted: boolean;
+  /** Offer the wallet this page's template, and what to do once it trusts it. */
+  onOffer?: (() => Promise<boolean>) | undefined;
+  onTrusted?: (() => void) | undefined;
   problem?: string | undefined;
   market: Market | undefined;
   facts: PageFacts;
@@ -477,7 +480,14 @@ export const LoanList = (props: {
         <Spinner /> Asking your wallet about its loan keys…
       </p>
     ) : props.loans.length === 0 ? (
-      <p class="muted">{props.trusted ? 'No loans yet. A loan you open here is listed here, and in any other browser your wallet connects to.' : 'No loans to show. Your wallet tells this page about its loan keys once you use this page with it, or once you allow it in the wallet.'}</p>
+      props.trusted ? (
+        <p class="muted">No loans yet. A loan you open here is listed here, and in any other browser your wallet connects to.</p>
+      ) : (
+        <div class="stack-s">
+          <p class="muted">No loans to show. Your wallet does not trust this page's template yet, so it tells the page nothing about what it holds. If it holds a loan key, one that was sent to you for example, ask it here.</p>
+          {props.onOffer !== undefined && <TemplateOffer label="Show the loans my wallet holds" offer={props.onOffer} onTrusted={props.onTrusted ?? (() => undefined)} />}
+        </div>
+      )
     ) : (
       <ul class="loans">
         {props.loans.map((loan) => (

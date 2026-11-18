@@ -13,7 +13,8 @@
   .apps-layout .connect-card { order: 2; }
   .apps-layout .connected-card { order: 3; }
   .apps-layout .tokens-card { order: 4; }
-  .apps-layout .earlier-card { order: 5; }
+  .apps-layout .templates-card { order: 5; }
+  .apps-layout .earlier-card { order: 6; }
 }
 
 .card-lead { margin-top: -4px; }
@@ -232,3 +233,15 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .token-net.up { color: var(--good); }
 .moved-group .kv > div { padding: 8px 0; }
 .destroyed .moved-head > :last-child { flex: none; }
+
+/* Templates: a row opens the template's page. */
+.templates-none { color: var(--muted); margin: 0; }
+button.template-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; min-height: 44px;
+  padding: 0; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+button.template-row:hover:not(:disabled) { background: none; color: var(--accent); }
+button.template-row > :first-child { display: flex; flex-direction: column; min-width: 0; }
+.template-row-name { font-weight: 600; overflow-wrap: anywhere; }
+.template-row-go { color: var(--muted); font-size: 20px; }
+.templates-own .list { margin-bottom: 8px; }

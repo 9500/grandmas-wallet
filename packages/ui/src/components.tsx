@@ -634,3 +634,40 @@ export const useStored = <T,>(vault: { get<V>(name: string): V | undefined; set(
   }, []);
   return [value, set];
 };
+
+/**
+ * For an application's page: offer the page's template to a wallet that reports nothing because it has never
+ * used the page. The user decides in the wallet; the page waits, and says how it went.
+ *
+ * @param offer - resolves to whether the wallet trusts the template now; rejects with the wallet's reason
+ */
+export const TemplateOffer = ({ label, offer, onTrusted }: { label: string; offer: () => Promise<boolean>; onTrusted: () => void }) => {
+  const [state, setState] = useState<{ at: 'idle' } | { at: 'waiting' } | { at: 'declined' } | { at: 'failed'; reason: string }>({ at: 'idle' });
+  const ask = (): void => {
+    setState({ at: 'waiting' });
+    offer().then(
+      (trusted) => {
+        setState(trusted ? { at: 'idle' } : { at: 'declined' });
+        if (trusted) onTrusted();
+      },
+      (error: unknown) => setState({ at: 'failed', reason: error instanceof Error ? error.message : String(error) }),
+    );
+  };
+  return (
+    <div class="stack-s template-offer" data-testid="template-offer">
+      {state.at === 'waiting' ? (
+        <p class="muted">
+          <Spinner /> Your wallet shows this page's template under Apps. Trust it there to go on.
+        </p>
+      ) : (
+        <div>
+          <Button kind="secondary" onClick={ask}>
+            {label}
+          </Button>
+        </div>
+      )}
+      {state.at === 'declined' && <p class="small muted">Declined in the wallet. Nothing was shared.</p>}
+      {state.at === 'failed' && <Notice tone="warn">{state.reason}</Notice>}
+    </div>
+  );
+};

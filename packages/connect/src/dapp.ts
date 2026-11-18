@@ -11,6 +11,9 @@ import {
   INVITATION_UPDATE,
   POSITIONS,
   POSITIONS_REQUEST,
+  TEMPLATE_ANSWER,
+  TEMPLATE_OFFER,
+  type TemplateName,
 } from './protocol.js';
 
 /**
@@ -51,6 +54,7 @@ const newId = (): string => Array.from(crypto.getRandomValues(new Uint8Array(12)
 export class DappRequests {
   private readonly pending = new Map<string, Pending>();
   private readonly listing = new Map<string, (answer: { trusted: boolean; positions: ReportedPosition[]; error?: string }) => void>();
+  private readonly offering = new Map<string, (answer: { trusted: boolean; reason?: string }) => void>();
   private channel: Channel | undefined;
   private stop: (() => void) | undefined;
 
@@ -134,9 +138,51 @@ export class DappRequests {
     });
   }
 
+  /**
+   * Present the application's template to the wallet without asking for an action: for a wallet that holds
+   * tokens of the template and has never used this application. The user decides in the wallet, in their own
+   * time; the offer is sent again now and then in case a message was lost.
+   *
+   * @returns whether the user trusts the template with this application now
+   * @throws WalletSilentError when no answer comes within the time allowed; RequestRefusedError when the wallet does not take the template in
+   */
+  offerTemplate(template: TemplateName, texts: TemplateTexts, waitMs = 300_000, intervalMs = 10_000): Promise<boolean> {
+    const { channel } = this;
+    if (channel === undefined) return Promise.reject(new Error('No wallet is connected.'));
+    const id = newId();
+    return new Promise((resolve, reject) => {
+      const started = Date.now();
+      const finish = (): void => {
+        clearInterval(timer);
+        this.offering.delete(id);
+      };
+      const send = (): void => {
+        if (Date.now() - started > waitMs) {
+          finish();
+          reject(new WalletSilentError());
+          return;
+        }
+        (this.channel ?? channel).send({ action: TEMPLATE_OFFER, time: this.now(), id, template, definition: texts }).catch(() => undefined);
+      };
+      const timer = setInterval(send, intervalMs);
+      this.offering.set(id, (answer) => {
+        finish();
+        if (answer.trusted) resolve(true);
+        else if (answer.reason === undefined || answer.reason === 'The user declined.') resolve(false);
+        else reject(new RequestRefusedError(answer.reason));
+      });
+      send();
+    });
+  }
+
   private receive(message: unknown): void {
     const { action, id } = (message ?? {}) as { action?: unknown; id?: unknown };
     if (typeof id !== 'string') return;
+    if (action === TEMPLATE_ANSWER) {
+      const { trusted, reason } = message as { trusted?: unknown; reason?: unknown };
+      this.offering.get(id)?.({ trusted: trusted === true, ...(typeof reason === 'string' && reason !== '' ? { reason } : {}) });
+      return;
+    }
     if (action === POSITIONS) {
       const { trusted, positions, error } = message as { trusted?: unknown; positions?: unknown; error?: unknown };
       this.listing.get(id)?.({ trusted: trusted === true, positions: Array.isArray(positions) ? (positions as ReportedPosition[]) : [], ...(typeof error === 'string' && error !== '' ? { error } : {}) });

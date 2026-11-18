@@ -11,7 +11,7 @@ import {
   Pill,
   QrCode,
   Segmented,
-  Spinner,
+  Spinner, TemplateOffer,
   Status,
   Steps,
   type Step,
@@ -357,6 +357,8 @@ export const JarItem = ({
 export const JarList = ({
   jars,
   trusted,
+  onOffer,
+  onTrusted,
   problem,
   facts,
   state,
@@ -365,6 +367,9 @@ export const JarList = ({
 }: {
   jars: JarView[] | undefined;
   trusted: boolean;
+  /** Offer the wallet this page's template, and what to do once it trusts it. */
+  onOffer?: (() => Promise<boolean>) | undefined;
+  onTrusted?: (() => void) | undefined;
   /** Why the list could not be brought up to date. What was listed before stays. */
   problem?: string | undefined;
   facts: PageFacts;
@@ -380,7 +385,14 @@ export const JarList = ({
           <Spinner /> Looking for your jars…
         </p>
       ) : jars.length === 0 ? (
-        <p class="muted">{trusted ? 'No jars yet. A jar you open here is listed here, and in any other browser your wallet connects to.' : 'No jars to show. Your wallet tells this page about its jars once you open one here, or once you allow it in the wallet.'}</p>
+        trusted ? (
+          <p class="muted">No jars yet. A jar you open here is listed here, and in any other browser your wallet connects to.</p>
+        ) : (
+          <div class="stack-s">
+            <p class="muted">No jars to show. Your wallet does not trust this page's template yet, so it tells the page nothing about what it holds.</p>
+            {onOffer !== undefined && <TemplateOffer label="Show the jars my wallet holds" offer={onOffer} onTrusted={onTrusted ?? (() => undefined)} />}
+          </div>
+        )
       ) : (
         <ul class="jars">
           {jars.map((jar) => (

@@ -153,6 +153,8 @@ const Loans = ({ environment, loans, chain, peerName, onDisconnect }: { environm
           <LoanList
             loans={listing?.loans}
             trusted={listing?.trusted ?? true}
+            onOffer={() => loans.offerTemplate()}
+            onTrusted={() => void refresh()}
             problem={listProblem}
             market={market}
             facts={facts}

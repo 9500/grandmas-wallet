@@ -272,6 +272,14 @@ Decided with it, for the wallet's screens: a "Max" in the amount field in place 
 
 Closed by the simulated-chain tests (RC05, RC06, MG04, SW09, CR05), a run on the XO engine on the local node with a request, a refusal, a second request and its completion, the taking in of coins at an earlier fee address and the sending of the whole balance (`docs/runs/stage-4-local-node.md`), and a look at the screens in browsers at a phone's and a desktop's size. Still to do: the courses in browsers with coins.
 
+## The wallet's templates: a list, a page's offer, and stopping to trust (18 November 2026)
+
+The owner asked to see the templates the wallet trusts, to add and remove them, and to get a template from an application's page without an action: a wallet that was sent a loan key and PUSD showed both as tokens of unknown meaning, and the loan page listed nothing, since the wallet tells a page nothing about a template it does not trust.
+
+Decided: **a Templates card on the Apps screen** lists the trusted templates, those the backup holds and this phone does not trust, and, folded and fixed, the wallet's own. A template's page shows what it is, the tokens of it the wallet holds, the applications that are told about them (each removable), and "Stop trusting", which warns of open positions and is allowed all the same. **A page offers its template** over the session without an action (`xo_template_offer`, proposal section 14.2); the wallet shows it and the user decides. The pages offer only from a button, so that connecting raises nothing in the wallet. **The backup is told of a withdrawal** by a record of its own (section 10.2). Taking a template in from a file or a link was left out.
+
+Closed by the simulated-chain tests (AP16, BK11) and the savings jar course in browsers on the local node, in which the new phone stops trusting the template, the page offers it, and the jar is listed again (`docs/runs/stage-8-browser-local-node.md`). Still to do: the same on the loan page with a loan key received from another wallet, on chipnet.
+
 ## Which stage closes which test
 
 | Stage | Tests |
