@@ -71,3 +71,7 @@ Each switch interrupted the sites for about three seconds.
 ## What a browser that used the first design's pages sees
 
 The new pages keep their data under names of their own and never read what the first design's pages kept in the same browser. A wallet made with the first design's page is not shown by the new page; its data stays in the browser until the site's data is cleared or the new page's "Erase this phone" is used, which clears everything the site keeps. The wallet made on the first design's public page was emptied by its owner before the switch.
+
+## Since then
+
+On 18 November 2026 at 00:40 UTC the pages were released again from commit `c15a069`, with one change: a page whose first chipnet server takes no connection opens its account through the next one. The same installer and the same check from outside were used. What is public at any time is at `https://wallet.9500.cash/version.json`.
