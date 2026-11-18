@@ -3,7 +3,7 @@ import { Amount, Button, Card, Icon, KeyValues, LinkRow, Loading, More, TaskStat
 
 import type { Owner } from './OwnerApp.js';
 import { ActivityList } from './parts.js';
-import { Alarm, CancelCoin, KitCard, ProtectionStatus } from './Protection.js';
+import { Alarm, KitCard, ProtectionStatus } from './Protection.js';
 import { kept } from './session.js';
 
 /**
@@ -13,10 +13,9 @@ import { kept } from './session.js';
 export const Home = ({ owner }: { owner: Owner }) => {
   const { balance } = owner;
   if (balance === undefined) return <Loading>Reading what the wallet holds…</Loading>;
-  const total = balance.recoverable + balance.cancelling + balance.vault + balance.toSweep + balance.notRecoverable + balance.voided;
+  const total = balance.recoverable + balance.vault + balance.toSweep + balance.notRecoverable + balance.voided;
   const rows: [preact.ComponentChildren, preact.ComponentChildren][] = [[<>Ready to spend</>, <Amount satoshis={balance.recoverable} />]];
   if (balance.vault > 0n) rows.push([<>At vault addresses<small>Spending from these goes through the wallet's controller.</small></>, <Amount satoshis={balance.vault} />]);
-  rows.push([<>Kept for cancelling<small>Pays for refusing a request.</small></>, balance.cancelling > 0n ? <Amount satoshis={balance.cancelling} /> : <span class="muted">none</span>]);
   if (balance.toSweep > 0n) rows.push([<>At earlier addresses<small>Not yet moved to this phone's addresses.</small></>, <Amount satoshis={balance.toSweep} />]);
   if (balance.voided > 0n) rows.push([<>At addresses given out before the wallet was made again<small>Yours, and not recoverable until moved. This phone moves them.</small></>, <Amount satoshis={balance.voided} />]);
   if (balance.notRecoverable > 0n) rows.push([<>At the address for the first coins<small>Not recoverable. Only this phone can move it.</small></>, <Amount satoshis={balance.notRecoverable} />]);
@@ -74,11 +73,6 @@ export const Home = ({ owner }: { owner: Owner }) => {
         <div class="stack">
           <Card cls="o2">
             <ProtectionStatus owner={owner} compact />
-            {owner.canCancel === false && (
-              <div class="actions">
-                <CancelCoin owner={owner} bare />
-              </div>
-            )}
             <div class="card-foot">
               <LinkRow label="Recovery" hint="Your recoverer, the waiting period, a new phone, your own backup" onClick={() => owner.navigate('recovery')} />
             </div>

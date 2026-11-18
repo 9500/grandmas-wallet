@@ -128,7 +128,6 @@ export const deviceWith = async (values: bigint[], options: { stores?: Map<strin
   // What is left of the funding coin is moved out of the way, so that the tests' figures start from the coins they name.
   const rest = (await wallet.balance()).recoverable;
   if (rest > 0n) await wallet.sendEverything(p2pkhLockingBytecode(new Uint8Array(20).fill(0x77)));
-  await wallet.setAsideCancellingCoin().catch(() => undefined);
   const stores = options.stores ?? new Map(STORES.map((address) => [address, new MemoryStore(address)]));
   const device = assemble(chain, wallet, backend, 0, stores, { archive: newArchive(STORES), earlierArchives: [], earlierViewingKeyRecords: [] }, () => kept as OwnerWalletState, options);
   await device.receive(...values);

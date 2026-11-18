@@ -286,7 +286,7 @@ try {
     }
     for (const [step, transactionId, about] of [
       ['prepare', wallet.stored.creation.prepareTransactionId, 'the wallet pays itself, to have a coin that is output 0; this transaction is the identity'],
-      ['create', wallet.stored.creation.createTransactionId, 'the controller, the coin for cancelling, an allowance for the recoverer, and the rest'],
+      ['create', wallet.stored.creation.createTransactionId, 'the controller, an allowance for the recoverer, and the rest'],
     ] as const) {
       if (transactionId === undefined) continue;
       const bytes = ((await until('the transaction', async () => server.getTransaction(transactionId))) as string).length / 2;
@@ -295,7 +295,7 @@ try {
     note(`Recovery is shown as "${wallet.recovery}" while no receipt of the recoverer exists.`);
     // What the wallet holds at its own addresses is followed exactly, so that no step works from a list the engine has not yet brought up to date.
     const created = await once('the wallet holds its first coin', async () => {
-      const first = await until('the wallet\'s first coin', async () => { const now = await wallet.balance(); return now.recoverable > 0n && now.cancelling > 0n ? now : undefined; });
+      const first = await until('the wallet\'s first coin', async () => { const now = await wallet.balance(); return now.recoverable > 0n ? now : undefined; });
       return { data: { recoverable: String(first.recoverable) } };
     });
     const arrived = BigInt(created['recoverable'] as string) + 21_000n;
@@ -334,7 +334,7 @@ try {
     });
     await block();
     const balance = await until('the wallet after the payment', async () => { const now = await wallet.balance(); return now.recoverable === BigInt(paid['recoverable'] as string) ? now : undefined; });
-    facts.held = String(balance.recoverable + balance.cancelling + balance.vault + 1_000n);
+    facts.held = String(balance.recoverable + balance.vault + 1_000n);
     keep();
     note(`The old device holds ${facts.held} satoshis at addresses given out, change addresses and a vault address, and an NFT. Then it is lost.`);
   }
@@ -421,7 +421,7 @@ try {
       const full = await wallet.search();
       note(`The full pass over both seeds (${full.seeds.reduce((sum, seed) => sum + (seed.full?.lookups ?? 0), 0)} addresses) took ${((Date.now() - started) / 1000).toFixed(0)} seconds; the wallet was then "${full.status}".`, 'the full pass');
       const holds = async (amount: bigint, tokens: number): Promise<void> => {
-        await until(`the new device to hold ${amount} satoshis`, async () => { const now = await wallet.balance(); return now.recoverable + now.cancelling === amount && now.tokens.length === tokens && now.toSweep === 0n; });
+        await until(`the new device to hold ${amount} satoshis`, async () => { const now = await wallet.balance(); return now.recoverable === amount && now.tokens.length === tokens && now.toSweep === 0n; });
       };
       // What the sweep sent is written down as soon as it is sent, so that a run that stops here does not sweep twice.
       if (facts.steps['the new device sweeps'] === undefined) {
@@ -437,7 +437,7 @@ try {
       const swept = BigInt(facts.steps['the new device sweeps']?.data?.['recoverable'] as string);
       const paid = await once('the new owner pays', async () => {
         await holds(swept, 1);
-        note(`After the sweep the new device holds everything at its own addresses: ${swept} satoshis, of which ${(await wallet.balance()).cancelling} are a coin the sweep put aside for cancelling, and the NFT, which it reports as a token of unknown meaning. It can cancel a request: ${await wallet.canCancel()}.`);
+        note(`After the sweep the new device holds everything at its own addresses: ${swept} satoshis, and the NFT, which it reports as a token of unknown meaning. Its coins pay for cancelling a request: ${await wallet.canCancel()}.`);
         const sent = await wallet.pay([{ lockingBytecode: funderLocking, valueSatoshis: 4_000n }]);
         record('pay', sent, 'the new owner pays from what it swept, by its own key');
         return { transactionIds: [sent.transactionId], data: { recoverable: String(swept - 4_000n - sent.feeSatoshis) } };

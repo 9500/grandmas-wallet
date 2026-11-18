@@ -208,7 +208,6 @@ describe('the recoverer\'s fees', () => {
     for (let round = 0; round < 3; round++) {
       paid.push(await wallet.recoverer.request(newDevice.keyHash));
       await wallet.owner.cancel();
-      await wallet.owner.setAsideCancellingCoin();
     }
     paid.push(await wallet.recoverer.request(newDevice.keyHash));
     wallet.wait();

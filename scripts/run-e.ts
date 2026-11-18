@@ -101,7 +101,7 @@ const FLOOR_PERCENT = 112n;
 const MANAGE_ADD = 100_000n;
 /** Kept in the wallet for network fees and the outputs of 1,000 satoshis each transaction makes. */
 const MARGIN = 50_000n;
-/** What creating the wallet takes from the funder: the controller, the coin for cancelling, the allowance, the rest. */
+/** What creating the wallet takes from the funder: the controller, the allowance, the rest. */
 const WALLET_CREATION = 80_000n;
 /** No interest: see the record (the period of the Borrowing thread is moved on as well). */
 const STARTING_INTEREST = 0;
@@ -571,7 +571,7 @@ try {
     }
     for (const [step, transactionId, about] of [
       ['prepare', wallet.stored.creation.prepareTransactionId, 'the wallet pays itself, to have a coin that is output 0; this transaction is the identity'],
-      ['create', wallet.stored.creation.createTransactionId, 'the controller, the coin for cancelling, an allowance for the recoverer, and the rest'],
+      ['create', wallet.stored.creation.createTransactionId, 'the controller, an allowance for the recoverer, and the rest'],
     ] as const) {
       if (transactionId === undefined) continue;
       const bytes = ((await until('the transaction', async () => server.getTransaction(transactionId))) as string).length / 2;

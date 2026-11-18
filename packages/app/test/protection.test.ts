@@ -3,9 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { type ProtectionInput, assessProtection, emptyWatchLog, noteWatching, unwatched } from '../src/protection.js';
 
 /**
- * Acceptance test OP02 of the proposal: the coin for cancelling is spent or missing; the device was not
- * running for part of a wait. The wallet says that it cannot cancel, or could not watch; it does not show
- * full protection.
+ * Acceptance test OP02 of the proposal: the device was not running for part of a wait. The wallet says that
+ * it could not watch then; it does not show full protection.
  */
 
 const T = 1_800_000_000;
@@ -15,26 +14,21 @@ const running = (from: number, to: number, log = emptyWatchLog()) => {
   for (let now = from; now <= to; now += 60) next = noteWatching(next, now);
   return next;
 };
-const quiet: ProtectionInput = { recovery: 'on', canCancel: true, watch: { kind: 'quiet' }, log: running(T - 3600, T), now: T, chainVerified: true };
+const quiet: ProtectionInput = { recovery: 'on', watch: { kind: 'quiet' }, log: running(T - 3600, T), now: T, chainVerified: true };
 const requested = { kind: 'recovery-requested', proposedOwnerKeyHash: 'ab'.repeat(20), requestedIn: 'cd'.repeat(32), confirmed: true } as const;
 
 describe('what the wallet says about its protection', () => {
-  it('shows full protection only when recovery is on, a coin for cancelling is held and the servers agree', () => {
+  it('shows full protection only when recovery is on and the servers agree', () => {
     expect(assessProtection(quiet)).toEqual({ full: true, canRefuse: true, gaps: [], notWatched: [] });
     expect(assessProtection({ ...quiet, recovery: 'off' }).full).toBe(false);
     expect(assessProtection({ ...quiet, chainVerified: false }).full).toBe(false);
   });
 
-  it('OP02: with the coin for cancelling spent or missing, it says that it cannot cancel and does not show full protection', () => {
-    const missing = assessProtection({ ...quiet, canCancel: false });
-    expect(missing.full).toBe(false);
-    expect(missing.canRefuse).toBe(false);
-    expect(missing.gaps).toEqual(['The wallet holds no coin for cancelling. It cannot refuse a recovery request until one is put aside.']);
-    // The same while a request is waiting: the request is shown, and so is that it cannot be refused.
-    const waiting = assessProtection({ ...quiet, canCancel: false, watch: requested, wait: { from: T - 600, until: T + 3000 } });
-    expect(waiting.canRefuse).toBe(false);
-    expect(waiting.gaps[0]).toMatch(/holds no coin for cancelling/);
-    expect(waiting.gaps.at(-1)).toMatch(/A recovery request is waiting\. It can be refused for about 50 minutes more\./);
+  it('does not depend on a coin kept apart: a waiting request is shown, and can be refused', () => {
+    const waiting = assessProtection({ ...quiet, watch: requested, wait: { from: T - 600, until: T + 3000 } });
+    expect(waiting.canRefuse).toBe(true);
+    expect(waiting.gaps).toEqual(['A recovery request is waiting. It can be refused for about 50 minutes more.']);
+    expect(waiting.gaps.join(' ')).not.toMatch(/coin/);
   });
 
   it('OP02: a device that was not running for part of a wait says that it could not watch then', () => {

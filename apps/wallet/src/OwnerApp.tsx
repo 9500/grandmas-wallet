@@ -36,6 +36,7 @@ export interface Owner {
   wallet: OwnerWallet;
   seed: SeedKeys;
   balance?: Balance;
+  /** Whether the wallet's coins pay the fee of refusing a request. */
   canCancel?: boolean;
   recovery?: RecoveryStatus;
   watch: Watch & { check: () => Promise<void> };
@@ -87,7 +88,7 @@ const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: O
   const [arrival, setArrival] = useState(() => kept('arrival'));
   const [toastElement, toast] = useToast();
   const [dismissed, setDismissed] = useState(false);
-  const watch = useWatch(session, wallet, seed.controllerKey.keyHash, canCancel ?? true);
+  const watch = useWatch(session, wallet, seed.controllerKey.keyHash);
   const apps = useApplications({
     session,
     wallet,

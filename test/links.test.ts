@@ -82,7 +82,6 @@ describe('what ties a coin to the identity', () => {
     let seen = observe(chain, identity);
     expect(seen.showing.size).toBe(1);
     expect(seen.tied.has(fundingCoin)).toBe(true);
-    expect(seen.tiedAt(changeAt(owner.stored.cancelCoinNumber as number))).toBe(true);
     expect(seen.tiedAt(changeAt(owner.stored.firstCoinNumber as number))).toBe(true);
     // The recoverer's allowance leads back to the wallet's coin that paid it.
     expect(seen.tiedAt(feeAddress)).toBe(true);
@@ -97,7 +96,7 @@ describe('what ties a coin to the identity', () => {
     expect(seen.tied.has(received)).toBe(false);
     expect(seen.tied.has(`${everyday.transactionId}:0`)).toBe(false);
 
-    // --- A request and its cancellation: the recoverer's fee coin, and the wallet coin that pays for cancelling, with its change.
+    // --- A request and its cancellation: the recoverer's fee coin, and the wallet coin that pays the cancellation's fee, with its change.
     const recovererBackend = () => new KeyBackend(chain, { controllerKey: credential.recoveryKey, fundingKey: credential.feeKey, addressKey: () => credential.feeKey });
     const requested = await (await RecovererWallet.open({ backend: recovererBackend(), chain, identity })).request(next.controllerKey.keyHash);
     const cancelled = await owner.cancel();
