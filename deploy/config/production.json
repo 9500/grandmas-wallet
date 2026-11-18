@@ -3,6 +3,7 @@
   "walletUrl": "https://wallet.9500.cash/",
   "recovererUrl": "https://recoverer.9500.cash/",
   "jarUrl": "https://jar.9500.cash/",
+  "loanUrl": "https://paryon.9500.cash/",
   "stores": ["https://store1.9500.cash", "https://store2.9500.cash"],
   "chain": ["wss://chipnet.9500.cash:443", "wss://chipnet.imaginary.cash:50004"],
   "relays": ["wss://relay.riften.net:443", "wss://relay.cauldron.quest:443"],

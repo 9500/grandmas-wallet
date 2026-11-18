@@ -5,7 +5,9 @@
 #   deploy/install-services.sh 192.168.88.112 deploy/config/production.json 2
 #
 # Each service listens on plain HTTP; a reverse proxy in front provides HTTPS. Ports:
-#   8101 wallet, 8102 recoverer, 8103 savings jar application, 8111 and up backup stores.
+#   8101 wallet, 8102 recoverer, 8103 savings jar application, 8104 loan page, 8111 and up backup stores.
+# The loan page is an independent demonstration with Paryon's public contracts on chipnet; it is served when
+# the configuration names an address for it (loanUrl) and it is built.
 # The pages must have been built first: deploy/preview.sh build
 # Where an application of this design is not built yet, a page saying so is served in its place.
 #
@@ -56,6 +58,8 @@ for app in wallet recoverer; do
   [ -f "$ROOT/apps/$app/dist/index.html" ] || { echo "apps/$app is not built: deploy/preview.sh build" >&2; exit 1; }
 done
 if [ -d "$ROOT/apps/jar/src" ] && [ -f "$ROOT/apps/jar/dist/index.html" ]; then JAR_ROOT=apps/jar/dist; else JAR_ROOT=deploy/placeholder/jar; fi
+LOAN="$("$NODE" -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).loanUrl === undefined ? "no" : "yes")' "$CONFIG")"
+if [ "$LOAN" = yes ] && [ ! -f "$ROOT/apps/loan/dist/index.html" ]; then echo "apps/loan is not built: deploy/preview.sh build" >&2; exit 1; fi
 
 # The release: the built pages, the server and the configuration, with a record of what they were built from.
 RELEASE="$DATA/release"
@@ -64,6 +68,7 @@ mkdir -p "$RELEASE.new"
 cp -r "$ROOT/apps/wallet/dist" "$RELEASE.new/wallet"
 cp -r "$ROOT/apps/recoverer/dist" "$RELEASE.new/recoverer"
 cp -r "$ROOT/$JAR_ROOT" "$RELEASE.new/jar"
+if [ "$LOAN" = yes ]; then cp -r "$ROOT/apps/loan/dist" "$RELEASE.new/loan"; fi
 cp "$ROOT/deploy/serve.mjs" "$RELEASE.new/serve.mjs"
 cp "$CONFIG" "$RELEASE.new/config.json"
 (
@@ -76,13 +81,16 @@ rm -rf "$RELEASE.previous"
 if [ -d "$RELEASE" ]; then mv "$RELEASE" "$RELEASE.previous"; fi
 mv "$RELEASE.new" "$RELEASE"
 
-page() { # name, description, port
-  unit "$1" "$2" "$RELEASE" serve.mjs --root "$1" --config config.json --version version.json --host "$HOST" --port "$3"
+page() { # name, description, port, further arguments of the server...
+  local name="$1" description="$2" port="$3"; shift 3
+  unit "$name" "$description" "$RELEASE" serve.mjs --root "$name" --config config.json --version version.json --host "$HOST" --port "$port" "$@"
 }
 page wallet "wallet page" 8101
 page recoverer "recoverer page" 8102
 page jar "savings jar application" 8103
 NAMES=(wallet recoverer jar)
+# The loan page reads the price General Protocols' oracle signs; that server is named for it alone.
+if [ "$LOAN" = yes ]; then page loan "loan page" 8104 --connect https://oracles.generalprotocols.com; NAMES+=(loan); fi
 for number in $(seq 1 "$STORES"); do
   unit "store$number" "backup store $number" "$ROOT" --import tsx apps/archive-store/src/cli.ts \
     --port "$((8110 + number))" --host "$HOST" --directory "$DATA/store$number" --origin "$WALLET_ORIGIN" --origin "$RECOVERER_ORIGIN"

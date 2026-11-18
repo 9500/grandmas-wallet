@@ -53,5 +53,6 @@ const store = async (url, origin) => {
 await page('wallet', config.walletUrl, true);
 await page('recoverer', config.recovererUrl, true);
 if (config.jarUrl !== undefined) await page('savings jar', config.jarUrl, false);
+if (config.loanUrl !== undefined) await page('loan page', config.loanUrl, false);
 for (const url of config.stores) await store(url, new URL(config.walletUrl).origin);
 process.exit(failed ? 1 : 0);
