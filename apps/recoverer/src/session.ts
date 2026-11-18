@@ -1,8 +1,8 @@
-import { binToHex, hexToBin } from '@bitauth/libauth';
-import type { Account, AppChain, LinkField, StoreAt } from '@grandmas-wallet/app';
+import { binToHex, generateBip39Mnemonic, hexToBin } from '@bitauth/libauth';
+import { type Account, type AppChain, type LinkField, type SetUpRecord, type StoreAt, RecovererFunds } from '@grandmas-wallet/app';
 import { linkKind, makeLink, readLink } from '@grandmas-wallet/app/links';
 import { HttpStore } from '@grandmas-wallet/archive';
-import type { ChainReader } from '@grandmas-wallet/core';
+import type { ChainReader, ChallengeDelay } from '@grandmas-wallet/core';
 import { type KeptKit, generateRecipientKeyPair, recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
 import { type Environment, Vault, connectChain, keyNetwork, loadEnvironment, openAccount } from '@grandmas-wallet/ui';
 
@@ -26,6 +26,8 @@ export interface Looked {
   requested?: { proposedKeyHash: string; transactionId: string };
   /** The hand-over link, once made, so that it can be given again. */
   handOverLink?: string;
+  /** The new phone said, over the session of the lost phone's code, that it has the hand-over. */
+  handOverDelivered?: boolean;
 }
 
 /** A takeover message, before and after the recoverer has said which wallet it is for. */
@@ -39,6 +41,16 @@ export interface InboxEntry {
   assignedTo?: string;
 }
 
+/** How this recoverer works: a bank sets wallets up without asking; someone helping a person they know says yes first. */
+export type Mode = 'bank' | 'friend';
+
+/** What a new wallet gets, and the waiting period it is created with. */
+export interface Settings {
+  /** Satoshis, as a decimal string. */
+  startingSatoshis: string;
+  challengeDelay: ChallengeDelay;
+}
+
 export interface Kept {
   key: { publicKey: string; privateKey: string };
   name: string;
@@ -47,7 +59,25 @@ export interface Kept {
   /** The wallet open in this page: its credential's account is the engine of the page. */
   current: string;
   incoming: { kind: LinkField | 'enroll'; text: string };
+  mode: Mode;
+  settings: Settings;
+  /** The twelve words of the recoverer's own coins: its balance, from which it creates wallets and pays its fees. */
+  fundsWords: string;
+  /** Phones' requests to have a wallet set up, by request. */
+  setUps: Record<string, SetUpRecord>;
+  /** The session the page's code offers, kept so that the page offers the same one after a reload. */
+  deskSession: { privateKey: string; secret: string; walletPublicKey?: string; for?: string };
 }
+
+/** Until the recoverer chooses, the starting balance and the waiting period of a new wallet. */
+export const DEFAULT_SETTINGS: Settings = { startingSatoshis: '10000', challengeDelay: { unit: 'time512', value: 169 } };
+export const settingsOf = (): Settings => kept('settings') ?? DEFAULT_SETTINGS;
+
+/**
+ * How this page works. A page that held kits before it could be asked keeps working as someone helping people
+ * they know, and shows its wallets at once.
+ */
+export const modeOf = (): Mode | undefined => kept('mode') ?? (Object.keys(kept('wallets') ?? {}).length > 0 ? 'friend' : undefined);
 
 export const kept = <Name extends keyof Kept>(name: Name): Kept[Name] | undefined => vault.get<Kept[Name]>(name);
 export const keep = <Name extends keyof Kept>(name: Name, value: Kept[Name] | undefined): void => (value === undefined ? vault.remove(name) : vault.set(name, value));
@@ -119,6 +149,34 @@ export const credentialAccount = (session: Session, words: string): Promise<Acco
     throw error;
   });
   return account;
+};
+
+/** The words of the recoverer's own coins, made the first time they are needed. */
+const fundsWords = (): string => {
+  const known = kept('fundsWords');
+  if (known !== undefined) return known;
+  const words = generateBip39Mnemonic();
+  keep('fundsWords', words);
+  return words;
+};
+
+let funds: Promise<RecovererFunds> | undefined;
+/** For the fixtures page, which has no chain: the recoverer's coins as given. */
+export const useFixedFunds = (fixed: RecovererFunds): void => {
+  funds = Promise.resolve(fixed);
+};
+/**
+ * The recoverer's own coins: the engine of the page's first screens, from which wallets are created. A page that
+ * opens one wallet's credential instead loads again.
+ */
+export const fundsOf = (session: Session): Promise<RecovererFunds> => {
+  funds ??= credentialAccount(session, fundsWords())
+    .then((opened) => RecovererFunds.open({ backend: opened, chain: session.chain }))
+    .catch((error: unknown) => {
+      funds = undefined;
+      throw error;
+    });
+  return funds;
 };
 
 /** Open another wallet: the page loads again, so that its engine opens with that wallet's credential. */

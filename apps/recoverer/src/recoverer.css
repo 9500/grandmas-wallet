@@ -1,0 +1,8 @@
+/* The recoverer page's own shapes, beside the shared styles. */
+
+/* A code a phone scans: as large as the card allows, never more than a phone camera needs. */
+.code-box { display: flex; justify-content: center; }
+.code-box .qr-wrap { width: min(100%, 320px); }
+.code-box .qr { width: 100%; max-width: 300px; height: auto; }
+
+.funds .balance-main { font-size: 28px; }
