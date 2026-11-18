@@ -916,7 +916,30 @@ A wallet that holds an NFT and trusts this template fills the variables from the
 }
 ```
 
-The wallet finds the unspent coins at the companion script that carry the token's category; the position is the output at the stated distance in the same transaction. The declaration also has to say what makes a companion genuine: which contract must have created it, and what the position's own script and token must be. The wallet checks that. The category and the distance alone are not enough where the holder of a token could make look-alikes. If more than one candidate passes, or none can be checked, the wallet says so and picks none. The field that carries this check is still to be designed.
+The wallet finds the unspent coins at the companion script that carry the token's category; the position is the output at the stated distance in the same transaction. The declaration also has to say what makes a companion genuine: which contract must have created it, and what the position's own script and token must be. The wallet checks that. The category and the distance alone are not enough where the holder of a token could make look-alikes. If more than one candidate passes, or none can be checked, the wallet says so and picks none. The check is carried by a `genuine` entry beside `relative`:
+
+```
+"genuine": { "lockingScript": "loanLockingScript",
+             "variables": { "loanKey": "token.category", "terms": "companion.commitment" },
+             "tokenCategory": "…" }
+```
+
+The wallet builds the named script from the stated values and compares it with the script of the output the companion points at; with `tokenCategory`, that output must also carry a token of the category. A declaration with a companion and no `genuine` entry is refused. Naming the contract that must have created the companion is not part of this version; it is needed where a look-alike could carry the right script, and is to be added for ParyonUSD (section 15.2).
+
+**Where values come from.** A declaration takes each value from one of: `token.category`, `token.commitment`, `token.inputIndex` (the number of the input that spends the token), `companion.commitment`, `position.commitment`, `position.valueSatoshis`. A whole number is read from bytes as scripts write numbers. Anything else is a value the chain does not hold, and the position is then reported as incomplete.
+
+**The wallet's parts of an action.** For the wallet to operate a position with the application's site unavailable, the declaration also says what each action leaves to the wallet:
+
+```
+"actions": {
+  "open":     { "creates": "keyCategory", "outputs": { "keyHolder": "receive" } },
+  "withdraw": { "spends": "jarKey", "position": "savingsJarInput",
+                "outputs": { "keyHolder": "receive" },
+                "variables": { "keyCategory": "token.category", "keyInput": "token.inputIndex" } }
+}
+```
+
+`creates` names the variable that receives a new token category; `spends` the authority entry whose token the action spends; `position` the template input that each coin of the position is spent as; `outputs` the variables that hold a locking script of the wallet's, with the kind of each; `variables` what the wallet fills from the token and the chain. In the transaction the position's coins come first, then the token, then the wallet's other coins; the template's outputs come in the template's order, then what is left over, at a fresh address of chain 1. A request may state the same things (section 14.2); where it disagrees with the declaration, the wallet refuses.
 
 Until the declaration is part of XO's schema it travels as a document beside the template, naming the template by identifier and content hash, and is stored with it. Whether it belongs in the schema or stays a companion document is for XO to say. The field names above are proposals and have not been discussed with XO's authors.
 
@@ -967,8 +990,8 @@ The announcement lists no templates. A list of what the user trusts would tell e
 
 | Message | Direction | Meaning |
 | --- | --- | --- |
-| `xo_action_request` | application → wallet | The template's identifier and content hash, and the template with its recovery declaration if the wallet lacks it; the action; the role; the variables; which variables the wallet fills and with which kind; which of the wallet's tokens the action spends |
-| `xo_action_response` | wallet → application | Taken on, or refused with a reason |
+| `xo_action_request` | application → wallet | The template's identifier and content hash, and the content hash of its recovery declaration; the texts themselves when the wallet has answered that it lacks them; the action; the role; the variables; which variables the wallet fills and with which kind; the variable that receives the category of a token the action creates; which of the wallet's tokens the action spends |
+| `xo_action_response` | wallet → application | Taken on; refused with a reason; or "the template is needed", after which the same request is sent again with the texts |
 | `xo_invitation_update` | wallet → application | Approved by the user; sent |
 | `xo_action_result` | wallet → application | The transaction and the tokens the wallet received, or an error |
 | `xo_positions_request` / `xo_positions` | both | Which tokens of this template does the wallet hold? Answered only for a template the user trusted in a session with this application. |
@@ -980,7 +1003,7 @@ The wallet signs its own inputs with a type that covers every input and output: 
 ### 14.3 Rules the wallet follows
 
 - **An unknown template is shown to the user** with its name, description and actions, and is trusted only on their word. The wallet checks that the template is the one the request names, by identifier and content hash. The declaration, and anything else the template refers to, is bound by content hash in the same way; a later download does not replace it.
-- **The wallet states what it knows about a template: verified, a violation found, or not verified.** Verified means that the checks the wallet can run have passed, not that the contract was audited. Not verified is the ordinary state of a template the wallet meets for the first time; it is shown as such, and the user decides. A violation is named, with the rule it breaks and what that means for recovery. An unknown profile or version is refused.
+- **The wallet states what it knows about a template: verified, a violation found, or not verified.** Verified means that the checks the wallet can run have passed, not that the contract was audited. Not verified is the ordinary state of a template the wallet meets for the first time; it is shown as such, and the user decides. A violation is named, with the rule it breaks and what that means for recovery, and the wallet carries out no action of such a template. A template counts as verified once a token made with it has led to its position on chain as the declaration says; until then it is not verified. An unknown profile or version is refused.
 - **The user sees two things before approving:** the action in the template's words, and the wallet's own figures from the transaction it built: what goes where, what the wallet gives and gets, the fee, the earliest time. The application cannot influence the second.
 - **A request is carried out at most once.** It is identified by its id within the session's pairing; a repeat, or a reconnect, gets the stored outcome, and the same id with other content is refused.
 - **The application is never sent the identity, a viewing key, or anything about other applications.** It learns the addresses that appear in its own transactions. It can study the chain like anyone.
@@ -1008,7 +1031,7 @@ contract SavingsJar(bytes32 keyCategory, int unlockTime) {
 }
 ```
 
-- **The key.** Opening a jar creates one NFT of a fresh category, with no capability and no fungible amount, and sends it to the wallet. Its commitment is the unlock time, encoded as the script number the contract is built with.
+- **The key.** Opening a jar creates one NFT of a fresh category, with no capability and no fungible amount, and sends it to the wallet. Its commitment is the unlock time, encoded as the script number the contract is built with. A template's token field takes a value as text, so the template has the time twice: as a whole number for the script and the lock time, and as bytes for the commitment. The wallet refuses to open a jar whose key would not lead to it, which is the case when the two disagree.
 - **The jar's address follows from the key alone:** P2SH32 of `SavingsJar(key.category, key.commitment)`. That is rule 3.
 - **One contract for every wallet.** An ordinary wallet holds the key NFT at a P2PKH address and the application builds the transaction. This wallet holds it at a recoverable address and builds the transaction itself. The jar cannot tell the difference.
 
@@ -1016,7 +1039,7 @@ contract SavingsJar(bytes32 keyCategory, int unlockTime) {
 | --- | --- | --- |
 | Open | A coin of the wallet that is output 0 of its transaction (its transaction's identifier becomes the key's category); further coins as needed | The jar, with the first deposit; the key NFT to the wallet (`receive`); change |
 | Deposit | Any coins, from anyone | The jar |
-| Withdraw | The jar's coins; the key NFT, signed by its address key | The savings to the wallet (`receive`); the key NFT back to the wallet (`receive`) |
+| Withdraw | The jar's coins; the key NFT, signed by its address key | The key NFT back to the wallet (`receive`); the savings to the wallet, as what is left over after the fee, at a fresh address of chain 1 |
 
 Points for implementation:
 
