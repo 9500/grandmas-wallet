@@ -62,9 +62,11 @@ export const YourLink = ({ session }: { session: Session }) => {
           {link === undefined || shown === undefined ? (
             <Loading>Making the code…</Loading>
           ) : (
-            <div class="handoff with-qr">
-              <QrCode text={shown} label="QR code of your recoverer link" />
-              <div class="stack-s">
+            <div class="stack">
+              <div class="handoff with-qr">
+                <div data-testid="recoverer-code" data-value={shown}>
+                  <QrCode text={shown} label="QR code of your recoverer link" />
+                </div>
                 {reachable ? (
                   <SessionLine desk={desk} />
                 ) : (
@@ -72,6 +74,8 @@ export const YourLink = ({ session }: { session: Session }) => {
                     This page cannot open a connection just now. Their wallet gives them your kit as a link, which they send you.
                   </Status>
                 )}
+              </div>
+              <div class="stack-s">
                 <p class="small muted">Or send them this link as a message. It works at any time, with this page closed: their wallet then gives them your kit as a link, which you open on this page.</p>
                 <Value text={link} clamp copyLabel="Copy link" testId="recoverer-link" />
               </div>

@@ -17,7 +17,7 @@ export interface Environment {
   stores: string[];
   /** Electrum servers, the first being the one actions are checked against. Two or more for monitoring. */
   chain: string[];
-  /** Relays for connections between the wallet and applications. */
+  /** Relays for connections between the wallet and applications, and between the wallet and a recoverer's page. */
   relays: string[];
   /** Address of a block explorer page for a transaction, to which the transaction's identifier is appended. */
   explorer: string;

@@ -2,21 +2,27 @@ import '@grandmas-wallet/ui/styles.css';
 import './apps.css';
 
 import type { ActionPreview, HeldToken, TemplateSummary } from '@grandmas-wallet/app';
-import { Card, Field, Frame, TextArea, TextInput } from '@grandmas-wallet/ui';
+import { Button, Card, Field, Frame, HandOff, TextArea, TextInput } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useState } from 'preact/hooks';
 
 import { ActionReview } from './ActionReview.js';
 import { TokenRow } from './Apps.js';
+import { handToRecoverer } from './hand-to-recoverer.js';
 import type { Owner } from './OwnerApp.js';
+import { RecipientCheck, RecipientEntry } from './parts.js';
 import { RECOVERER_LINK, paymentAddress } from './scan.js';
 import { ScanDialog, WithScan } from './Scanner.js';
+import { SealedHandOff } from './SealedHandOff.js';
+import type { StoredRecipient } from './session.js';
 
 /*
- * Parts of the Applications screen, fed from fixed data, for looking at them in a browser without a wallet.
- * Served by the development server only (`fixtures.html?show=tokens|review|closing|scan`, and `&open` to show
- * the scanner already opened); the build of the page
- * does not include it. The template here is an invented example, as a template would describe itself.
+ * Parts of the wallet's screens, fed from fixed data, for looking at them in a browser without a wallet: the
+ * Applications screen (`fixtures.html?show=tokens|review|closing`), the fields that take a scanned code
+ * (`show=scan`, and `&open` to show the scanner already opened), and a recoverer's code taken in, with something
+ * sealed handed to the recoverer's page over the session the code offers (`show=recoverer`). Served by the
+ * development server; the build of the page does not include it. The template here is an invented example, as
+ * a template would describe itself, and what is handed to the recoverer is a sample that their page cannot open.
  */
 
 const CATEGORY = '5c1d8c7d635141a15d9d41747ebe30422ca50237c41c54c45714d09114439382';
@@ -175,6 +181,51 @@ const ScanFields = () => {
   );
 };
 
+/**
+ * A recoverer's code taken in as on the first step of making a wallet, and something sealed handed to their page
+ * as after the wallet is made. The sample is random bytes: the recoverer's page receives it and refuses it.
+ */
+const RecovererFixture = () => {
+  const [recipient, setRecipient] = useState<StoredRecipient | undefined>();
+  const [matched, setMatched] = useState(false);
+  const [sample, setSample] = useState<string | undefined>();
+  if (recipient === undefined) {
+    return (
+      <Card title="1. Your recoverer">
+        <RecipientEntry onRead={setRecipient} purpose="It holds their name and the key your wallet seals their kit to." />
+      </Card>
+    );
+  }
+  const name = recipient.name || 'your recoverer';
+  return (
+    <div class="stack">
+      <Card title="1. Your recoverer">
+        <RecipientCheck recipient={recipient} matched={matched} onMatched={setMatched} onClear={() => setRecipient(undefined)} />
+      </Card>
+      <Card title={`Send the recovery kit to ${name}`} tone="warn">
+        {sample === undefined ? (
+          <Button
+            disabled={!matched}
+            onClick={() => {
+              const sealed = crypto.getRandomValues(new Uint8Array(900));
+              handToRecoverer(recipient, 'enroll', sealed);
+              setSample(`${recipient.page}#enroll=sample`);
+            }}
+          >
+            Send a sample to their page
+          </Button>
+        ) : (
+          <SealedHandOff kind="enroll" name={name}>
+            <HandOff text={sample} qrLabel="QR code of the recovery kit link" copyLabel="Copy link" testId="kit-link">
+              <p>Send this link to {name}, by message or by letting them scan the code. Only they can open it.</p>
+            </HandOff>
+          </SealedHandOff>
+        )}
+      </Card>
+    </div>
+  );
+};
+
 const show = new URLSearchParams(window.location.search).get('show') ?? 'tokens';
 const owner = { apps: { applications: { suggestions: [] } } } as unknown as Owner;
 const ignore = () => undefined;
@@ -184,6 +235,8 @@ render(
     <div class="stack">
       {show === 'scan' ? (
         <ScanFields />
+      ) : show === 'recoverer' ? (
+        <RecovererFixture />
       ) : show === 'tokens' ? (
         <div class="grid two apps-layout">
           <Card title="Tokens">
