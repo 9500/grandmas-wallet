@@ -94,3 +94,20 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .token-actions button { flex: none; }
 
 .token-aside p { margin: 0; }
+
+/* What a position holds, in the template's words */
+.position-state { padding: 4px 12px; border-radius: var(--r-s); background: var(--sunken); }
+.position-state > .small { padding-top: 6px; }
+.position-state .kv > div { padding: 8px 0; }
+
+/* An action only the application's page can carry out */
+.token-actions > li.through-application { align-items: flex-start; }
+.token-action-name { font-weight: 600; }
+.needs-application { margin-top: 4px; color: var(--ink); }
+
+/* Tokens in a review */
+.moved-note { margin: -2px 0 6px; }
+.token-net { font-weight: 600; }
+.token-net.up { color: var(--good); }
+.moved-group .kv > div { padding: 8px 0; }
+.destroyed .moved-head > :last-child { flex: none; }

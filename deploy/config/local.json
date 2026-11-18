@@ -3,6 +3,7 @@
   "walletUrl": "http://localhost:8101/",
   "recovererUrl": "http://localhost:8102/",
   "jarUrl": "http://localhost:8103/",
+  "loanUrl": "http://localhost:8104/",
   "stores": ["http://localhost:8111", "http://localhost:8112"],
   "chain": ["wss://chipnet.9500.cash:443", "wss://chipnet.imaginary.cash:50004"],
   "relays": ["wss://relay.riften.net:443", "wss://relay.cauldron.quest:443"],

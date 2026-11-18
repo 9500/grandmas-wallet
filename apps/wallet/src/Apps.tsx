@@ -1,13 +1,12 @@
 import { binToHex } from '@bitauth/libauth';
-import { type ActionOutcome, type ActionPreview, type ApplicationAction, type HeldToken, type TemplateSummary, NotStoredError, actionOf, readDeclaration } from '@grandmas-wallet/app';
+import { type ActionOutcome, type ActionPreview, type ApplicationAction, type HeldToken, type TemplateSummary, type TokenAction, NotStoredError, actionOf } from '@grandmas-wallet/app';
 import { readLink } from '@grandmas-wallet/app/links';
 import type { LedgerEntry, Proposal } from '@grandmas-wallet/connect';
-import { readTemplate } from '@grandmas-wallet/core';
-import { Amount, Button, Card, Field, Loading, Notice, PageHead, Pill, Spinner, TaskStatus, TextArea, TextInput, Value, formatTime, lockingBytecodeOfAddress, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Field, KeyValues, Loading, Notice, PageHead, Pill, Spinner, TaskStatus, TextArea, TextInput, Value, formatTime, lockingBytecodeOfAddress, useTask } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
-import { ActionReview, Hex, Part, TemplateView, plainRefusal, refusalOf } from './ActionReview.js';
+import { ActionReview, Hex, Part, TemplateView, TypedValue, plainRefusal, refusalOf } from './ActionReview.js';
 import { type ApplicationsPart, type PositionsAsk, relayOf } from './connections.js';
 import type { Owner } from './OwnerApp.js';
 import { type Connection, keep, kept } from './session.js';
@@ -19,7 +18,7 @@ import './apps.css';
  * shows about one comes from the application's template, and its name for itself is marked as unverified.
  */
 
-type View = { at: 'main' } | { at: 'act'; token: HeldToken; action: NonNullable<HeldToken['actions']>[number] } | { at: 'trust'; token: HeldToken };
+type View = { at: 'main' } | { at: 'act'; token: HeldToken; action: TokenAction } | { at: 'trust'; token: HeldToken };
 
 /** Requests the user decided while the page has been open: their outcome stays on the screen until dismissed. */
 const followed = new Set<string>();
@@ -492,7 +491,23 @@ const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void 
   );
 };
 
-const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldToken; onView: (view: View) => void }) => {
+/** What a position holds, read from the chain as the template's declaration says, in the template's words. */
+const PositionState = ({ state }: { state: NonNullable<NonNullable<HeldToken['position']>['state']> }) => (
+  <div class="position-state">
+    <div class="small muted">In the template's words, read from the chain:</div>
+    <KeyValues
+      entries={state.map((entry) => [
+        <>
+          {entry.name}
+          {entry.description !== '' && <small>{entry.description}</small>}
+        </>,
+        <TypedValue type={entry.type} value={entry.value} />,
+      ])}
+    />
+  </div>
+);
+
+export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldToken; onView: (view: View) => void }) => {
   const status = token.meaning === 'position' ? token.position?.status : token.meaning;
   const shown = status === undefined ? undefined : STATUS[status];
   const suggestion = token.meaning === 'incomplete' && token.template !== undefined ? owner.apps.applications.suggestions.find((candidate) => candidate.identifier === token.template?.identifier) : undefined;
@@ -527,14 +542,21 @@ const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldToken; on
           {position.status === 'closed' && <p>It holds nothing now.</p>}
           {position.status === 'ambiguous' && <p>The wallet cannot tell which coin on the chain this token controls, and picks none.</p>}
           {position.note !== undefined && position.note !== 'It holds nothing now.' && <p class="small muted">{position.note}</p>}
+          {position.status === 'open' && (position.state ?? []).length > 0 && <PositionState state={position.state ?? []} />}
           {(token.actions ?? []).length > 0 && (
             <ul class="token-actions">
               {(token.actions ?? []).map((action) => (
-                <li>
-                  <div class="small muted">{action.description !== '' ? action.description : 'An action of the template.'}</div>
-                  <Button small kind="secondary" disabled={!usable} onClick={() => onView({ at: 'act', token, action })}>
-                    {action.name}
-                  </Button>
+                <li class={action.needsApplication === undefined ? undefined : 'through-application'}>
+                  <div>
+                    {action.needsApplication !== undefined && <div class="token-action-name">{action.name}</div>}
+                    <div class="small muted">{action.description !== '' ? action.description : 'An action of the template.'}</div>
+                    {action.needsApplication !== undefined && <div class="small needs-application">Only from the application's own page. {action.needsApplication}</div>}
+                  </div>
+                  {action.needsApplication === undefined && (
+                    <Button small kind="secondary" disabled={!usable} onClick={() => onView({ at: 'act', token, action })}>
+                      {action.name}
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -572,31 +594,7 @@ const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldToken; on
 
 // ------------------------------------------------------------------ acting on a position from the wallet
 
-interface Wanted {
-  variable: string;
-  name: string;
-  description: string;
-  type: string;
-}
-
-/**
- * The values an action needs that neither the wallet nor the token supplies: what the role requires, less
- * what the template's declaration says the wallet fills.
- */
-const wantedFor = (owner: Owner, token: HeldToken, action: string, role: string): Wanted[] => {
-  const trusted = owner.apps.applications.templates.find((template) => template.identifier === token.template?.identifier);
-  if (trusted === undefined) return [];
-  const { definition } = readTemplate(trusted.text);
-  const required = (definition.actions?.[action]?.roles?.[role]?.requirements?.variables ?? []) as string[];
-  const entry = trusted.declaration === undefined ? undefined : readDeclaration(trusted.declaration.text).declaration.actions[action];
-  const filled = new Set([...Object.keys(entry?.outputs ?? {}), ...Object.keys(entry?.variables ?? {}), ...(entry?.creates === undefined ? [] : [entry.creates])]);
-  return required
-    .filter((variable) => !filled.has(variable))
-    .map((variable) => {
-      const described = definition.variables?.[variable] as { name?: string; description?: string; type?: string } | undefined;
-      return { variable, name: described?.name ?? variable, description: described?.description ?? '', type: described?.type ?? '' };
-    });
-};
+type Wanted = NonNullable<TokenAction['asks']>[number];
 
 const NUMBERS = new Set(['satoshis', 'integer', 'bigint', 'token_amount']);
 
@@ -636,10 +634,15 @@ const valueOf = (wanted: Wanted, text: string, network: Owner['session']['networ
 
 type Acting = { at: 'form' } | { at: 'review'; request: ApplicationAction; preview: ActionPreview } | { at: 'refused'; reason: string } | { at: 'done'; outcome: ActionOutcome } | { at: 'failed'; reason: string; notStored: boolean };
 
-const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: HeldToken; action: NonNullable<HeldToken['actions']>[number]; onBack: () => void }) => {
+const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: HeldToken; action: TokenAction; onBack: () => void }) => {
   const { applications } = owner.apps;
-  const wanted = useMemo(() => wantedFor(owner, token, action.action, action.role), []);
-  const [values, setValues] = useState<Record<string, string>>({});
+  // What the user gives: the library says which values neither the token nor the chain supplies.
+  const wanted: Wanted[] = action.asks ?? [];
+  // A value the position holds now, as the template reads it from the chain, is where the user starts from.
+  const [prefilled] = useState<Record<string, string>>(() =>
+    Object.fromEntries(wanted.flatMap((item) => token.position?.state?.filter((entry) => entry.variable === item.variable).map((entry) => [item.variable, entry.value]) ?? [])),
+  );
+  const [values, setValues] = useState<Record<string, string>>(prefilled);
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [acting, setActing] = useState<Acting>({ at: 'form' });
   const task = useTask();
@@ -685,7 +688,7 @@ const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: Hel
         <div class="stack">
           {acting.at === 'form' && wanted.length > 0 && (
             <Card title="What the action needs">
-              <p class="small muted card-lead">The template asks for these values. Their names and descriptions are the template's.</p>
+              <p class="small muted card-lead">The template asks for these values. Their names and descriptions are the template's.{Object.keys(prefilled).length > 0 && ' Where the position holds a value now, the field starts with it.'}</p>
               {wanted.map((item) => (
                 <Field label={item.name} id={`value-${item.variable}`} hint={hintOf(item)} error={problems[item.variable]}>
                   {item.type === 'satoshis' ? (
@@ -787,6 +790,7 @@ const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: Hel
                   Holds <Amount satoshis={token.position.satoshis} exact />
                 </p>
               )}
+              {token.position?.status === 'open' && (token.position.state ?? []).length > 0 && <PositionState state={token.position.state ?? []} />}
               <p class="small muted">You act from the wallet itself. Everything comes from the token, the template you trust and the chain; no application is asked.</p>
             </div>
           </Card>

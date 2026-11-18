@@ -1,0 +1,98 @@
+/*
+ * The loan page: the visual system of the wallet and recoverer pages, with an accent of its own, so that it is
+ * taken neither for the wallet nor for anyone else's site. Only what those pages do not have is added here.
+ */
+
+:root[data-role='application'] {
+  --accent: #2f5d8a;
+  --accent-soft: #e6eef6;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-role='application'] {
+    --accent: #8fb8e0;
+    --accent-ink: #0e1b28;
+    --accent-soft: #1d2b3a;
+  }
+}
+
+/* One column on a phone; on a desktop the loans beside the form for a new one. */
+:root[data-role='application'] .narrow .content { max-width: 1040px; }
+.columns { display: grid; gap: 16px; align-items: start; }
+@media (min-width: 960px) {
+  .columns { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; }
+  .columns > .stack { gap: 24px; }
+}
+
+.lead { color: var(--muted); font-size: 17px; max-width: 42em; }
+@media (min-width: 960px) { .intro { margin-bottom: 8px; } }
+
+/* whose page this is */
+.independent {
+  padding: 12px 14px; border-radius: var(--r-s); border: 1px solid var(--line); background: var(--surface);
+  font-size: 14px; color: var(--muted); border-left: 3px solid var(--accent);
+}
+.independent strong { color: var(--ink); font-weight: 650; }
+
+.how { margin: 0; padding: 0; list-style: none; counter-reset: how; }
+.how > li { counter-increment: how; position: relative; padding-left: 36px; margin: 0; }
+.how > li + li { margin-top: 14px; }
+.how > li::before {
+  content: counter(how); position: absolute; left: 0; top: 1px; width: 24px; height: 24px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 13px; font-weight: 700; background: var(--accent-soft); color: var(--accent);
+}
+.how strong { display: block; font-weight: 650; }
+.how span { color: var(--muted); font-size: 15px; }
+
+.link-state { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; margin-top: 12px; }
+
+.connected { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.connected .status { flex: 1 1 16em; min-width: 0; }
+.connected button { flex: none; }
+
+/* a loan */
+.loans { list-style: none; margin: 0; padding: 0; }
+.loan { margin: 0; padding: 16px 0; border-top: 1px solid var(--line); }
+.loan:first-child { border-top: 0; padding-top: 4px; }
+.loan:last-child { padding-bottom: 0; }
+.loan-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.loan-amount { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.loan-amount .unit { font-size: 15px; font-weight: 600; color: var(--muted); margin-left: 5px; letter-spacing: 0; }
+.loan-amount.nothing { color: var(--muted); font-size: 20px; }
+.loan .kv > div { padding: 8px 0; }
+.ratio.low { color: var(--warn, var(--bad)); font-weight: 600; }
+.loan-key { margin-top: 6px; }
+.loan-note { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+.loan-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.loan-actions > button { flex: 1 1 auto; }
+@media (min-width: 600px) { .loan-actions > button { flex: 0 0 auto; } }
+.loan .notice { margin-top: 12px; }
+
+.panel { margin-top: 12px; padding: 12px; border-radius: var(--r-s); background: var(--sunken); border: 1px solid var(--line); }
+.panel .field { margin: 12px 0; }
+.panel > p { margin: 0 0 12px; }
+.panel .seg button { white-space: nowrap; }
+.inline-form { display: flex; gap: 8px; align-items: flex-start; }
+.inline-form .input-unit { flex: 1 1 auto; min-width: 0; }
+.inline-form button { flex: none; }
+
+/* a new loan, in three steps */
+.new-steps { display: flex; flex-direction: column; }
+.new-step { padding: 14px 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.new-step:first-child { border-top: 0; padding-top: 0; }
+.new-step > p { margin: 0; }
+.new-step > .field, .new-step > .summary, .new-step > button.block, .new-step > .notice { align-self: stretch; }
+.new-step .field { margin-bottom: 4px; }
+.new-step-head { display: flex; align-items: center; gap: 10px; }
+.new-step-number {
+  width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  font-size: 13px; font-weight: 700; background: var(--accent-soft); color: var(--accent);
+}
+.new-step-head.done .new-step-number { background: var(--good-soft); color: var(--good); }
+.summary { padding: 4px 12px 10px; border-radius: var(--r-s); background: var(--accent-soft); }
+.summary .kv > div { padding: 8px 0; border-color: color-mix(in srgb, var(--accent) 18%, transparent); }
+.summary p { margin: 4px 0 0; }
+
+/* what is on its way */
+.on-way .card-head { margin-bottom: 8px; }
+.on-way .notice { margin-top: 12px; }
+.form-foot { margin-top: 12px; }

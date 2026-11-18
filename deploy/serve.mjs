@@ -3,6 +3,8 @@
 //
 // usage: node deploy/serve.mjs --root apps/wallet/dist --config deploy/config/local.json --host 127.0.0.1 --port 8101
 //        [--version <file>]   a record of what was released, shown at /version.json
+//        [--connect <origin>] another server this page alone may talk to (repeatable): the loan page reads the
+//                             oracle's prices this way, and the other pages are not given it
 import { execFileSync } from 'node:child_process';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -36,6 +38,9 @@ const version = (() => {
   }
 })();
 
+/** Servers named for this page alone. */
+const extra = process.argv.flatMap((word, index) => (word === '--connect' && process.argv[index + 1] !== undefined ? [process.argv[index + 1]] : []));
+
 // The Electrum servers the XO engine connects to by itself on this network.
 const ENGINE_SERVERS = { chipnet: ['wss://chipnet.imaginary.cash:50004', 'wss://chipnet.bch.ninja:50004'] };
 
@@ -46,7 +51,7 @@ const contentSecurityPolicy = [
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self'",
   "img-src 'self' data:",
-  `connect-src 'self' ${[...config.chain, ...config.stores, ...config.relays, ...(ENGINE_SERVERS[config.network] ?? [])].join(' ')}`,
+  `connect-src 'self' ${[...config.chain, ...config.stores, ...config.relays, ...(ENGINE_SERVERS[config.network] ?? []), ...extra].join(' ')}`,
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",

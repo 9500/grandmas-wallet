@@ -1,0 +1,10 @@
+{
+  "network": "chipnet",
+  "walletUrl": "http://localhost:8101/",
+  "recovererUrl": "http://localhost:8102/",
+  "stores": ["http://localhost:8111", "http://localhost:8112"],
+  "chain": ["wss://chipnet.9500.cash:443", "wss://chipnet.imaginary.cash:50004"],
+  "relays": ["wss://relay.riften.net:443", "wss://relay.cauldron.quest:443"],
+  "explorer": "https://chipnet.imaginary.cash/tx/",
+  "secondsPerBlock": 60
+}

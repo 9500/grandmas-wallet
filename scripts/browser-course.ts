@@ -4,7 +4,8 @@
 // a recoverer gives its link, the owner makes a wallet with it, the recoverer keeps the kit, the owner receives.
 //
 // The first argument of a course is `local` (the default) or `chipnet`; `--screens` takes screenshots and
-// `--headed` shows the browser.
+// `--headed` shows the browser. On chipnet, `--local-pages` serves the pages of this checkout on this machine
+// (deploy/config/local.json) instead of using the public ones.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -20,10 +21,14 @@ export const argument = (name: string): string | undefined => {
 };
 export const takeScreens = process.argv.includes('--screens');
 export const headed = process.argv.includes('--headed');
-export const config = JSON.parse(readFileSync(`${root}deploy/config/${chipnet ? 'production' : 'local-regtest'}.json`, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl: string; network: string };
+/** On chipnet: the pages of this checkout, served on this machine, instead of the public ones. */
+export const localPages = !chipnet || process.argv.includes('--local-pages');
+const configName = chipnet ? (localPages ? 'local' : 'production') : 'local-regtest';
+export const config = JSON.parse(readFileSync(`${root}deploy/config/${configName}.json`, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl: string; loanUrl?: string; network: string; relays?: string[] };
 export const WALLET = config.walletUrl;
 export const RECOVERER = config.recovererUrl;
 export const JAR = config.jarUrl;
+export const LOAN = config.loanUrl ?? 'http://localhost:8104/';
 /** On chipnet a block takes about a minute and may take several: every wait is given ten times as long. */
 export const patience = chipnet ? 10 : 1;
 export const PHONE = { width: 390, height: 844 };
@@ -38,8 +43,10 @@ export interface Device {
   page: Page;
 }
 
-type App = 'wallet' | 'recoverer' | 'jar';
-const PORTS: Record<App, number> = { wallet: 8101, recoverer: 8102, jar: 8103 };
+type App = 'wallet' | 'recoverer' | 'jar' | 'loan';
+const PORTS: Record<App, number> = { wallet: 8101, recoverer: 8102, jar: 8103, loan: 8104 };
+/** Servers a page alone may talk to, besides those of the configuration. */
+const EXTRA: Partial<Record<App, string[]>> = { loan: ['--connect', 'https://oracles.generalprotocols.com'] };
 
 /**
  * A course: its log, its devices and its servers.
@@ -98,9 +105,9 @@ export const course = (options: { directory: string; continuing: boolean; until:
     if (!(await answers(url))) throw new Error(`${name} did not start`);
   };
 
-  /** What a run needs before its first step: the public pages' version on chipnet, or the pages and stores of this checkout on the local node. */
+  /** What a run needs before its first step: the public pages' version on chipnet, or the pages and stores of this checkout on this machine. */
   const prepare = async (apps: App[]): Promise<void> => {
-    if (chipnet) {
+    if (chipnet && !localPages) {
       for (const app of apps) {
         const url = app === 'wallet' ? WALLET : app === 'recoverer' ? RECOVERER : JAR;
         const version = (await (await fetch(`${url}version.json`)).json()) as { commit?: string; branch?: string; network?: string; releasedAt?: string };
@@ -110,7 +117,8 @@ export const course = (options: { directory: string; continuing: boolean; until:
       log(`funding address: ${run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'balance'])}`);
       return;
     }
-    log(`local node: ${run(`${root}deploy/regtest/regtest.sh`, ['status']).split('\n')[0]}`);
+    if (chipnet) log(`funding address: ${run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'balance'])}`);
+    else log(`local node: ${run(`${root}deploy/regtest/regtest.sh`, ['status']).split('\n')[0]}`);
     for (const app of apps) if (!existsSync(`${root}apps/${app}/dist/index.html`)) throw new Error(`apps/${app} is not built`);
     mkdirSync(`${work}store1`, { recursive: true });
     mkdirSync(`${work}store2`, { recursive: true });
@@ -120,7 +128,10 @@ export const course = (options: { directory: string; continuing: boolean; until:
     // Each is started as a process of its own, not through a wrapper, so that it ends when the run does.
     for (const app of apps) {
       const port = PORTS[app];
-      await serve(`http://127.0.0.1:${port}/`, process.execPath, ['deploy/serve.mjs', '--root', `apps/${app}/dist`, '--config', 'deploy/config/local-regtest.json', '--host', '127.0.0.1', '--port', String(port)], `the ${app} page`);
+      await serve(`http://127.0.0.1:${port}/`, process.execPath, ['deploy/serve.mjs', '--root', `apps/${app}/dist`, '--config', `deploy/config/${configName}.json`, '--host', '127.0.0.1', '--port', String(port), ...(EXTRA[app] ?? [])], `the ${app} page`);
+      const served = (await (await fetch(`http://127.0.0.1:${port}/version.json`)).json()) as { commit?: string; network?: string };
+      if (served.network !== config.network) throw new Error(`the ${app} page on port ${port} serves ${served.network}, not ${config.network}: something else answers there`);
+      log(`${app} page: http://localhost:${port}/, this checkout at ${served.commit}, ${served.network}`);
     }
   };
 
@@ -260,6 +271,8 @@ export const balanceOf = async (page: Page): Promise<bigint> => {
 export const firstSteps = async (
   { begin, device, log, pay, mine }: Course,
   shoot: (page: Page, name: string) => Promise<void>,
+  /** Called once the owner's wallet has its words and before anything is paid to it: to keep them on disk. */
+  beforeFunding: (old: Device) => Promise<void> = async () => undefined,
 ): Promise<{ recoverer: Device; old: Device; recovererLink: string } | undefined> => {
   // 1 ------------------------------------------------------------------
   if (!begin('The recoverer opens its page and gives its link')) return;
@@ -294,6 +307,7 @@ export const firstSteps = async (
   const funding = await valueOf(old.page, 'funding-address');
   log(`   funding address ${funding}`);
   await shoot(old.page, 'wallet-create-funding');
+  await beforeFunding(old);
   log(`   ${pay(funding, 120_000)}`);
   await click(old.page, 'Create the wallet');
   await see(old.page, 'Waiting for the network to put the new wallet in a block');

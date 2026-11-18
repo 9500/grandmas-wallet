@@ -189,8 +189,8 @@ describe('a ParyonUSD loan through the wallet, from the template (PY02)', () => 
     const loan = await loanOf(device, keyCategory);
     expect(loan).toMatchObject({ meaning: 'position', authority: 'loanKey', place: 'address', position: { status: 'open', satoshis: COLLATERAL } });
     expect(loan.position?.state).toEqual([
-      { variable: 'debt', name: 'Debt', description: 'PUSD borrowed, in cents.', value: String(DEBT) },
-      { variable: 'collateral', name: 'Collateral', description: 'Satoshis the loan holds as collateral.', value: String(COLLATERAL) },
+      { variable: 'debt', name: 'Debt', description: 'PUSD borrowed, in cents.', type: 'token_amount', value: String(DEBT) },
+      { variable: 'collateral', name: 'Collateral', description: 'Satoshis the loan holds as collateral.', type: 'satoshis', value: String(COLLATERAL) },
     ]);
     expect(loan.actions?.map(({ action, asks, needsApplication }) => ({ action, asks: asks?.map(({ variable }) => variable), needs: needsApplication !== undefined }))).toEqual([
       { action: 'manage', asks: ['collateral'], needs: false },

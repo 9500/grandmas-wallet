@@ -27,6 +27,15 @@
 //   npx tsx ../../scripts/run-e-template.ts local
 //   npx tsx ../../scripts/run-e-template.ts chipnet        with the engine's header fix: node patches/chipnet-faster-blocks.mjs
 //   npx tsx ../../scripts/run-e-template.ts <chain> --emergency-close [earlier|new]
+//   npx tsx ../../scripts/run-e-template.ts <chain> --emergency-close [earlier|new] --prove
+//                       the same closing, built, checked and tried with testmempoolaccept, and not sent
+//   npx tsx ../../scripts/run-e-template.ts <chain> --check-course
+//                       before borrowing: the whole course built by step 1's builders from the earlier seed's own
+//                       coin against Paryon's outputs as they are, and checked in the virtual machine; nothing sent
+//
+//   --state=<file>      the facts of another run instead of this run's own: the browser course of stage 9
+//                       (scripts/browser-run-loan.ts) writes its wallets' words there before it funds them, so
+//                       that its loan can be checked and closed from them without the browser
 //
 //   STOP_AFTER=<step>   the run stops after the named step, to be continued with the same command
 import 'fake-indexeddb/auto';
@@ -118,6 +127,13 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const words = process.argv.slice(2).filter((word) => !word.startsWith('--'));
 const [chainName, phase] = words;
 const emergency = process.argv.includes('--emergency-close');
+const proveOnly = process.argv.includes('--prove');
+const checkCourseOnly = process.argv.includes('--check-course');
+const otherState = process.argv.find((word) => word.startsWith('--state='))?.slice('--state='.length);
+if (otherState !== undefined && !emergency && !checkCourseOnly) {
+  console.error('--state= is for --emergency-close and --check-course only: the run itself keeps its own facts.');
+  process.exit(2);
+}
 if (chainName !== 'local' && chainName !== 'chipnet') {
   console.error('usage: npx tsx ../../scripts/run-e-template.ts <local|chipnet> [--emergency-close [earlier|new]]');
   process.exit(2);
@@ -127,7 +143,7 @@ const local = chainName === 'local';
 const STOPPED = 3;
 const PHASES = ['the owner opens a loan', 'the recoverer recovers', 'the new device closes the loan', 'the recoverer returns its fee coins', 'the run returns what is left'];
 mkdirSync(`${root}.chipnet`, { recursive: true });
-const stateFile = `${root}.chipnet/run-e-template-${chainName}.json`;
+const stateFile = otherState ?? `${root}.chipnet/run-e-template-${chainName}.json`;
 const storeDirectory = `${root}.chipnet/run-e-template-${chainName}-stores`;
 const logFile = `${root}docs/runs/stage-9-template-${local ? 'local-node' : 'chipnet'}.md`;
 
@@ -180,7 +196,7 @@ interface Facts {
 
 // ------------------------------------------------------------------ the driver: one process for each part
 
-if (phase === undefined && !emergency) {
+if (phase === undefined && !emergency && !checkCourseOnly) {
   if (local && !existsSync(stateFile) && Number(execFileSync(`${root}deploy/regtest/regtest.sh`, ['cli', 'getblockcount'], { encoding: 'utf8' })) > 2500) {
     console.error('The local chain is long and its block rewards are small. Start a new one: deploy/regtest/regtest.sh reset');
     process.exit(1);
@@ -300,9 +316,10 @@ const until = async <T>(what: string, check: () => Promise<T | undefined | false
 console.error = () => undefined;
 
 const numbers = walletTemplateNumbers();
-const credential = deriveCredentialKeys(facts.words.credential, 'testnet', numbers);
+// Another run's facts may name only the words it has so far: the recoverer's and the new device's are then absent.
+const credential = (facts.words.credential === '' ? undefined : deriveCredentialKeys(facts.words.credential, 'testnet', numbers)) as ReturnType<typeof deriveCredentialKeys>;
 const ownerSeed = deriveSeedKeys(facts.words.owner, 'testnet', numbers);
-const newSeed = deriveSeedKeys(facts.words.next, 'testnet', numbers);
+const newSeed = (facts.words.next === '' ? undefined : deriveSeedKeys(facts.words.next, 'testnet', numbers)) as SeedKeys;
 
 const server = await Electrum.connect(local ? 'ws://127.0.0.1:60403' : 'wss://chipnet.9500.cash:443');
 const chain: ChainReader = {
@@ -648,12 +665,64 @@ const walletSees = async (wallet: OwnerWallet, transactionId: string): Promise<v
 
 if (emergency) {
   const which = words[1] === 'new' ? 'new' : words[1] === 'earlier' ? 'earlier' : facts.steps['the new device sweeps'] === undefined ? 'earlier' : 'new';
-  say(`emergency: closing the loan by plain script with the ${which} seed's keys`);
+  say(`${proveOnly ? 'the way out' : 'emergency'}: closing the loan by plain script with the ${which} seed's keys${proveOnly ? ', not sent' : ''}`);
   try {
-    const built = await plainClose(which === 'new' ? newSeed : ownerSeed, true);
-    say(`  sent ${built.transactionId}: the collateral (less the fee) and the key to the address that paid for the run`);
-    facts.notes.push(`EMERGENCY: the loan was closed by plain script with the ${which} seed in ${built.transactionId}.`);
-    keep();
+    if (which === 'new' && newSeed === undefined) throw new Error('the facts name no words of a new device');
+    const built = await plainClose(which === 'new' ? newSeed : ownerSeed, !proveOnly);
+    const found = await findLoan(server, contracts(), hexToBin(facts.keyCategory as string));
+    if (proveOnly) {
+      say(`  PROVEN: the closing ${built.transactionId} (${built.encoded.length} bytes, fee ${built.feeSatoshis} sat) against the loan at ${hex(found?.loan.transactionHash ?? new Uint8Array())}:${found?.loan.index} with ${found?.loan.output.valueSatoshis} sat passed the virtual machine and testmempoolaccept; it was not sent`);
+    } else {
+      say(`  sent ${built.transactionId}: the collateral (less the fee) and the key to the address that paid for the run`);
+      facts.notes.push(`EMERGENCY: the loan was closed by plain script with the ${which} seed in ${built.transactionId}.`);
+      keep();
+    }
+  } catch (error) {
+    say(`FAILED: ${String((error as Error).message)}`);
+    process.exitCode = STOPPED;
+  } finally {
+    await server.disconnect().catch(() => undefined);
+    process.exit();
+  }
+}
+
+// ------------------------------------------------------------------ the course, checked before borrowing
+
+/**
+ * The whole course (create a loan key, move the Borrowing thread on, borrow, add collateral, close), built by
+ * step 1's builders against Paryon's outputs as they are and a coin of the seed that is output 0, chained, and
+ * every input of every transaction evaluated in the virtual machine. Nothing is sent.
+ */
+const checkCourse = (state: ParyonState, price: Prices, coin: Utxo, seed: SeedKeys, height: number): bigint => {
+  const to = coin.output.lockingBytecode;
+  const spend = (utxo: Utxo): InputSpec => spendByKey(seed, { ...utxo, output: { ...utxo.output, lockingBytecode: to } });
+  const made = createLoanKey({ contracts: contracts(), factory: pick(state.loanKeyFactory, 'factory'), defining: spendByKey(seed, coin), changeTo: to });
+  verified(made.built, 'creating a loan key (planned)');
+  const thread = state.borrowing.slice().sort((a, b) => Number(b.supply - a.supply))[0] as ParyonState['borrowing'][number];
+  const moved = updateBorrowingPeriod({ contracts: contracts(), borrowing: thread, wallet: [spend(made.change)], height, changeTo: to });
+  verified(moved.built, 'moving the Borrowing thread on (planned)');
+  const fee = borrowingFee(DEBT, priceThread(state).state.price);
+  const room = moved.change.output.valueSatoshis - fee - MANAGE_ADD - MARGIN;
+  const collateral = collateralAtRatio(DEBT, price.lower, TARGET_PERCENT) < room ? collateralAtRatio(DEBT, price.lower, TARGET_PERCENT) : room;
+  const opened = borrow({ contracts: contracts(), borrowing: moved.borrowing, price: priceThread(state), enforcer: made.enforcer, proof: made.proof, wallet: [spend(moved.change)], debt: DEBT, collateral, startingInterest: STARTING_INTEREST, keyTo: to, tokensTo: to, changeTo: to });
+  verified(opened.built, 'borrowing (planned)');
+  const added = manageLoan({ contracts: contracts(), price: opened.price, loan: opened.loan, sidecar: opened.sidecar, manageFunction: pick(state.manage, 'manage function'), key: spend(opened.key), wallet: [spend(opened.change)], repay: 0n, collateral: collateral + MANAGE_ADD, changeTo: to });
+  verified(added.built, 'managing (planned)');
+  const closed = closeLoan({ contracts: contracts(), price: added.price, loan: added.loan, sidecar: added.sidecar, manageFunction: added.manageFunction, key: spend(added.key), wallet: [spend(opened.tokens)], keyTo: to, changeTo: to });
+  verified(closed.built, 'closing (planned)');
+  return collateral;
+};
+
+if (checkCourseOnly) {
+  try {
+    const identity = hexToBin(facts.identity as string);
+    const state = await readParyon();
+    const price = await prices(state);
+    const coins = (await quickPass(chain, identity, ownerSeed.viewingKey)).found.flatMap((address) => address.coins).map((found) => found.utxo).filter((utxo) => utxo.index === 0 && utxo.output.token === undefined);
+    const [coin] = coins.sort((a, b) => (a.output.valueSatoshis > b.output.valueSatoshis ? -1 : 1));
+    if (coin === undefined) throw new Error('the seed holds no coin that is output 0');
+    const collateral = checkCourse(state, price, coin, ownerSeed, await lockHeight());
+    say(`CHECKED: the whole course (create a loan key, move the Borrowing thread on, borrow 100.00 PUSD against ${collateral} sat, ${collateralRatio(collateral, DEBT, price.lower)}% at ${dollars(price.lower)}, add ${MANAGE_ADD} sat, close) from the coin ${hex(coin.transactionHash)}:0 of ${coin.output.valueSatoshis} sat, against Paryon's outputs as they are: every input of every transaction passed the virtual machine (2026 and 2025 rules, standard). Nothing was sent. Stored ${dollars(price.stored)}, oracle ${dollars(price.oracle)}.`);
   } catch (error) {
     say(`FAILED: ${String((error as Error).message)}`);
     process.exitCode = STOPPED;
@@ -764,21 +833,7 @@ try {
       const price = await prices(state);
       const [coin] = (await wallet.parts.ownCoins()).filter((candidate) => candidate.utxo.index === 0).sort((a, b) => (a.utxo.output.valueSatoshis > b.utxo.output.valueSatoshis ? -1 : 1));
       if (coin === undefined) throw new Error('the wallet holds no coin that is output 0');
-      const to = coin.utxo.output.lockingBytecode;
-      const spend = (utxo: Utxo): InputSpec => spendByKey(ownerSeed, { ...utxo, output: { ...utxo.output, lockingBytecode: to } });
-      const made = createLoanKey({ contracts: contracts(), factory: pick(state.loanKeyFactory, 'factory'), defining: spendByKey(ownerSeed, coin.utxo), changeTo: to });
-      verified(made.built, 'creating a loan key (planned)');
-      const thread = state.borrowing.slice().sort((a, b) => Number(b.supply - a.supply))[0] as ParyonState['borrowing'][number];
-      const moved = updateBorrowingPeriod({ contracts: contracts(), borrowing: thread, wallet: [spend(made.change)], height: await lockHeight(), changeTo: to });
-      verified(moved.built, 'moving the Borrowing thread on (planned)');
-      const fee = borrowingFee(DEBT, priceThread(state).state.price);
-      const collateral = collateralAtRatio(DEBT, price.lower, TARGET_PERCENT) < moved.change.output.valueSatoshis - fee - MANAGE_ADD - MARGIN ? collateralAtRatio(DEBT, price.lower, TARGET_PERCENT) : moved.change.output.valueSatoshis - fee - MANAGE_ADD - MARGIN;
-      const opened = borrow({ contracts: contracts(), borrowing: moved.borrowing, price: priceThread(state), enforcer: made.enforcer, proof: made.proof, wallet: [spend(moved.change)], debt: DEBT, collateral, startingInterest: STARTING_INTEREST, keyTo: to, tokensTo: to, changeTo: to });
-      verified(opened.built, 'borrowing (planned)');
-      const added = manageLoan({ contracts: contracts(), price: opened.price, loan: opened.loan, sidecar: opened.sidecar, manageFunction: pick(state.manage, 'manage function'), key: spend(opened.key), wallet: [spend(opened.change)], repay: 0n, collateral: collateral + MANAGE_ADD, changeTo: to });
-      verified(added.built, 'managing (planned)');
-      const closed = closeLoan({ contracts: contracts(), price: added.price, loan: added.loan, sidecar: added.sidecar, manageFunction: added.manageFunction, key: spend(added.key), wallet: [spend(opened.tokens)], keyTo: to, changeTo: to });
-      verified(closed.built, 'closing (planned)');
+      checkCourse(state, price, coin.utxo, ownerSeed, await lockHeight());
       note('Before anything of the loan was sent, the whole course (5 transactions: create a loan key, move the Borrowing thread on, borrow, manage, close) was built by step 1\'s builders against Paryon\'s outputs as they were and the wallet\'s actual coin, chained, and every input of every transaction passed the virtual machine (2026 and 2025 rules, standard). The wallet then worked each transaction out again from the template, and evaluated it in the virtual machine before it was signed.');
       return undefined;
     });

@@ -145,7 +145,21 @@ const KINDS: Record<string, string> = {
   return: 'back where it came from',
   lasting: 'to a vault address, for a later payout',
   'left over': 'what is left over, as change',
+  'token change': 'tokens left over, as change',
 };
+
+/** A value of a template's variable, shown by the template's type for it: satoshis as an amount, numbers grouped, bytes shortened. */
+export const TypedValue = ({ type, value }: { type: string; value: string }) => {
+  if (/^-?\d+$/.test(value)) {
+    if (type === 'satoshis') return <Amount satoshis={BigInt(value)} exact />;
+    if (type === 'token_amount') return <span class="word-value">{BigInt(value).toLocaleString('en-US')} units</span>;
+    if (type === 'integer' || type === 'bigint') return <span class="word-value">{BigInt(value).toLocaleString('en-US')}</span>;
+  }
+  return /^[0-9a-f]{24,}$/i.test(value) ? <Hex value={value} /> : <span class="word-value">{value}</span>;
+};
+
+/** Fungible tokens, more or fewer, in plain words. */
+const tokenAmount = (amount: bigint): string => `${(amount < 0n ? -amount : amount).toLocaleString('en-US')} ${amount === 1n || amount === -1n ? 'unit' : 'units'}`;
 
 /** The earliest time the network accepts a transaction: a Unix time from 500,000,000, else a block height. */
 export const earliest = (notBefore: number): string => (notBefore >= 500_000_000 ? formatTime(notBefore) : `block ${notBefore.toLocaleString('en-US')}`);
@@ -167,24 +181,78 @@ const Moved = ({ output, label }: { output: MovedOutput; label: ComponentChildre
 /** The wallet's own figures from the transaction it worked out. The application cannot influence them. */
 export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) => {
   const net = figures.getsSatoshis - figures.givesSatoshis;
+  const into = figures.intoApplicationSatoshis;
   const rows: [ComponentChildren, ComponentChildren][] = [
     [<>Leaves your wallet<small>The coins it spends, token coins included</small></>, <Amount satoshis={figures.givesSatoshis} exact />],
     [<>Comes back to your wallet</>, <Amount satoshis={figures.getsSatoshis} exact />],
   ];
-  if (figures.fromApplication.coins > 0) {
-    rows.push([<>Taken out of the application's scripts<small>{figures.fromApplication.coins === 1 ? 'one coin' : `${figures.fromApplication.coins} coins`}</small></>, <Amount satoshis={figures.fromApplication.satoshis} exact />]);
-  }
+  if (into > 0n) rows.push([<>Goes into the application<small>To its contracts and others, less what comes back from them</small></>, <Amount satoshis={into} exact />]);
+  if (into < 0n) rows.push([<>Comes back from the application<small>Out of its contracts, more than goes into them</small></>, <Amount satoshis={-into} exact />]);
   rows.push([<>Network fee<small>{figures.bytes} bytes</small></>, <Sat satoshis={figures.feeSatoshis} />]);
   rows.push([<strong>{net < 0n ? 'Your wallet goes down by' : 'Your wallet goes up by'}</strong>, <strong><Amount satoshis={net < 0n ? -net : net} exact /></strong>]);
   return (
     <Part title="This wallet's own figures" note="Worked out by this wallet from the transaction it built. The application cannot change them." cls="own-figures">
       <KeyValues entries={rows} />
+      {figures.tokensNet.length > 0 && (
+        <div class="moved-group">
+          <div class="moved-title">Tokens</div>
+          <KeyValues
+            entries={figures.tokensNet.map((entry) => [
+              <>
+                {entry.amount > 0n ? 'Your wallet receives' : 'Your wallet pays'}
+                <small>
+                  Of token <Hex value={entry.category} />
+                </small>
+              </>,
+              <span class={`token-net ${entry.amount > 0n ? 'up' : 'down'}`}>{`${entry.amount > 0n ? '+' : '−'}${tokenAmount(entry.amount)}`}</span>,
+            ])}
+          />
+        </div>
+      )}
+      {figures.tokensDestroyed.length > 0 && (
+        <div class="moved-group destroyed">
+          <div class="moved-title">Destroyed</div>
+          <p class="small muted moved-note">These tokens can never be used again after this transaction.</p>
+          <ul class="list">
+            {figures.tokensDestroyed.map((entry) => (
+              <li class="moved">
+                <div class="moved-head">
+                  <span>{entry.name}</span>
+                  <span class="small muted">{entry.wallet ? 'Yours' : 'The application\'s'}</span>
+                </div>
+                <div class="small muted">
+                  The <TokenWords token={entry.token} />, {entry.how === 'data output' ? 'sent to a data output, which no one can spend' : 'spent and not carried on'}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {figures.tokensSpent.length > 0 && (
         <div class="moved-group">
           <div class="moved-title">Your tokens it spends</div>
           <ul class="list">
             {figures.tokensSpent.map((output) => (
               <Moved output={output} label="A coin of your wallet" />
+            ))}
+          </ul>
+        </div>
+      )}
+      {figures.applicationInputs.length > 0 && (
+        <div class="moved-group">
+          <div class="moved-title">The application's coins it spends</div>
+          <p class="small muted moved-note">Read from the chain by this wallet. None of them is yours.</p>
+          <ul class="list">
+            {figures.applicationInputs.map((input) => (
+              <Moved
+                output={input}
+                label={
+                  <>
+                    {input.name}
+                    <span class="small muted"> · <Hex value={input.outpoint} head={6} tail={4} /></span>
+                  </>
+                }
+              />
             ))}
           </ul>
         </div>

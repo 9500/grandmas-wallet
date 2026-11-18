@@ -1,0 +1,24 @@
+{
+  "name": "@grandmas-wallet/loan-app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@bitauth/libauth": "3.1.0-next.8",
+    "@grandmas-wallet/chipnet": "0.0.0",
+    "@grandmas-wallet/connect": "0.0.0",
+    "@grandmas-wallet/core": "0.0.0",
+    "@grandmas-wallet/paryon": "0.0.0",
+    "@grandmas-wallet/ui": "0.0.0",
+    "preact": "^11.2.0"
+  },
+  "devDependencies": {
+    "@grandmas-wallet/app": "0.0.0",
+    "@grandmas-wallet/testing": "0.0.0"
+  }
+}

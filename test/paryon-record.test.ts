@@ -121,3 +121,47 @@ describe('a ParyonUSD loan through the wallet from the template on chipnet, as r
     expect(record).toMatch(/Nothing is left anywhere else/);
   });
 });
+
+const BROWSER_NAME = 'stage-9-browser-chipnet.md';
+const browserRecorded = existsSync(new URL(`../docs/runs/${BROWSER_NAME}`, import.meta.url)) && /^Outcome: every step was carried out/m.test(readFileSync(new URL(`../docs/runs/${BROWSER_NAME}`, import.meta.url), 'utf8'));
+
+/**
+ * The same loan in browsers (`scripts/browser-run-loan.ts chipnet --local-pages`): the wallet page driven by the
+ * loan page of this project over WizardConnect, and after the loss of the phone, the new phone's wallet page alone.
+ */
+describe('a ParyonUSD loan in browsers on chipnet, from the loan page, as recorded', () => {
+  it.runIf(browserRecorded)('PY02 (browser): the loan page paired with the wallet and had it make a key, borrow and add collateral, each an action of the template the wallet showed and the user approved', () => {
+    const record = readFileSync(new URL(`../docs/runs/${BROWSER_NAME}`, import.meta.url), 'utf8');
+    expect(record).toMatch(/^# Stage 9 scripted run in a browser, on chipnet/);
+    expect(record).toMatch(/loan page: http:\/\/localhost:8104\/, this checkout at [0-9a-f]{7}, chipnet/);
+    expect(record).toMatch(/The wallet was paired with the loan page over WizardConnect/);
+    expect(record).toMatch(/it says: "An independent demonstration on chipnet, Bitcoin Cash's test network\. This page is not Paryon's site/);
+    // The key: the first request of the page, for a template the wallet did not have; shown, approved and carried out.
+    expect(record).toMatch(/making a loan key: template "ParyonUSD loan \(chipnet-fast-periods-6\)", "Not verified"/);
+    expect(record).toMatch(/it says: "This wallet does not have this template yet\. Approving trusts it on this phone, and stores it in your backup first/);
+    expect(record).toMatch(/approved; the wallet: "Done: Make a loan key", transaction [0-9a-f]{64}/);
+    // Each part of the run that stopped is named, with where the next took over.
+    expect(record.match(/^ +\d+ s {2}FAILED at step \d+: /gm)?.length ?? 0).toBe(record.match(/^ +continued from step \d+ on /gm)?.length ?? 0);
+    expect(record).toMatch(/Before anything of the loan was sent, the whole course, by script from the wallet's words on disk, .* passed the virtual machine/);
+    expect(record).toMatch(/The loan page borrowed 100\.00 PUSD at \d+% collateral at the lower price/);
+    expect(record).toMatch(/Tokens: Your wallet receives Of token e7979ccd…30e6b8 \+10,000 units/);
+    expect(record).toMatch(/The page then listed the loan, found through the wallet's answer to its question about the template's tokens and read from the chain: 100\.00 ?PUSD; Collateral: /);
+    expect(record).toMatch(/The way out was proven right after the loan was opened, from the first phone's words on disk and the chain alone, without the browser: .* passed the virtual machine and testmempoolaccept/);
+    expect(record).toMatch(/The loan page added 0\.001 BCH of collateral/);
+    expect(record).toMatch(/The way out was proven after collateral was added/);
+    for (const step of ['a loan key, asked by the loan page', 'borrow 100.00 PUSD, asked by the loan page', 'collateral added, asked by the loan page']) expect(record).toMatch(new RegExp(`^\\| ${step.replace(/[.()]/g, '\\$&')} \\| \`[0-9a-f]{64}\` \\|$`, 'm'));
+  });
+
+  it.runIf(browserRecorded)('PY03 (browser): after the loss of the phone the new phone found the loan from the swept key and the template in the backup, and closed it from its own list of tokens without the loan page', () => {
+    const record = readFileSync(new URL(`../docs/runs/${BROWSER_NAME}`, import.meta.url), 'utf8');
+    const at = (text: string): number => record.indexOf(text);
+    expect(at('The phone is lost, with the loan open')).toBeGreaterThan(at('The loan page adds collateral'));
+    expect(record).toMatch(/On the new phone the swept loan key was listed; once the template stored in the backup was trusted, the wallet found the loan from the key and the chain: Holds [^;]+; Debt: 10,000 units; Collateral: /);
+    expect(record).toMatch(/The way out was proven after the takeover, from the new phone's words on disk/);
+    expect(record).toMatch(/The new phone closed the loan from its own list of tokens, with the loan page not opened \(transaction `[0-9a-f]{64}`\)/);
+    expect(record).toMatch(/Destroyed: PUSD repaid/);
+    expect(record).toMatch(/new phone's browser made \d+ requests, to .*: none to the loan page \(http:\/\/localhost:8104\)/);
+    expect(record).toMatch(/the key is still listed: "[^"]+" \(Closed\), "It holds nothing now\."/);
+    expect(record).toMatch(/At the end the coins went back to bchtest:\S+, the address that paid for the run/);
+  });
+});

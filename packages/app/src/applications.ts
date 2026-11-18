@@ -283,8 +283,8 @@ export interface HeldToken {
     satoshis: bigint;
     coins: number;
     lockingBytecode?: string;
-    /** What the position holds, read from the chain as the declaration says, in the template's words. */
-    state?: { variable: string; name: string; description: string; value: string }[];
+    /** What the position holds, read from the chain as the declaration says, in the template's words, with the template's type of each value. */
+    state?: { variable: string; name: string; description: string; type: string; value: string }[];
   };
   /** What the token's holder can do, in the template's words. */
   actions?: TokenAction[];
@@ -380,7 +380,7 @@ const positionState = (definition: ReadTemplate['definition'], entry: AuthorityE
         positionSatoshis: sum(found.coins.map((coin) => coin.output.valueSatoshis)),
       })[variable];
       const described = definition.variables?.[variable];
-      return value === undefined ? [] : [{ variable, name: described?.name ?? variable, description: described?.description ?? '', value: String(value) }];
+      return value === undefined ? [] : [{ variable, name: described?.name ?? variable, description: described?.description ?? '', type: String(described?.type ?? 'bytes'), value: String(value) }];
     } catch (error) {
       if (!(error instanceof TemplateError)) throw error;
       return [];
