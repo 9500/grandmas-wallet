@@ -1,11 +1,12 @@
 import { binToHex, hexToBin } from '@bitauth/libauth';
-import { type FeeView, type RecovererView, type RequestTiming, RecovererWallet, completeTakeover, describeDelay, feeView, requestTiming, viewAsRecoverer } from '@grandmas-wallet/app';
+import { type FeeView, type RecovererView, type RequestTiming, RecovererWallet, acceptTakeover, completeTakeover, describeDelay, feeView, requestTiming, viewAsRecoverer } from '@grandmas-wallet/app';
 import { makeLink } from '@grandmas-wallet/app/links';
 import { keyFingerprint, recoveryKeyOf, undoHandOver } from '@grandmas-wallet/enrollment';
-import { Amount, Button, Card, Field, Fingerprint, HandOff, KeyValues, More, Notice, PageHead, Sat, Status, TaskStatus, TextInput, formatDuration, formatTime, lockingBytecodeOfAddress, plainError, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Field, Fingerprint, HandOff, KeyValues, Loading, More, Notice, PageHead, QrCode, Sat, Status, TaskStatus, TextInput, Value, formatDuration, formatTime, lockingBytecodeOfAddress, plainError, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
-import { type Looked, type Session, credentialAccount, openWalletPage, saveWallet, wallets } from './session.js';
+import { handOverNow, handleTakeovers, resumeDesk, useDesk } from './offered-session.js';
+import { type Looked, type Session, credentialAccount, modeOf, openWalletPage, recovererLink, saveWallet, wallets } from './session.js';
 import { describeProblem } from './Wallets.js';
 
 /**
@@ -26,6 +27,10 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
     saveWallet(identity, next);
     setLooked(next);
   };
+
+  // A lost phone's session this page offered before a reload is offered again, so that the hand-over reaches the
+  // new phone there if it is still on it.
+  useEffect(() => resumeDesk(session, { kind: 'lost phone', identity }), []);
 
   useEffect(() => {
     if (!('words' in kit.credential)) {
@@ -71,7 +76,14 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
           const handed = await completeTakeover({ kept: current.kept, chain: session.chain, recoveryKey: recoveryKeyOf(current.kept.kit), storeAt: session.storeAt, save: (next) => saveWallet(identity, { ...current, kept: next }) });
           const link = await makeLink(session.environment.walletUrl, 'handover', { sealed: binToHex(handed.sealed) });
           update({ ...current, kept: handed.kept, handOverLink: link });
-          toast('The hand-over link is ready.');
+          // Straight to the new phone, if it is on the session of the lost phone's code; its code is shown in any case.
+          void handOverNow(binToHex(handed.sealed).slice(0, 32), handed.sealed).then((delivered) => {
+            if (delivered) {
+              update({ ...(wallets()[identity] ?? current), handOverDelivered: true });
+              toast('The new phone has the wallet.');
+            }
+          });
+          toast('The hand-over is ready.');
         });
       }
     },
@@ -188,12 +200,13 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
           )}
 
           {looked.handOverLink !== undefined && standing?.kind !== 'not named' && view?.takenOver === true && (
-            <Card title="Send this to the new phone" tone="good">
-              <HandOff text={looked.handOverLink} qrLabel="QR code of the hand-over link" copyLabel="Copy link" testId="handover-link">
-                <p>It is sealed to the new phone: only it can open it. It tells the phone which wallet it now owns and how to find the coins.</p>
+            <Card title={looked.handOverDelivered === true ? 'The new phone has the wallet' : 'Let the new phone scan this'} tone="good">
+              <HandOff text={looked.handOverLink} qrLabel="QR code of the hand-over" copyLabel="Copy link" testId="handover-link">
+                <p>{looked.handOverDelivered === true ? 'It reached the new phone over the connection. The code stays here in case it is needed again.' : 'It is sealed to the new phone: only it can open it. It tells the phone which wallet it now owns and how to find the coins.'}</p>
               </HandOff>
             </Card>
           )}
+          {standing?.kind === 'quiet' && view?.takenOver !== true && <LostPhone session={session} identity={identity} recoverer={recoverer} toast={toast} onTaken={() => setLooked(wallets()[identity] ?? looked)} />}
           <TaskStatus task={task} name="handover" />
         </div>
         <div class="stack">
@@ -202,6 +215,86 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
         </div>
       </div>
     </div>
+  );
+};
+
+/**
+ * The owner lost their phone (proposal section 11.1): the page shows a code; the new phone scans it and sends its
+ * takeover request over the session; the page saves it for this wallet and asks the network to move the wallet to
+ * the new phone at once. Whoever pressed the button has made sure who is asking. The waiting period then runs.
+ */
+const LostPhone = ({ session, identity, recoverer, toast, onTaken }: { session: Session; identity: string; recoverer: RecovererWallet | undefined; toast: (text: string) => void; onTaken: () => void }) => {
+  const [showing, setShowing] = useState(false);
+  const bank = modeOf() === 'bank';
+  const label = wallets()[identity]?.label;
+  const owner = bank ? 'Customer' : label || 'The owner';
+  const title = `${owner} lost their phone`;
+  useEffect(() => {
+    if (!showing) return;
+    handleTakeovers(async (sealed) => {
+      const current = wallets()[identity];
+      if (current === undefined) throw new Error('This page no longer holds the wallet.');
+      if (recoverer === undefined) throw new Error('The recoverer\'s page is still opening. Scan the code again in a moment.');
+      const taken = await acceptTakeover({ sealed, privateKey: session.privateKey, kept: current.kept, chain: session.chain });
+      saveWallet(identity, { ...current, kept: taken.kept });
+      const sent = await recoverer.request(taken.proposedKeyHash);
+      saveWallet(identity, { ...(wallets()[identity] ?? current), requested: { proposedKeyHash: binToHex(taken.proposedKeyHash), transactionId: sent.transactionId } });
+      toast('The request is sent. The waiting period counts from the block that holds it.');
+      onTaken();
+    });
+    return () => handleTakeovers(undefined);
+  }, [showing, recoverer]);
+  if (!showing) {
+    return (
+      <Card flat>
+        <div class="row spread">
+          <span class="small muted">If the owner lost their phone, their new phone scans a code here.</span>
+          <Button kind="secondary" onClick={() => setShowing(true)}>
+            {title}
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+  return <LostPhoneCode session={session} identity={identity} onClose={() => setShowing(false)} />;
+};
+
+const LostPhoneCode = ({ session, identity, onClose }: { session: Session; identity: string; onClose: () => void }) => {
+  const desk = useDesk(session, { kind: 'lost phone', identity }, true);
+  const [code, setCode] = useState<string | undefined>();
+  useEffect(() => {
+    void recovererLink(session, desk.uri).then(setCode);
+  }, [desk.uri]);
+  return (
+    <Card title="A new phone for this wallet">
+      <div class="stack">
+        <p class="small muted">On the new phone they open the wallet, tap "I lost my phone" and scan this code. The page then asks the network to move the wallet to that phone.</p>
+        {code === undefined ? (
+          <Loading>Making the code…</Loading>
+        ) : (
+          <div data-testid="lost-phone-code" data-value={code} class="code-box">
+            <QrCode text={code} label="Code for the new phone to scan" />
+          </div>
+        )}
+        {code !== undefined && (
+          <More summary="The code as text">
+            <Value text={code} clamp copyLabel="Copy" />
+          </More>
+        )}
+        {desk.arrived?.kind === 'takeover' ? (
+          desk.arrived.answered === 'refused' ? <Status tone="warn" title="The request was not taken" /> : <Status tone="good" title="The new phone's request has arrived" />
+        ) : desk.status.state === 'connected' ? (
+          <Status tone="good" title="A phone is connected">Keep this page open.</Status>
+        ) : (
+          <Status tone="wait" title="Waiting for the new phone to scan the code" />
+        )}
+        <div>
+          <Button kind="quiet" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 };
 
@@ -236,7 +329,7 @@ const FeeCard = ({ fees, named }: { fees: FeeView | undefined; named: boolean })
   );
 };
 
-/** Sending the fee coins elsewhere: an allowance given back, or when the recoverer no longer serves the wallet. */
+/** Sending the fee coins elsewhere: back to the recoverer's balance, or when the recoverer no longer serves the wallet. */
 const ReturnFees = ({ recoverer, session, toast }: { recoverer: RecovererWallet | undefined; session: Session; toast: (text: string) => void }) => {
   const [to, setTo] = useState('');
   const [error, setError] = useState<string | undefined>();
@@ -245,7 +338,7 @@ const ReturnFees = ({ recoverer, session, toast }: { recoverer: RecovererWallet 
   return (
     <Card flat>
       <More summary="Send the fee coins elsewhere">
-        <p class="small muted">The coins are yours. Nothing obliges you to give an allowance back, and without fee coins you cannot act for this wallet.</p>
+        <p class="small muted">The coins are yours. Without fee coins you cannot act for this wallet.</p>
         <Field label="To" id="return-to" error={error}>
           <TextInput id="return-to" value={to} onInput={setTo} invalid={error !== undefined} />
         </Field>

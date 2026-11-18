@@ -1,25 +1,36 @@
 import '@grandmas-wallet/ui/styles.css';
+import './set-up.css';
 
-import type { OwnerWallet } from '@grandmas-wallet/app';
+import type { OwnerWallet, OwnerWalletState } from '@grandmas-wallet/app';
 import { Card, Frame, Loading, Notice, plainError } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
 import { BRAND } from './brand.js';
-import { Create } from './Create.js';
 import { MoveIn } from './MoveIn.js';
 import { OwnerApp } from './OwnerApp.js';
 import { Restore } from './Restore.js';
 import { type Mode, type Session, boot, keep, kept } from './session.js';
+import { SetUp } from './SetUp.js';
 import { Takeover } from './Takeover.js';
-import { Welcome } from './Welcome.js';
+import { type Beginning, Welcome } from './Welcome.js';
 
+/**
+ * What a phone kept is where it stands. A phone that began making a wallet itself, before the recoverer created
+ * wallets, opens its wallet if it was made; otherwise it begins again at the first screen.
+ */
+const storedMode = (): Mode | 'restore' | undefined => {
+  const mode = kept('mode');
+  if (mode !== 'create') return mode;
+  const state = kept('state') as OwnerWalletState | undefined;
+  return state?.identity !== undefined && state.creation.createSeen === true ? 'owner' : undefined;
+};
 
 /** Which screen the device is at follows from what it keeps. */
 const Root = () => {
   const [session, setSession] = useState<Session | undefined>();
   const [problem, setProblem] = useState<string | undefined>();
-  const [mode, setMode] = useState<Mode | 'restore' | undefined>(() => kept('mode'));
+  const [mode, setMode] = useState<Mode | 'restore' | undefined>(storedMode);
   const [wallet, setWallet] = useState<OwnerWallet | undefined>();
 
   useEffect(() => {
@@ -36,8 +47,15 @@ const Root = () => {
     setMode(next);
     window.scrollTo(0, 0);
   };
+  const begin = (beginning: Beginning) => {
+    if (beginning === 'bank' || beginning === 'friend') {
+      keep('setUp', { kind: beginning });
+      choose('setup');
+    } else choose(beginning);
+  };
   const becomeOwner = (opened?: OwnerWallet) => {
     keep('mode', 'owner');
+    keep('setUp', undefined);
     setWallet(opened);
     setMode('owner');
     window.scrollTo(0, 0);
@@ -69,9 +87,9 @@ const Root = () => {
   );
   switch (mode) {
     case undefined:
-      return frame(<Welcome session={session} onChoose={choose} />);
-    case 'create':
-      return frame(<Create session={session} onBack={() => choose(undefined)} onCreated={becomeOwner} />);
+      return frame(<Welcome session={session} onChoose={begin} />);
+    case 'setup':
+      return frame(<SetUp session={session} kind={kept('setUp')?.kind ?? 'friend'} onBack={() => choose(undefined)} onDone={becomeOwner} />);
     case 'takeover':
       return frame(<Takeover session={session} onBack={() => choose(undefined)} onDone={becomeOwner} />);
     case 'move':
@@ -79,7 +97,7 @@ const Root = () => {
     case 'restore':
       return frame(<Restore session={session} onBack={() => choose(undefined)} onDone={becomeOwner} />);
     case 'owner':
-      return <OwnerApp session={session} opened={wallet} onLost={() => choose('create')} />;
+      return <OwnerApp session={session} opened={wallet} onLost={() => choose(undefined)} />;
     default:
       return frame(<Notice tone="bad">This device keeps something this page does not know. Erase the device under details to start again.</Notice>);
   }

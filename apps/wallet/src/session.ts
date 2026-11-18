@@ -6,19 +6,19 @@ import {
   type LinkField,
   type NewSeedPreparation,
   type OwnerWalletState,
+  type PendingSetUp,
   type PendingTakeover,
   type RecoveryArrangement,
   type StoreAt,
   type WatchLog,
   OwnerWallet,
-  kitTemplates,
   walletTemplateNumbers,
 } from '@grandmas-wallet/app';
 import { linkKind, readLink } from '@grandmas-wallet/app/links';
 import { HttpStore } from '@grandmas-wallet/archive';
 import type { LedgerEntry } from '@grandmas-wallet/connect';
 import { type ChainReader, type ChallengeDelay, type SeedKeys, deriveSeedKeys } from '@grandmas-wallet/core';
-import { credentialKeys, recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
+import { recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
 import { type Environment, Vault, connectChain, keyNetwork, loadEnvironment, openAccount } from '@grandmas-wallet/ui';
 
 import type { Handing, HandingSlot } from './hand-to-recoverer.js';
@@ -34,7 +34,12 @@ export const vault = new Vault('gw2-wallet');
 
 /** What the device is doing, before and after it has a wallet. */
 export type Mode =
-  /** Making a new wallet: the steps of creation. */
+  /** The recoverer sets the wallet up: the phone scans its code and asks. */
+  | 'setup'
+  /**
+   * Kept by phones that began making a wallet themselves before the recoverer created wallets. Such a phone opens
+   * its wallet if it was made, and otherwise starts again at the first screen.
+   */
   | 'create'
   /** A new device asks the recoverer to take a wallet over. */
   | 'takeover'
@@ -43,7 +48,7 @@ export type Mode =
   /** The device owns a wallet. */
   | 'owner';
 
-/** The recoverer as this device knows it: from the link the recoverer's page shows. */
+/** The recoverer as this device knows it: from the code the recoverer's page shows. */
 export interface StoredRecipient {
   name: string;
   page: string;
@@ -53,14 +58,25 @@ export interface StoredRecipient {
   session?: string;
 }
 
-/** What was chosen before the wallet was created. */
+/** A set-up with the recoverer, from the scan of its code to the wallet. */
+export interface StoredSetUp {
+  /** Which entry the user chose. */
+  kind: 'bank' | 'friend';
+  recipient?: StoredRecipient;
+  /** What the recoverer's page said a new wallet gets. The waiting period is checked in the creation. */
+  offer?: { challengeDelay: ChallengeDelay; startingSatoshis: string };
+  /** The request, kept so that the same request goes again after a reload. */
+  pending?: PendingSetUp;
+  /** The wallet is open: what its first screen shows. */
+  done?: { startingSatoshis: string };
+}
+
+/** Kept by phones that made their wallet themselves: what was chosen then. Read by nothing new. */
 export interface Setup {
   recipient: StoredRecipient;
   delay: ChallengeDelay;
   allowance: boolean;
-  /** The recoverer's credential, made by this device. Forgotten once the recoverer's receipt is found. */
   credentialWords?: string;
-  /** The hash of the credential's recovery key, hex: what the controller names. */
   recoveryKeyHash: string;
 }
 
@@ -110,10 +126,16 @@ export interface Kept {
   /** Refuse a request to another key without asking. */
   autoCancel: boolean;
   /**
-   * The network no longer has the transaction that made the wallet: it is being made again. Shown until
-   * recovery is on again, so that the user knows to send the new kit and to write the backup down again.
+   * Kept by phones that made their wallet themselves, when the network no longer had its creation. Read by nothing new.
    */
   lostCreation: { at: number };
+  /** A set-up with the recoverer, under way. */
+  setUp: StoredSetUp;
+  /**
+   * The network no longer has the transaction that created the wallet: the set-up did not hold, and is done again
+   * with the recoverer. Coins at the wallet's addresses stay this phone's, by key.
+   */
+  lostSetUp: { at: number; name: string };
   /** A link the page was opened with, until something has dealt with it. */
   incoming: { kind: LinkField | 'enroll'; text: string };
   /** The applications this device is connected to, so that the page connects again when it is opened. */
@@ -237,21 +259,15 @@ export const sealedOf = async (text: string, field: 'handover' | 'takeover' | 'u
 export const sealedContent = (sealed: Uint8Array): { sealed: string } => ({ sealed: binToHex(sealed) });
 
 /**
- * The wallet's creation is gone from the network, or its controller has to be made again. What this phone
- * sent its recoverer and showed as addresses was for that creation; the recoverer has to be set up again.
- * A credential the phone no longer holds (the recoverer had confirmed it) is replaced by a new one, which
- * the new controller names.
+ * The network no longer has the transaction that created the wallet: the set-up did not hold (proposal section
+ * 7.9). What this phone showed as addresses and what its recoverer keeps were for that creation; the wallet keeps
+ * its earlier addresses as voided, watches them and moves what arrives there by key once it is set up again. The
+ * phone goes back to its first screen, which says so.
  */
-export const startCreationAgain = (session: Session): void => {
-  const setup = kept('setup');
-  if (setup !== undefined && setup.credentialWords === undefined) {
-    const credentialWords = generateBip39Mnemonic();
-    const { recoveryKey } = credentialKeys(credentialWords, session.network, kitTemplates());
-    keep('setup', { ...setup, credentialWords, recoveryKeyHash: binToHex(recoveryKey.keyHash) });
-  }
-  keep('lostCreation', { at: Math.floor(Date.now() / 1000) });
-  for (const name of ['arrangement', 'kitLink', 'receive', 'vaultReceive', 'watchLog'] as const) keep(name, undefined);
-  keep('mode', 'create');
+export const setUpAgain = (): void => {
+  keep('lostSetUp', { at: Math.floor(Date.now() / 1000), name: kept('recipient')?.name ?? '' });
+  for (const name of ['arrangement', 'kitLink', 'receive', 'vaultReceive', 'watchLog', 'setUp', 'recovererSession'] as const) keep(name, undefined);
+  keep('mode', undefined);
 };
 
 export const noteActivity = (entry: Omit<Activity, 'at'>): void => {

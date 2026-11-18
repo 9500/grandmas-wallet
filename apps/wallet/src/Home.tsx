@@ -3,7 +3,7 @@ import { Amount, Button, Card, Icon, KeyValues, LinkRow, Loading, More, TaskStat
 
 import type { Owner } from './OwnerApp.js';
 import { ActivityList } from './parts.js';
-import { Alarm, KitCard, ProtectionStatus } from './Protection.js';
+import { Alarm, ProtectionStatus } from './Protection.js';
 import { kept } from './session.js';
 
 /**
@@ -77,7 +77,6 @@ export const Home = ({ owner }: { owner: Owner }) => {
               <LinkRow label="Recovery" hint="Your recoverer, the waiting period, a new phone, your own backup" onClick={() => owner.navigate('recovery')} />
             </div>
           </Card>
-          <KitCard owner={owner} />
           <Card cls="o4">
             <LinkRow
               label="Applications"

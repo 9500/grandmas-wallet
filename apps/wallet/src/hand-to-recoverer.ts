@@ -1,6 +1,7 @@
-import { binToHex, sha256 } from '@bitauth/libauth';
+import { binToHex, hexToBin, sha256 } from '@bitauth/libauth';
+import type { PendingSetUp } from '@grandmas-wallet/app';
 import type { SealedKind } from '@grandmas-wallet/app/hand-off';
-import { type Particulars, type SealedAnswer, OtherRecovererError, SealedCourier, SealedRefusedError } from '@grandmas-wallet/connect/recoverer';
+import { type Created, type Particulars, type SealedAnswer, OtherRecovererError, RecovererSilentError, SealedCourier, SealedRefusedError } from '@grandmas-wallet/connect/recoverer';
 import { type JoinedDesk, joinDeskSession } from '@grandmas-wallet/connect/recoverer-session';
 import { newLinkKey } from '@grandmas-wallet/connect/wizard';
 import { useEffect, useState } from 'preact/hooks';
@@ -95,8 +96,9 @@ export const handToRecoverer = (recipient: StoredRecipient, kind: SealedKind, se
     note(slot, { status: answer.status, ...(answer.reason === undefined ? {} : { reason: answer.reason }), at: answer.time, sent });
     if (answer.status !== 'received') {
       stop();
-      // Done with this recoverer: the session is left a moment later, once the answer is acknowledged.
-      setTimeout(() => leaveRecoverer(recipient.session), 2_000);
+      // Done with this recoverer: the session is left a moment later, once the answer is acknowledged. A new phone
+      // whose takeover request was kept stays: the hand-over comes back over the same session after the waiting period.
+      if (kind !== 'takeover' || answer.status === 'refused') setTimeout(() => leaveRecoverer(recipient.session), 2_000);
     }
   });
   courier.send({ expected: particularsOf(recipient), kind, sealed, id: sent, timeoutMs: ANSWER_WITHIN_MS }).then(
@@ -112,6 +114,73 @@ export const handToRecoverer = (recipient: StoredRecipient, kind: SealedKind, se
       leaveRecoverer(recipient.session);
     },
   );
+};
+
+/** How long the recoverer's page has to say who it is, or that it has a request, before the phone says it did not answer. */
+const SILENT_MS = 20_000;
+/** How long a phone waits for the wallet once the recoverer's page has the request: a person may have to say yes. */
+const SET_UP_WITHIN_MS = 15 * 60_000;
+
+/** The recoverer's page did not answer: it was closed, or the network is in the way. */
+export class NotReachedError extends Error {
+  constructor(name: string) {
+    super(`${name || 'The recoverer'}'s page did not answer. Keep it open and scan the code again.`);
+    this.name = 'NotReachedError';
+  }
+}
+
+/**
+ * Join the session of a scanned code and learn who is at the other end, with what it offers a new wallet.
+ * @throws NotReachedError, or OtherRecovererError for a page that speaks for another recoverer than the code
+ */
+export const meetRecoverer = async (recipient: StoredRecipient): Promise<Particulars> => {
+  const courier = joinRecoverer(recipient);
+  if (courier === undefined) throw new Error('This code offers no connection. Scan the code on the recoverer\'s screen.');
+  let said: Particulars;
+  try {
+    said = await courier.particulars(SILENT_MS);
+  } catch {
+    throw new NotReachedError(recipient.name);
+  }
+  if (said.publicKey !== recipient.publicKey || said.page !== recipient.page) throw new OtherRecovererError();
+  return said;
+};
+
+/**
+ * Ask the recoverer's page to set the wallet up, over the session of its code: the same request, again every few
+ * seconds, until the wallet or a refusal comes back. A reload sends the same request again, and the page answers it
+ * as before.
+ * @throws SealedRefusedError with the recoverer's reason, NotReachedError
+ */
+export const askToSetUp = async (recipient: StoredRecipient, pending: PendingSetUp, onReceived: () => void): Promise<Created> => {
+  const courier = joinRecoverer(recipient);
+  if (courier === undefined) throw new NotReachedError(recipient.name);
+  try {
+    return await courier.enroll({ expected: particularsOf(recipient), id: pending.requestId, sealed: hexToBin(pending.sealed), silentMs: SILENT_MS, timeoutMs: SET_UP_WITHIN_MS, onReceived });
+  } catch (error) {
+    if (error instanceof RecovererSilentError) throw new NotReachedError(recipient.name);
+    throw error;
+  }
+};
+
+/**
+ * Take the hand-over after a recovery when the recoverer's page sends it over the session of its code. The page is
+ * told once it is kept, so that it stops sending it. Returns a function that stops following.
+ */
+export const followHandOver = (recipient: StoredRecipient, take: (sealed: Uint8Array) => Promise<void>): (() => void) => {
+  const courier = joinRecoverer(recipient);
+  if (courier === undefined) return () => undefined;
+  let taking = false;
+  return courier.onHandOver(({ id, sealed }) => {
+    if (taking) return;
+    taking = true;
+    void take(sealed).then(
+      () => courier.acknowledge(id),
+      () => undefined,
+    ).finally(() => {
+      taking = false;
+    });
+  });
 };
 
 /** Where handing a message stands, for as long as a screen shows it. */

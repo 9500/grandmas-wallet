@@ -1,25 +1,32 @@
-import { type FeeView, type RecovererView, feeView, viewAsRecoverer } from '@grandmas-wallet/app';
+import { type FeeView, type RecovererView, feeReserve, feeView, viewAsRecoverer } from '@grandmas-wallet/app';
 import { keyFingerprint } from '@grandmas-wallet/enrollment';
-import { Card, PageHead, Pill, shorten, useEvery } from '@grandmas-wallet/ui';
+import { Button, Card, PageHead, Pill, TaskStatus, lockingBytecodeOfAddress, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
+import { useState } from 'preact/hooks';
+
+import { FundsCard, useFunds } from './Funds.js';
+import { type Session, modeOf, openWalletPage, wallets } from './session.js';
 
 /**
- * Why a wallet cannot be read. A wallet whose creation the network no longer has is said so in plain words:
- * its owner's wallet makes a new one and sends a new kit.
+ * Why a wallet cannot be read. A wallet whose creation the network no longer has is said so in plain words: the
+ * set-up did not hold, and is done again when its owner's phone asks again.
  */
 export const describeProblem = (error: unknown): string => {
   const message = (error as Error).message;
   return /No transaction creating this identity|created by a different transaction/.test(message)
-    ? 'The network no longer has the transaction that made this wallet. The owner\'s wallet makes it again and sends you a new kit; this one can no longer be used.'
+    ? 'The network no longer has the transaction that made this wallet: the set-up did not hold. Set it up again when its owner\'s phone asks; this one can no longer be used.'
     : message;
 };
-import { useState } from 'preact/hooks';
 
-import { type Session, openWalletPage, wallets } from './session.js';
-
-/** The wallets this recoverer holds a kit for, each with where it stands on chain. */
-export const Wallets = ({ session, onShowLink }: { session: Session; onShowLink: () => void }) => {
+/**
+ * The wallets this recoverer looks after, each with where it stands on chain, and the recoverer's balance, from
+ * which it sets new wallets up. A wallet whose fee address runs short is topped up from the balance.
+ */
+export const Wallets = ({ session, onNew }: { session: Session; onNew: () => void }) => {
+  const bank = modeOf() === 'bank';
   const all = Object.entries(wallets()).sort(([, a], [, b]) => b.addedAt - a.addedAt);
   const [views, setViews] = useState<Record<string, { view?: RecovererView; fees?: FeeView | undefined; problem?: string }>>({});
+  const { funds, problem } = useFunds(session);
+  const topUp = useTask();
   useEvery(20_000, async () => {
     const next: typeof views = {};
     for (const [identity, looked] of all) {
@@ -30,23 +37,28 @@ export const Wallets = ({ session, onShowLink }: { session: Session; onShowLink:
       }
     }
     setViews(next);
-  }, [all.length]);
+  }, [all.length, topUp.busy]);
+  const short = all.filter(([identity]) => {
+    const entry = views[identity];
+    return entry?.fees !== undefined && entry.fees.missing > 0n && entry.view?.standing.kind !== 'not named' && entry.view?.standing.kind !== 'closed';
+  });
   return (
     <div class="stack">
-      <PageHead title="Wallets you look after">Open one to see its fee coins, or to act on a request.</PageHead>
-      {all.length === 0 ? (
-        <Card>
-          <div class="empty stack-s">
-            <p>No wallets yet.</p>
-            <p class="small">Give your link to the person whose wallet you will look after. Their wallet then sends you a recovery kit as a link; open it on this page.</p>
-            <div>
-              <button type="button" onClick={onShowLink}>
-                Show your link
-              </button>
-            </div>
-          </div>
-        </Card>
-      ) : (
+      <PageHead title={bank ? 'Customers' : 'People you help'}>
+        <button type="button" onClick={onNew} data-testid="new-wallet">
+          {bank ? 'New customer' : 'Help someone set up'}
+        </button>
+      </PageHead>
+      <div class="grid two">
+        <div class="stack">
+          {all.length === 0 ? (
+            <Card>
+              <div class="empty stack-s">
+                <p>No wallets yet.</p>
+                <p class="small">{bank ? 'When a customer opens an account, show them the code under "New customer".' : 'When someone you know wants a wallet, choose "Help someone set up" and let their phone scan the code.'}</p>
+              </div>
+            </Card>
+          ) : (
         <Card>
           <ul class="list">
             {all.map(([identity, looked]) => {
@@ -72,7 +84,41 @@ export const Wallets = ({ session, onShowLink }: { session: Session; onShowLink:
             })}
           </ul>
         </Card>
-      )}
+          )}
+          {short.length > 0 && (
+            <Card title="Fee coins running short" tone="warn">
+              <p class="small muted">A request and its completion are paid from each wallet's own fee address. Top these up from your balance.</p>
+              <ul class="list">
+                {short.map(([identity, looked]) => (
+                  <li class="list-item">
+                    <span>
+                      {looked.label || shorten(identity, 6, 4)} <span class="small muted">· {views[identity]?.fees?.missing.toLocaleString('en-US')} sat missing</span>
+                    </span>
+                    <Button
+                      small
+                      kind="secondary"
+                      task={topUp}
+                      name={identity}
+                      disabled={funds === undefined}
+                      onClick={() =>
+                        void topUp.run(identity, async () => {
+                          const fees = views[identity]?.fees;
+                          if (funds === undefined || fees === undefined) return;
+                          await funds.pay(lockingBytecodeOfAddress(fees.address, session.network), feeReserve());
+                        })
+                      }
+                    >
+                      Top up
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              <TaskStatus task={topUp} />
+            </Card>
+          )}
+        </div>
+        <FundsCard session={session} funds={funds} problem={problem} />
+      </div>
     </div>
   );
 };

@@ -1,0 +1,19 @@
+/* The first screens of a phone: a title, the main figure, the main action. */
+
+.set-up { max-width: 440px; margin: 0 auto; padding-top: 16px; }
+.set-up-head { text-align: center; display: grid; gap: 8px; justify-items: center; }
+.set-up-head h1 { font-size: 26px; margin: 0; }
+.set-up-head p { margin: 0; }
+.set-up-spinner { display: grid; place-items: center; width: 64px; height: 64px; }
+.set-up-spinner .spinner { width: 40px; height: 40px; border-width: 4px; }
+.set-up-actions { display: grid; gap: 8px; }
+.set-up-problem { color: var(--bad); text-align: center; }
+.set-up-balance { text-align: center; align-items: center; padding: 24px 0 8px; }
+.set-up-balance .balance-main { font-size: 40px; }
+.set-up-protected { text-align: center; color: var(--muted); }
+.set-up-protected strong { color: var(--ink); }
+
+.welcome .set-up-head { margin: 24px 0 8px; }
+.welcome .choice-card { min-height: 64px; justify-content: center; align-items: center; text-align: center; font-size: 18px; }
+.welcome-more { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 20px; padding-top: 8px; }
+.welcome-more .link { font-size: 15px; }

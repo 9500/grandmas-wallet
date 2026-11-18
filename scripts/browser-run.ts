@@ -2,19 +2,20 @@
 // or on chipnet. Each device is a browser profile of its own, kept on disk, so that a device that is "lost"
 // is a profile that is no longer opened, and one that comes back is the same profile opened again.
 //
-//   1. the recoverer opens its page and gives its link        7. the phone is lost
-//   2. the owner creates a wallet with that recoverer         8. a new phone takes the wallet over and sweeps
-//   3. the recoverer takes in the kit; recovery is on         9. the wallet moves to a newer phone (new seed)
-//   4. the owner receives                                     10. a new recoverer replaces the first
-//   5. the owner pays                                         11. the user's own backup, restored elsewhere
-//   6. an unwanted request is made and refused                12. the coins go back to where they came from
+//   1. Anna opens the recoverer's page and funds her balance   7. a new phone takes the wallet over and sweeps
+//   2. she sets up Grandma's wallet: scan, yes, ready         8. the wallet moves to a newer phone (new seed)
+//   3. the owner receives                                     9. a new recoverer replaces the first
+//   4. the owner pays                                         10. the user's own backup, restored elsewhere
+//   5. an unwanted request is made and refused                11. the coins go back to where they came from
+//   6. the phone is lost
 //
 // usage (from the repository's root):
-//   npx tsx scripts/browser-run.ts [local|chipnet] [--local-pages] [--until <step number>] [--from 11|12] [--screens] [--headed] [--ask-again]
-//                                  [--directory <name>] [--record <file name>] [--links]
+//   npx tsx scripts/browser-run.ts [local|chipnet] [--local-pages] [--until <step number>] [--from 10|11] [--screens] [--headed] [--ask-again]
+//                                  [--directory <name>] [--record <file name>]
 //
-// The wallet is made with Anna through the session her page's code offers (scripts/browser-course.ts); --links
-// makes it with the pasted links, as before.
+// The wallet is set up by Anna from her own coins: the phone scans her code and asks over the session it offers,
+// she says yes on her page, and the phone opens the wallet she created (scripts/browser-course.ts). A phone that
+// lost its wallet scans the code of her "lost their phone", and the hand-over comes back over the same session.
 //
 // --local-pages (chipnet): the pages of this checkout (deploy/preview.sh build), served on this machine with
 // deploy/config/local.json and two backup stores of the run's own, instead of the public ones.
@@ -25,7 +26,7 @@
 // "Protected", and from the completion of the takeover to the swept coins, and reads from the chain which of the
 // wallet's transactions were not in a block yet at those moments; the record says so in its head.
 //
-// --ask-again: the phone whose request is refused in step 6 is the same that takes over in step 8, and the
+// --ask-again: the phone whose request is refused in step 5 is the same that takes over in step 7, and the
 // recoverer asks the network again with the request it saved (the course of docs/walkthrough.md).
 //
 // local (the default): against the local node (deploy/regtest/regtest.sh status), with the pages of this
@@ -36,7 +37,7 @@
 // from the key in .chipnet/funder-design-2.json and go back to it at the end; blocks and the waiting period
 // take their real time.
 //
-// --from 11 (or 12) continues a run that stopped there, with the profiles it left on disk; the log goes on
+// --from 10 (or 11) continues a run that stopped there, with the profiles it left on disk; the log goes on
 // from the lines the stopped run wrote.
 //
 // Profiles and store data are under .chipnet/browser-run/ or .chipnet/browser-run-chipnet/ (not in git).
@@ -47,9 +48,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { type Device, RECOVERER, WALLET, argument, blockSection, chipnet, click, completeTakeover, course, firstSteps, localPages, newPhoneAsks, openDesk, openDeskWorking, pagesUsed, recordFile, root, see, tick, valueOf, wait } from './browser-course.js';
 
 const until = Number(argument('until') ?? '99');
-/** Continue a run that stopped at step 11 or 12, with the browser profiles it left on disk. */
+/** Continue a run that stopped at step 10 or 11, with the browser profiles it left on disk. */
 const from = Number(argument('from') ?? '1');
-/** The phone whose request was refused in step 6 is the one that takes over in step 8: the recoverer asks the network again. */
+/** The phone whose request was refused in step 5 is the one that takes over in step 7: the recoverer asks the network again. */
 const askAgain = process.argv.includes('--ask-again');
 
 const theCourse = course({ directory: 'browser-run', continuing: from > 1, until });
@@ -63,7 +64,7 @@ let overSession = false;
 const writeLog = (outcome: string): void => {
   mkdirSync(`${root}docs/runs`, { recursive: true });
   const made = overSession
-    ? ' The wallet was made with its recoverer through the session that the recoverer\'s code offers: the phone read the code, and the kit went straight to the recoverer\'s page.'
+    ? ' The wallet was set up by its recoverer: the phone took in Anna\'s code and asked over the session it offers, Anna said yes on her page, and her page created the wallet from her own coins.'
     : '';
   const where = chipnet && localPages
     ? pagesUsed([WALLET, RECOVERER], 'Blocks and the waiting period took their real time.')
@@ -74,11 +75,11 @@ const writeLog = (outcome: string): void => {
     recordFile(`stage-6-${chipnet ? 'chipnet' : 'local-node'}.md`),
     [
       chipnet && localPages
-        ? `# The wallet course in a browser, on chipnet with the pages of this checkout${overSession ? ', the recoverer set up with one scan' : ''}`
+        ? `# The wallet course in a browser, on chipnet with the pages of this checkout${overSession ? ', the wallet set up by its recoverer' : ''}`
         : chipnet
           ? '# Stage 6 scripted run in a browser, on chipnet with the public pages (run C)'
           : overSession
-            ? '# The wallet course in a browser, against the local node, the recoverer set up with one scan'
+            ? '# The wallet course in a browser, against the local node, the wallet set up by its recoverer'
             : '# Stage 6 scripted run in a browser, against the local node',
       '',
       `Written by \`scripts/browser-run.ts${process.argv.slice(2).length === 0 ? '' : ` ${process.argv.slice(2).join(' ')}`}\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`. ${where}${made} Times are seconds since the start.`,
@@ -96,16 +97,16 @@ const writeLog = (outcome: string): void => {
 
 // ------------------------------------------------------------------ the run
 
-/** Steps 1 to 10. Returns the two devices the last steps go on with, or nothing when the run was asked to stop earlier. */
-const toStepTen = async (): Promise<{ recoverer: Device; newer: Device } | undefined> => {
-  if (askAgain) log('course: the phone whose request is refused in step 6 is the one that takes over in step 8 (--ask-again)');
+/** Steps 1 to 9. Returns the two devices the last steps go on with, or nothing when the run was asked to stop earlier. */
+const toStepNine = async (): Promise<{ recoverer: Device; newer: Device } | undefined> => {
+  if (askAgain) log('course: the phone whose request is refused in step 5 is the one that takes over in step 7 (--ask-again)');
 
   const reached = await firstSteps(theCourse, shot);
   if (reached === undefined) return;
   const { recoverer, old, recovererLink } = reached;
   overSession = reached.overSession;
 
-  // 5 ------------------------------------------------------------------
+  // 4 ------------------------------------------------------------------
   if (!begin('The owner pays, and sees the fee before sending')) return;
   await old.page.getByRole('link', { name: 'Send' }).first().click();
   await old.page.getByLabel('To').fill(elsewhere());
@@ -118,27 +119,14 @@ const toStepTen = async (): Promise<{ recoverer: Device; newer: Device } | undef
   await click(old.page, /^Send$/);
   await see(old.page, 'Sent');
   log(`   sent in ${await valueOf(old.page, 'sent-transaction')}`);
-  await standingNow(old.page, `A payment from the wallet, ${since('paid')} after the payment that funded it`);
+  await standingNow(old.page, `A payment from the wallet, ${since('paid')} after "Set it up"`);
   await shot(old.page, 'wallet-send-done');
   mine(1);
 
-  // 6 ------------------------------------------------------------------
+  // 5 ------------------------------------------------------------------
   if (!begin('A request the owner did not make is refused')) return;
-  const stranger = await device('stranger');
-  await stranger.page.goto(recovererLink);
-  await click(stranger.page, /Take over my wallet on this phone/);
-  await tick(stranger.page, 'The fingerprints are the same');
-  await click(stranger.page, 'Make my request');
-  const strangerLink = await valueOf(stranger.page, 'takeover-link');
-  const strangerFingerprint = (await stranger.page.locator('.fingerprint').first().textContent()) ?? '';
-  log(`   a request from a phone with key ${strangerFingerprint}`);
-  await recoverer.page.goto(strangerLink);
-  await see(recoverer.page, 'A takeover request has arrived');
-  await click(recoverer.page, 'See the request');
-  await tick(recoverer.page, 'I have made sure who is asking');
-  await shot(recoverer.page, 'recoverer-request');
-  await click(recoverer.page, 'Save it for this wallet');
-  await click(recoverer.page, /Ask the network/);
+  // A phone that is not the owner's scans the code of "Grandma lost their phone": Anna was deceived.
+  const stranger = await newPhoneAsks(theCourse, recoverer, recovererLink, async () => undefined, await device('stranger'));
   await see(recoverer.page, 'The request is sent');
   log('   the recoverer (deceived, or its key stolen) asked the network');
   mine(1);
@@ -160,12 +148,12 @@ const toStepTen = async (): Promise<{ recoverer: Device; newer: Device } | undef
   log('   the recoverer sees the refusal; the wallet is protected again');
   if (!askAgain) await close(stranger);
 
-  // 7 ------------------------------------------------------------------
+  // 6 ------------------------------------------------------------------
   if (!begin('The phone is lost')) return;
   await close(old);
   log('   the old phone\'s profile is no longer opened');
 
-  // 8 ------------------------------------------------------------------
+  // 7 ------------------------------------------------------------------
   if (!begin('A new phone takes the wallet over with Anna\'s help, and sweeps')) return;
   let next: Device;
   if (askAgain) {
@@ -173,9 +161,7 @@ const toStepTen = async (): Promise<{ recoverer: Device; newer: Device } | undef
     next = stranger;
     await openDesk(recoverer.page);
     await see(recoverer.page, 'A saved takeover request');
-    const shown = (await recoverer.page.locator('.fingerprint').first().textContent()) ?? '';
-    if (shown !== strangerFingerprint) throw new Error(`the recoverer sees ${shown}, the phone ${strangerFingerprint}`);
-    log(`   the recoverer still holds the request of ${shown}, and asks the network again`);
+    log('   the recoverer still holds the request of that phone, and asks the network again');
     await click(recoverer.page, 'Ask the network again');
   } else {
     next = await newPhoneAsks(theCourse, recoverer, recovererLink, shot);
@@ -189,7 +175,7 @@ const toStepTen = async (): Promise<{ recoverer: Device; newer: Device } | undef
   await shot(found.page, 'wallet-owned-elsewhere');
   await close(found);
 
-  // 9 ------------------------------------------------------------------
+  // 8 ------------------------------------------------------------------
   if (!begin('The wallet moves to a newer phone, the new phone still working')) return;
   const newer = await device('newer-phone');
   await newer.page.goto(WALLET);
@@ -229,20 +215,25 @@ const toStepTen = async (): Promise<{ recoverer: Device; newer: Device } | undef
   await standingNow(newer.page, `From the move link opened on the newer phone to its wallet in use with recovery on: ${since('move')}`);
   await shot(newer.page, 'wallet-home-after-move');
 
-  // 10 ------------------------------------------------------------------
+  // 9 ------------------------------------------------------------------
   if (!begin('Ben replaces Anna as recoverer')) return;
   const ben = await device('second-recoverer');
-  await ben.page.goto(`${RECOVERER}link`);
+  await ben.page.goto(RECOVERER);
+  await ben.page.getByTestId('mode-friend').click();
   await ben.page.getByLabel('Your name, as their wallet shows it').fill('Ben');
+  await click(ben.page, 'Continue');
+  await ben.page.getByTestId('new-wallet').click();
+  await click(ben.page, 'Show the code');
+  await see(ben.page, 'Waiting for their phone to scan the code', 60_000);
   await wait(300);
-  const benLink = await valueOf(ben.page, 'recoverer-link');
-  await newer.page.goto(benLink);
+  const benCode = await valueOf(ben.page, 'recoverer-code');
+  // Replacing the recoverer still goes as before: the wallet takes Ben's code, and sends him a complete kit over its session.
+  await newer.page.goto(benCode);
   await click(newer.page, 'Change recoverer');
   await tick(newer.page, 'The fingerprints are the same');
   await click(newer.page, 'Send them a kit');
-  const benKit = await valueOf(newer.page, 'new-recoverer-link');
-  await ben.page.goto(benKit);
-  await see(ben.page, 'A recovery kit has arrived');
+  await see(ben.page, 'A recovery kit has arrived', 60_000);
+  log('   the kit reached Ben\'s page over the session of his code');
   await ben.page.getByLabel('Whose wallet is this?').fill('Grandma');
   await click(ben.page, 'Check and keep the kit');
   await see(ben.page, 'This kit is for a new recoverer');
@@ -267,10 +258,10 @@ const toStepTen = async (): Promise<{ recoverer: Device; newer: Device } | undef
   return { recoverer, newer };
 };
 
-/** Steps 11 and 12. */
+/** Steps 10 and 11. */
 const lastSteps = async (recoverer: Device, newer: Device): Promise<void> => {
-  // 11 ------------------------------------------------------------------
-  if (state.step < 11) {
+  // 10 ------------------------------------------------------------------
+  if (state.step < 10) {
   if (!begin('The owner keeps a backup, and restores the wallet from it on another phone')) return;
   await newer.page.goto(`${WALLET}recovery`);
   await newer.page.getByRole('button', { name: /Your own backup/ }).click();
@@ -307,7 +298,7 @@ const lastSteps = async (recoverer: Device, newer: Device): Promise<void> => {
   await close(restored);
   }
 
-  // 12 ------------------------------------------------------------------
+  // 11 ------------------------------------------------------------------
   if (!begin('The coins go back to where they came from')) return;
   // A run continued from step 12 whose stopped part had sent the wallet's coins already goes on with the recoverer's.
   if (/ {3}the wallet sent everything: /.test(lines.join('\n'))) log('   the wallet\'s coins were sent back by the part of the run that stopped (see above)');
@@ -324,7 +315,7 @@ const lastSteps = async (recoverer: Device, newer: Device): Promise<void> => {
   log(`   the wallet sent everything: ${arrives.replace('BCH', ' BCH')} arrives, fee ${everythingFee}`);
   mine(1);
   }
-  // Anna is no longer the wallet's recoverer. What is left of her allowance is hers, and she sends it back.
+  // Anna is no longer the wallet's recoverer. What is left at the wallet's fee address is hers, and she sends it on.
   await openDeskWorking(theCourse, recoverer);
   await see(recoverer.page, 'The wallet no longer names you');
   // The bar fixed at the bottom of a phone's screen would cover a row scrolled just into view.
@@ -334,7 +325,7 @@ const lastSteps = async (recoverer: Device, newer: Device): Promise<void> => {
   await recoverer.page.getByLabel('To').fill(elsewhere());
   await click(recoverer.page, 'Send them');
   await see(recoverer.page, /Sent; the fee was \d+ satoshis/);
-  log(`   Anna, no longer the recoverer, sent the rest of her allowance back: ${(await recoverer.page.getByText(/Sent; the fee was \d+ satoshis/).first().textContent())?.trim()}`);
+  log(`   Anna, no longer the recoverer, sent on what was left at the wallet's fee address: ${(await recoverer.page.getByText(/Sent; the fee was \d+ satoshis/).first().textContent())?.trim()}`);
   mine(1);
   if (chipnet) {
     await wait(5_000);
@@ -345,11 +336,11 @@ const lastSteps = async (recoverer: Device, newer: Device): Promise<void> => {
 const main = async (): Promise<void> => {
   if (from === 1) {
     await prepare(['wallet', 'recoverer']);
-    const reached = await toStepTen();
+    const reached = await toStepNine();
     if (reached !== undefined) await lastSteps(reached.recoverer, reached.newer);
     return;
   }
-  if (from !== 11 && from !== 12) throw new Error('A run continues from step 11 or 12.');
+  if (from !== 10 && from !== 11) throw new Error('A run continues from step 10 or 11.');
   note(`       continued from step ${from} on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC with the same browser profiles; the times below are seconds since then`);
   await prepare(['wallet', 'recoverer']);
   state.step = from - 1;
@@ -363,7 +354,7 @@ const main = async (): Promise<void> => {
 
 try {
   await main();
-  writeLog(state.step >= 12 && until >= 12 ? 'every step was carried out.' : `stopped after step ${Math.min(state.step, until)}, as asked.`);
+  writeLog(state.step >= 11 && until >= 11 ? 'every step was carried out.' : `stopped after step ${Math.min(state.step, until)}, as asked.`);
 } catch (error) {
   await theCourse.failed(error);
   writeLog(`failed at step ${state.step}; see the last lines.`);

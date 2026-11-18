@@ -1,49 +1,48 @@
 import { Notice } from '@grandmas-wallet/ui';
-import { useEffect, useState } from 'preact/hooks';
 
-import { type Mode, type Session, type StoredRecipient, kept, readRecipientLink } from './session.js';
+import { type Session, kept } from './session.js';
 
-/** The first screen of a device that keeps no wallet: four ways to begin. */
-export const Welcome = ({ session, onChoose }: { session: Session; onChoose: (mode: Mode | 'restore') => void }) => {
-  const [from, setFrom] = useState<StoredRecipient | undefined>();
-  const incoming = kept('incoming');
-  useEffect(() => {
-    if (incoming?.kind === 'recoverer') void readRecipientLink(incoming.text).then(setFrom, () => undefined);
-  }, []);
+/** Where a phone that keeps no wallet can begin. */
+export type Beginning = 'bank' | 'friend' | 'takeover' | 'move' | 'restore';
+
+/**
+ * The first screen of a phone that keeps no wallet: a wallet set up by the user's bank, or by someone they trust;
+ * and, smaller, the ways back to a wallet the user had.
+ */
+export const Welcome = ({ session, onChoose }: { session: Session; onChoose: (beginning: Beginning) => void }) => {
+  const lost = kept('lostSetUp');
   const test = session.environment.network !== 'mainnet';
   return (
-    <div class="stack">
-      <div class="hero">
-        <h1>A wallet someone you trust can help you get back</h1>
-        <p>If you lose this phone, a person you choose can move the wallet to a new one. They have to wait, in public, before it happens, and while they wait this phone can say no. They can never spend your coins.</p>
+    <div class="stack set-up welcome">
+      <div class="set-up-head">
+        <h1>Welcome</h1>
       </div>
-      {from !== undefined && (
-        <Notice tone="wait">
-          You opened the link of <strong>{from.name || 'a recoverer'}</strong>. Make a new wallet with them as your recoverer, or take over a wallet they look after.
+      {lost !== undefined && (
+        <Notice tone="warn">
+          Your set-up did not hold. Set it up again with {lost.name || 'your recoverer'}.
+          {/* info: The network no longer has the transaction that created your wallet. Coins sent to your addresses are still yours: this phone keeps their keys and moves them into the wallet once it is set up again. */}
         </Notice>
       )}
-      {incoming !== undefined && incoming.kind !== 'recoverer' && (
-        <Notice tone="warn">You opened a link that belongs to a step this phone has not started. Choose below what you are doing, and the link is used when it fits.</Notice>
-      )}
       <div class="choices">
-        <button type="button" class="choice-card primary" onClick={() => onChoose('create')}>
-          Make a new wallet
-          <small>You choose a recoverer and a waiting period, then add the first coins.</small>
+        <button type="button" class="choice-card primary" onClick={() => onChoose('bank')} data-testid="begin-bank">
+          I have a code from my bank
         </button>
-        <button type="button" class="choice-card" onClick={() => onChoose('takeover')}>
-          Take over my wallet on this phone
-          <small>Your old phone is lost or broken. Your recoverer moves the wallet here after the waiting period.</small>
-        </button>
-        <button type="button" class="choice-card" onClick={() => onChoose('move')}>
-          Move from my other phone
-          <small>Your old phone still works. It hands the wallet over at once, with no waiting.</small>
-        </button>
-        <button type="button" class="choice-card" onClick={() => onChoose('restore')}>
-          Restore from my own backup
-          <small>The twelve words and the wallet's identity that you wrote down.</small>
+        <button type="button" class="choice-card primary" onClick={() => onChoose('friend')} data-testid="begin-friend">
+          Someone I trust is helping me
         </button>
       </div>
-      {test && <p class="small muted">This page runs on a test network ({session.environment.network}). Its coins have no value; do not send real Bitcoin Cash here.</p>}
+      <div class="welcome-more">
+        <button type="button" class="link" onClick={() => onChoose('takeover')} data-testid="begin-takeover">
+          I lost my phone
+        </button>
+        <button type="button" class="link" onClick={() => onChoose('move')}>
+          Move from my other phone
+        </button>
+        <button type="button" class="link" onClick={() => onChoose('restore')}>
+          Restore from my own backup
+        </button>
+      </div>
+      {test && <p class="small muted center">Test network ({session.environment.network}). Its coins have no value.</p>}
     </div>
   );
 };

@@ -84,6 +84,12 @@ export interface OwnerWalletState {
      * if one disappears it makes a new identity (`voided`).
      */
     confirmed: boolean;
+    /**
+     * The recoverer created the wallet from its own coins, for this phone's enrollment request (section 7.9).
+     * The creating transaction is the recoverer's: if it disappears, the set-up did not hold and is done again
+     * with the recoverer; the phone makes no identity of its own.
+     */
+    byRecoverer?: boolean;
   };
   /**
    * Identities this wallet made whose creation the network no longer has: the transaction that defined one,
@@ -204,6 +210,15 @@ export const newOwnerWalletState = (): OwnerWalletState => ({
 });
 
 /**
+ * The change address a phone asks its recoverer to pay the starting balance to: the next number of its kind.
+ * A phone whose earlier set-up did not hold goes on after the numbers that set-up gave out.
+ */
+export const firstAddressFor = (state?: OwnerWalletState): number => {
+  const taken = takeNumber(state?.allocation ?? emptyAllocation(), ADDRESS_KIND.change);
+  return 'number' in taken ? taken.number : taken.refused.offer;
+};
+
+/**
  * Where creating a wallet stands. `created`: the network has the transaction that creates the controller,
  * and the wallet is in use; it is not waited for in a block.
  */
@@ -212,8 +227,6 @@ export type CreationStep = 'not funded' | 'funded' | 'prepared' | 'created';
 export interface CreateOptions {
   recovererKeyHash: Uint8Array;
   challengeDelay: ChallengeDelay;
-  /** Coins the owner gives the recoverer for its fees, at the recoverer's fee address. Offered, not required. */
-  allowance?: { feeLockingBytecode: Uint8Array; satoshis: bigint };
 }
 
 export interface Balance {
@@ -289,16 +302,16 @@ const leastFirstCoin = (feeRate: number): bigint => {
 };
 
 /**
- * What the funding address must receive for a wallet to be created (proposal section 7.9): the controller,
- * the allowance if one is given, a first coin of the wallet that pays for one cancellation, and the
- * fees of the creating transaction and of the payment to itself that comes before it when the funding coin
- * is not the first output of its transaction.
+ * What the funding address must receive for a wallet to create itself (the library's own way, used by tests
+ * and scripts; a phone is enrolled by its recoverer, section 7.9): the controller, a first coin of the wallet
+ * that pays for one cancellation, and the fees of the creating transaction and of the payment to itself that
+ * comes before it when the funding coin is not the first output of its transaction.
  */
-export const creationFunding = (options: { allowanceSatoshis?: bigint; feeRate?: number } = {}): bigint => {
+export const creationFunding = (options: { feeRate?: number } = {}): bigint => {
   const feeRate = options.feeRate ?? 1;
   const keyed: Output = { lockingBytecode: new Uint8Array(25), valueSatoshis: 0n };
   const own: Output = { lockingBytecode: new Uint8Array(35), valueSatoshis: 0n };
-  const outputs = [controllerSized, ...(options.allowanceSatoshis === undefined ? [] : [{ ...keyed, valueSatoshis: options.allowanceSatoshis }]), own];
+  const outputs = [controllerSized, own];
   const creating = requiredFee(transactionBytes([INPUT_BYTES.p2pkh], outputs), feeRate);
   const toItself = requiredFee(transactionBytes([INPUT_BYTES.p2pkh], [keyed]), feeRate);
   return outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n) + leastFirstCoin(feeRate) + creating + toItself;
@@ -411,6 +424,50 @@ export class OwnerWallet {
     };
     options.save?.(state);
     return OwnerWallet.open({ ...options, state });
+  }
+
+  /**
+   * A phone opens the wallet its recoverer created for it (proposal section 7.9): the identity, the transaction
+   * that created it, and the change address the starting balance was paid to. The caller has checked the
+   * creation as any client does (section 5.7, `checkCreation`). Nothing waits for a block: the wallet is in use
+   * at once, and every check looks at the creating transaction again until a block holds it. If it disappears,
+   * the set-up did not hold (`creationStep` gives another step than `created`), the identity is set aside as
+   * voided, and coins at its addresses stay the wallet's by key.
+   *
+   * @param options.state - what the phone kept before, when an earlier set-up did not hold: its voided identities and their numbers
+   */
+  static async enrolled(options: {
+    backend: WalletBackend;
+    chain: ChainReader;
+    seed: Pick<SeedKeys, 'viewingKey' | 'network'>;
+    identity: string;
+    creationTransactionId: string;
+    firstCoinNumber: number;
+    state?: OwnerWalletState;
+    save?: (state: OwnerWalletState) => void;
+    feeRate?: number;
+  }): Promise<OwnerWallet> {
+    const before = options.state ?? newOwnerWalletState();
+    if (before.identity !== undefined && before.identity !== options.identity) throw new Error('This phone already has a wallet.');
+    // A creation of the same identity again (the recoverer's coin came back and was spent the same way): its
+    // addresses are the wallet's again, not those of a voided identity.
+    const voided = (before.voided ?? []).filter((entry) => entry.identity !== options.identity);
+    const { voided: _before, ...rest } = before;
+    const state: OwnerWalletState = {
+      ...rest,
+      ...(voided.length === 0 ? {} : { voided }),
+      identity: options.identity,
+      creation: { byRecoverer: true, createTransactionId: options.creationTransactionId, identitySeen: true, createSeen: true, confirmed: false },
+      // The starting balance is there, or on its way: the number counts as used.
+      allocation: markUsed(before.allocation, ADDRESS_KIND.change, options.firstCoinNumber),
+      firstCoinNumber: options.firstCoinNumber,
+      recoveryConfirmed: false,
+      fullySearched: false,
+    };
+    options.save?.(state);
+    const wallet = await OwnerWallet.open({ ...options, state });
+    await wallet.makeAddresses(ADDRESS_KIND.change, options.firstCoinNumber + 1);
+    return wallet;
   }
 
   /**
@@ -556,7 +613,16 @@ export class OwnerWallet {
    * what it read before.
    */
   async creationStep(): Promise<CreationStep> {
-    if (this.state.identity !== undefined && !this.state.creation.confirmed) {
+    if (this.state.identity !== undefined && !this.state.creation.confirmed && this.state.creation.byRecoverer === true) {
+      // The recoverer's creating transaction is the one to watch: the transaction that defined the identity is its
+      // parent, so it cannot be gone while the creation is there, and once the creation is in a block, so is it.
+      const { identity, creation } = this.state;
+      const createdIn = creation.createTransactionId === undefined ? 'missing' : await this.seen(creation.createTransactionId, controllerScript(this.identity).lockingBytecode);
+      if (this.state.identity !== identity || this.state.creation !== creation) return this.creationStep();
+      // The set-up did not hold. The phone makes no identity of its own: it is done again with the recoverer.
+      if (createdIn === 'missing') this.voidIdentity();
+      else this.store({ creation: { ...creation, confirmed: createdIn === 'confirmed' } });
+    } else if (this.state.identity !== undefined && !this.state.creation.confirmed) {
       const { identity, creation } = this.state;
       const definedIn = await this.seen(identity, await this.fundingAddress());
       const createdIn = creation.createTransactionId === undefined ? 'missing' : await this.seen(creation.createTransactionId, controllerScript(this.identity).lockingBytecode);
@@ -716,15 +782,14 @@ export class OwnerWallet {
     }
     const restNumber = this.state.firstCoinNumber as number;
     await this.makeAddresses(ADDRESS_KIND.change, this.state.allocation[ADDRESS_KIND.change].next);
-    const allowance = options.allowance === undefined ? [] : [{ lockingBytecode: options.allowance.feeLockingBytecode, valueSatoshis: options.allowance.satoshis }];
     const rest = { lockingBytecode: this.address(ADDRESS_KIND.change, restNumber).lockingBytecode, valueSatoshis: 0n };
-    const outputs = [controller, ...allowance, rest];
+    const outputs = [controller, rest];
     const fee = requiredFee(transactionBytes([INPUT_BYTES.p2pkh], outputs), this.feeRate);
     const left = coin.utxo.output.valueSatoshis - outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n) - fee;
     // A wallet that is created can refuse a request at once: its first coin pays for that.
     const least = leastFirstCoin(this.feeRate);
     if (left < least) {
-      throw new InsufficientFundsError(coin.utxo.output.valueSatoshis, fee, coin.utxo.output.valueSatoshis - left + least, 'the funding coin does not cover the controller, the allowance, the fee and a first coin that pays for refusing a request.');
+      throw new InsufficientFundsError(coin.utxo.output.valueSatoshis, fee, coin.utxo.output.valueSatoshis - left + least, 'the funding coin does not cover the controller, the fee and a first coin that pays for refusing a request.');
     }
     const prepared = await this.prepareTransaction({
       template: 'controller',
@@ -732,7 +797,7 @@ export class OwnerWallet {
       role: 'owner',
       variables: { identity: hex(identity), nextState: hex(encodeControllerState(first)) },
       inputs: [{ coin }],
-      outputs: [{ outputIdentifier: 'controllerOutput' }, ...allowance, { ...rest, valueSatoshis: left }],
+      outputs: [{ outputIdentifier: 'controllerOutput' }, { ...rest, valueSatoshis: left }],
     });
     // The creation is checked as any client would check it, before it is sent and before the identity is used.
     const transaction = decodeTransactionBch(hexToBin(prepared.transactionHex));

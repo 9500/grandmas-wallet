@@ -55,7 +55,9 @@ const start = async () => {
   const credential = credentialKeys(CREDENTIAL_WORDS, 'testnet', kitTemplates());
   const owner = await OwnerWallet.open({ backend: new KeyBackend(chain, first), chain, seed: first });
   chain.fund(p2pkhLockingBytecode(first.fundingKey.keyHash), 100_000n);
-  await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY, allowance: { feeLockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), satoshis: 20_000n } });
+  await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY });
+  // The recoverer's own coins for its fees.
+  chain.fund(p2pkhLockingBytecode(credential.feeKey.keyHash), 20_000n);
   const identity = hexToBin(owner.stored.identity as string);
   const recovererDevice = await generateRecipientKeyPair();
   const recipient = { name: 'recoverer.example', page: 'https://recoverer.example/', publicKey: recovererDevice.publicKey };

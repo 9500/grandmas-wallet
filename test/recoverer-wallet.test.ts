@@ -1,5 +1,5 @@
 import { binToHex, hexToBin } from '@bitauth/libauth';
-import { FeeCoinsMissingError, OwnerWallet, RecovererWallet, suggestedAllowance, walletTemplateNumbers } from '@grandmas-wallet/app';
+import { FeeCoinsMissingError, OwnerWallet, RecovererWallet, feeReserve, walletTemplateNumbers } from '@grandmas-wallet/app';
 import {
   type ControllerAction,
   type ControllerState,
@@ -42,18 +42,16 @@ const payee = p2pkhLockingBytecode(testKey(0x44).keyHash);
 const hex = binToHex;
 
 /** A wallet with its recoverer, on one chain. The recoverer's account holds the credential's two keys and nothing of the owner's. */
-const setup = async (options: { chain?: SimulatedChain; words?: string; credentialWords?: string; allowance?: bigint } = {}) => {
+const setup = async (options: { chain?: SimulatedChain; words?: string; credentialWords?: string; feeCoins?: bigint } = {}) => {
   const chain = options.chain ?? new SimulatedChain();
   const seed = deriveSeedKeys(options.words ?? WORDS, 'testnet', numbers);
   const credential = deriveCredentialKeys(options.credentialWords ?? CREDENTIAL_WORDS, 'testnet', numbers);
   const feeAddress = p2pkhLockingBytecode(credential.feeKey.keyHash);
   const owner = await OwnerWallet.open({ backend: new KeyBackend(chain, seed), chain, seed });
   chain.fund(p2pkhLockingBytecode(seed.fundingKey.keyHash), 100_000n);
-  await owner.create({
-    recovererKeyHash: credential.recoveryKey.keyHash,
-    challengeDelay: DELAY,
-    ...(options.allowance === undefined ? {} : { allowance: { feeLockingBytecode: feeAddress, satoshis: options.allowance } }),
-  });
+  await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY });
+  // The recoverer's own coins for its fees, as it puts them at the wallet's fee address when it creates a wallet.
+  if (options.feeCoins !== undefined) chain.fund(feeAddress, options.feeCoins);
   const identity = hexToBin(owner.stored.identity as string);
   const backend = new KeyBackend(chain, {
     controllerKey: credential.recoveryKey,
@@ -77,7 +75,7 @@ const setup = async (options: { chain?: SimulatedChain; words?: string; credenti
 
 describe('what the recoverer can do with everything it holds', () => {
   it('RC03: no path spends or sweeps a coin of the wallet, before a wait or during one', async () => {
-    const { chain, seed, credential, owner, recoverer, identity, controller, wait } = await setup({ allowance: 20_000n });
+    const { chain, seed, credential, owner, recoverer, identity, controller, wait } = await setup({ feeCoins: 20_000n });
     chain.fund((await owner.receiveAddress()).address.lockingBytecode, 10_000n);
     chain.fund((await owner.vaultAddress()).address.lockingBytecode, 10_000n);
     // The recoverer holds the viewing key: it finds every coin, with its secret.
@@ -143,7 +141,7 @@ describe('what the recoverer can do with everything it holds', () => {
   });
 
   it('RC03: after a wait that nobody cancelled, to a key of its own, that key is the owner and can sweep: the stated limit', async () => {
-    const { chain, seed, credential, owner, recoverer, identity, controller, wait } = await setup({ allowance: 20_000n });
+    const { chain, seed, credential, owner, recoverer, identity, controller, wait } = await setup({ feeCoins: 20_000n });
     chain.fund((await owner.receiveAddress()).address.lockingBytecode, 10_000n);
     chain.fund((await owner.vaultAddress()).address.lockingBytecode, 10_000n);
     const own = credential.feeKey;
@@ -163,7 +161,7 @@ describe('what the recoverer can do with everything it holds', () => {
       remainderOutputIndex: 1,
     });
     expect(chain.submit(hex(sweep.encoded)).accepted).toBe(true);
-    // Everything the wallet held: its first coins less the allowance, and the two payments it received.
+    // Everything the wallet held: its first coins and the two payments it received.
     expect(chain.balanceOf(payee)).toBeGreaterThan(95_000n);
     // The earlier owner's controller key no longer cancels or approves anything.
     await expect(owner.cancel()).rejects.toThrow();
@@ -173,8 +171,8 @@ describe('what the recoverer can do with everything it holds', () => {
 describe('two wallets with the same recoverer', () => {
   it('RC05: nothing on chain is common to them, and neither fee address follows from a controller\'s state', async () => {
     const chain = new SimulatedChain();
-    const first = await setup({ chain, allowance: 5_000n });
-    const second = await setup({ chain, words: OTHER_WORDS, credentialWords: OTHER_CREDENTIAL_WORDS, allowance: 5_000n });
+    const first = await setup({ chain, feeCoins: 5_000n });
+    const second = await setup({ chain, words: OTHER_WORDS, credentialWords: OTHER_CREDENTIAL_WORDS, feeCoins: 5_000n });
     // The recoverer uses a different credential for every wallet.
     const states = [first, second].map((wallet) => wallet.controller().state);
     const fields = states.map((state) => [hex(state.ownerKeyHash), hex(state.recovererKeyHash)]);
@@ -216,9 +214,9 @@ describe('the recoverer\'s fees', () => {
     return paid;
   };
 
-  it('RC06: with the suggested allowance, the recoverer pays all five fees from its fee address, exactly', async () => {
-    expect(suggestedAllowance()).toBe(4n * 991n + 936n);
-    const wallet = await setup({ allowance: suggestedAllowance() });
+  it('RC06: with the fee reserve, the recoverer pays all five fees from its fee address, exactly', async () => {
+    expect(feeReserve()).toBe(4n * 991n + 936n);
+    const wallet = await setup({ feeCoins: feeReserve() });
     expect(await wallet.recoverer.feeReadiness()).toMatchObject({ holds: 4_900n, request: 991n, completion: 936n, canRequest: true, canRecover: true, missing: 0n });
     const paid = await fiveTransactions(wallet);
     expect(paid.map((sent) => sent.bytes)).toEqual([991, 991, 991, 991, 936]);
@@ -229,7 +227,7 @@ describe('the recoverer\'s fees', () => {
     expect(history.transitions.map((step) => step.kind)).toEqual(['requestRecovery', 'ownerAuthorize', 'requestRecovery', 'ownerAuthorize', 'requestRecovery', 'ownerAuthorize', 'requestRecovery', 'finalizeRecovery']);
   });
 
-  it('RC06: with no allowance and coins the recoverer added itself, the same', async () => {
+  it('RC06: with no reserve and coins the recoverer added later, the same', async () => {
     const wallet = await setup();
     expect(wallet.chain.balanceOf(wallet.feeAddress)).toBe(0n);
     // Anyone can send coins to the fee address, from any wallet.
@@ -270,8 +268,8 @@ describe('the recoverer\'s fees', () => {
     expect(wallet.controller().state.ownerKeyHash).toEqual(newDevice.keyHash);
   });
 
-  it('the recoverer can send what its fee address holds back; nothing obliges it to', async () => {
-    const wallet = await setup({ allowance: 4_900n });
+  it('the recoverer can send what its fee address holds elsewhere; the coins are its own', async () => {
+    const wallet = await setup({ feeCoins: 4_900n });
     await wallet.recoverer.request(newDevice.keyHash);
     const sent = await wallet.recoverer.returnFeeCoins(payee);
     // 4,900 less the request's 991, less the 185 of sending it on.

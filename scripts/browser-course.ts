@@ -177,10 +177,10 @@ export const course = (options: { directory: string; continuing: boolean; until:
   };
   const standing = async (page: Page): Promise<{ height: number; open: string[]; settled: number; text: string }> => {
     const stored = await page.evaluate(() => ({ state: localStorage.getItem('gw2-wallet:state'), activity: localStorage.getItem('gw2-wallet:activity') }));
-    const state = stored.state === null ? undefined : (JSON.parse(stored.state) as { identity?: string; creation?: { prepareTransactionId?: string; createTransactionId?: string } });
+    const state = stored.state === null ? undefined : (JSON.parse(stored.state) as { identity?: string; creation?: { prepareTransactionId?: string; createTransactionId?: string; byRecoverer?: boolean } });
     const activity = stored.activity === null ? [] : (JSON.parse(stored.activity) as { what: string; transactionId: string }[]);
     const named = new Map<string, string>();
-    if (state?.identity !== undefined) named.set(state.identity, 'the payment that defines the identity');
+    if (state?.identity !== undefined) named.set(state.identity, state.creation?.byRecoverer === true ? 'the recoverer\'s payment that defines the identity' : 'the payment that defines the identity');
     if (state?.creation?.prepareTransactionId !== undefined) named.set(state.creation.prepareTransactionId, 'the wallet\'s payment to itself');
     if (state?.creation?.createTransactionId !== undefined) named.set(state.creation.createTransactionId, 'the creation');
     for (const entry of activity) if (!named.has(entry.transactionId)) named.set(entry.transactionId, `"${entry.what}"`);
@@ -464,12 +464,12 @@ const waitsConcluded = (facts: string[]): string[] => {
     return found === null ? undefined : { seconds: found[1] ?? '', open: found[2] ?? '' };
   };
   const said: string[] = [];
-  const protectedAt = fact('From the payment to "Protected"');
+  const protectedAt = fact('From "Set it up" to "Protected"') ?? fact('From the payment to "Protected"');
   if (protectedAt !== undefined) {
     said.push(
       /the creation /.test(protectedAt.open)
-        ? `From the payment that funded the wallet to a wallet in use with recovery on (${protectedAt.seconds} s), no step waited for a block: the transaction that created the wallet was still not in one when the wallet showed "Protected".`
-        : `A block held the wallet's creation before the wallet showed "Protected" (${protectedAt.seconds} s after the payment), so this record alone does not show that no step of the creation waited for one.`,
+        ? `From the moment the wallet was asked for to a wallet in use with recovery on (${protectedAt.seconds} s), no step waited for a block: the transaction that created the wallet was still not in one when the wallet showed "Protected".`
+        : `A block held the wallet's creation before the wallet showed "Protected" (${protectedAt.seconds} s), so this record alone does not show that no step of the creation waited for one.`,
     );
   }
   const sweptAt = fact('From the completion to the sweep sent by the new phone');
@@ -553,123 +553,101 @@ export const balanceOf = async (page: Page): Promise<bigint> => {
 // ------------------------------------------------------------------ the first steps of every course
 
 /**
- * Steps 1 to 4: the recoverer opens its page and shows its code; the owner creates a wallet with that recoverer;
- * the recoverer takes in the kit and recovery is on; the owner receives. The owner's phone reads the code, which
- * carries the recoverer's link and a session, and the wallet sends the kit straight to the recoverer's page, kept
- * open on its "Your link" screen. With `--links`, or when the recoverer's page offers no session, the phone opens
- * the recoverer's link and the recoverer's page opens the kit link, as before.
+ * A code taken in on the phone as a person without a camera would: the scanner that opens by itself is closed, and the
+ * code's text is pasted under "No camera?" (scripts/scan-check.ts and scripts/session-check.ts cover the camera).
+ */
+export const pasteCode = async (page: Page, code: string): Promise<void> => {
+  const cancel = page.locator('dialog.scan-dialog').getByRole('button', { name: 'Cancel' });
+  await cancel.waitFor({ state: 'visible', timeout: 30_000 }).then(() => cancel.click(), () => undefined);
+  await page.getByText('No camera?').first().click();
+  await page.locator('#code-text').fill(code);
+  await click(page, 'Use it');
+};
+
+/** The code a recoverer's screen shows, once its session is reachable. */
+const codeOn = async (page: Page, testId: string): Promise<string> => {
+  await see(page, /Waiting for (their|the new) phone to scan the code/, 60_000);
+  await wait(300);
+  return valueOf(page, testId);
+};
+
+/**
+ * Steps 1 to 3: Anna opens the recoverer's page as someone helping a person she knows, sets the waiting period of
+ * new wallets, and funds her balance; she sets up Grandma's wallet: the phone scans her code and asks, Anna says
+ * yes, and the wallet is created from her coins, the phone opens it and recovery is on; the owner receives.
  * @param shoot - takes the screenshots of these screens, under their names in docs/screens
- * @returns the devices, the recoverer's link (without a session), and whether the kit went over the session; or
+ * @returns the devices, the code of Anna's set-up screen, and that the wallet was set up over its session; or
  * nothing when the run was asked to stop earlier
  */
 export const firstSteps = async (
-  { begin, device, log, pay, mark, since, standingNow, keepStorage, work }: Course,
+  { begin, device, log, pay, mine, mark, since, standingNow, keepStorage, work }: Course,
   shoot: (page: Page, name: string) => Promise<void>,
-  /** Called once the owner's wallet has its words and before anything is paid to it: to keep them on disk. */
+  /** Called once the owner's phone has its words and before anything is created for it: to keep them on disk. */
   beforeFunding: (old: Device) => Promise<void> = async () => undefined,
 ): Promise<{ recoverer: Device; old: Device; recovererLink: string; overSession: boolean } | undefined> => {
   // 1 ------------------------------------------------------------------
-  if (!begin(viaLinks ? 'The recoverer opens its page and gives its link' : 'The recoverer opens its page and shows its code')) return;
+  if (!begin('Anna opens the recoverer\'s page to help someone she knows, and funds her balance')) return;
   const recoverer = await device('recoverer');
   await recoverer.page.goto(RECOVERER);
-  await see(recoverer.page, 'No wallets yet.');
-  await shoot(recoverer.page, 'recoverer-empty');
-  await recoverer.page.goto(`${RECOVERER}link`);
+  await see(recoverer.page, 'How will you use this page?');
+  await recoverer.page.getByTestId('mode-friend').click();
   await recoverer.page.getByLabel('Your name, as their wallet shows it').fill('Anna');
-  await wait(300);
-  const recovererLink = await valueOf(recoverer.page, 'recoverer-link');
-  const recovererFingerprint = (await recoverer.page.locator('.fingerprint').first().textContent()) ?? '';
-  log(`   link of ${recovererLink.length} characters; fingerprint ${recovererFingerprint}`);
-  // The code carries the link and a session once the page reaches its relay; a page that cannot, or an older page
-  // without a session, shows the plain link: the course then goes on with the links.
-  let code: string | undefined;
-  if (!viaLinks) code = await sessionCode(recoverer.page, recovererLink);
-  const overSession = code !== undefined;
-  if (overSession) log(`   the code on "Your link" carries the link and a session, ${code?.length} characters; the page stays open on that screen`);
-  else if (!viaLinks) log('   the recoverer\'s page offers no session with its code: the wallet is made with the links');
-  await shoot(recoverer.page, 'recoverer-link');
-  if (!overSession) {
-    await recoverer.page.goto(RECOVERER);
-    await see(recoverer.page, 'No wallets yet.');
-  }
+  await shoot(recoverer.page, 'recoverer-start');
+  await click(recoverer.page, 'Continue');
+  await see(recoverer.page, 'No wallets yet.');
+  // The shortest waiting period, so that the course's recovery can complete: the run moves the chain's clock.
+  await recoverer.page.getByRole('link', { name: 'Settings' }).first().click();
+  await recoverer.page.getByLabel(/about 9 minutes/).check();
+  await recoverer.page.getByLabel('Starting balance, in satoshis').fill('100000');
+  await shoot(recoverer.page, 'recoverer-settings');
+  await click(recoverer.page, 'Save');
+  log('   friend mode; new wallets get 100,000 satoshis and a waiting period of about 9 minutes');
+  await recoverer.page.getByRole('link', { name: 'People' }).first().click();
+  const fundsAddress = await valueOf(recoverer.page, 'funds-address');
+  await keepStorage(recoverer);
+  log(`   Anna's balance is funded at ${fundsAddress}; what her page keeps, her words among it, is copied to ${work.slice(root.length)}storage-recoverer.json first`);
+  log(`   ${pay(fundsAddress, 400_000)}`);
+  const balance = recoverer.page.locator('[data-testid="funds-balance"]:not([data-value="0"])');
+  await balance.first().waitFor({ state: 'visible', timeout: 120_000 * patience });
+  log(`   Anna's page shows her balance: ${(await balance.first().getAttribute('data-value')) ?? ''} satoshis`);
+  await shoot(recoverer.page, 'recoverer-empty');
 
   // 2 ------------------------------------------------------------------
-  if (!begin('The owner creates a wallet with Anna as recoverer')) return;
+  if (!begin('Anna sets up Grandma\'s wallet: the phone scans her code, she says yes')) return;
+  await recoverer.page.getByTestId('new-wallet').click();
+  await recoverer.page.getByLabel('Who are you helping?').fill('Grandma');
+  await click(recoverer.page, 'Show the code');
+  const code = await codeOn(recoverer.page, 'recoverer-code');
+  log(`   Anna's code carries her name, her key and a session, ${code.length} characters`);
   const old = await device('old-phone');
   await old.page.goto(WALLET);
-  await see(old.page, 'Make a new wallet');
+  await see(old.page, 'Someone I trust is helping me');
   await shoot(old.page, 'wallet-welcome');
-  if (code !== undefined) {
-    // The phone reads the code: what its camera reads is put into the field (scripts/scan-check.ts covers the camera).
-    await click(old.page, /Make a new wallet/);
-    await old.page.locator('#recipient-link').fill(code);
-    await click(old.page, 'Use this link');
-  } else {
-    await old.page.goto(recovererLink);
-    await see(old.page, 'You opened the link of');
-    await click(old.page, /Make a new wallet/);
-  }
-  await see(old.page, 'Fingerprint of their key');
-  const seenFingerprint = (await old.page.locator('.fingerprint').first().textContent()) ?? '';
-  if (seenFingerprint !== recovererFingerprint) throw new Error(`the fingerprints differ: ${seenFingerprint} and ${recovererFingerprint}`);
-  log(`   the wallet shows the same fingerprint, ${seenFingerprint}`);
-  if (overSession) {
-    await see(recoverer.page, 'A phone is connected', 60_000);
-    log('   the recoverer\'s page shows that a phone is connected');
-    await shoot(recoverer.page, 'recoverer-link-code');
-  }
-  await tick(old.page, 'The fingerprints are the same');
-  await shoot(old.page, 'wallet-create-setup');
-  await click(old.page, 'Continue');
-  const funding = await valueOf(old.page, 'funding-address');
-  log(`   funding address ${funding}`);
-  await shoot(old.page, 'wallet-create-funding');
+  await click(old.page, 'Someone I trust is helping me');
+  await pasteCode(old.page, code);
   await beforeFunding(old);
+  await see(recoverer.page, 'Set up Grandma\'s wallet with', 120_000);
+  await see(old.page, 'Waiting for Anna to say yes', 120_000);
+  log('   the phone asked over the session; Anna\'s page asks "Set up Grandma\'s wallet?", the phone waits for her');
   await keepStorage(old);
-  await keepStorage(recoverer);
-  log(`   what the two pages keep, the wallet's words among it, is copied to ${work.slice(root.length)}storage-*.json before anything is paid`);
-  log(`   ${pay(funding, 120_000)}`);
+  await shoot(old.page, 'wallet-setting-up');
+  await shoot(recoverer.page, 'recoverer-friend-confirm');
+  await click(recoverer.page, 'Set it up');
   mark('paid');
-  await click(old.page, 'Create the wallet');
-  // The wallet goes on as soon as the network has its creation: no block is waited for.
-  let kitLink: string;
-  if (overSession) {
-    // The kit goes to the recoverer's page; its link stays folded away under "Send it as a link instead".
-    await old.page.getByTestId('handed-enroll').first().waitFor({ state: 'visible', timeout: 180_000 * patience });
-    kitLink = (await old.page.getByTestId('kit-link').first().getAttribute('data-value')) ?? '';
-    log(`   created; the wallet sends the kit to Anna's page (its link, ${kitLink.length} characters, folded away)`);
-    await standingNow(old.page, `From the payment to the wallet in use, its kit on the way to Anna's page: ${since('paid')}`);
-    await see(old.page, 'Anna\'s page has the kit.', 60_000);
-    log('   the wallet shows that Anna\'s page has the kit');
-  } else {
-    kitLink = await valueOf(old.page, 'kit-link');
-    log(`   created; the kit link has ${kitLink.length} characters`);
-    await standingNow(old.page, `From the payment to the wallet in use, its kit link shown: ${since('paid')}`);
-  }
-  await see(old.page, /Recovery is not on yet|Checking the wallet's protection/);
-  await shoot(old.page, 'wallet-home-kit-sent');
+  // The phone goes on as soon as the network has the creation: no block is waited for.
+  await see(old.page, 'Your wallet is ready', 180_000);
+  log(`   the phone shows "Your wallet is ready" with ${(await old.page.locator('.set-up-balance .balance-sub').first().textContent())?.trim()}`);
+  await standingNow(old.page, `From "Set it up" to "Your wallet is ready": ${since('paid')}`);
+  await shoot(old.page, 'wallet-ready');
+  await see(recoverer.page, 'Grandma\'s wallet is set up', 60_000);
+  log('   Anna\'s page says the wallet is set up and keeps what a recovery needs');
+  await click(old.page, 'Open my wallet');
+  await see(old.page, 'Protected', 180_000);
+  log('   the wallet shows "Protected": Anna\'s receipt is on the backup stores');
+  await standingNow(old.page, `From "Set it up" to "Protected", recovery on: ${since('paid')}`);
+  mine(1);
 
   // 3 ------------------------------------------------------------------
-  if (!begin('Anna takes in the kit; the wallet says that recovery is on')) return;
-  if (overSession) {
-    // Nothing is opened on the recoverer's page: the kit arrived on the screen it was left on.
-    await see(recoverer.page, 'A recovery kit has arrived', 60_000);
-    log('   the kit arrived on Anna\'s page, still on "Your link"');
-  } else {
-    await recoverer.page.goto(kitLink);
-    await see(recoverer.page, 'A recovery kit has arrived');
-  }
-  await recoverer.page.getByLabel('Whose wallet is this?').fill('Grandma');
-  await shoot(recoverer.page, 'recoverer-kit-arrived');
-  await click(recoverer.page, 'Check and keep the kit');
-  await see(recoverer.page, 'You look after Grandma now');
-  log('   the recoverer kept the kit and left its receipt');
-  await shoot(recoverer.page, 'recoverer-kit-kept');
-  await see(old.page, 'Protected', 120_000);
-  log('   the wallet shows "Protected"');
-  await standingNow(old.page, `From the payment to "Protected", recovery on: ${since('paid')}`);
-
-  // 4 ------------------------------------------------------------------
   if (!begin('The owner receives')) return;
   await old.page.getByRole('link', { name: 'Receive' }).first().click();
   const receiving = await valueOf(old.page, 'receive-address');
@@ -681,63 +659,42 @@ export const firstSteps = async (
   const vaultShown = old.page.locator(`[data-testid="receive-address"]:not([data-value="${receiving}"])`);
   await vaultShown.first().waitFor({ state: 'visible', timeout: 60_000 * patience });
   log(`   vault address ${(await vaultShown.first().getAttribute('data-value')) ?? ''}`);
-  await standingNow(old.page, `From the payment to the vault address shown: ${since('paid')}`);
+  await standingNow(old.page, `From "Set it up" to the vault address shown: ${since('paid')}`);
   await shoot(old.page, 'wallet-receive-vault');
   await old.page.getByRole('link', { name: 'Home' }).first().click();
   await see(old.page, /^0\.00\d+/);
   for (let attempt = 0; attempt < 30; attempt++) {
     const balance = (await old.page.getByTestId('balance').textContent()) ?? '';
-    if (Number(balance.replace(/[^0-9.]/g, '')) > 0.0011) break;
+    if (Number(balance.replace(/[^0-9.]/g, '')) > 0.0014) break;
     await wait(1_000);
   }
   log(`   the wallet holds ${(await old.page.getByTestId('balance').textContent())?.replace('BCH', ' BCH')}`);
   await shoot(old.page, 'wallet-home');
-  return { recoverer, old, recovererLink, overSession };
-};
-
-/**
- * The code the recoverer's "Your link" screen shows, if it carries a session: it is longer than the plain link,
- * which the screen shows instead when it cannot reach its relay. Nothing when the page has no such code.
- */
-const sessionCode = async (page: Page, plain: string): Promise<string | undefined> => {
-  const shown = page.getByTestId('recoverer-code').first();
-  for (let attempt = 0; attempt < 60; attempt++) {
-    if ((await shown.count()) === 0) {
-      // An older page has no code of its own: the link is all there is.
-      if (attempt >= 10) return undefined;
-    } else {
-      const value = (await shown.getAttribute('data-value')) ?? '';
-      if (value !== plain && value.length > plain.length && (await page.getByText('Waiting for their phone').first().isVisible())) return value;
-      if (await page.getByText('Only the link').first().isVisible()) return undefined;
-    }
-    await wait(500);
-  }
-  return undefined;
+  return { recoverer, old, recovererLink: code, overSession: true };
 };
 
 // ------------------------------------------------------------------ a takeover
 
 /**
- * A new phone asks to take the wallet over with the recoverer's link; the recoverer checks it and asks the network.
+ * A phone asks to take the wallet over: on the recoverer's screen of the wallet, "Grandma lost their phone" shows a
+ * code; the phone chooses "I lost my phone" and scans it; its request goes over the session, and the recoverer's
+ * page asks the network at once.
+ * @param _link - kept for the courses that pass it; the code comes from the recoverer's screen of the wallet
  * @param made - the new phone, if it is already opened; otherwise a new profile is made
  */
-export const newPhoneAsks = async ({ device, log }: Course, recoverer: Device, recovererLink: string, shoot: (page: Page, name: string) => Promise<void>, made?: Device): Promise<Device> => {
+export const newPhoneAsks = async (theCourse: Course, recoverer: Device, _link: string, shoot: (page: Page, name: string) => Promise<void>, made?: Device): Promise<Device> => {
+  const { device, log } = theCourse;
   const next = made ?? (await device('new-phone'));
-  await next.page.goto(recovererLink);
-  await click(next.page, /Take over my wallet on this phone/);
-  await tick(next.page, 'The fingerprints are the same');
-  await click(next.page, 'Make my request');
-  const takeoverLink = await valueOf(next.page, 'takeover-link');
-  const nextFingerprint = (await next.page.locator('.fingerprint').first().textContent()) ?? '';
+  await openDeskWorking(theCourse, recoverer);
+  await click(recoverer.page, /lost their phone/);
+  const code = await codeOn(recoverer.page, 'lost-phone-code');
+  await shoot(recoverer.page, 'recoverer-lost-phone');
+  await next.page.goto(WALLET);
+  await click(next.page, 'I lost my phone');
+  await pasteCode(next.page, code);
+  await see(next.page, /Waiting for Anna/, 120_000);
+  log('   the new phone sent its request over the session of the code');
   await shoot(next.page, 'wallet-takeover-request');
-  await recoverer.page.goto(takeoverLink);
-  await click(recoverer.page, 'See the request');
-  const shown = (await recoverer.page.locator('.fingerprint').first().textContent()) ?? '';
-  if (shown !== nextFingerprint) throw new Error(`the recoverer sees ${shown}, the new phone ${nextFingerprint}`);
-  log(`   both sides show ${shown}`);
-  await tick(recoverer.page, 'I have made sure who is asking');
-  await click(recoverer.page, 'Save it for this wallet');
-  await click(recoverer.page, /Ask the network/);
   return next;
 };
 
@@ -760,10 +717,19 @@ export const completeTakeover = async ({ log, mine, passTime, mark, since, block
   await nameNewest('the completion');
   // The hand-over is made as soon as the network shows the completion: no block is waited for.
   const handOver = await valueOf(recoverer.page, 'handover-link', 120_000);
-  log('   completed; the hand-over link is ready');
-  blockFact(`From the completion to the hand-over link: ${since('completed')}; the chain is at height ${await height()}.`);
+  log('   completed; the hand-over is ready');
+  blockFact(`From the completion to the hand-over: ${since('completed')}; the chain is at height ${await height()}.`);
   await shoot(recoverer.page, 'recoverer-handover');
-  await next.page.goto(handOver);
+  // Over the session of the lost phone's code, when the new phone is still on it; otherwise by the hand-over's code.
+  const arrived = await next.page.getByText('Bringing your coins over').first().waitFor({ state: 'visible', timeout: 45_000 }).then(() => true, () => false);
+  if (arrived) {
+    log('   the hand-over reached the new phone over the session');
+    const told = await recoverer.page.getByText('The new phone has the wallet').first().waitFor({ state: 'visible', timeout: 30_000 }).then(() => true, () => false);
+    log(told ? '   the recoverer\'s page says that the new phone has the wallet' : '   the recoverer\'s page was not told that the new phone has the wallet');
+  } else {
+    log('   the hand-over did not arrive over the session; the new phone opens the hand-over\'s code');
+    await next.page.goto(handOver);
+  }
   await see(next.page, 'Bringing your coins over');
   await shoot(next.page, 'wallet-arrival');
   // The sweep is looked at on the chain as soon as the page has sent it, before the full search ends.

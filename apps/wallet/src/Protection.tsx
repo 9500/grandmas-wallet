@@ -5,8 +5,7 @@ import { Button, Card, HandOff, Loading, Notice, Sat, Status, TaskStatus, useTas
 import { useEffect, useState } from 'preact/hooks';
 
 import { type Owner, isChainGap } from './OwnerApp.js';
-import { WaitEnds, Waiting } from './parts.js';
-import { SealedHandOff } from './SealedHandOff.js';
+import { WaitEnds } from './parts.js';
 import { keep, kept } from './session.js';
 
 const recovererName = (): string => kept('recipient')?.name || 'your recoverer';
@@ -47,27 +46,6 @@ export const ProtectionStatus = ({ owner, compact }: { owner: Owner; compact?: b
         <p class="small">Why: {owner.recovery.reasons.join(' ')}</p>
       )}
     </Status>
-  );
-};
-
-/** The kit link, until the recoverer's receipt is found (section 9.3: "kit sent" is not "confirmed"). */
-export const KitCard = ({ owner }: { owner: Owner }) => {
-  const link = kept('kitLink');
-  if (link === undefined || owner.wallet.recovery === 'on') return null;
-  const name = recovererName();
-  return (
-    <Card title={`Send the recovery kit to ${name}`} tone="warn" cls="o3">
-      <SealedHandOff kind="enroll" name={name}>
-        <HandOff text={link} qrLabel="QR code of the recovery kit link" copyLabel="Copy link" testId="kit-link">
-          <p>Send this link to {name}, by message or by letting them scan the code. Only they can open it.</p>
-        </HandOff>
-      </SealedHandOff>
-      <div class="actions">
-        <Waiting>
-          Waiting for {name} to check the kit and leave a receipt. Until then recovery is not on: coins you receive are not yet recoverable.
-        </Waiting>
-      </div>
-    </Card>
   );
 };
 

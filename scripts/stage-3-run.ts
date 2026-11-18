@@ -90,8 +90,9 @@ try {
   await fund(await wallet.fundingAddress());
   await until('the funding coin', async () => (await wallet.creationStep()) === 'funded');
   const before = await wallet.creationStep();
-  const allowance = { feeLockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), satoshis: 6_000n };
-  const afterCreate = await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 }, allowance });
+  const afterCreate = await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
+  // The recoverer's fee coins, paid here from the run's own coins; the owner gives no allowance.
+  await wallet.pay([{ lockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), valueSatoshis: 6_000n }]);
   const identity = hexToBin(wallet.stored.identity as string);
   say(`  identity ${hex(identity)}; creation was "${before}", is "${afterCreate}"`);
   // The wallet is in use as soon as the network has its creation; no block is waited for.

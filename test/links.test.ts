@@ -76,15 +76,17 @@ describe('what ties a coin to the identity', () => {
 
     // --- Creating the wallet: the coins it was funded with, and the first addresses they move to.
     const fundingCoin = fund(chain, fundingAddress, 100_000n);
-    await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 }, allowance: { feeLockingBytecode: feeAddress, satoshis: 20_000n } });
+    await owner.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
+    // The recoverer's fee coins are its own, from elsewhere.
+    fund(chain, feeAddress, 20_000n);
     const identity = hexToBin(owner.stored.identity as string);
     const changeAt = (number: number) => walletAddress(identity, first.viewingKey, ADDRESS_KIND.change, number).lockingBytecode;
     let seen = observe(chain, identity);
     expect(seen.showing.size).toBe(1);
     expect(seen.tied.has(fundingCoin)).toBe(true);
     expect(seen.tiedAt(changeAt(owner.stored.firstCoinNumber as number))).toBe(true);
-    // The recoverer's allowance leads back to the wallet's coin that paid it.
-    expect(seen.tiedAt(feeAddress)).toBe(true);
+    // Nothing leads from the creation to the recoverer's fee address.
+    expect(seen.tiedAt(feeAddress)).toBe(false);
 
     // --- An everyday payment from an address that was given out: nothing of the wallet is shown, nothing is tied.
     const given = (await owner.receiveAddress()).address;

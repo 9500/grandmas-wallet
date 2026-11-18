@@ -54,7 +54,7 @@ import {
   applicationArchive,
   copyEarlierArchives,
   newArchive,
-  suggestedAllowance,
+  feeReserve,
   walletTemplateNumbers,
 } from '../packages/app/src/index.js';
 // The application's own definitions. The wallet's code has none of them: they reach it as texts.
@@ -339,7 +339,9 @@ try {
     await once('the wallet is funded', async () => ({ transactionIds: [await funderPays([{ lockingBytecode: funding, valueSatoshis: 80_000n }])] }));
     if ((await wallet.creationStep()) !== 'created') {
       await until('the funding coin in the engine', async () => (await wallet.creationStep()) !== 'not funded');
-      await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 }, allowance: { feeLockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), satoshis: suggestedAllowance() } });
+      await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
+      // The recoverer's fee coins, paid here from the run's own coins; the owner gives no allowance.
+      await wallet.pay([{ lockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), valueSatoshis: feeReserve() }]);
       facts.identity = wallet.stored.identity as string;
       keep();
       // The wallet is in use as soon as the network has its creation; no block is waited for.

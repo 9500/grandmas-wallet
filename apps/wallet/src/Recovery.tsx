@@ -1,15 +1,14 @@
 import { generateBip39Mnemonic } from '@bitauth/libauth';
-import { type NewSeedPreparation, describeDelay, enroll, kitTemplates, makeUserBackup, sendUpdate, suggestedAllowance, userBackupText } from '@grandmas-wallet/app';
+import { type NewSeedPreparation, describeDelay, enroll, makeUserBackup, sendUpdate, userBackupText } from '@grandmas-wallet/app';
 import { makeLink, readLink } from '@grandmas-wallet/app/links';
-import { type ChallengeDelay, p2pkhLockingBytecode } from '@grandmas-wallet/core';
+import type { ChallengeDelay } from '@grandmas-wallet/core';
 import { sealedOfLink } from '@grandmas-wallet/app/hand-off';
-import { credentialKeys } from '@grandmas-wallet/enrollment';
-import { Button, Card, Choice, Field, Fingerprint, HandOff, KeyValues, LinkRow, Notice, PageHead, Sat, Segmented, TaskStatus, TextArea, CopyButton, download, useTask } from '@grandmas-wallet/ui';
+import { Button, Card, Choice, Field, Fingerprint, HandOff, KeyValues, LinkRow, Notice, PageHead, Segmented, TaskStatus, TextArea, CopyButton, download, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import type { Owner } from './OwnerApp.js';
 import { DELAYS, DelayPicker, RecipientCheck, RecipientEntry, Waiting, sameDelay } from './parts.js';
-import { KitCard, ProtectionStatus } from './Protection.js';
+import { ProtectionStatus } from './Protection.js';
 import { type StoredRecipient, deviceWords, keep, kept, recipientFingerprint, recipientOf, sealedContent } from './session.js';
 import { handToRecoverer } from './hand-to-recoverer.js';
 import { PREPARE_LINK } from './scan.js';
@@ -53,7 +52,6 @@ export const Recovery = ({ owner }: { owner: Owner }) => {
             />
             <p class="small muted">This page checks the wallet every 15 seconds while it is open. A phone with the page closed, or switched off, does not watch; keep it open, or open it at least once within every waiting period.</p>
           </Card>
-          <KitCard owner={owner} />
           {pending !== undefined && (
             <Card title={pending.kind === 'new seed' ? 'Moving to a new phone' : pending.kind === 'new recoverer' ? 'Changing your recoverer' : 'Changing the waiting period'} tone="warn">
               <ChangeState owner={owner} />
@@ -258,11 +256,9 @@ const NewRecoverer = ({ owner, onBack }: { owner: Owner; onBack: () => void }) =
       setPending(made);
       deviceWords();
     });
-  const allowance = useTask();
   if (pending !== undefined) {
     const changing = kept('arrangement')?.change?.kind === 'new recoverer' && kept('arrangement')?.change?.made === undefined;
     const name = pending.recipient.name || 'the new recoverer';
-    const feeAddress = p2pkhLockingBytecode(credentialKeys(pending.credentialWords, owner.session.network, kitTemplates()).feeKey.keyHash);
     return (
       <div class="stack">
         <Back onBack={onBack} />
@@ -276,28 +272,8 @@ const NewRecoverer = ({ owner, onBack }: { owner: Owner; onBack: () => void }) =
         </Card>
         <Card title="2. The change">
           {changing ? <ChangeState owner={owner} /> : <Notice tone="good">The wallet names {name} as its recoverer.</Notice>}
-          <p class="small muted">The earlier recoverer's key stops working on the wallet. They keep what they were given and can go on seeing the addresses they know; to end that, also move to a new phone afterwards.</p>
-        </Card>
-        <Card title="3. An allowance, if you like">
-          <p class="small muted">
-            So that {name} need not find Bitcoin Cash for fees first. It becomes theirs. What the earlier recoverer holds stays theirs.
-          </p>
-          <TaskStatus task={allowance} name="give" />
+          {/* info: The earlier recoverer's key stops working on the wallet. They keep what they were given and can go on seeing the addresses they know; to end that, also move to a new phone afterwards. */}
           <div class="actions">
-            <Button
-              kind="secondary"
-              task={allowance}
-              name="give"
-              onClick={() =>
-                void allowance.run('give', async () => {
-                  const sent = await owner.wallet.pay([{ lockingBytecode: feeAddress, valueSatoshis: suggestedAllowance() }]);
-                  owner.sent(`Gave ${name} an allowance`, sent, suggestedAllowance());
-                  owner.toast('The allowance is sent.');
-                })
-              }
-            >
-              Give <Sat satoshis={suggestedAllowance()} />
-            </Button>
             {changing && (
               <Button
                 kind="quiet"

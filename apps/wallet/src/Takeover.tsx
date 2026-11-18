@@ -1,47 +1,60 @@
 import { hexToBin } from '@bitauth/libauth';
 import { type OwnerWallet, finishTakeover, startTakeover } from '@grandmas-wallet/app';
 import { makeLink } from '@grandmas-wallet/app/links';
-import { Button, Card, Field, Fingerprint, HandOff, PageHead, type Step, Steps, TaskStatus, TextArea, useTask } from '@grandmas-wallet/ui';
+import { Button, Field, More, Spinner, TaskStatus, TextArea, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
-import { SealedHandOff } from './SealedHandOff.js';
-import { handToRecoverer } from './hand-to-recoverer.js';
-import { RecipientCheck, RecipientEntry } from './parts.js';
+import { followHandOver, handToRecoverer, leaveRecoverer, useHanding } from './hand-to-recoverer.js';
+import { ScanCode } from './ScanCode.js';
 import { HANDOVER_LINK } from './scan.js';
 import { WithScan } from './Scanner.js';
-import { type Session, type StoredRecipient, deviceAccount, deviceWords, keep, kept, recipientFingerprint, saveState, sealedContent, sealedOf, seedOf } from './session.js';
+import { type Session, deviceAccount, deviceWords, keep, kept, saveState, sealedContent, sealedOf, seedOf } from './session.js';
 
 /**
- * A new device takes a wallet over with the recoverer's help (proposal section 11.1, steps 1 and 6): it makes
- * its own seed, sends the recoverer a sealed takeover message, and after the waiting period opens the
- * recoverer's hand-over.
+ * A new phone takes a wallet over with the recoverer's help (proposal section 11.1, steps 1 and 6): it scans the
+ * recoverer's code, makes its own keys and sends its takeover request over the session the code offers. After the
+ * waiting period the recoverer completes, and the hand-over reaches the phone over the same session if both pages
+ * are open, or by scanning the hand-over's code on the recoverer's screen.
  */
 export const Takeover = ({ session, onBack, onDone }: { session: Session; onBack: () => void; onDone: (wallet: OwnerWallet) => void }) => {
   const [asked, setAsked] = useState(() => kept('takeover'));
-  const [recipient, setRecipient] = useState<StoredRecipient | undefined>();
-  const [matched, setMatched] = useState(false);
-  const [pasted, setPasted] = useState('');
   const task = useTask();
 
-  const ask = () =>
-    task.run('ask', async (progress) => {
-      if (recipient === undefined) return;
-      progress('Writing this phone\'s viewing key to the backup stores');
+  const ask = (recipient: Parameters<typeof handToRecoverer>[0]) =>
+    task.run('ask', async () => {
       const { sealed, pending } = await startTakeover({ seed: seedOf(session, deviceWords()), stores: session.environment.stores, storeAt: session.storeAt, recovererPublicKey: hexToBin(recipient.publicKey) });
       const link = await makeLink(recipient.page, 'takeover', sealedContent(sealed));
       const made = { pending, recipient, link };
       keep('takeover', made);
-      // Straight to the recoverer's page when its code offered a session; the link stays the second way.
       handToRecoverer(recipient, 'takeover', sealed);
       setAsked(made);
     });
 
-  const takeIn = (text: string) =>
-    task.run('handover', async (progress) => {
-      if (asked === undefined) return;
-      const sealed = await sealedOf(text, 'handover');
-      if (sealed === undefined) throw new Error('This is not the link your recoverer sends after the waiting period. It contains "#handover=".');
-      progress('Opening this phone\'s keys and checking the wallet\'s history on the chain');
+  if (asked === undefined) {
+    return (
+      <>
+        <ScanCode title="Scan your helper's code" onBack={onBack} onRead={(recipient) => void ask(recipient)} />
+        <TaskStatus task={task} name="ask" />
+      </>
+    );
+  }
+  return <Waiting session={session} onDone={onDone} onAgain={() => {
+    leaveRecoverer();
+    keep('takeover', undefined);
+    setAsked(undefined);
+  }} />;
+};
+
+/** After the request: the recoverer asks the network, the waiting period runs, the hand-over comes. */
+const Waiting = ({ session, onDone, onAgain }: { session: Session; onDone: (wallet: OwnerWallet) => void; onAgain: () => void }) => {
+  const asked = kept('takeover') as NonNullable<ReturnType<typeof kept<'takeover'>>>;
+  const handing = useHanding('takeover');
+  const [pasted, setPasted] = useState('');
+  const task = useTask();
+  const name = asked.recipient.name || 'your helper';
+
+  /** Open the wallet with the hand-over. Throws when it cannot be opened. */
+  const takeIn = async (sealed: Uint8Array): Promise<void> => {
       const account = await deviceAccount(session);
       const taken = await finishTakeover({ sealedHandOver: sealed, pending: asked.pending, seed: seedOf(session, deviceWords()), backend: account, chain: session.chain, save: saveState });
       keep('arrangement', taken.arrangement);
@@ -49,92 +62,68 @@ export const Takeover = ({ session, onBack, onDone }: { session: Session; onBack
       keep('arrival', { from: 'takeover', missing: taken.missing });
       keep('takeover', undefined);
       keep('incoming', undefined);
+      // The session is left a moment later: a hand-over that came over it is acknowledged first, so that the page stops sending it.
+      setTimeout(() => leaveRecoverer(asked.recipient.session), 3_000);
       onDone(taken.wallet);
-    });
+  };
+  const takeLink = async (text: string) => {
+    const sealed = await sealedOf(text, 'handover');
+    if (sealed === undefined) throw new Error('This is not the code your helper shows after the waiting period.');
+    await takeIn(sealed);
+  };
 
+  // The hand-over over the session, when the recoverer's page sends it there; a link the page was opened with likewise.
   useEffect(() => {
     const incoming = kept('incoming');
-    if (asked !== undefined && incoming?.kind === 'handover') void takeIn(incoming.text);
-  }, [asked]);
+    if (incoming?.kind === 'handover') void task.run('link', () => takeLink(incoming.text));
+    return followHandOver(asked.recipient, async (sealed) => {
+      // The recoverer's page is told only once the wallet is open here; otherwise it sends the hand-over again.
+      const opened = await task.run('handover', async () => {
+        await takeIn(sealed);
+        return true;
+      });
+      if (opened !== true) throw new Error('The hand-over could not be opened.');
+    });
+  }, []);
 
-  if (asked === undefined) {
-    return (
-      <div class="stack">
-        <PageHead title="Take over your wallet">Your recoverer can move your wallet to this phone. It takes the waiting period you chose, and your old phone, if anyone has it, can refuse in that time.</PageHead>
-        <Card title="Who is your recoverer?">
-          {recipient === undefined ? (
-            <RecipientEntry onRead={setRecipient} purpose="Ask them for it: by message, or by showing its QR code." />
-          ) : (
-            <RecipientCheck recipient={recipient} matched={matched} onMatched={setMatched} onClear={() => setRecipient(undefined)} />
-          )}
-          <TaskStatus task={task} name="ask" />
-          <div class="actions">
-            <Button task={task} name="ask" disabled={recipient === undefined || !matched} onClick={() => void ask()}>
-              Make my request
-            </Button>
-            <Button kind="quiet" onClick={onBack}>
-              Back
-            </Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  const steps: Step[] = [
-    {
-      title: `Send this link to ${asked.recipient.name || 'your recoverer'}`,
-      state: 'current',
-      detail: (
-        <div class="stack-s">
-          <p>It is sealed: only your recoverer can open it. It does not say which wallet is yours; your recoverer decides that.</p>
-          <SealedHandOff kind="takeover" name={asked.recipient.name || 'your recoverer'}>
-            <HandOff text={asked.link} qrLabel="QR code of the request for your recoverer" copyLabel="Copy link" testId="takeover-link" />
-          </SealedHandOff>
-        </div>
-      ),
-    },
-    {
-      title: 'Read them this fingerprint',
-      state: 'current',
-      detail: (
-        <div class="stack-s">
-          <Fingerprint value={asked.pending.fingerprint} />
-          <p class="small muted">It is the fingerprint of this phone's new key. Your recoverer's page shows the same one for your request. They should not go on unless it matches and they are sure it is you.</p>
-        </div>
-      ),
-    },
-    { title: 'Your recoverer asks the network', state: 'later', detail: 'Then the waiting period runs. Everyone can see the request, and your old phone could refuse it.' },
-    {
-      title: 'Open the link your recoverer sends back',
-      state: 'later',
-      detail: (
-        <div class="stack-s">
-          <p>After the waiting period your recoverer completes the move and sends you a link. Open it on this phone, scan its code, or paste it here.</p>
-          <Field label="The link from your recoverer" id="handover">
-            <WithScan filter={HANDOVER_LINK} onScan={setPasted}>
-              <TextArea id="handover" value={pasted} onInput={setPasted} placeholder="https://…#handover=…" />
-            </WithScan>
-          </Field>
-          <TaskStatus task={task} name="handover" />
-          <div>
-            <Button task={task} name="handover" disabled={pasted.trim() === ''} onClick={() => void takeIn(pasted)}>
-              Open the wallet
-            </Button>
-          </div>
-        </div>
-      ),
-    },
-  ];
+  const failed = handing?.status === 'refused' || handing?.status === 'unreached';
   return (
-    <div class="stack">
-      <PageHead title="Take over your wallet">Your request is ready. Keep this page: its key is the one your wallet moves to. You can close it and come back.</PageHead>
-      <Card>
-        <Steps steps={steps} />
-      </Card>
-      <p class="small muted">
-        Recoverer: {asked.recipient.name || 'unnamed'} · fingerprint {recipientFingerprint(asked.recipient)}
-      </p>
+    <div class="stack set-up" data-testid="takeover-waiting" data-status={handing?.status ?? ''}>
+      <div class="set-up-head">
+        {!failed && (
+          <div class="set-up-spinner">
+            <Spinner />
+          </div>
+        )}
+        <h1>{failed ? 'Not sent' : handing?.status === 'sending' ? 'Sending…' : `Waiting for ${name}`}</h1>
+        {failed ? (
+          <p class="set-up-problem">{handing?.reason ?? `${name}'s page did not answer. Keep it open and try again.`}</p>
+        ) : (
+          <p class="muted">Keep this page. You can close it and come back.</p>
+        )}
+        {/* info: Your helper asks the network to move your wallet to this phone. Then a waiting period runs, in public, during which your old phone could refuse. Afterwards your helper completes the move and this phone receives the wallet. */}
+      </div>
+      {failed && (
+        <div class="set-up-actions">
+          <Button block onClick={() => void sealedOf(asked.link, 'takeover').then((sealed) => sealed !== undefined && handToRecoverer(asked.recipient, 'takeover', sealed))}>
+            Try again
+          </Button>
+          <Button block kind="quiet" onClick={onAgain}>
+            Scan again
+          </Button>
+        </div>
+      )}
+      <TaskStatus task={task} />
+      <More summary="Scan the code they show after the waiting period">
+        <Field label="The code from your helper" id="handover">
+          <WithScan filter={HANDOVER_LINK} onScan={(text) => void task.run('link', () => takeLink(text))}>
+            <TextArea id="handover" value={pasted} onInput={setPasted} placeholder="https://…#handover=…" />
+          </WithScan>
+        </Field>
+        <Button kind="secondary" task={task} name="link" disabled={pasted.trim() === ''} onClick={() => void task.run('link', () => takeLink(pasted))}>
+          Open the wallet
+        </Button>
+      </More>
     </div>
   );
 };
