@@ -1,0 +1,23 @@
+pragma cashscript ^0.14.0;
+
+// Savings Jar: a demonstration application.
+//
+// A jar holds savings until a date. Anyone can pay in: a deposit is an
+// ordinary payment to the jar's address. After the date, whoever spends the
+// jar's key token in the same transaction can empty it.
+//
+// The contract knows nothing about wallets, keys or recovery. Authority is
+// the token: no key and no key hash is written into the jar.
+//
+//   keyCategory  the token category of the jar's key
+//   unlockTime   a Unix time (500,000,000 or above) or a block height
+//
+// A withdrawing transaction has a lock time at or after `unlockTime` and a
+// sequence number below the highest on the jar's input. The signature that
+// spends the key covers every input and output, so the jar's inputs need none.
+contract SavingsJar(bytes32 keyCategory, int unlockTime) {
+    function withdraw(int keyInput) {
+        require(tx.inputs[keyInput].tokenCategory == keyCategory);
+        require(tx.time >= unlockTime);
+    }
+}

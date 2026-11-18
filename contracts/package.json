@@ -11,7 +11,8 @@
   "exports": {
     "./controller": "./artifacts/controller.ts",
     "./recoverableAddress": "./artifacts/recoverableAddress.ts",
-    "./vaultAddress": "./artifacts/vaultAddress.ts"
+    "./vaultAddress": "./artifacts/vaultAddress.ts",
+    "./savingsJar": "./artifacts/savingsJar.ts"
   },
   "scripts": {
     "build": "node build.mjs"
