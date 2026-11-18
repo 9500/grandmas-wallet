@@ -1,9 +1,10 @@
 import { binToHex } from '@bitauth/libauth';
 import { type FeeView, acceptEnrollment, acceptUpdate, describeDelay, feeView } from '@grandmas-wallet/app';
 import { EnrollmentError, keyFingerprint, openPackage, readTakeover, readUpdate, recoveryKeyOf } from '@grandmas-wallet/enrollment';
-import { Amount, Button, Card, Field, Notice, TaskStatus, TextInput, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Field, Notice, TaskStatus, TextInput, plainError, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
+import { answerIncoming } from './offered-session.js';
 import { type Session, keep, kept, saveWallet, sealedOf, wallets } from './session.js';
 
 type Outcome =
@@ -14,7 +15,9 @@ type Outcome =
 
 /**
  * A link the page was opened with: a recovery kit (`enroll`), a takeover request (`takeover`) or an update
- * from an owner (`update`). Each is dealt with here and the result shown above the page.
+ * from an owner (`update`). Each is dealt with here and the result shown above the page. A kit or a request
+ * that arrived over the session the page's code offers is put into the same link and dealt with in the same
+ * way; the wallet that sent it is told what became of it.
  */
 export const Incoming = ({ session, onChanged, toast, onShowRequests }: { session: Session; onChanged: () => void; toast: (text: string) => void; onShowRequests: () => void }) => {
   const [outcome, setOutcome] = useState<Outcome | undefined>();
@@ -25,7 +28,17 @@ export const Incoming = ({ session, onChanged, toast, onShowRequests }: { sessio
   useEffect(() => {
     if (incoming === undefined) return;
     if (incoming.kind === 'enroll') setOutcome({ kind: 'enroll', stage: 'ask' });
-    else if (incoming.kind === 'takeover') void task.run('takeover', () => takeTakeover(incoming.text));
+    else if (incoming.kind === 'takeover') {
+      void task.run('takeover', () =>
+        takeTakeover(incoming.text).then(
+          () => answerIncoming('kept'),
+          (error: unknown) => {
+            answerIncoming('refused', plainError(error));
+            throw error;
+          },
+        ),
+      );
+    }
     else if (incoming.kind === 'update') void task.run('update', () => takeUpdate(incoming.text));
   }, []);
 
@@ -85,6 +98,7 @@ export const Incoming = ({ session, onChanged, toast, onShowRequests }: { sessio
           },
         });
         keep('incoming', undefined);
+        answerIncoming('kept');
         setOutcome({ kind: 'enrolled', label: name, identity, asNewRecoverer, fees: await feeView(session.chain, taken.kept).catch(() => undefined) });
         toast('The kit is kept and your receipt is on the backup stores.');
         onChanged();
@@ -93,6 +107,7 @@ export const Incoming = ({ session, onChanged, toast, onShowRequests }: { sessio
           setOutcome({ kind: 'enroll', stage: 'new recoverer', reason: error.message });
           return;
         }
+        answerIncoming('refused', plainError(error));
         throw error;
       }
     });
@@ -135,7 +150,7 @@ export const Incoming = ({ session, onChanged, toast, onShowRequests }: { sessio
             <Button task={task} name="enroll" onClick={() => void enroll(outcome.stage === 'new recoverer')}>
               {outcome.stage === 'ask' ? 'Check and keep the kit' : 'Keep it as the new recoverer'}
             </Button>
-            <Button kind="quiet" onClick={() => { keep('incoming', undefined); setOutcome(undefined); }}>
+            <Button kind="quiet" onClick={() => { keep('incoming', undefined); answerIncoming('refused', 'The recoverer did not take it in now.'); setOutcome(undefined); }}>
               Not now
             </Button>
           </div>

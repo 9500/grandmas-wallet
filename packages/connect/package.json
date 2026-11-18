@@ -6,10 +6,16 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
-    "./wizard": "./src/wizard.ts"
+    "./wizard": "./src/wizard.ts",
+    "./recoverer": "./src/recoverer.ts",
+    "./recoverer-session": "./src/recoverer-session.ts"
   },
   "dependencies": {
     "@bitauth/libauth": "3.1.0-next.8",
     "@wizardconnect/core": "0.2.10"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2",
+    "ws": "8.23.0"
   }
 }

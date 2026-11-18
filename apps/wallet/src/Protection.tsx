@@ -4,6 +4,7 @@ import { Amount, Button, Card, HandOff, Notice, Sat, Status, TaskStatus, useTask
 
 import { type Owner, isChainGap } from './OwnerApp.js';
 import { WaitEnds, Waiting } from './parts.js';
+import { SealedHandOff } from './SealedHandOff.js';
 import { kept } from './session.js';
 
 const recovererName = (): string => kept('recipient')?.name || 'your recoverer';
@@ -56,9 +57,11 @@ export const KitCard = ({ owner }: { owner: Owner }) => {
   const name = recovererName();
   return (
     <Card title={`Send the recovery kit to ${name}`} tone="warn" cls="o3">
-      <HandOff text={link} qrLabel="QR code of the recovery kit link" copyLabel="Copy link" testId="kit-link">
-        <p>Send this link to {name}, by message or by letting them scan the code. Only they can open it.</p>
-      </HandOff>
+      <SealedHandOff kind="enroll" name={name}>
+        <HandOff text={link} qrLabel="QR code of the recovery kit link" copyLabel="Copy link" testId="kit-link">
+          <p>Send this link to {name}, by message or by letting them scan the code. Only they can open it.</p>
+        </HandOff>
+      </SealedHandOff>
       <div class="actions">
         <Waiting>
           Waiting for {name} to check the kit and leave a receipt. Until then recovery is not on: coins you receive are not yet recoverable.

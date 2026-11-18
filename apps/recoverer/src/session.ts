@@ -92,9 +92,18 @@ export const boot = async (): Promise<Session> => {
 
 export const fingerprintOf = (session: Session): string => recipientKeyFingerprint(session.publicKey);
 
-/** The link the owner's wallet takes in: this recoverer's name, its page and its encryption key. Not secret. */
-export const recovererLink = (session: Session): Promise<string> =>
-  makeLink(session.environment.walletUrl, 'recoverer', { name: kept('name') ?? '', page: session.environment.recovererUrl, publicKey: binToHex(session.publicKey) });
+/**
+ * The link the owner's wallet takes in: this recoverer's name, its page and its encryption key. Not secret. In
+ * the page's QR code it also names the session the page offers while it is open, so that the wallet can send
+ * the kit straight back; a link sent as a message names none, and works at any time.
+ */
+export const recovererLink = (session: Session, sessionAddress?: string): Promise<string> =>
+  makeLink(session.environment.walletUrl, 'recoverer', {
+    name: kept('name') ?? '',
+    page: session.environment.recovererUrl,
+    publicKey: binToHex(session.publicKey),
+    ...(sessionAddress === undefined ? {} : { session: sessionAddress }),
+  });
 
 export const sealedOf = async (text: string, field: 'takeover' | 'update'): Promise<Uint8Array> => {
   const read = await readLink<{ sealed?: unknown }>(text, field);

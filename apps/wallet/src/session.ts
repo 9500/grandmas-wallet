@@ -21,6 +21,8 @@ import { type ChainReader, type ChallengeDelay, type SeedKeys, deriveSeedKeys } 
 import { credentialKeys, recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
 import { type Environment, Vault, connectChain, keyNetwork, loadEnvironment, openAccount } from '@grandmas-wallet/ui';
 
+import type { Handing, HandingSlot } from './hand-to-recoverer.js';
+
 /**
  * What the wallet page holds while it is open, and what it keeps in this browser between visits.
  *
@@ -47,6 +49,8 @@ export interface StoredRecipient {
   page: string;
   /** The recoverer's encryption key, hex. */
   publicKey: string;
+  /** The address of a session the recoverer's page offered with its code, to send it what is sealed to it (`gw_recoverer_v1`). */
+  session?: string;
 }
 
 /** What was chosen before the wallet was created. */
@@ -118,6 +122,10 @@ export interface Kept {
   ledger: LedgerEntry[];
   /** The camera that read the last QR code, so that the next scan starts with it. */
   scanCamera: string;
+  /** What was sent to the recoverer's page over its session, and what became of it. */
+  handing: Partial<Record<HandingSlot, Handing>>;
+  /** This phone's key for the recoverer's session it joined, so that it joins the same session after a reload. */
+  recovererSession: { uri: string; privateKey: string };
 }
 
 /** A connection to an application over WizardConnect. */
@@ -202,13 +210,18 @@ export const openWallet = async (session: Session): Promise<OwnerWallet> =>
 
 export const saveState = (state: OwnerWalletState): void => keep('state', state);
 
-/** Read a `recoverer` link: the recoverer's name, page and encryption key. */
+/**
+ * Read a `recoverer` link: the recoverer's name, page and encryption key, and, from the page's QR code, the
+ * address of the session it offers.
+ */
 export const readRecipientLink = async (text: string): Promise<StoredRecipient> => {
-  const read = await readLink<{ name?: unknown; page?: unknown; publicKey?: unknown }>(text, 'recoverer');
+  const read = await readLink<{ name?: unknown; page?: unknown; publicKey?: unknown; session?: unknown }>(text, 'recoverer');
   if (read === undefined) throw new Error('This is not a recoverer\'s link. The recoverer\'s page shows it under "Your link".');
-  const { name, page, publicKey } = read;
+  const { name, page, publicKey, session } = read;
   if (typeof name !== 'string' || typeof page !== 'string' || typeof publicKey !== 'string' || !/^[0-9a-f]{64}$/.test(publicKey)) throw new Error('The recoverer\'s link is incomplete.');
-  return { name, page, publicKey };
+  // A session address that cannot be used is left out: the link works without it.
+  const usable = typeof session === 'string' && session.length < 400 && /^wiz:\/\//i.test(session);
+  return { name, page, publicKey, ...(usable ? { session } : {}) };
 };
 
 export const recipientOf = (stored: StoredRecipient) => ({ name: stored.name, page: stored.page, publicKey: hexToBin(stored.publicKey) });
