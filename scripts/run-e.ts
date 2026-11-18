@@ -562,14 +562,12 @@ try {
       record('fund the wallet', { transactionId: built.transactionId, bytes: built.encoded.length, feeSatoshis: built.feeSatoshis }, `${sat(WALLET_CREATION)} from the funder to the wallet's funding address, to create the wallet`);
       return { transactionIds: [built.transactionId] };
     });
-    if ((await wallet.creationStep()) !== 'confirmed') {
+    if ((await wallet.creationStep()) !== 'created') {
       await until('the funding coin in the engine', async () => (await wallet.creationStep()) !== 'not funded');
       await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 }, allowance: { feeLockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), satoshis: suggestedAllowance() } });
       facts.identity = wallet.stored.identity as string;
       keep();
-      // The wallet gives out no address before its creation is in a block (its own rule): this is the run's only wait for a block.
-      if (wallet.stored.creation.prepareTransactionId !== undefined) await until('the first confirmation', async () => ((await server.confirmations(wallet.stored.creation.prepareTransactionId as string)) ?? 0) > 0);
-      await until('the creation to be confirmed', async () => (await wallet.creationStep()) === 'confirmed', 30 * 60_000, 10_000);
+      // The wallet is in use as soon as the network has its creation; no block is waited for.
     }
     for (const [step, transactionId, about] of [
       ['prepare', wallet.stored.creation.prepareTransactionId, 'the wallet pays itself, to have a coin that is output 0; this transaction is the identity'],

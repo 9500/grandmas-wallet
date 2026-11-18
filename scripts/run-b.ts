@@ -277,18 +277,12 @@ try {
 
     const funding = await wallet.fundingAddress();
     await once('the wallet is funded', async () => ({ transactionIds: [await funderPays([{ lockingBytecode: funding, valueSatoshis: 80_000n }])] }));
-    if ((await wallet.creationStep()) !== 'confirmed') {
+    if ((await wallet.creationStep()) !== 'created') {
       await until('the funding coin in the engine', async () => (await wallet.creationStep()) !== 'not funded');
       await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 }, allowance: { feeLockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), satoshis: suggestedAllowance() } });
       facts.identity = wallet.stored.identity as string;
       keep();
-      let early = false;
-      try { await wallet.receiveAddress(); } catch { early = true; }
-      note(`No address was given out before the creation was confirmed: ${early}.`);
-      // The self-payment, when one was needed, and the creation are both to be in a block.
-      if (wallet.stored.creation.prepareTransactionId !== undefined) await confirmed(wallet.stored.creation.prepareTransactionId);
-      await confirmed(wallet.stored.creation.createTransactionId as string);
-      await until('the creation to be confirmed', async () => (await wallet.creationStep()) === 'confirmed');
+      // The wallet is in use as soon as the network has its creation; no block is waited for.
     }
     for (const [step, transactionId, about] of [
       ['prepare', wallet.stored.creation.prepareTransactionId, 'the wallet pays itself, to have a coin that is output 0; this transaction is the identity'],

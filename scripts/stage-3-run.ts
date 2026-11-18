@@ -94,11 +94,7 @@ try {
   const afterCreate = await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 }, allowance });
   const identity = hexToBin(wallet.stored.identity as string);
   say(`  identity ${hex(identity)}; creation was "${before}", is "${afterCreate}"`);
-  let refusedEarly = false;
-  try { await wallet.receiveAddress(); } catch { refusedEarly = true; }
-  say(`  no address is given out before confirmation: ${refusedEarly}`);
-  await settle();
-  await until('the creation to be confirmed', async () => (await wallet.creationStep()) === 'confirmed');
+  // The wallet is in use as soon as the network has its creation; no block is waited for.
   const created = await server.getTransaction(wallet.stored.creation.createTransactionId as string);
   record('create', { transactionId: wallet.stored.creation.createTransactionId as string, bytes: (created as string).length / 2, feeSatoshis: BigInt((created as string).length / 2) }, 'with the coin for cancelling and an allowance of 6,000 for the recoverer');
   say(`  recovery is shown as "${wallet.recovery}"; the wallet can cancel: ${await wallet.canCancel()}`);

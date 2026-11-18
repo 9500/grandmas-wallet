@@ -9,7 +9,9 @@ import { type SignedMessage, signMessage, verifyMessage } from './signing.js';
  *
  * It is left on the backup stores, where the wallet finds it, so no channel from the recoverer back to
  * the owner is needed. A store's answer that something was uploaded is not a receipt. The wallet says that
- * recovery is on only when a receipt matches what it sent and the controller's confirmed state matches both.
+ * recovery is on only when a receipt matches what it sent and the controller's state, as the network shows
+ * it, matches both. The state counts as soon as the network shows it, in a block or not: every check works
+ * the status out again from the chain, so a transaction that disappears takes the status with it.
  *
  * A receipt given before a change takes effect (a new seed, a new recoverer) is a prepared receipt. It
  * also names the controller output it was prepared against and the state the change is to produce, and it
@@ -143,7 +145,6 @@ const whyNot = (receipt: Receipt, sent: Sent, history: ControllerHistory): strin
   if (receipt.prepared === undefined) {
     if (hex(state.recovererKeyHash) !== receipt.recoveryKeyHash) return 'the controller names another recoverer';
     if (hex(state.ownerKeyHash) !== sent.ownerKeyHash) return 'the controller names another owner than this device';
-    if (!history.currentConfirmed) return 'the controller\'s state is not confirmed yet';
     return undefined;
   }
   // A prepared receipt counts only once the chain shows exactly the change it was prepared for.
@@ -166,7 +167,6 @@ const whyNot = (receipt: Receipt, sent: Sent, history: ControllerHistory): strin
     );
   });
   if (change < 0) return 'the chain does not show the change it was prepared for';
-  if (history.transactions[change + 1]?.confirmed !== true) return 'the change it was prepared for is not confirmed yet';
   // The controller may have moved on since (an approval, a request); the settings must still be the ones prepared for.
   if (hex(state.ownerKeyHash) !== hex(intended.ownerKeyHash) || hex(state.recovererKeyHash) !== hex(intended.recovererKeyHash)) return 'the controller\'s settings have changed since';
   if (state.challengeDelay.unit !== intended.challengeDelay.unit || state.challengeDelay.value !== intended.challengeDelay.value) return 'the waiting period has changed since';
@@ -175,7 +175,7 @@ const whyNot = (receipt: Receipt, sent: Sent, history: ControllerHistory): strin
 
 /**
  * Whether recovery is on (proposal sections 9.5 and 10.5): a receipt matches what the wallet sent, and the
- * controller's confirmed state matches both.
+ * controller's state as the network shows it matches both.
  *
  * @param receipts - what the stores returned as receipts; unreadable ones do not count
  */

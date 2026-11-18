@@ -456,7 +456,11 @@ export class Run {
     }
   }
 
-  /** Wait until a step's transaction is in a block. The wallet gives out no address before its creation is. */
+  /**
+   * Wait until a step's transaction is in a block. The run pays a vault address right after creating the
+   * wallet, and a vault address waits until nobody but the wallet could undo its creation (proposal section
+   * 7.9); ordinary addresses do not wait.
+   */
   async waitConfirmed(name: string): Promise<void> {
     const record = this.state.steps[name];
     if (record === undefined) throw new Error(`There is no step "${name}" to wait for.`);
@@ -609,6 +613,7 @@ export const runLifecycle = async (run: Run): Promise<void> => {
   // The check any client makes before it trusts an identity.
   validateGenesis(decode(created.transactionHex), hexToBin(created.transactionId), run.identity);
   run.env.log(`  identity ${state.identity ?? ''}`);
+  // The next step pays a vault address, which has no key: it waits until the creation is in a block.
   await run.waitConfirmed('create');
 
   const givenOutFirst = run.address('old', ADDRESS_KIND.givenOut, 0);

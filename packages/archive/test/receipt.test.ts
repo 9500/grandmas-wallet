@@ -62,8 +62,8 @@ describe('a receipt for a kit that was sent', () => {
   it('RC04: a receipt that does not match the controller\'s state does not count', async () => {
     const { chain, wallet, history, sent, fields, seedA } = start();
     const receipt = signReceipt(fields, credential.recoveryKey);
-    // The state is not confirmed yet.
-    expect(recoveryStatus([receipt], sent, await history(unconfirmed(chain)), 'testnet').reasons[0]).toMatch(/not confirmed yet/);
+    // The state counts as soon as the network shows it: a block is not waited for.
+    expect(recoveryStatus([receipt], sent, await history(unconfirmed(chain)), 'testnet').on).toBe(true);
     expect(recoveryStatus([receipt], sent, await history(), 'testnet').on).toBe(true);
     // A request is pending: the receipt still stands, and the owner can cancel.
     wallet.requestRecovery(credential.recoveryKey, seedOf(WORDS_B).controllerKey.keyHash);
@@ -97,14 +97,17 @@ describe('a prepared receipt', () => {
     return { ...made, sent, fields, output, intended, change };
   };
 
-  it('RC10: recovery is not shown as on until the change it was prepared for is confirmed', async () => {
+  it('RC10: recovery is not shown as on until the network shows the change it was prepared for, in a block or not', async () => {
     const { chain, history, sent, fields, change } = await prepare();
     // It is signed with the recovery key that is to be installed, which the controller does not name yet.
     const receipt = signReceipt(fields, otherCredential.recoveryKey);
     expect(recoveryStatus([receipt], sent, await history(), 'testnet')).toEqual({ on: false, reasons: ['A receipt does not count: the chain does not show the change it was prepared for.'] });
-    change();
-    expect(recoveryStatus([receipt], sent, await history(unconfirmed(chain)), 'testnet').reasons[0]).toMatch(/not confirmed yet/);
+    const changedIn = change();
+    expect(recoveryStatus([receipt], sent, await history(unconfirmed(chain)), 'testnet').on).toBe(true);
     expect(recoveryStatus([receipt], sent, await history(), 'testnet').on).toBe(true);
+    // The change disappears (replaced, or its block undone and not mined again): the status goes with it.
+    chain.drop(changedIn);
+    expect(recoveryStatus([receipt], sent, await history(), 'testnet').reasons[0]).toMatch(/chain does not show the change it was prepared for/);
   });
 
   it('RC10: prepared for another controller output, it does not count', async () => {

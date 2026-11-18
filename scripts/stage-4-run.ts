@@ -121,8 +121,7 @@ try {
       });
       facts.identity = wallet.stored.identity as string;
       keep();
-      await mine(1, BURN);
-      await until('the creation to be confirmed', async () => (await wallet.creationStep()) === 'confirmed');
+      // The wallet is in use as soon as the network has its creation; no block is waited for.
       const createdIn = wallet.stored.creation.createTransactionId as string;
       const bytes = ((await server.getTransaction(createdIn)) as string).length / 2;
       record('create', { transactionId: createdIn, bytes, feeSatoshis: BigInt(bytes) }, `with an allowance of ${suggestedAllowance()} for the recoverer: four requests and one completion`);
