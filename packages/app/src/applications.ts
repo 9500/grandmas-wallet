@@ -218,6 +218,8 @@ export interface ActionPreview {
 export interface ActionOutcome {
   transactionId: string;
   sent: Sent;
+  /** The key holder's handle to what it built: with the XO engine, the invitation of the application's template. */
+  builtAs: string;
   /** The tokens the wallet received. */
   tokens: { category: string; commitment: string; capability: string; satoshis: string }[];
 }
@@ -798,6 +800,7 @@ export class Applications {
     const received = plan.outputs.filter(({ output, wallet }) => wallet !== undefined && output.token !== undefined);
     return {
       transactionId: prepared.transactionId,
+      builtAs: prepared.invitationIdentifier,
       sent: { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: plan.remainderSatoshis },
       tokens: received.map(({ output }) => ({
         category: hex(output.token?.category ?? new Uint8Array()),

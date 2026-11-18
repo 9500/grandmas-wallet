@@ -626,7 +626,9 @@ export class OwnerWallet {
     const coins = await this.coins();
     const cancelAt = this.state.cancelCoinNumber === undefined || this.state.identity === undefined ? undefined : hex(this.address(ADDRESS_KIND.change, this.state.cancelCoinNumber).lockingBytecode);
     const controllerAt = this.state.identity === undefined ? undefined : hex(controllerScript(this.identity).lockingBytecode);
-    const atAddress = coins.filter((coin) => hex(coin.utxo.output.lockingBytecode) !== controllerAt && coin.template !== 'coins');
+    // Coins at the wallet's own addresses. A key holder may also follow scripts of other templates, for an
+    // action that spends from them; what is there is not the wallet's.
+    const atAddress = coins.filter((coin) => hex(coin.utxo.output.lockingBytecode) !== controllerAt && (coin.template === 'givenOut' || coin.template === 'change' || coin.template === 'actions'));
     const keyed = atAddress.filter((coin) => coin.template === 'givenOut' || coin.template === 'change');
     // The coin for cancelling is the one the wallet put aside; anything else that arrives at its address is an ordinary coin.
     const cancelling = keyed.filter((coin) => tokenFree(coin) && hex(coin.utxo.output.lockingBytecode) === cancelAt && coin.utxo.output.valueSatoshis === this.cancellationCost()).slice(0, 1);
