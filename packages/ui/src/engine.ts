@@ -1,8 +1,9 @@
-import { Account } from '@grandmas-wallet/app';
+import { Account, HeaderCheckBehind } from '@grandmas-wallet/app';
 import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { ElectrumWebSocket } from '@electrum-cash/web-socket';
 import { Engine, XO_SUPPORTED_NETWORKS, resolveElectrumServersForNetwork } from '@xo-cash/engine';
 
+import { clearHeaderResetMark, markHeadersForReset, resetMarkedHeaders } from './engine-headers.js';
 import type { Environment } from './environment.js';
 
 /**
@@ -86,7 +87,22 @@ const engineServers = async (environment: Environment): Promise<unknown[]> => {
  */
 export const openAccount = async (words: string, environment: Environment): Promise<Account> => {
   const electrumServers = (await engineServers(environment)) as NonNullable<Parameters<typeof Engine.create>[1]>['electrumServers'];
-  return Account.open(await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, ...(electrumServers === undefined ? {} : { electrumServers }) }));
+  // A header store the last load found stuck is deleted before the engine opens it (see engine-headers.ts).
+  await resetMarkedHeaders(sessionStorage, indexedDB);
+  const engine = await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, ...(electrumServers === undefined ? {} : { electrumServers }) });
+  try {
+    const account = await Account.open(engine);
+    clearHeaderResetMark(sessionStorage);
+    return account;
+  } catch (error) {
+    // A header check that did not move at all: the store is made afresh at the next load, once in a row.
+    if (error instanceof HeaderCheckBehind && !error.moved && markHeadersForReset(sessionStorage)) {
+      await engine.stop().catch(() => undefined);
+      location.reload();
+      return new Promise<Account>(() => undefined);
+    }
+    throw error;
+  }
 };
 
 /** The network the wallet's keys and addresses are made for. A local chain uses the test network's. */

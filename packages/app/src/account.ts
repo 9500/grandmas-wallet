@@ -62,6 +62,22 @@ const KEY_OF_ROLE: Record<Role, { secret: string; action: string }> = {
 const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const hex = binToHex;
 
+/**
+ * The engine's check of block headers did not reach the chain's tip in time. `moved` says whether it went on
+ * at all while the account waited: one that did not move may be stuck on a block that a reorganization of the
+ * chain took away, which the engine does not undo by itself (docs/xo-feedback-notes.md, 18 November).
+ */
+export class HeaderCheckBehind extends Error {
+  constructor(
+    readonly verifiedHeight: number,
+    readonly currentHeight: number,
+    readonly moved: boolean,
+  ) {
+    super(`The engine's header check stands at ${verifiedHeight} of ${currentHeight}; what it reports cannot be relied on.`);
+    this.name = 'HeaderCheckBehind';
+  }
+}
+
 export class Account implements WalletBackend {
   /** The invitation the controller key was made for: the handle by which the engine finds that key again. */
   private keyInvitation: Partial<Record<Role, string>> = {};
@@ -81,15 +97,15 @@ export class Account implements WalletBackend {
    * What the engine hears about a transaction before its header check has reached the tip is dropped and
    * not asked for again, so nothing is made known to it before then.
    */
-  static async open(engine: Engine, options: { headerCheckTimeoutMs?: number } = {}): Promise<Account> {
+  static async open(engine: Engine, options: { headerCheckTimeoutMs?: number; pollMs?: number } = {}): Promise<Account> {
     const deadline = Date.now() + (options.headerCheckTimeoutMs ?? 120_000);
+    let first: number | undefined;
     for (;;) {
       const status = await engine.getChainStatus();
       if (status.verifiedHeight >= status.currentHeight) break;
-      if (Date.now() > deadline) {
-        throw new Error(`The engine's header check stands at ${status.verifiedHeight} of ${status.currentHeight}; what it reports cannot be relied on.`);
-      }
-      await wait(500);
+      first ??= status.verifiedHeight;
+      if (Date.now() > deadline) throw new HeaderCheckBehind(status.verifiedHeight, status.currentHeight, status.verifiedHeight !== first);
+      await wait(options.pollMs ?? 500);
     }
     const templates = {} as Record<WalletTemplateName, string>;
     for (const name of Object.keys(WALLET_TEMPLATES) as WalletTemplateName[]) {

@@ -13,7 +13,13 @@
 //                                                            12. the coins go back to where they came from
 //
 // usage (from the repository's root):
-//   npx tsx scripts/browser-run-jar.ts [local|chipnet] [--until <step number>] [--from 9] [--screens] [--headed]
+//   npx tsx scripts/browser-run-jar.ts [local|chipnet] [--local-pages] [--until <step number>] [--from 9] [--screens] [--headed]
+//                                      [--directory <name>] [--record <file name>]
+//
+// --local-pages (chipnet): the pages of this checkout (deploy/preview.sh build), served on this machine with
+// deploy/config/local.json and two backup stores of the run's own, instead of the public ones.
+// --directory and --record: the profiles under .chipnet/<name>-chipnet/ and the record in docs/runs/<file name>,
+// instead of the course's own (see scripts/browser-course.ts).
 //
 // --from 9 (or 12) continues a run that stopped in step 9 or later (or in step 12), with the profiles it left on
 // disk: the jar's facts come from the state file the run keeps (jar.json beside the log) or, for a run made before
@@ -37,14 +43,14 @@ import { savingsJarScript } from '@grandmas-wallet/savings-jar';
 import type { Locator, Page } from 'playwright';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
-import { type Device, JAR, RECOVERER, WALLET, argument, balanceOf, chipnet, click, completeTakeover, config, course, firstSteps, newPhoneAsks, openDesk, patience, root, see, wait } from './browser-course.js';
+import { type Device, JAR, RECOVERER, WALLET, argument, balanceOf, blockSection, chipnet, click, completeTakeover, config, course, firstSteps, localPages, newPhoneAsks, openDeskWorking, pagesUsed, patience, recordFile, root, see, wait } from './browser-course.js';
 
 const until = Number(argument('until') ?? '99');
 /** Continue a run that stopped in step 9 or later, with the browser profiles it left on disk. */
 const from = Number(argument('from') ?? '1');
 if (from !== 1 && from !== 9 && from !== 12) throw new Error('A run continues from step 9 or 12.');
 const theCourse = course({ directory: 'browser-run-jar', continuing: from > 1, until });
-const { work, started, lines, note, log, run, pay, mine, passTime, prepare, device, watchPage, close, shot, state, begin, elsewhere } = theCourse;
+const { work, started, lines, note, log, run, pay, mine, passTime, prepare, device, watchPage, close, shot, state, begin, elsewhere, blockFact, blockFacts, mark, since, standingNow } = theCourse;
 /** The screens of the first steps are those of the stage 6 course; they are not taken again. */
 const noShot = async (): Promise<void> => undefined;
 const JAR_ORIGIN = new URL(JAR).origin;
@@ -60,20 +66,23 @@ const fact = (line: string): void => {
 };
 const writeLog = (outcome: string): void => {
   mkdirSync(`${root}docs/runs`, { recursive: true });
-  const where = chipnet
+  const where = chipnet && localPages
+    ? pagesUsed([WALLET, RECOVERER, JAR], 'Blocks, the waiting period and the jar\'s date took their real time.')
+    : chipnet
     ? `The pages are the public ones, ${WALLET}, ${RECOVERER} and ${JAR}, as served, on chipnet with the public backup stores. Blocks, the waiting period and the jar's date took their real time.`
     : 'The pages are the production builds served by `deploy/serve.mjs` with the content security policy, against the regtest node and two backup stores on this machine. The run made the blocks and moved the chain\'s clock.';
   writeFileSync(
-    `${root}docs/runs/stage-8-browser-${chipnet ? 'chipnet' : 'local-node'}.md`,
+    recordFile(`stage-8-browser-${chipnet ? 'chipnet' : 'local-node'}.md`),
     [
-      `# Stage 8 scripted run in a browser, ${chipnet ? 'on chipnet with the public pages' : 'against the local node'}: a savings jar through the loss of a phone`,
+      `# ${chipnet && localPages ? 'The jar course in a browser, on chipnet with the pages of this checkout' : `Stage 8 scripted run in a browser, ${chipnet ? 'on chipnet with the public pages' : 'against the local node'}`}: a savings jar through the loss of a phone`,
       '',
-      `Written by \`scripts/browser-run-jar.ts\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the Savings Jar page is a second tab of the phone that uses it. ${where} The wallet page and the Savings Jar page reached each other through the public WizardConnect relays (${(JSON.parse(JSON.stringify(config)) as { relays?: string[] }).relays?.join(', ') ?? 'as configured'}); nothing but the session's messages went over them. Times are seconds since the start.`,
+      `Written by \`scripts/browser-run-jar.ts${process.argv.slice(2).length === 0 ? '' : ` ${process.argv.slice(2).join(' ')}`}\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the Savings Jar page is a second tab of the phone that uses it. ${where} The wallet page and the Savings Jar page reached each other through the public WizardConnect relays (${(JSON.parse(JSON.stringify(config)) as { relays?: string[] }).relays?.join(', ') ?? 'as configured'}); nothing but the session's messages went over them. Times are seconds since the start.`,
       '',
       `Outcome: ${outcome}`,
       ...(continued.length === 0 ? [] : ['', ...continued]),
       '',
       ...(facts.length === 0 ? [] : ['What the run showed:', '', ...facts.map((line) => `- ${line}`), '']),
+      ...blockSection(blockFacts),
       '```',
       ...lines,
       '```',
@@ -230,8 +239,10 @@ const untilTheDate = async (): Promise<void> => {
   let clock = await medianTime();
   if (clock.medianTime > jar.unlockTime) {
     log(`   the chain's median time is ${iso(clock.medianTime)} at height ${clock.height}, past the jar's date ${iso(jar.unlockTime)}`);
+    blockFact(`The jar's date, a time lock the network checks against the median time of the last eleven blocks, had passed when the new phone came to empty the jar: nothing waited for it.`);
     return;
   }
+  mark('date');
   if (!chipnet) {
     const tip = chainClock();
     log(`   ${passTime(jar.unlockTime - (tip?.tip ?? clock.medianTime) + 120)}`);
@@ -248,6 +259,7 @@ const untilTheDate = async (): Promise<void> => {
   }
   clock = await medianTime();
   log(`   the chain's median time is ${iso(clock.medianTime)} at height ${clock.height}, past the jar's date ${iso(jar.unlockTime)}`);
+  blockFact(`The jar's date, a time lock the network checks against the median time of the last eleven blocks: the course waited ${since('date')} for the chain's clock to pass it, as the jar is made to.`);
 };
 
 const steps = async (): Promise<void> => {
@@ -331,6 +343,7 @@ const steps = async (): Promise<void> => {
   await done.waitFor({ state: 'visible', timeout: 180_000 * patience });
   const opened = (await done.getByTestId('action-transaction').getAttribute('data-value')) ?? '';
   log(`   approved; the wallet: "${await textOf(done.locator('h2, .card-title'))}", transaction ${opened}`);
+  await standingNow(old.page, `The jar opened from the wallet, ${since('paid')} after the payment that funded the wallet`);
   await see(oldJar, 'The jar is open. Its key is in your wallet.', 120_000);
   const item = oldJar.getByTestId('jar').first();
   await item.waitFor({ state: 'visible', timeout: 120_000 * patience });
@@ -432,6 +445,7 @@ const steps = async (): Promise<void> => {
   const balanceBefore = await balanceOf(next.page);
   await next.page.getByRole('link', { name: 'Apps' }).first().click();
   const emptied = await empty(next, 'the first withdrawal');
+  await standingNow(next.page, 'The jar emptied from the new phone\'s list of tokens, once its date had passed');
   const toJar = requested.filter((url) => url.startsWith(JAR_ORIGIN));
   const origins = [...new Set(requested.map((url) => new URL(url).origin))];
   if (toJar.length > 0) throw new Error(`the new phone asked the Savings Jar page: ${toJar.join(', ')}`);
@@ -515,7 +529,7 @@ const lastStep = async (recoverer: Device, next: Device): Promise<void> => {
     walletPart = earlier === null ? `nothing from the wallet, which held ${holds} it could spend` : `the wallet's coins, sent by the part of the run that stopped (${earlier[1]} arrived, fee ${earlier[2]}; the coin kept for cancelling went too)`;
   }
   mine(1);
-  await openDesk(recoverer.page);
+  await openDeskWorking(theCourse, recoverer);
   const elsewhereRow = recoverer.page.getByText('Send the fee coins elsewhere');
   await elsewhereRow.evaluate((element) => element.scrollIntoView({ block: 'center' }));
   await elsewhereRow.click();

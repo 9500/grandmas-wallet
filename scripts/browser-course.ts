@@ -5,13 +5,19 @@
 //
 // The first argument of a course is `local` (the default) or `chipnet`; `--screens` takes screenshots and
 // `--headed` shows the browser. On chipnet, `--local-pages` serves the pages of this checkout on this machine
-// (deploy/config/local.json) instead of using the public ones.
+// (deploy/config/local.json) instead of using the public ones. `--directory <name>` keeps the profiles, the
+// stores' data and the log under `.chipnet/<name>/` (with `-chipnet` added on chipnet) instead of the course's
+// own directory, and `--record <file name>` writes the record to that file in docs/runs/ instead of the
+// course's own, so that a run does not touch an earlier run's profiles or record.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
+import { controllerScript } from '@grandmas-wallet/core';
 import { type BrowserContext, type Page, chromium } from 'playwright';
+
+import { Electrum } from '../packages/chipnet/src/electrum.js';
 
 export const root = fileURLToPath(new URL('..', import.meta.url));
 export const chipnet = process.argv[2] === 'chipnet';
@@ -24,7 +30,16 @@ export const headed = process.argv.includes('--headed');
 /** On chipnet: the pages of this checkout, served on this machine, instead of the public ones. */
 export const localPages = !chipnet || process.argv.includes('--local-pages');
 const configName = chipnet ? (localPages ? 'local' : 'production') : 'local-regtest';
-export const config = JSON.parse(readFileSync(`${root}deploy/config/${configName}.json`, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl: string; loanUrl?: string; network: string; relays?: string[] };
+export const config = JSON.parse(readFileSync(`${root}deploy/config/${configName}.json`, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl: string; loanUrl?: string; network: string; relays?: string[]; chain: string[] };
+/**
+ * The file in docs/runs/ the record is written to: the course's own, or the one `--record` names. A name that
+ * is not a plain file name ending in `.md` is refused, so that a record never lands outside docs/runs/.
+ */
+export const recordFile = (own: string): string => {
+  const named = argument('record') ?? own;
+  if (!/^[a-z0-9][a-z0-9.-]*\.md$/.test(named)) throw new Error(`--record takes a file name in docs/runs/, such as no-waits-browser-chipnet.md, not ${named}`);
+  return `${root}docs/runs/${named}`;
+};
 export const WALLET = config.walletUrl;
 export const RECOVERER = config.recovererUrl;
 export const JAR = config.jarUrl;
@@ -55,7 +70,9 @@ const EXTRA: Partial<Record<App, string[]>> = { loan: ['--connect', 'https://ora
  * @param until - the last step to carry out
  */
 export const course = (options: { directory: string; continuing: boolean; until: number }) => {
-  const work = `${root}.chipnet/${options.directory}${chipnet ? '-chipnet' : ''}/`;
+  const directory = argument('directory') ?? options.directory;
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(directory)) throw new Error(`--directory takes a plain name, made a directory under .chipnet/, not ${directory}`);
+  const work = `${root}.chipnet/${directory}${chipnet ? '-chipnet' : ''}/`;
   const started = Date.now();
 
   // ------------------------------------------------------------------ the log
@@ -93,6 +110,119 @@ export const course = (options: { directory: string; continuing: boolean; until:
       outside = typeof made === 'string' ? made : made.address;
     }
     return outside;
+  };
+
+  // ------------------------------------------------------------------ what waited for a block
+
+  /** Moments of the run by name, for the time between them. */
+  const marks = new Map<string, number>();
+  const mark = (name: string): void => void marks.set(name, Date.now());
+  const since = (name: string): string => {
+    const at = marks.get(name);
+    return at === undefined ? '(not measured)' : `${((Date.now() - at) / 1000).toFixed(0)} s`;
+  };
+  /** What the run measured about waits for a block, for the head of the record; kept on disk for a run that continues. */
+  const blocksFile = `${work}blocks.json`;
+  const blockFacts: string[] = options.continuing && existsSync(blocksFile) ? (JSON.parse(readFileSync(blocksFile, 'utf8')) as string[]) : [];
+  const blockFact = (line: string): void => {
+    blockFacts.push(line);
+    writeFileSync(blocksFile, JSON.stringify(blockFacts, null, 1));
+    log(`   ${line}`);
+  };
+
+  /**
+   * Where a wallet's transactions stand on the chain, as the first server of the configuration has them: the
+   * height of its last block, and which of the controller's transactions, the transactions that made the wallet
+   * and those the phone sent are not in a block yet. What the page keeps is read from its local storage.
+   */
+  /** Transactions the run named when they were sent (the completion of a takeover, a move's change), and the wallet's identity last read. */
+  const labels = new Map<string, string>();
+  let identitySeen: string | undefined;
+  /** Every transaction a reading of the chain has named already, so that a newer one is told from it. */
+  const seenBefore = new Set<string>();
+  /**
+   * Name the controller's newest transaction, as the server lists it right after a page sent it: the server lists
+   * those not in a block last, in the order it took them.
+   */
+  const nameNewest = async (label: string): Promise<void> => {
+    if (identitySeen === undefined) return;
+    const electrum = await Electrum.connect(config.chain[0] ?? '');
+    try {
+      // The page may have sent it through the other server: it is looked for a few times.
+      for (let attempt = 0; attempt < 15; attempt++) {
+        const history = await electrum.getHistory(controllerScript(hexToBin(identitySeen)).lockingBytecode);
+        const newest = history[history.length - 1];
+        if (newest !== undefined && newest.height <= 0 && !labels.has(newest.transactionId) && !seenBefore.has(newest.transactionId)) {
+          labels.set(newest.transactionId, label);
+          return;
+        }
+        await wait(1_000);
+      }
+    } catch {
+      // Not named: it is listed as a transaction of the controller.
+    } finally {
+      await electrum.disconnect();
+    }
+  };
+  const standing = async (page: Page): Promise<{ height: number; open: string[]; settled: number; text: string }> => {
+    const stored = await page.evaluate(() => ({ state: localStorage.getItem('gw2-wallet:state'), activity: localStorage.getItem('gw2-wallet:activity') }));
+    const state = stored.state === null ? undefined : (JSON.parse(stored.state) as { identity?: string; creation?: { prepareTransactionId?: string; createTransactionId?: string } });
+    const activity = stored.activity === null ? [] : (JSON.parse(stored.activity) as { what: string; transactionId: string }[]);
+    const named = new Map<string, string>();
+    if (state?.identity !== undefined) named.set(state.identity, 'the payment that defines the identity');
+    if (state?.creation?.prepareTransactionId !== undefined) named.set(state.creation.prepareTransactionId, 'the wallet\'s payment to itself');
+    if (state?.creation?.createTransactionId !== undefined) named.set(state.creation.createTransactionId, 'the creation');
+    for (const entry of activity) if (!named.has(entry.transactionId)) named.set(entry.transactionId, `"${entry.what}"`);
+    if (state?.identity !== undefined) identitySeen = state.identity;
+    const electrum = await Electrum.connect(config.chain[0] ?? '');
+    try {
+      const { height } = await electrum.tip();
+      const heights = new Map<string, number>();
+      const unknown = new Set<string>();
+      if (state?.identity !== undefined) {
+        // The server lists a script's history in the chain's order, those not in a block last.
+        const history = await electrum.getHistory(controllerScript(hexToBin(state.identity)).lockingBytecode);
+        for (const [index, entry] of history.entries()) {
+          heights.set(entry.transactionId, entry.height);
+          if (!named.has(entry.transactionId)) named.set(entry.transactionId, labels.get(entry.transactionId) ?? (index === history.length - 1 ? 'the controller\'s last transaction' : 'a transaction of the controller'));
+        }
+      }
+      for (const transactionId of named.keys()) {
+        if (heights.has(transactionId)) continue;
+        const confirmations = await electrum.confirmations(transactionId);
+        if (confirmations === undefined) unknown.add(transactionId);
+        else heights.set(transactionId, confirmations > 0 ? height - confirmations + 1 : 0);
+      }
+      // A height of 0 or less is a transaction not in a block (-1: one that spends another not in a block either).
+      for (const transactionId of named.keys()) seenBefore.add(transactionId);
+      const open = [...named].filter(([transactionId]) => unknown.has(transactionId) || (heights.get(transactionId) ?? 0) <= 0).map(([transactionId, label]) => `${label} ${transactionId.slice(0, 12)}…${unknown.has(transactionId) ? ' (unknown to the server)' : ''}`);
+      const settled = named.size - open.length;
+      const text = `the chain is at height ${height}; not in a block yet: ${open.length === 0 ? 'none' : open.join(', ')}; in a block: ${settled} of the ${named.size} transactions looked at`;
+      return { height, open, settled, text };
+    } finally {
+      await electrum.disconnect();
+    }
+  };
+  /** The height of the chain's last block, as the first server of the configuration has it. */
+  const height = async (): Promise<string> => {
+    try {
+      const electrum = await Electrum.connect(config.chain[0] ?? '');
+      try {
+        return String((await electrum.tip()).height);
+      } finally {
+        await electrum.disconnect();
+      }
+    } catch {
+      return '(not read)';
+    }
+  };
+  /** Whether the wallet page has noted a sweep of coins from earlier addresses among what it sent: it does as soon as it sends one. */
+  const sweepSent = (page: Page): Promise<boolean> => page.evaluate(() => /from earlier addresses/.test(localStorage.getItem('gw2-wallet:activity') ?? '')).catch(() => false);
+  /** The same, said in the log and in the head of the record, with what was just done. */
+  const standingNow = async (page: Page, what: string): Promise<{ height: number; open: string[] }> => {
+    const seen = await standing(page).catch((error: unknown) => ({ height: 0, open: [], settled: 0, text: `the chain could not be read: ${(error as Error).message.slice(0, 120)}` }));
+    blockFact(`${what}; ${seen.text}.`);
+    return seen;
   };
 
   const children: ChildProcess[] = [];
@@ -152,10 +282,74 @@ export const course = (options: { directory: string; continuing: boolean; until:
   const watchPage = (name: string, page: Page): void => {
     page.on('pageerror', (error) => log(`  [${name}] page error: ${error.message.slice(0, 200)}`));
     page.on('console', (message) => {
-      if (message.type() === 'error' && !/favicon|Failed to load resource/.test(message.text())) log(`  [${name}] console: ${message.text().slice(0, 200)}`);
+      const text = message.text();
+      if (message.type() !== 'error' || /favicon|Failed to load resource/.test(text)) return;
+      // The engine's failed header checks: the device is marked, and each message is logged once.
+      if (/Server reported merkle root \S+ for checkpoint|Could not validate a block header/.test(text)) {
+        stuck.add(name);
+        const kind = `${name}|${text.replace(/[0-9a-f]{16,}|\d+/g, '…').slice(0, 160)}`;
+        if (logged.has(kind)) return;
+        logged.add(kind);
+        log(`  [${name}] console: ${text.slice(0, 200)} (logged once; the same message again is not)`);
+        return;
+      }
+      log(`  [${name}] console: ${text.slice(0, 200)}`);
     });
   };
+  /** Devices whose page's engine failed a header check, and the messages logged once. */
+  const stuck = new Set<string>();
+  const logged = new Set<string>();
+  /**
+   * After a reorganization of the chain, a page's engine may keep a checkpoint of a block that is no longer in
+   * the chain and fail every header check from then on (docs/xo-feedback-notes.md, 18 November): the page then
+   * stays at "Opening this wallet's account". The engine's header store is a cache of what the servers give; it
+   * is deleted (the IndexedDB databases named Electrum_…, on the page's origin) and the page is opened again.
+   * What the page keeps itself, its keys and kits, is not touched. Nothing is done for a device whose engine
+   * did not fail.
+   */
+  const freshEngine = async (owner: Device, url: string, sayStuck = false): Promise<void> => {
+    if (!stuck.has(owner.name) && !sayStuck) return;
+    // A page of the same origin that runs no engine, so that the database is not in use while it is deleted.
+    await owner.page.goto(`${new URL(url).origin}/version.json`);
+    const deleted = await owner.page.evaluate(async () => {
+      const names = (await indexedDB.databases()).map((entry) => entry.name ?? '').filter((name) => name.startsWith('Electrum'));
+      for (const name of names) {
+        await new Promise<void>((resolve, reject) => {
+          const request = indexedDB.deleteDatabase(name);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(new Error(`could not delete ${name}`));
+          request.onblocked = () => reject(new Error(`${name} is still in use`));
+        });
+      }
+      return names;
+    });
+    stuck.delete(owner.name);
+    log(`   the ${owner.name}'s page had ${sayStuck ? 'said that its engine\'s header check stood behind the chain' : 'failed its engine\'s header checks'}, as after a reorganization of the chain; its engine's header store (${deleted.join(', ') || 'none found'}) was deleted and the page opened again`);
+    await owner.page.goto(url);
+  };
+  /**
+   * What the device's pages keep in local storage (the wallet's words among it), copied to a file beside the
+   * profile, by origin: so that coins can still be reached by script if a profile cannot be opened again.
+   */
+  const keepStorage = async (owner: Device): Promise<void> => {
+    const file = `${work}storage-${owner.name}.json`;
+    const all = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, Record<string, string>>) : {};
+    for (const page of owner.context.pages()) {
+      const origin = (() => {
+        try {
+          return new URL(page.url()).origin;
+        } catch {
+          return 'null';
+        }
+      })();
+      if (origin === 'null') continue;
+      const items = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage))).catch(() => undefined);
+      if (items !== undefined) all[origin] = items;
+    }
+    writeFileSync(file, JSON.stringify(all, null, 1), { mode: 0o600 });
+  };
   const close = async (gone: Device): Promise<void> => {
+    await keepStorage(gone).catch(() => undefined);
     await gone.context.close();
     devices.splice(devices.indexOf(gone), 1);
   };
@@ -211,14 +405,67 @@ export const course = (options: { directory: string; continuing: boolean; until:
     }
   };
   const end = async (): Promise<void> => {
+    for (const gone of [...devices]) await keepStorage(gone).catch(() => undefined);
     for (const gone of [...devices]) await gone.context.close().catch(() => undefined);
     for (const child of children) child.kill();
   };
 
-  return { work, started, lines, note, log, run, pay, mine, passTime, elsewhere, prepare, device, watchPage, close, devices, shot, state, begin, failed, end };
+  return { work, started, lines, note, log, run, pay, mine, passTime, elsewhere, prepare, device, watchPage, close, keepStorage, freshEngine, devices, shot, state, begin, failed, end, mark, since, blockFacts, blockFact, standing, standingNow, height, sweepSent, nameNewest };
 };
 
 export type Course = ReturnType<typeof course>;
+
+/** The part of a record that says what the run measured about waits for a block, if it measured anything. */
+export const blockSection = (facts: string[]): string[] =>
+  facts.length === 0
+    ? []
+    : [
+        'Waits for a block (proposal section 17, "What still waits for a block"): the times are wall-clock times measured by the run; after each, the chain as the pages\' first server had it at that moment, and which of the wallet\'s transactions were not in a block yet when the page had already gone on.',
+        '',
+        ...facts.map((line) => `- ${line}`),
+        '',
+        ...waitsConcluded(facts),
+      ];
+
+/**
+ * What the measured facts show, said in the record: whether a step went on before a block held the transaction
+ * it rested on. Only what the facts show is said; where a block came first, the record says that it cannot tell.
+ */
+const waitsConcluded = (facts: string[]): string[] => {
+  const fact = (start: string): { seconds: string; open: string } | undefined => {
+    const line = facts.find((candidate) => candidate.startsWith(start));
+    const found = line === undefined ? null : /(\d+) s[^;]*; the chain is at height \d+; not in a block yet: ([^;]*); in a block: /.exec(line);
+    return found === null ? undefined : { seconds: found[1] ?? '', open: found[2] ?? '' };
+  };
+  const said: string[] = [];
+  const protectedAt = fact('From the payment to "Protected"');
+  if (protectedAt !== undefined) {
+    said.push(
+      /the creation /.test(protectedAt.open)
+        ? `From the payment that funded the wallet to a wallet in use with recovery on (${protectedAt.seconds} s), no step waited for a block: the transaction that created the wallet was still not in one when the wallet showed "Protected".`
+        : `A block held the wallet's creation before the wallet showed "Protected" (${protectedAt.seconds} s after the payment), so this record alone does not show that no step of the creation waited for one.`,
+    );
+  }
+  const sweptAt = fact('From the completion to the sweep sent by the new phone');
+  if (sweptAt !== undefined) {
+    said.push(
+      /the completion /.test(sweptAt.open) && /"Moved /.test(sweptAt.open)
+        ? `From the completed recovery to the swept coins, no step waited for a block: ${sweptAt.seconds} s after the completion the new phone sent its sweep, and neither the completion nor the sweep was in a block yet.`
+        : `When the new phone sent its sweep (${sweptAt.seconds} s after the completion), a block held the completion already, so this record alone does not show that no step of the takeover waited for one.`,
+    );
+  }
+  if (said.length === 0) return [];
+  said.push('The waits that remain are those the proposal keeps: the waiting period of a recovery request, which counts from the block that holds the request; a device retiring for good only once a block holds another owner; and the time locks of applications.');
+  return ['What these show:', '', ...said.map((line) => `- ${line}`), ''];
+};
+
+/** The sentence of a record that says which pages the run used. */
+export const pagesUsed = (apps: string[], timed: string): string =>
+  chipnet && !localPages
+    ? `The pages are the public ones, ${apps.join(', ')}, as served, on chipnet with the public backup stores. ${timed}`
+    : chipnet
+      ? `The pages are this checkout's production builds (\`deploy/preview.sh build\`), served on this machine by \`deploy/serve.mjs\` with the content security policy and \`deploy/config/local.json\` (${apps.join(', ')}), with two backup stores of the run's own, on chipnet. ${timed}`
+      : 'The pages are the production builds served by `deploy/serve.mjs` with the content security policy, against the regtest node and two backup stores on this machine. The run made the blocks and moved the chain\'s clock.';
 
 // ------------------------------------------------------------------ waiting for a page
 
@@ -253,6 +500,23 @@ export const openDesk = async (page: Page): Promise<void> => {
   await desk.waitFor({ state: 'visible', timeout: 60_000 * patience });
 };
 
+/**
+ * The recoverer's screen of its wallet, with the wallet's account open. A page whose engine failed its header
+ * checks after a reorganization of the chain stays at "Opening this wallet's account": after three minutes of
+ * that, its engine's header store is made afresh (see `freshEngine`) and the screen opened again.
+ */
+export const openDeskWorking = async ({ freshEngine }: Course, recoverer: Device): Promise<void> => {
+  await openDesk(recoverer.page);
+  const opening = recoverer.page.getByText('Opening this wallet\'s account');
+  const behind = recoverer.page.getByText(/The engine's header check stands at \d+ of \d+/);
+  for (let attempt = 0; attempt < 90 && (await opening.isVisible()) && !(await behind.isVisible()); attempt++) await wait(2_000);
+  if (!(await opening.isVisible()) && !(await behind.isVisible())) return;
+  await freshEngine(recoverer, RECOVERER, await behind.isVisible());
+  await openDesk(recoverer.page);
+  for (let attempt = 0; attempt < 150 && (await opening.isVisible()); attempt++) await wait(2_000);
+  if (await behind.isVisible()) throw new Error(`the recoverer's page still says: ${await behind.first().textContent()}`);
+};
+
 /** The wallet's balance as its home screen shows it, in satoshis. */
 export const balanceOf = async (page: Page): Promise<bigint> => {
   const text = (await page.getByTestId('balance').first().textContent()) ?? '';
@@ -269,7 +533,7 @@ export const balanceOf = async (page: Page): Promise<bigint> => {
  * @returns the devices and the recoverer's link, or nothing when the run was asked to stop earlier
  */
 export const firstSteps = async (
-  { begin, device, log, pay }: Course,
+  { begin, device, log, pay, mark, since, standingNow, keepStorage, work }: Course,
   shoot: (page: Page, name: string) => Promise<void>,
   /** Called once the owner's wallet has its words and before anything is paid to it: to keep them on disk. */
   beforeFunding: (old: Device) => Promise<void> = async () => undefined,
@@ -308,11 +572,16 @@ export const firstSteps = async (
   log(`   funding address ${funding}`);
   await shoot(old.page, 'wallet-create-funding');
   await beforeFunding(old);
+  await keepStorage(old);
+  await keepStorage(recoverer);
+  log(`   what the two pages keep, the wallet's words among it, is copied to ${work.slice(root.length)}storage-*.json before anything is paid`);
   log(`   ${pay(funding, 120_000)}`);
+  mark('paid');
   await click(old.page, 'Create the wallet');
   // The wallet goes on as soon as the network has its creation: no block is waited for.
   const kitLink = await valueOf(old.page, 'kit-link');
   log(`   created; the kit link has ${kitLink.length} characters`);
+  await standingNow(old.page, `From the payment to the wallet in use, its kit link shown: ${since('paid')}`);
   await see(old.page, /Recovery is not on yet|Checking the wallet's protection/);
   await shoot(old.page, 'wallet-home-kit-sent');
 
@@ -328,6 +597,7 @@ export const firstSteps = async (
   await shoot(recoverer.page, 'recoverer-kit-kept');
   await see(old.page, 'Protected', 120_000);
   log('   the wallet shows "Protected"');
+  await standingNow(old.page, `From the payment to "Protected", recovery on: ${since('paid')}`);
 
   // 4 ------------------------------------------------------------------
   if (!begin('The owner receives')) return;
@@ -336,9 +606,12 @@ export const firstSteps = async (
   log(`   address ${receiving}`);
   log(`   ${pay(receiving, 50_000)}`);
   await shoot(old.page, 'wallet-receive');
+  // The vault address is given as soon as the wallet is created, as every other address.
   await old.page.getByRole('button', { name: 'For regular payments' }).click();
-  const vaultAddress = await valueOf(old.page, 'receive-address');
-  log(`   vault address ${vaultAddress}`);
+  const vaultShown = old.page.locator(`[data-testid="receive-address"]:not([data-value="${receiving}"])`);
+  await vaultShown.first().waitFor({ state: 'visible', timeout: 60_000 * patience });
+  log(`   vault address ${(await vaultShown.first().getAttribute('data-value')) ?? ''}`);
+  await standingNow(old.page, `From the payment to the vault address shown: ${since('paid')}`);
   await shoot(old.page, 'wallet-receive-vault');
   await old.page.getByRole('link', { name: 'Home' }).first().click();
   await see(old.page, /^0\.00\d+/);
@@ -382,7 +655,9 @@ export const newPhoneAsks = async ({ device, log }: Course, recoverer: Device, r
  * The request the recoverer sent goes into a block, the waiting period passes, the recoverer completes the
  * move and hands the wallet over, and the new phone sweeps the coins to its own seed.
  */
-export const completeTakeover = async ({ log, mine, passTime }: Course, recoverer: Device, next: Device, shoot: (page: Page, name: string) => Promise<void>): Promise<void> => {
+export const completeTakeover = async ({ log, mine, passTime, mark, since, blockFact, standingNow, keepStorage, height, sweepSent, nameNewest }: Course, recoverer: Device, next: Device, shoot: (page: Page, name: string) => Promise<void>): Promise<void> => {
+  // The new phone's words, kept beside its profile before any coin is swept to them.
+  await keepStorage(next);
   await see(recoverer.page, 'The request is sent');
   mine(1);
   await see(recoverer.page, 'Your request is waiting');
@@ -391,17 +666,26 @@ export const completeTakeover = async ({ log, mine, passTime }: Course, recovere
   // On chipnet the chain's clock has to pass 512 seconds: the button is enabled when it has.
   await click(recoverer.page, 'Complete the move', chipnet ? 360_000 : 120_000);
   await see(recoverer.page, 'The wallet is moved');
+  mark('completed');
+  await nameNewest('the completion');
   // The hand-over is made as soon as the network shows the completion: no block is waited for.
   const handOver = await valueOf(recoverer.page, 'handover-link', 120_000);
   log('   completed; the hand-over link is ready');
+  blockFact(`From the completion to the hand-over link: ${since('completed')}; the chain is at height ${await height()}.`);
   await shoot(recoverer.page, 'recoverer-handover');
   await next.page.goto(handOver);
   await see(next.page, 'Bringing your coins over');
   await shoot(next.page, 'wallet-arrival');
-  for (let attempt = 0; attempt < 40; attempt++) {
+  // The sweep is looked at on the chain as soon as the page has sent it, before the full search ends.
+  let swept = false;
+  for (let attempt = 0; attempt < 120; attempt++) {
+    if (!swept && (await sweepSent(next.page))) {
+      swept = true;
+      await standingNow(next.page, `From the completion to the sweep sent by the new phone: ${since('completed')}`);
+    }
     if (await next.page.getByRole('button', { name: 'Open the wallet' }).isVisible()) break;
-    mine(1);
-    await wait(3_000);
+    if (attempt % 3 === 0) mine(1);
+    await wait(1_000);
   }
   await click(next.page, 'Open the wallet');
   mine(1);
@@ -412,7 +696,9 @@ export const completeTakeover = async ({ log, mine, passTime }: Course, recovere
     await wait(1_000);
   }
   log(`   the new phone holds ${(await next.page.getByTestId('balance').textContent())?.replace('BCH', ' BCH')}`);
+  await standingNow(next.page, `From the completion to the swept coins in the new phone's wallet: ${since('completed')}`);
   await see(next.page, 'Protected', 120_000);
   log('   recovery is on for the new phone');
+  blockFact(`From the completion to "Protected" on the new phone: ${since('completed')}.`);
   await shoot(next.page, 'wallet-home-after-takeover');
 };
