@@ -123,21 +123,34 @@ describe('a session with an application', () => {
     expect(proposals()).toHaveLength(1);
   });
 
-  it('AP01: a later text under the same identifier does not replace the template the user trusted', async () => {
+  it('AP01: a later text under the same identifier does not replace the template the user trusted without the user\'s word', async () => {
     const { device, connect, proposals } = await session();
     const { dapp } = connect('first application');
     const first = dapp.request(open(strongbox), strongbox.texts);
     await settle();
     await proposals()[0]?.approve();
     await first;
-    // The same template comes again with another declaration. It does not take the place of the one the user trusted.
+    // The same template comes again with another declaration. It is shown as a template to be trusted again, and
+    // does not take the place of the one the user trusted unless the user approves.
     const altered = (strongbox.texts.declaration as string).replace('"actions":["add","take"]', '"actions":["take"]');
     expect(altered).not.toBe(strongbox.texts.declaration);
-    const again = dapp.request({ ...open(strongbox), template: { ...strongbox.names, declaration: presentationHash(altered) } }, { template: strongbox.texts.template, declaration: altered });
-    await expect(again).rejects.toThrow('another recovery declaration than the one this wallet trusted');
-    expect(proposals()).toEqual([]);
+    const names = { ...strongbox.names, declaration: presentationHash(altered) };
+    const texts = { template: strongbox.texts.template, declaration: altered };
+    const again = dapp.request({ ...open(strongbox), template: names }, texts);
+    await settle();
+    expect(proposals()).toHaveLength(1);
+    expect(device.applications.describe(names, texts)).toMatchObject({ trusted: false, replacesDeclaration: true });
+    await proposals()[0]?.decline();
+    await expect(again).rejects.toThrow('declined');
     expect(device.applications.templates).toHaveLength(1);
     expect(device.applications.templates[0]?.declaration?.contentHash).toBe(strongbox.names.declaration);
+    // Asked again and approved: the new declaration takes the earlier one's place.
+    const approved = dapp.request({ ...open(strongbox), template: names }, texts);
+    await settle();
+    await proposals()[0]?.approve();
+    await approved;
+    expect(device.applications.templates).toHaveLength(1);
+    expect(device.applications.templates[0]?.declaration?.contentHash).toBe(names.declaration);
   });
 
   it('AP03: a request that is repeated, or asked again after a reconnect, is carried out once; the same id with other content is refused', async () => {

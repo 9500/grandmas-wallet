@@ -44,6 +44,7 @@ Within a short while the wallet's home screen changes from "Recovery is not on y
 - **Receive** shows a fresh address each time. "For regular payments" gives a vault address instead, for someone who pays to the same address again and again.
 - **Send** asks for an address and an amount, and then shows the fee before anything is sent: one satoshi per byte, exactly.
 - The home screen's "What it is made of" shows where the coins are.
+- **Tokens.** To receive one, tick **Receiving a token?** on the Receive screen: the same address, written in the form that wallets sending tokens ask for. Once the wallet holds a token, **Send** offers **Bitcoin Cash** or **A token**, and each token on the **Apps** screen has a **Send** button. A token goes only to a token address; a plain address is refused, with what to ask the receiver for. The review shows what goes, the token change and the fee; a token that controls something, such as a jar's key, says what, and is sent only after you tick that you understand. Tokens show a name and an amount in dollars and cents, say, only where a template you trust names them, and the screen says which.
 
 ## 5. A request nobody asked for
 

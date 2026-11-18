@@ -250,6 +250,10 @@ This is tested on the simulated chain. Earlier run records stay as they were run
 
 The owner runs the wallet page on a phone and the recoverer's page and the applications on a desktop, and asked for less copying between the two. Every field of the wallet that takes a link or an address from another screen has a QR code scanner (`apps/wallet/src/Scanner.tsx`, library `qr-scanner` 1.4.2). The recoverer's code also offers a WizardConnect session under a second extension of the project's own, `gw_recoverer_v1` (proposal section 14.4), over which the wallet sends the kit, the kit for a new recoverer and a takeover request; the links remain the second way. Closed by unit and protocol tests (RC12, RC13) and by two scripted checks in browsers that need no chain and no coins (`scripts/scan-check.ts`, `scripts/session-check.ts`; OP04). Still to do: the scanner on real phones, and the scripted course of stage 6 taking the recoverer's code over the session instead of opening its links.
 
+## Tokens: receiving, sending and their names (18 November 2026)
+
+The owner asked for tokens to be sent and received like Bitcoin Cash, and named. Every address has a token-aware form, which the Receive screen shows on request. The Send screen chooses between Bitcoin Cash and a token: an amount of a fungible token, gathered from the wallet's coins of the category with the rest coming back as token change, or one NFT whole; the fee from the wallet's ordinary coins only. A token goes only to a token-aware address; a plain one is refused with what to ask the receiver for. A token that controls a position, or an NFT with minting or mutable capability, says so in the review and needs a tick. A token at a vault address is moved to an ordinary address first. The owner chose that names come only from templates the user trusts, with no registry: a declaration may describe the tokens its template deals in (proposal section 13.3), and the ParyonUSD and Savings Jar declarations now name PUSD and the two keys. Their content hashes changed; a wallet that trusted the earlier declaration keeps working with it, and takes the new one, as a template to trust again, when a page presents it and the user approves; before, it refused such a request outright (AP01 was changed to say so). Closed by unit and simulated-chain tests (TK01 to TK10) and a scripted check of the screens in a browser from the fixtures page (`scripts/token-send-check.ts`). Still to do: a run on the local node and on chipnet, real phones, and the release of the wallet page before the pages that present the new declarations. The loan course's last step (`scripts/browser-run-loan.ts`) sends the loan key with the "Tokens" card, which is gone; it has to choose the key on the Send screen, give the token-aware form of the address and tick before it runs again.
+
 ## Which stage closes which test
 
 | Stage | Tests |
@@ -263,8 +267,9 @@ The owner runs the wallet page on a phone and the recoverer's page and the appli
 | 7 | AP01–AP09, AP11–AP15, BK04–BK06, BK10 |
 | 8 | SJ01–SJ06, AP10 |
 | 9 | PY01–PY04 |
+| Tokens (18 November 2026) | TK01–TK10 |
 
-All 125 tests of the proposal's section 21 are in this table once.
+All 135 tests of the proposal's section 21 are in this table once.
 
 ## Decisions
 

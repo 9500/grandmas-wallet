@@ -46,6 +46,7 @@ import {
 } from '@grandmas-wallet/core';
 
 import type { ApplicationsState } from './applications.js';
+import { type TokenSendQuote, type TokenSendRequest, quoteTokenSend, sendTokens } from './token-send.js';
 
 /**
  * The owner's wallet (proposal sections 7.7, 7.9 and 8): creating it, giving out addresses, paying,
@@ -1037,6 +1038,21 @@ export class OwnerWallet {
     return { feeSatoshis: choice.feeSatoshis, remainderSatoshis: choice.remainderSatoshis, bytes: choice.bytes, change: choice.changeSatoshis !== undefined };
   }
 
+  /**
+   * What sending tokens will do and cost (proposal section 8): an amount of a fungible token, gathered from the
+   * wallet's coins of the category with the rest coming back, or one NFT, whole. The fee comes from the
+   * ordinary coins. Nothing is recorded.
+   */
+  async quoteTokens(request: TokenSendRequest): Promise<TokenSendQuote> {
+    return quoteTokenSend(this.parts, request);
+  }
+
+  /** Send tokens as `quoteTokens` worked it out. */
+  async sendTokens(request: TokenSendRequest): Promise<Sent & { quote: TokenSendQuote }> {
+    const { sent, quote } = await sendTokens(this.parts, request);
+    return { ...sent, quote };
+  }
+
   /** Send a coin that carries a token on, token unchanged, with the smallest value its new output may hold. */
   async sendToken(coin: AccountCoin, toLockingBytecode: Uint8Array): Promise<Sent> {
     const { token } = coin.utxo.output;
@@ -1212,10 +1228,26 @@ export class OwnerWallet {
    * @param options.maximumTransactions - stop after this many transactions; the rest is swept by the next call
    */
   async sweepEarlier(options: { maximumCoins?: number; maximumTransactions?: number } = {}): Promise<Swept> {
+    return this.release('earlier', options);
+  }
+
+  /**
+   * Move the coins with tokens at vault addresses to an ordinary address of this seed, through the controller,
+   * as a sweep moves those at earlier addresses: tokens unchanged, the fee from the wallet's ordinary coins. A
+   * token there can then be sent or used in an application's action. Coins without tokens stay where they are.
+   * Like every spend through the controller, it also cancels a pending request.
+   */
+  async moveVaultTokens(options: { maximumCoins?: number; maximumTransactions?: number } = {}): Promise<Swept> {
+    return this.release('vault tokens', options);
+  }
+
+  private async release(which: 'earlier' | 'vault tokens', options: { maximumCoins?: number; maximumTransactions?: number }): Promise<Swept> {
     this.requireCreated();
     const swept: Swept = { transactions: [], coins: 0, tokens: [] };
     for (;;) {
-      const { own, earlier } = await this.sorted();
+      const sorted = await this.sorted();
+      const { own } = sorted;
+      const earlier = which === 'earlier' ? sorted.earlier : sorted.tokens.filter((coin) => coin.template === 'actions');
       if (earlier.length === 0) return swept;
       const ordered = [...earlier].sort((a, b) => {
         if (tokenFree(a) !== tokenFree(b)) return tokenFree(a) ? 1 : -1;
@@ -1230,7 +1262,7 @@ export class OwnerWallet {
       const destination = this.address(ADDRESS_KIND.change, number).lockingBytecode;
 
       // As many coins as one transaction holds.
-      const inputBytesOf = (coin: AccountCoin): number => this.earlierInputBytes(coin);
+      const inputBytesOf = (coin: AccountCoin): number => (which === 'earlier' ? this.earlierInputBytes(coin) : INPUT_BYTES.vault);
       const tokenOutput = (coin: AccountCoin): Output => {
         const output = { lockingBytecode: destination, valueSatoshis: 0n, token: coin.utxo.output.token as NonNullable<Output['token']> };
         const smallest = smallestOutputValue(output);

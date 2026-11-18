@@ -405,5 +405,10 @@ export const paryonDeclarationSource = (contracts: ParyonContracts) => {
         },
       },
     },
+    // What a wallet that trusts the template may call its tokens. PUSD amounts are in cents.
+    tokens: {
+      pusd: { kind: 'fungible', category: P, name: 'ParyonUSD', symbol: 'PUSD', decimals: 2 },
+      loanKey: { kind: 'nft', authority: 'loanKey', name: 'Loan key' },
+    },
   };
 };

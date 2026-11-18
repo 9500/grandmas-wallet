@@ -51,6 +51,7 @@ describe('a savings jar', () => {
     const { device, unlockTime, opened, key, script } = await withJar();
     expect(opened.tokens).toEqual([{ category: key.category, commitment: hex(unlockTimeBytes(unlockTime)), capability: 'none', satoshis: '1000' }]);
     expect(key).toMatchObject({ meaning: 'position', template: { name: 'Savings Jar' }, authority: 'jarKey', amount: 0n, position: { status: 'open', satoshis: 40_000n, coins: 1, lockingBytecode: hex(script.lockingBytecode) } });
+    expect(key?.names?.nft?.named?.name).toBe('Jar key');
     expect(key.actions?.map(({ action }) => action)).toEqual(['deposit', 'withdraw']);
     expect(device.chain.balanceOf(script.lockingBytecode)).toBe(40_000n);
   });
