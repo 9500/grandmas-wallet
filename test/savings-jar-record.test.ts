@@ -122,4 +122,29 @@ describe('a savings jar through the loss of a device, as recorded', () => {
     expect(record.match(/^ +\d+ s {5}done: [0-9a-f]{64}$/gm)?.length).toBe(2);
     expect(record).toMatch(/allowed; the Savings Jar page lists, from the wallet's answer/);
   });
+
+  // The same course on chipnet with the public pages. A run that stopped and was continued says so, and what that means.
+  const browserOnChipnet = existsSync(new URL('../docs/runs/stage-8-browser-chipnet.md', import.meta.url));
+  it.runIf(browserOnChipnet)('SJ04: on chipnet with the public pages, a new phone found the jar from the swept key and the template, emptied it twice, and the coins went back', () => {
+    const record = readFileSync(new URL('../docs/runs/stage-8-browser-chipnet.md', import.meta.url), 'utf8');
+    expect(record).toMatch(/^Outcome: every step was carried out/m);
+    expect(record).toMatch(/on chipnet with the public pages/);
+    expect(record).toMatch(/jar page: https:\/\/jar\.9500\.cash\/, commit [0-9a-f]{7}/);
+    // Each part that stopped is named; a continuation from step 9 says what the request list does and does not cover.
+    const parts = record.match(/^ +continued from step (\d+) on /gm)?.length ?? 0;
+    expect(record.match(/^A part of the run stopped: /gm)?.length ?? 0).toBe(parts);
+    if (/continued from step 9 on/.test(record)) expect(record).toMatch(/the requests of the new phone's browser were recorded only in the continued part[^\n]*none of the Savings Jar page \(https:\/\/jar\.9500\.cash\)[^\n]*it does not show, as a recording would/);
+    expect(record).toMatch(/template "Savings Jar", "Not verified"/);
+    expect(record).toMatch(/"Not carried out": "The network does not take this transaction yet/);
+    expect(record).toMatch(/it is not trusted on this device yet/);
+    // The withdrawal waited for the network's clock, not the wall clock.
+    expect(record).toMatch(/the chain's median time is \S+ at height \d+, past the jar's date/);
+    expect(record).toMatch(/the new phone's browser made \d+ requests, to [^;]+; none to the Savings Jar page \(https:\/\/jar\.9500\.cash\)/);
+    expect(record.match(/^ +\d+ s {5}done: [0-9a-f]{64}$/gm)?.length).toBe(2);
+    expect(record).toMatch(/the key: \(Open\), "Holds 0\.00008 BCH · 8,000 sat"/);
+    expect(record).toMatch(/allowed; the Savings Jar page lists, from the wallet's answer/);
+    expect(record).toMatch(/the new phone sent everything to bchtest:\S+: [^;]+ arrives, fee [\d,]+ sat/);
+    expect(record).toMatch(/Anna sent her fee coins back: Sent; the fee was \d+ satoshis/);
+    expect(record).toMatch(/What is left: the jar's key, an NFT on a coin of 1,000 satoshis, in the new phone's wallet/);
+  });
 });
