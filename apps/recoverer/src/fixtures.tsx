@@ -49,6 +49,8 @@ if (show !== 'start') {
 useFixedFunds({
   address: async () => p2pkhLockingBytecode(new Uint8Array(20).fill(0x5a)),
   balance: async () => 1_250_000n,
+  // There is no chain here: a set-up that begins stays at its beginning.
+  create: () => new Promise(() => undefined),
 } as unknown as RecovererFunds);
 
 const Root = () => {

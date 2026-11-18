@@ -1,6 +1,5 @@
 import { Notice } from '@grandmas-wallet/ui';
 
-import { BRAND } from './brand.js';
 import { type Session, kept } from './session.js';
 
 /** Where a phone that keeps no wallet can begin. */
@@ -16,7 +15,7 @@ export const Welcome = ({ session, onChoose }: { session: Session; onChoose: (be
   return (
     <div class="stack set-up welcome">
       <div class="set-up-head">
-        <h1>{BRAND}</h1>
+        <h1>Welcome</h1>
       </div>
       {lost !== undefined && (
         <Notice tone="warn">

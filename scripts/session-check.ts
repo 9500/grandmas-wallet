@@ -1,17 +1,19 @@
-// The recoverer's code and the session it offers, in real browsers, through a relay on this machine: no chain,
-// no coins, nothing sent to an outside service. The recoverer's page and the wallet's page are built with their
-// fixtures pages and served with deploy/serve.mjs, whose configuration names the relay of this run.
+// Setting a wallet up over the session of the recoverer's code, in real browsers, through a relay on this machine:
+// no chain, no coins, nothing sent to an outside service. The recoverer's page and the wallet's page are built with
+// their fixtures pages and served with deploy/serve.mjs, whose configuration names the relay of this run.
 //
-// The recoverer's "Your link" screen shows its code; the phone's camera (a fake one, playing a clip of that very
-// code) scans it into the wallet's first step of making a wallet; the wallet shows the same fingerprint, and the
-// recoverer's page shows that a phone is connected. The wallet then hands over a sealed sample, as it hands over
-// the kit once the wallet is made; the recoverer's page shows it as an arrived kit, the wallet shows that the
-// page has it; the recoverer tries to keep it, which fails because the sample opens with no key, and the wallet
-// shows the refusal with its reason, with the link in view. (That a real kit received this way is the link's kit
-// and passes the page's checks is tested in test/kit-over-session.test.ts.)
+// The recoverer's first run asks how the page is used. A bank's "New customer" shows its code; the phone's camera (a
+// fake one, playing a clip of that very code) scans it on the wallet's "I have a code from my bank"; the wallet
+// shows "Setting up…" and the bank's page starts the set-up by itself (its fixtures create nothing, so both stay
+// there). A friend's code: the phone scans it, and the friend's page asks "Set up Grandma's wallet with …?" while
+// the wallet shows that it waits for the friend to say yes. The request is a real one, signed and sealed to the
+// recoverer's key, which the recoverer's page opens. "Your wallet is ready" is shown from fixed figures. (That the
+// wallet is created, checked and opened is tested in test/set-up.test.ts and test/set-up-over-session.test.ts, and
+// run on the local node by scripts/browser-run.ts.)
 //
-// Screenshots: docs/screens/recoverer-link-code-{phone,desktop}.png (the code, a phone connected) and
-// docs/screens/wallet-kit-handed-{phone,desktop}.png (the wallet, the recoverer's page has the kit).
+// Screenshots, each for a phone (390x844) and a desktop (1280x800), under docs/screens/: wallet-welcome,
+// wallet-setting-up-bank, wallet-setting-up, wallet-ready, recoverer-start, recoverer-bank-code,
+// recoverer-friend-confirm, recoverer-settings.
 //
 // usage (from the repository's root):   npx tsx scripts/session-check.ts [--headed] [--no-screens]
 // It takes about a minute. Ports 8192 and 8193 must be free.
@@ -50,7 +52,7 @@ log(`relay at ${relay.url}`);
 // ------------------------------------------------------------------ the pages, built and served as for the public sites
 
 const config = {
-  ...(JSON.parse(readFileSync(join(root, 'deploy/config/local.json'), 'utf8')) as Record<string, unknown>),
+  ...(JSON.parse(readFileSync(join(root, 'deploy/config/local-regtest.json'), 'utf8')) as Record<string, unknown>),
   walletUrl: `http://localhost:${PORTS.wallet}/`,
   recovererUrl: `http://localhost:${PORTS.recoverer}/`,
   relays: [relay.url],
@@ -88,7 +90,7 @@ const open = async (args: string[], viewport: { width: number; height: number })
 };
 
 /** A clip in the YUV4MPEG2 format, which Chromium plays as a camera: the code, black on white, in the middle. */
-const clipOf = (text: string): string => {
+const clipOf = (text: string, name: string): string => {
   const code = qrcode(0, 'M');
   code.addData(text, 'Byte');
   code.make();
@@ -106,7 +108,7 @@ const clipOf = (text: string): string => {
   }
   const chroma = new Uint8Array((width / 2) * (height / 2)).fill(128);
   const frame = Buffer.concat([Buffer.from('FRAME\n'), luma, chroma, chroma]);
-  const path = join(work, 'code.y4m');
+  const path = join(work, `${name}.y4m`);
   writeFileSync(path, Buffer.concat([Buffer.from(`YUV4MPEG2 W${width} H${height} F10:1 Ip A1:1 C420jpeg\n`), frame, frame]));
   return path;
 };
@@ -123,49 +125,66 @@ const shoot = async (page: Page, name: string): Promise<void> => {
   await page.setViewportSize(before);
 };
 
+
 try {
-  // ---------------------------------------------------------------- the recoverer's page, on a desktop
+  const recovererPage = (show: string): string => `http://localhost:${PORTS.recoverer}/fixtures.html?show=${show}`;
+  const walletPage = (show: string): string => `http://localhost:${PORTS.wallet}/fixtures.html?show=${show}`;
+
+  // ---------------------------------------------------------------- the first screens, by themselves
   const recoverer = await open([], DESKTOP);
-  await recoverer.goto(`http://localhost:${PORTS.recoverer}/fixtures.html`);
-  await recoverer.getByLabel('Your name, as their wallet shows it').fill('Anna');
-  await recoverer.getByText('Waiting for their phone').waitFor();
+  await recoverer.goto(recovererPage('start'));
+  await recoverer.getByText('How will you use this page?').waitFor();
+  await recoverer.getByTestId('mode-bank').click();
+  check(await recoverer.getByLabel('Your bank\'s name, as customers\' wallets show it').isVisible(), 'the recoverer\'s first run asks whether it is a bank or someone helping, and then for the name phones show');
+  await shoot(recoverer, 'recoverer-start');
+  await recoverer.goto(recovererPage('settings'));
+  await recoverer.getByText('Starting balance, in satoshis').waitFor();
+  check(true, 'the settings have the starting balance and the waiting period');
+  await shoot(recoverer, 'recoverer-settings');
+
+  const welcome = await open([], PHONE);
+  await welcome.goto(walletPage('welcome'));
+  await welcome.getByText('I have a code from my bank').waitFor();
+  check(await welcome.getByText('Someone I trust is helping me').isVisible(), 'the wallet\'s first screen offers the bank and the helper, and the ways back to a wallet');
+  await shoot(welcome, 'wallet-welcome');
+  await welcome.goto(walletPage('ready'));
+  await welcome.getByText('Your wallet is ready').waitFor();
+  check(await welcome.getByText('Protected by').isVisible(), '"Your wallet is ready" shows the balance and who protects it');
+  await shoot(welcome, 'wallet-ready');
+
+  // ---------------------------------------------------------------- a bank: the phone scans, the page sets up by itself
+  await recoverer.goto(recovererPage('bank'));
+  await recoverer.getByText('Waiting for their phone to scan the code').waitFor();
+  await recoverer.getByLabel('Customer', { exact: true }).fill('1042');
   await wait(300);
-  const code = (await recoverer.getByTestId('recoverer-code').getAttribute('data-value')) ?? '';
-  const plain = (await recoverer.getByTestId('recoverer-link').getAttribute('data-value')) ?? '';
-  check(code !== plain && code.length > plain.length, `the code (${code.length} characters) carries more than the link to send (${plain.length})`);
-  const recovererFingerprint = (await recoverer.locator('.fingerprint').first().textContent()) ?? '';
+  const bankCode = (await recoverer.getByTestId('recoverer-code').getAttribute('data-value')) ?? '';
+  check(/#recoverer=/.test(bankCode), `the bank's "New customer" shows its code (${bankCode.length} characters)`);
+  await shoot(recoverer, 'recoverer-bank-code');
+  const bankPhone = await open(['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${clipOf(bankCode, 'bank')}`], PHONE);
+  await bankPhone.goto(walletPage('setup-bank'));
+  await bankPhone.getByTestId('setting-up').waitFor();
+  check(true, 'the phone scanned the bank\'s code at once and shows "Setting up…"');
+  await recoverer.getByText('Setting up the customer\'s wallet…').or(recoverer.getByText('Setting up 1042\'s wallet…')).waitFor();
+  check(true, 'the bank\'s page took the request and began the set-up by itself, with nobody saying yes');
+  await bankPhone.locator('[data-stage="waiting"]').waitFor();
+  await shoot(bankPhone, 'wallet-setting-up-bank');
 
-  // ---------------------------------------------------------------- the phone scans it
-  const phone = await open(['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${clipOf(code)}`], PHONE);
-  await phone.goto(`http://localhost:${PORTS.wallet}/fixtures.html?show=recoverer`);
-  await phone.getByRole('button', { name: 'Scan', exact: true }).click();
-  await phone.waitForFunction(() => (document.querySelector<HTMLTextAreaElement>('#recipient-link')?.value ?? '').includes('#recoverer='));
-  check((await phone.locator('#recipient-link').inputValue()) === code, 'the phone scanned the code into the field, exactly as shown');
-  await phone.getByRole('button', { name: 'Use this link' }).click();
-  await phone.getByText('Fingerprint of their key').waitFor();
-  check((await phone.locator('.fingerprint').first().textContent()) === recovererFingerprint, `the wallet shows the recoverer's fingerprint, ${recovererFingerprint}`);
-  await recoverer.getByText('A phone is connected').waitFor();
-  check(true, 'the recoverer\'s page shows that a phone is connected');
-  await shoot(recoverer, 'recoverer-link-code');
-
-  // ---------------------------------------------------------------- something sealed, handed over the session
-  await phone.getByLabel('The fingerprints are the same').check();
-  await phone.getByRole('button', { name: 'Send a sample to their page' }).click();
-  await phone.getByText('Anna\'s page has the kit.').waitFor();
-  check(true, 'the wallet shows that the recoverer\'s page has it');
-  check(!(await phone.getByTestId('kit-link').isVisible()), 'with the link folded away under "Send it as a link instead"');
-  await recoverer.getByText('A recovery kit has arrived').waitFor();
-  check(!(await recoverer.getByTestId('recoverer-code').isVisible()), 'the recoverer\'s page shows the kit as arrived, as if its link had been opened, with the code out of the way');
-  await shoot(phone, 'wallet-kit-handed');
-
-  // ---------------------------------------------------------------- the recoverer's page checks it, and refuses it
-  await recoverer.getByLabel('Whose wallet is this?').fill('Grandma');
-  await recoverer.getByRole('button', { name: 'Check and keep the kit' }).click();
-  await phone.getByText('Anna\'s page did not keep the kit.').waitFor();
-  const refusal = (await phone.locator('.notice.warn').first().textContent()) ?? '';
-  check(/Send it as a link instead/.test(refusal), `the wallet shows the refusal and its reason: "${refusal.trim()}"`);
-  check(await phone.getByTestId('kit-link').isVisible(), 'and the link, in view');
-  check(await recoverer.getByText('The kit was not kept').isVisible(), 'the recoverer\'s page says the kit was not kept');
+  // ---------------------------------------------------------------- a friend: the phone scans, the friend says yes
+  await recoverer.goto(recovererPage('friend'));
+  await recoverer.getByLabel('Who are you helping?').fill('Grandma');
+  await recoverer.getByRole('button', { name: 'Show the code' }).click();
+  await recoverer.getByText('Waiting for their phone to scan the code').waitFor();
+  await wait(300);
+  const friendCode = (await recoverer.getByTestId('recoverer-code').getAttribute('data-value')) ?? '';
+  const friendPhone = await open(['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${clipOf(friendCode, 'friend')}`], PHONE);
+  await friendPhone.goto(walletPage('setup-friend'));
+  await recoverer.getByTestId('set-up-confirm').waitFor();
+  const question = (await recoverer.getByTestId('set-up-confirm').locator('.status-title, strong, h3').first().textContent()) ?? (await recoverer.getByTestId('set-up-confirm').textContent()) ?? '';
+  check(/Set up Grandma's wallet/.test((await recoverer.getByTestId('set-up-confirm').textContent()) ?? ''), `the friend's page asks: "${question.trim()}"`);
+  await friendPhone.getByText('Waiting for Anna to say yes').waitFor();
+  check(true, 'the phone shows that it waits for Anna to say yes');
+  await shoot(recoverer, 'recoverer-friend-confirm');
+  await shoot(friendPhone, 'wallet-setting-up');
 
   check(problems.length === 0, `no errors on the pages${problems.length === 0 ? '' : `: ${problems.join(' | ')}`}`);
   log(`PASSED (${relay.published().count} relay messages)`);
