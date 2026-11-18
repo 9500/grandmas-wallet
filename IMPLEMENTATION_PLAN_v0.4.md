@@ -262,6 +262,16 @@ Decided: **whoever has the coins creates the wallet.** The phone scans the recov
 
 Closed by unit, protocol and simulated-chain tests (CR05 to CR10, RC14, RC15, SW09), a check of the screens in browsers through a relay on this machine (`scripts/session-check.ts`), and the wallet course in browsers on the local node (`docs/runs/wallet-set-up-local-node.md`). Still to do: real phones, public relays, chipnet, the jar and loan courses in browsers with the new first steps, and the release of both pages together.
 
+## One balance for the recoverer, and less on the wallet's screens (18 November 2026)
+
+The owner found that a recoverer with a fee reserve at every wallet has too much to look after: coins scattered over its wallets, a list of those running short, a button to top each up. It should have one balance.
+
+Decided: **the recoverer pays every fee from its one balance, in the same transaction that spends the controller.** The page's own code unlocks the controller with the recovery key for that wallet and gives it to the engine as another participant's input; the engine, which holds the balance alone, adds its coins and signs them (proposal section 9.6). A creation has two outputs and no reserve. The recoverer's page shows the one balance on every screen, sends all of it to another address when asked, and brings in what earlier versions left at fee addresses. It no longer loads an engine for each wallet.
+
+Decided with it, for the wallet's screens: a "Max" in the amount field in place of a second button for sending everything; the token form of an address shown first; one card on the Apps screen for a new wallet; requests refused without asking unless the owner turns that off; the complete backup shown whole; and no screen for changing the waiting period, which stays as the recoverer set it.
+
+Closed by the simulated-chain tests (RC05, RC06, MG04, SW09, CR05), a run on the XO engine on the local node with a request, a refusal, a second request and its completion, the taking in of coins at an earlier fee address and the sending of the whole balance (`docs/runs/stage-4-local-node.md`), and a look at the screens in browsers at a phone's and a desktop's size. Still to do: the courses in browsers with coins.
+
 ## Which stage closes which test
 
 | Stage | Tests |
@@ -291,7 +301,7 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 3 | Who makes the recoverer's key | Stage 2 | The owner's device |
 | 4 | The viewing key's written form | Stage 2 | The two extended public keys and the blinding seed in one signed record |
 | 5 | Readable controller state | Settled | Readable, as the controller is |
-| 6 | Waiting period for real use; margin; automatic cancelling | Stage 6 | Time only; length and default open |
+| 6 | Waiting period for real use; margin; automatic cancelling | Stage 6 | Time only; length open; cancelling without asking is on unless the owner turns it off (18 November 2026) |
 | 7 | Fees: the rate; how a cancellation is paid for; an allowance for the recoverer | Stage 1 for sizes, stage 3 for amounts | One satoshi per byte; from the wallet's coins, with no coin kept apart; an allowance offered and not required, for four requests and one completion |
 | 8 | Messages with the recoverer; how the recoverer knows the user | Stage 4 | As in sections 9 and 11 |
 | 9 | Backup record formats; refusing without a stored template | Stage 4, for stage 7 | Refusing stays the default |

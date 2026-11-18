@@ -365,7 +365,7 @@ pre.code .c { color: var(--muted); }
     <tr><td>Address key, kind <em>c</em>, number <em>i</em></td><td><code>m / P' / A<sub><em>c</em></sub>' / 0' / i</code> &nbsp; (<em>c</em> = 0 given out, 1 change)</td></tr>
     <tr><td>Blinding seed</td><td>SHA-256 of the private key at <code>m / P' / A<sub>0</sub>' / B'</code></td></tr>
     <tr><td>Funding key</td><td><code>m / P' / W' / 0' / 0</code></td></tr>
-    <tr><td>Recoverer's credential, a separate set of twelve words</td><td>Recovery key <code>m / P' / C' / 0' / 0</code> and fee key <code>m / P' / W' / 0' / 0</code> of its own tree</td></tr>
+    <tr><td>Recoverer's credential, a separate set of twelve words</td><td>Recovery key <code>m / P' / C' / 0' / 0</code> of its own tree</td></tr>
   </table>
   </div>
   <p class="small" style="margin-top:10px">This is the key tree of the XO engine, which signs with no other key: every key of a template is at <code>m / P' / T' / 0' / n</code>. <code>P</code> is XO's purpose number, 2415 on mainnet and 42415 on test networks. <code>T</code> is the template's number, which follows from the template's content: <code>C</code> for the controller template, <code>A<sub>0</sub></code> and <code>A<sub>1</sub></code> for the two address templates, <code>W</code> for XO's standard wallet template. <code>n</code> counts up from 0. <code>B</code> is 1,651,272,046, a number of this scheme (the bytes of "blin"). The templates that hold keys never change, because a changed template would give other keys.</p>
@@ -532,7 +532,7 @@ contract VaultAddress(bytes32 tag) {
     <tr><td>A payment, an application's action</td><td>Owner</td><td>The coins being spent</td></tr>
     <tr><td>A cancel, a change of settings, a spend from a vault address</td><td>Owner</td><td>The wallet's coins, like a payment: the smallest coin that pays alone, with change to a fresh address. No coin is kept apart. When the ordinary coins hold less than the fee, a vault coin or an unswept coin at an earlier address pays.</td></tr>
     <tr><td>The sweep after a recovery</td><td>New owner</td><td>The swept coins</td></tr>
-    <tr><td>The request and the completion</td><td>Recoverer</td><td>Coins of its own, at an ordinary address of its fee key, where it puts a reserve when it creates the wallet. The owner gives it nothing.</td></tr>
+    <tr><td>The request and the completion</td><td>Recoverer</td><td>Its one balance, in the same transaction that spends the controller. Nothing is kept apart for a wallet, and the owner gives it nothing.</td></tr>
     <tr><td>Creating the wallet, and its starting balance</td><td>Recoverer</td><td>Its balance, an ordinary address of its own</td></tr>
   </table>
   </div>
@@ -547,7 +547,7 @@ contract VaultAddress(bytes32 tag) {
   </ul>
   <h3>Receiving and sending tokens</h3>
   <ul>
-    <li><strong>Every address can hold tokens.</strong> Its token-aware form (<code>z…</code> or <code>r…</code> after the prefix) pays the same script; it is the receiver's word that its wallet knows tokens. The Receive screen shows it when "Receiving a token?" is ticked.</li>
+    <li><strong>Every address can hold tokens.</strong> Its token-aware form (<code>z…</code> or <code>r…</code> after the prefix) pays the same script; it is the receiver's word that its wallet knows tokens. The Receive screen shows it first; unticking "Receiving a token?" shows the plain form.</li>
     <li><strong>An amount, or one NFT.</strong> A fungible token is one balance per category; the wallet gathers its coins, the largest first, and the rest comes back to a fresh change address. An NFT goes whole, commitment and capability unchanged, with any amount on its coin.</li>
     <li><strong>The fee from ordinary coins.</strong> Each token output holds the smallest value it may; what the token coins held beyond that comes back with the change in Bitcoin Cash.</li>
     <li><strong>Only to a token-aware address.</strong> A plain address is refused before anything is built: a wallet that does not know tokens can destroy them.</li>
@@ -586,8 +586,8 @@ contract VaultAddress(bytes32 tag) {
     <li><strong>One scan, both pages open.</strong> The recoverer's page shows one QR code that holds its name, its key and the address of a WizardConnect session it keeps open while it is shown. The phone scans it, and everything else goes over the session: the set-up request and its answer, a lost phone's request and the hand-over. A code scanned from the bank's page or a friend's screen is a trusted channel: there is no fingerprint to compare. There is no invitation answered hours later.</li>
     <li><strong>One page, two ways of working.</strong> "I'm a bank": "New customer" shows an activation code and the wallet is set up the moment the phone asks, with nobody saying yes; a list of customers; "Customer lost their phone". "I'm helping someone I know": "Help someone set up", then "Set up …'s wallet?" and one tap. Both show the recoverer's balance and an address to fund it, and settings for the starting balance and the waiting period, which the wallet shows as a fact.</li>
     <li><strong>The recoverer's key is one per wallet, not one per coin.</strong> Only its hash is on chain, in the controller. No address contains it, and the recoverer never signs for a coin of the wallet. It signs two kinds of transaction: the request and the completion.</li>
-    <li><strong>The recoverer uses a different key for every wallet,</strong> so two wallets with the same recoverer show nothing in common. The recoverer makes this key as a set of twelve words of its own when it creates the wallet; the phone never knows it. The same words give a separate fee key. (A phone that replaces its recoverer still makes the new one's words, as before.)</li>
-    <li><strong>The recoverer pays its own fees,</strong> about 2,000 satoshis for a request and a completion, from an ordinary address of the fee key, where it puts a reserve for four requests and one completion when it creates the wallet. Its page shows what each wallet's fee address holds and tops it up from its balance. The owner gives the recoverer nothing: the allowance of earlier versions is dropped.</li>
+    <li><strong>The recoverer uses a different key for every wallet,</strong> so the controllers of two wallets with the same recoverer show nothing in common. The recoverer makes this key as a set of twelve words of its own when it creates the wallet; the phone never knows it. (A phone that replaces its recoverer still makes the new one's words, as before.)</li>
+    <li><strong>The recoverer pays its own fees,</strong> about 2,000 satoshis for a request and a completion, from its one balance, the same that it creates wallets from. A request, or a completion, is one transaction: the wallet's controller, unlocked with the recoverer's key for that wallet, and a coin of the balance for the fee, with the change back to the balance. Nothing is kept apart for a wallet, and the whole balance can be sent to another address. The owner gives the recoverer nothing: the allowance of earlier versions is dropped. What it shows on chain: the wallets a recoverer has created or acted for share its balance as their payer.</li>
     <li><strong>A receipt decides.</strong> The wallet says that recovery is on only when the recoverer's signed receipt matches what it was sent and the controller's state on chain.</li>
     <li><strong>A new seed with the old phone at hand, and a new recoverer,</strong> follow one order: the recoverer first confirms that it holds what it needs, and only then does the owner sign the change. A recoverer that is replaced keeps what it has already seen.</li>
 
@@ -671,9 +671,9 @@ contract VaultAddress(bytes32 tag) {
   <div class="scroll">
   <table>
     <tr><th>Event</th><th>What becomes linked, in public</th></tr>
-    <tr><td>Creating the wallet</td><td>The recoverer's coins it was created from, the address of the starting balance, and the wallet's fee address</td></tr>
+    <tr><td>Creating the wallet</td><td>The recoverer's coins it was created from, the address of the recoverer's balance, and the address of the starting balance</td></tr>
     <tr><td>A cancel or a change of settings</td><td>The coin that pays the fee, and its change. The wallet takes the smallest coin that pays alone, so that little is tied.</td></tr>
-    <tr><td>The recoverer's request and completion</td><td>The recoverer's fee coins, which lead back to its creation of the wallet. Nothing leads to a coin of the owner.</td></tr>
+    <tr><td>The recoverer's request and completion</td><td>Coins of the recoverer's balance and its address, which every wallet it created or acted for shares. Nothing leads to a coin of the owner.</td></tr>
     <tr><td>Sending everything when a coin in it needs the controller; closing</td><td>Every coin in that transaction, and the address it pays</td></tr>
     <tr><td>A sweep, or collecting a late payment</td><td>Every address emptied, and the new addresses the coins go to</td></tr>
     <tr><td>Spending from a vault address</td><td>That vault address</td></tr>

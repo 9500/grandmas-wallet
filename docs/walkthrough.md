@@ -39,7 +39,7 @@ Within a short while the home screen says **Protected**: the wallet found Anna's
 - **Receive** shows a fresh address each time. "For regular payments" gives a vault address instead, for someone who pays to the same address again and again; the **?** under the choice says what each kind is for.
 - **Send** asks for an address and an amount, with what is available beside it, and then shows the fee before anything is sent: one satoshi per byte, exactly.
 - The home screen's "What it is made of" shows where the coins are.
-- **Tokens.** To receive one, tick **Receiving a token?** on the Receive screen: the same address, written in the form that wallets sending tokens ask for. Once the wallet holds a token, **Send** offers **Bitcoin Cash** or **A token**, and each token on the **Apps** screen has a **Send** button. A token goes only to a token address; a plain address is refused, with what to ask the receiver for. The review shows what goes, the token change and the fee; a token that controls something, such as a jar's key, says what, and is sent only after you tick that you understand. Tokens show a name and an amount in dollars and cents, say, only where a template you trust names them, and the **?** beside the amount says which.
+- **Tokens.** The Receive screen shows the address in the form that wallets sending tokens ask for; untick **Receiving a token?** for the plain form of the same address. Once the wallet holds a token, **Send** offers **Bitcoin Cash** or **A token**, and each token on the **Apps** screen has a **Send** button. A token goes only to a token address; a plain address is refused, with what to ask the receiver for. The review shows what goes, the token change and the fee; a token that controls something, such as a jar's key, says what, and is sent only after you tick that you understand. Tokens show a name and an amount in dollars and cents, say, only where a template you trust names them, and the **?** beside the amount says which.
 - **An application's request** opens with a picture: your wallet on one side, the application as its template names it on the other, and what goes each way; under it, by how much your wallet goes up or down. A template that is not verified, tokens that are destroyed and a payment the wallet makes to itself first are said in view. Then the action in the template's words, and, folded, **This wallet's own figures** with every coin in and out, and **The template**. **Approve** and **Decline** stay at the foot of the screen.
 
 ## 4. A request nobody asked for
@@ -48,8 +48,8 @@ This shows what protects Grandma when her recoverer is deceived, or the recovere
 
 1. On the recoverer's page open Grandma's wallet and press **Grandma lost their phone**. A code appears.
 2. On the new phone, open the wallet, choose **I lost my phone** and scan that code. The request goes to Anna's page, which asks the network to move the wallet at once: whoever pressed the button has made sure who is asking. Here, nobody did.
-3. Within a minute or so the old phone shows a red card: **Someone asked to move your wallet**, with the time until which it can be refused.
-4. Press **Refuse the request**. The wallet stays with the old phone. The recoverer's page shows that the request was refused.
+3. Within a minute or so the old phone, if its page is open, refuses the request by itself and says so; the wallet's activity keeps it. The wallet stays with the old phone, and the recoverer's page shows that the request was refused.
+4. To decide yourself instead, untick **Refuse requests without asking** under **Recovery** beforehand: the old phone then shows a red card, **Someone asked to move your wallet**, with the time until which it can be refused, and **Refuse the request**.
 5. Refusing took its fee, about 1,100 satoshis, from the wallet's coins, like a payment. The wallet stays Protected.
 
 ## 5. The phone is lost, and the wallet comes back
@@ -68,12 +68,11 @@ Under **Recovery** on the wallet page:
 
 - **Move to a new phone** while the old one still works: no waiting period. The new phone starts with "Move from my other phone"; the old one makes one link for the recoverer and one for the new phone.
 - **Change your recoverer.** A second recoverer page (another profile) shows its code under its set-up screen; the wallet takes it, sends it a complete kit over the connection, the new recoverer keeps it "as the new recoverer", and the wallet then names them. The first recoverer's key stops working on the wallet.
-- **Change the waiting period.**
 - **Your own backup:** twelve words and the wallet's identity. On another profile, "Restore from my own backup" opens the same wallet at once, with no waiting period and without the recoverer.
-- **Refuse requests without asking**, for a phone that is left running.
+- **Refuse requests without asking** is on unless you turn it off: while the page is open, a request nobody asked for is refused by the phone itself, and the wallet's activity shows it.
 - **Technical details** shows the identity, the keys' fingerprints, the servers and what this phone sent, and erases the phone.
 
-On the recoverer's page, each wallet shows its **fee coins**: what its fee address holds and what a request and a completion cost. The first screen lists the wallets whose fee coins run short, with **Top up**, paid from the balance.
+On the recoverer's page, **Your balance** pays for everything: setting a wallet up, and a request and its completion for any wallet. Nothing is kept with a wallet. **Send all** sends the whole balance to another address.
 
 ## What this demonstration does not show
 
