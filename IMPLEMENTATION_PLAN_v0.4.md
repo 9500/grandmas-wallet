@@ -133,7 +133,7 @@ Still open from stage 0: the pages against the local node, which stage 6 tries, 
 
 **Reads:** `design-1:packages/templates/src/grandmas-wallet.ts`, `design-1:packages/app/src/account.ts`, `design-1:packages/app/src/owner.ts`, `design-1:packages/xo-demo/src/run.ts`, [docs/xo-spike.md](docs/xo-spike.md).
 
-**Creating a wallet** uses the credential from stage 2: fund the funding address; pay itself if the coin is not an output 0; create the controller with the recovery key hash; check the creation; move the rest; set aside the owner's coin for cancelling and, if the user chose to give one, an allowance at the recoverer's fee address; continue correctly after a stop at any point. No step waits for a block; a creation that disappears is followed as the proposal's section 7.9 says (see "No waiting for a block" below).
+**Creating a wallet** uses the credential from stage 2: fund the funding address; pay itself if the coin is not an output 0; create the controller with the recovery key hash; check the creation; move the rest, enough of it to pay for a cancellation, and, if the user chose to give one, an allowance at the recoverer's fee address; continue correctly after a stop at any point. No step waits for a block; a creation that disappears is followed as the proposal's section 7.9 says (see "No waiting for a block" below).
 
 **Exit**
 
@@ -174,7 +174,7 @@ Still open from stage 0: the pages against the local node, which stage 6 tries, 
 
 ## Stage 6 — The pages
 
-**Builds:** the wallet page and the recoverer page on the parts above, including: the steps of creating a wallet; "recovery is on" and what it rests on; the vault address; using an address again when a window is full; the fee of each transaction and sending everything; the coin for cancelling; the recoverer's fee address, what it holds and what it needs; moving to a new phone; replacing the recoverer; the local backup; the alarm; the wallet owned elsewhere.
+**Builds:** the wallet page and the recoverer page on the parts above, including: the steps of creating a wallet; "recovery is on" and what it rests on; the vault address; using an address again when a window is full; the fee of each transaction and sending everything; the recoverer's fee address, what it holds and what it needs; moving to a new phone; replacing the recoverer; the local backup; the alarm; the wallet owned elsewhere.
 
 **Reads:** `design-1:apps/wallet/`, `design-1:apps/recoverer/`, `design-1:scripts/browser-demo.mjs`, `design-1:docs/web-apps.md`, `deploy/`.
 
@@ -240,6 +240,12 @@ The owner decided that everything that can go on before a block must, and that a
 
 This is tested on the simulated chain, which makes blocks on demand and lets a transaction disappear with everything built on it. Still to be run again with this behaviour: the browser course on the local node and on chipnet (stage 6, run C), the jar course in browsers (stage 8), and a creation that disappears on the local node, where a block can be undone and a conflicting transaction mined. Earlier run records stay as they were run.
 
+## No coin kept for cancelling (18 November 2026)
+
+The wallet kept a small coin apart to pay for refusing a recovery request: set aside at creation, after each refusal and by the first sweep after a takeover, left alone by payments, shown as an amount of its own, and a condition of "Protected". The owner found this too complicated for the wallet's user and decided to remove it. A controller transaction now takes its fee from the wallet's coins like a payment, with change to a fresh change address, preferring the smallest coin that pays alone, since that coin and its change are tied to the identity in public. When the ordinary coins hold less than the fee, a coin at a vault address or at an earlier seed's address pays, through the controller. A wallet that holds only tokens or positions and next to no Bitcoin Cash cannot refuse until a little arrives; the warning screen says so, with the amount and an address, and nothing else does. The proposal's sections 8 and 17 describe it. A wallet stored on a device before the change reads as before, and the coin it kept apart is an ordinary coin.
+
+This is tested on the simulated chain. Earlier run records stay as they were run; the browser courses wait for words of the pages that are gone and have to follow the pages before they run again.
+
 ## Which stage closes which test
 
 | Stage | Tests |
@@ -268,7 +274,7 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 4 | The viewing key's written form | Stage 2 | The two extended public keys and the blinding seed in one signed record |
 | 5 | Readable controller state | Settled | Readable, as the controller is |
 | 6 | Waiting period for real use; margin; automatic cancelling | Stage 6 | Time only; length and default open |
-| 7 | Fees: the rate; the coin for cancelling; an allowance for the recoverer | Stage 1 for sizes, stage 3 for amounts | One satoshi per byte; one cancellation; an allowance offered and not required, for four requests and one completion |
+| 7 | Fees: the rate; how a cancellation is paid for; an allowance for the recoverer | Stage 1 for sizes, stage 3 for amounts | One satoshi per byte; from the wallet's coins, with no coin kept apart; an allowance offered and not required, for four requests and one completion |
 | 8 | Messages with the recoverer; how the recoverer knows the user | Stage 4 | As in sections 9 and 11 |
 | 9 | Backup record formats; refusing without a stored template | Stage 4, for stage 7 | Refusing stays the default |
 | 10 | Template extension and recovery declaration | Stage 7; XO's word by stage 10 | The four kinds; a companion document until XO says |

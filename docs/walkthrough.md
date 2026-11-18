@@ -41,7 +41,7 @@ Within a short while the wallet's home screen changes from "Recovery is not on y
 
 - **Receive** shows a fresh address each time. "For regular payments" gives a vault address instead, for someone who pays to the same address again and again.
 - **Send** asks for an address and an amount, and then shows the fee before anything is sent: one satoshi per byte, exactly.
-- The home screen's "What it is made of" shows where the coins are. One small coin is kept apart: it pays for refusing a recovery request.
+- The home screen's "What it is made of" shows where the coins are.
 
 ## 5. A request nobody asked for
 
@@ -51,7 +51,7 @@ This shows what protects Grandma when her recoverer is deceived, or the recovere
 2. On the recoverer's page, open that link, choose **See the request**, pick Grandma's wallet, tick **I have made sure who is asking**, and press **Save it for this wallet**. Then press **Ask the network to move the wallet**.
 3. Within a minute or so the old phone shows a red card: **Someone asked to move your wallet**, with the fingerprint of the key that would get it and the time until which it can be refused.
 4. Press **Refuse the request**. The wallet stays with the old phone. The recoverer's page shows that the request was refused.
-5. Refusing spent the coin that was kept for it, and the wallet says so: "This phone cannot refuse a request". Press **Put a coin aside**, and it is Protected again.
+5. Refusing took its fee, about 1,100 satoshis, from the wallet's coins, like a payment. The wallet stays Protected.
 
 ## 6. The phone is lost, and the wallet comes back
 
