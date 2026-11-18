@@ -52,7 +52,7 @@ const facts = { network: 'chipnet', explorer: 'https://chipnet.imaginary.cash/tx
 const ignore = () => undefined;
 
 render(
-  <Frame brand="Loan desk" role="An independent demonstration on chipnet" environment={{ network: 'chipnet', walletUrl: '', recovererUrl: '', stores: [], chain: [], relays: [], explorer: '', secondsPerBlock: 60 }}>
+  <Frame brand="Loan desk" role="Independent, not affiliated with Paryon" environment={{ network: 'chipnet', walletUrl: '', recovererUrl: '', stores: [], chain: [], relays: [], explorer: '', secondsPerBlock: 60 }}>
     {show() === 'connect' ? (
       <div class="stack">
         <Intro />

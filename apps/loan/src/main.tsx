@@ -20,7 +20,7 @@ import { type KeptKey, type Outcome, type PendingRequest, STAGE_WORDS, XoLoans, 
  */
 
 const BRAND = 'Loan desk';
-const ROLE = 'An independent demonstration on chipnet';
+const ROLE = 'Independent, not affiliated with Paryon';
 const vault = new Vault('loan');
 
 const pendingStore = {
