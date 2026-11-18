@@ -85,7 +85,10 @@ try {
   check((await page.getByRole('button', { name: 'A token' }).getAttribute('aria-pressed')) === 'true', 'the Send screen opens on "A token", the token another screen chose');
   check(await page.getByRole('radio', { name: /Example dollar/ }).isChecked(), 'with that token chosen among the tokens');
   check((await textOf(page, '.token-picker .choice')).includes('250.00 EXD'), 'its balance is in its own decimals, "250.00 EXD"');
-  check(await page.getByText('Name from the template "Example lending (test network)", which you trust.').first().isVisible(), 'and the screen says which trusted template the name comes from');
+  const units = page.getByRole('button', { name: 'About this token\'s units' });
+  await units.click();
+  check(await page.getByText('Name from the template "Example lending (test network)", which you trust.').first().isVisible(), 'and the "?" beside its amount says which trusted template the name comes from');
+  await units.click();
   const tokenAddress = await textOf(page, '[data-testid="fixture-token-address"]');
   const plainAddress = await textOf(page, '[data-testid="fixture-plain-address"]');
   const decoded = [cashAddressToLockingBytecode(tokenAddress), cashAddressToLockingBytecode(plainAddress)];
@@ -95,7 +98,7 @@ try {
   await page.locator('#token-amount').fill('12.505');
   await page.locator('#token-to').fill(tokenAddress);
   await page.getByRole('button', { name: 'Review' }).click();
-  await page.getByText('Nothing is rounded').waitFor();
+  await page.locator('.field-error', { hasText: 'Nothing is rounded' }).waitFor();
   check(!(await page.getByText('Check and send').isVisible()), 'an amount with more decimals than the token has is refused, not rounded');
   await page.getByRole('button', { name: 'All', exact: true }).click();
   check((await page.locator('#token-amount').inputValue()) === '250.00', '"All" fills the whole balance, 250.00');

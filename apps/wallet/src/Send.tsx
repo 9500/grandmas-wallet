@@ -717,7 +717,7 @@ const TokenReview = ({ stage }: { stage: Extract<TokenStage, { at: 'review' }> }
   ];
   if (quote.tokenChange !== undefined) {
     rows.push([
-      <Named name="Comes back as token change" label="About token change" detail="To a new change address of this wallet." />,
+      <Named name="Comes back as token change" label="Where the rest goes" detail="To a new change address of this wallet." />,
       <TokenAmount amount={quote.tokenChange.amount} naming={token.kind === 'fungible' ? token.names : undefined} />,
     ]);
   }

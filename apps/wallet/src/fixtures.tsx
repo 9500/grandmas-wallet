@@ -467,12 +467,12 @@ render(
       {show === 'send-token' ? (
         <>
           <Send owner={tokenOwner} />
-          <Destinations />
+          <div class="focus-page send-page"><Destinations /></div>
         </>
       ) : show === 'send' ? (
         <>
           <Send owner={coinOwner} />
-          <Destinations />
+          <div class="focus-page send-page"><Destinations /></div>
         </>
       ) : show === 'receive' ? (
         <Receive owner={tokenOwner} />
@@ -493,7 +493,7 @@ render(
       ) : (
         <div class="stack">
           <PageHead title="Applications" />
-          <div class="grid two apps-layout">
+          <div class="grid two">
             <div class="stack">
               <RequestFixture preview={REVIEWS[show] ?? borrowing} />
             </div>

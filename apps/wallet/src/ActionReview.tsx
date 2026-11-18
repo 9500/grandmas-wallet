@@ -277,7 +277,7 @@ export const Picture = ({ preview }: { preview: ActionPreview }) => {
   const name = preview.template.name;
   return (
     <figure class="flow" aria-label={`What goes between your wallet and ${name}`}>
-      <div class="flow-node wallet">
+      <div class="flow-node mine">
         <span class="flow-icon" aria-hidden="true">
           <Icon name="wallets" />
         </span>
@@ -299,7 +299,7 @@ export const Picture = ({ preview }: { preview: ActionPreview }) => {
           </div>
         </div>
       </div>
-      <div class="flow-node app">
+      <div class="flow-node theirs">
         <span class="flow-icon" aria-hidden="true">
           <Icon name="apps" />
         </span>

@@ -61,7 +61,7 @@ export const Receive = ({ owner }: { owner: Owner }) => {
             {kind === 'once' ? (
               <div class="receive-caption">
                 <span>A new address for each payment</span>
-                <Info label="About addresses for one payment">
+                <Info label="About this kind of address">
                   <span>Give the payer this address, or let them scan the code.</span>
                   <span>Every payment gets a new address, so payers cannot see each other. What arrives here can be recovered if you lose this phone.</span>
                   <span>After a recovery the wallet gets new addresses. Someone who pays an old one later still reaches you, but tell regular payers your new address.</span>
@@ -70,7 +70,7 @@ export const Receive = ({ owner }: { owner: Owner }) => {
             ) : (
               <div class="receive-caption">
                 <span>An address that lasts for years</span>
-                <Info label="About addresses for regular payments">
+                <Info label="About this kind of address">
                   <span>A vault address stays valid for years, also after the wallet has moved to a new phone. Use it where it is published or saved by others: a salary, a donation page, a payout agreed long in advance.</span>
                   <span>Spending from it goes through the wallet's controller and costs a little more in fees.</span>
                 </Info>
@@ -116,7 +116,7 @@ export const Receive = ({ owner }: { owner: Owner }) => {
                     {tokens ? 'The same address, written for wallets that send tokens.' : undefined}
                   </Choice>
                   <Info label="About receiving tokens">
-                    <span>Every address of this wallet can hold tokens. Wallets that send tokens ask for the address in the form that says so: the same address, written for wallets that send tokens. It pays the same as the plain one.</span>
+                    <span>Every address of this wallet can hold tokens. Wallets that send tokens ask for the address in the form that says so; it pays the same as the plain one.</span>
                   </Info>
                 </div>
               </div>

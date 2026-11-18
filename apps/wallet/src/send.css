@@ -4,6 +4,7 @@
  * gives its holder more than itself.
  */
 
+.send-page { max-width: 640px; }
 .send-what { max-width: 420px; }
 
 /* a field's label with its "?" on one side and what is available on the other */
@@ -25,6 +26,8 @@
 .send-hero-to .mono { color: var(--ink); }
 .send-review > h2 { margin-bottom: 4px; }
 .send-review .kv dt .info-label { display: flex; }
+/* A figure stays beside its name where both fit, on a phone too. */
+.send-review .kv dt { flex: 1 1 auto; }
 
 .token-picker { display: flex; flex-direction: column; }
 .token-picker .choice-text { min-width: 0; }

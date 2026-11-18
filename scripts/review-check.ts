@@ -67,7 +67,11 @@ const shoot = async (page: Page, name: string, only?: 'phone'): Promise<void> =>
     // From the top: a full-page picture of a scrolled page draws the sticky header in the middle.
     await page.evaluate('window.scrollTo(0, 0)');
     await wait(300);
+    // A whole page in one picture would draw the buttons that stay at the foot of the screen halfway down it: there, they stand where they are on the page.
+    const place = (position: string) => page.evaluate((value) => document.querySelectorAll<HTMLElement>('.request-card .decide').forEach((element) => element.style.setProperty('position', value)), position);
+    if (only === undefined) await place('static');
     await page.screenshot({ path: `${root}docs/screens/${name}-${label}.png`, fullPage: only === undefined, animations: 'disabled' });
+    await place('');
     log(`screenshot docs/screens/${name}-${label}.png`);
   }
   await page.setViewportSize(PHONE);
@@ -182,13 +186,13 @@ try {
   // ---------------------------------------------------------------- Receive
   await page.goto(at('show=receive'));
   await page.getByTestId('receive-address').waitFor();
-  const once = page.getByRole('button', { name: 'About addresses for one payment' });
+  const once = page.getByRole('button', { name: 'About this kind of address' });
   await once.click();
   check((await (await bubbleOf(once)).innerText()).includes('Every payment gets a new address'), 'what an address for one payment is is behind the "?" under the choice');
   await once.click();
   await shoot(page, 'wallet-receive');
   await page.getByRole('button', { name: 'For regular payments' }).click();
-  const lasting = page.getByRole('button', { name: 'About addresses for regular payments' });
+  const lasting = page.getByRole('button', { name: 'About this kind of address' });
   await lasting.click();
   check((await (await bubbleOf(lasting)).innerText()).includes('stays valid for years'), 'and what a vault address is, behind the "?" for regular payments');
   await lasting.click();
@@ -213,7 +217,7 @@ try {
     const card = page.locator('.request-card');
     await card.locator('.flow').waitFor();
     check(await card.locator('.flow').getByText('Your wallet', { exact: true }).isVisible(), `${show}: the picture shows the wallet`);
-    const template = (await card.locator('.flow-node.app .flow-name').innerText()).trim();
+    const template = (await card.locator('.flow-node.theirs .flow-name').innerText()).trim();
     check(template.length > 0 && (await card.locator('.lane.out .lane-items').isVisible()) && (await card.locator('.lane.back .lane-items').isVisible()), `${show}: and the application, "${template}", with what goes each way`);
     check(/^Your wallet goes (down|up) by/.test((await card.locator('.headline-label').innerText()).trim()) && (await card.locator('.headline-figure').isVisible()), `${show}: the headline says by how much the wallet goes ${(await card.locator('.headline-label').innerText()).includes('down') ? 'down' : 'up'}: ${(await card.locator('.headline-figure').innerText()).replace(/\s+/g, ' ')}`);
     for (const caution of cautions) check(await card.getByText(caution).first().isVisible(), `${show}: "${caution}" is in view without opening anything`);
@@ -221,13 +225,14 @@ try {
     check(await card.getByText('This wallet\'s own figures').isVisible(), `${show}: "This wallet's own figures" is named, folded`);
     const approve = page.getByRole('button', { name: 'Approve' });
     const reach = await box(approve);
-    check(reach.y + reach.height <= PHONE.height && reach.y > PHONE.height / 2, `${show}: on a phone, Approve is at the foot of the screen, within a thumb's reach, before anything is scrolled`);
+    check(reach.y + reach.height <= PHONE.height && reach.y > PHONE.height / 2, `${show}: on a phone, Approve is at the foot of the screen, within a thumb's reach, before anything is scrolled (${Math.round(reach.y)} to ${Math.round(reach.y + reach.height)} px of ${PHONE.height})`);
     await shoot(page, name);
+    await shoot(page, `${name}-first-screen`, 'phone');
     const folds = card.locator('details.fold');
     for (let index = 0; index < (await folds.count()); index++) {
       const fold = folds.nth(index);
       const title = (await fold.locator('.fold-title').innerText()).trim();
-      await fold.locator('summary').click();
+      await fold.locator(':scope > summary').click();
       check((await fold.evaluate((element) => (element as HTMLDetailsElement).open)) && (await fold.locator(':scope > :not(summary)').first().isVisible()), `${show}: the folded section "${title}" opens`);
     }
     check((await card.locator('.own-figures > dl.kv > div').count()) >= 4, `${show}: the wallet's figures in full, where the scripted courses read them`);
