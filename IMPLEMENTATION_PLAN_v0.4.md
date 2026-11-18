@@ -222,7 +222,7 @@ Three steps, each worth having without the next. Together they are **chipnet run
 | Template and front end | **PY02.** The same actions from an XO template through the wallet, by the route of stage 7, driven from a page of our own. No code of the wallet names Paryon. |
 | Recovery of a live loan | **PY03.** With a loan open, the device is lost; the new device sweeps the loan key, finds the loan through its sidecar, and repays or closes it with Paryon's site not consulted. |
 
-**Before starting:** the deployment (`chipnet-fast-periods-6`) is checked to be alive and the amount of test coins is worked out again from its rules and price; about 0.5 tBCH was the figure on 17 November 2026. Whether to tell the Paryon team, and the missing licence on their contracts repository, are the owner's decisions.
+**Before starting:** the deployment (`chipnet-fast-periods-6`) is checked to be alive and the amount of test coins is worked out again from its rules and price; about 0.5 tBCH was the figure on 17 November 2026. The owner decided not to ask the Paryon team: the contracts are public and are used unchanged, as they are meant to be used.
 
 **If a step cannot be done** (the deployment is gone, or a template cannot express their transactions), what was reached and what stood in the way is written up, the tests not reached stay open, and the stage ends there. The decisive demonstration of the proposal is then reported as shown for the jar and not for the loan.
 
@@ -272,6 +272,6 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 14 | Local backup: offered, and in what form | Stage 5, for stage 6 | Offered, as in section 18.1 |
 | 15 | Upgrade policy; how long an old identity is kept | Stage 10 | A new identity; the old one kept while something can arrive |
 | 16 | Watching and confidence in the chain | Stage 0, stage 4, stage 6 | The user's own node among the servers; no claim beyond what is shown |
-| 17 | ParyonUSD: telling the team; the licence | Stage 9 | Ask before starting the stage |
+| 17 | ParyonUSD: telling the team; the licence | Stage 9 | Decided: the team is not asked; the public contracts are used unchanged |
 | 18 | When the public sites switch | Stage 6 | After the scripted run passes on them |
 | 19 | Closing a wallet: kept in a released controller, kept out of the interface, or offered | Stage 1 for the contract; stage 10 for a release | In every controller; used by the test runs and a tool; not offered in the interface |
