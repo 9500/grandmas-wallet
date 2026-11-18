@@ -1,5 +1,5 @@
 import { binToHex, generateBip39Mnemonic, hexToBin } from '@bitauth/libauth';
-import { type AppChain, type LinkField, type SetUpRecord, type StoreAt, RecovererFunds } from '@grandmas-wallet/app';
+import { type Account, type AppChain, type LinkField, type SetUpRecord, type StoreAt, RecovererFunds } from '@grandmas-wallet/app';
 import { linkKind, makeLink, readLink } from '@grandmas-wallet/app/links';
 import { HttpStore } from '@grandmas-wallet/archive';
 import type { ChainReader, ChallengeDelay } from '@grandmas-wallet/core';
@@ -156,8 +156,18 @@ const fundsWords = (): string => {
 };
 
 let funds: Promise<RecovererFunds> | undefined;
-/** For the fixtures page, which has no chain: the recoverer's coins as given. */
-export const useFixedFunds = (fixed: RecovererFunds): void => {
+let account: Account | undefined;
+let opening: { verifiedHeight: number; currentHeight: number } | undefined;
+/** How far the engine's check of block headers has come while the account opens, once it has begun. */
+export const openingProgress = (): { verifiedHeight: number; currentHeight: number } | undefined => opening;
+/** Stop the page's engine, before what the page keeps is erased. */
+export const closeAccount = async (): Promise<void> => {
+  await account?.close();
+};
+/** The words of the recoverer's balance, if it has ever been opened: for keeping them before the page is erased. */
+export const balanceWords = (): string | undefined => kept('fundsWords');
+/** For the fixtures page, which has no chain: the recoverer's coins as given, or an account that never opens. */
+export const useFixedFunds = (fixed: RecovererFunds | Promise<RecovererFunds>): void => {
   funds = Promise.resolve(fixed);
 };
 /**
@@ -166,8 +176,11 @@ export const useFixedFunds = (fixed: RecovererFunds): void => {
  * wallet's credential and is used by the page's own code, so no wallet needs an engine of its own.
  */
 export const fundsOf = (session: Session): Promise<RecovererFunds> => {
-  funds ??= openAccount(fundsWords(), session.environment)
-    .then((opened) => RecovererFunds.open({ backend: opened, chain: session.chain }))
+  funds ??= openAccount(fundsWords(), session.environment, (checked) => (opening = checked))
+    .then((opened) => {
+      account = opened;
+      return RecovererFunds.open({ backend: opened, chain: session.chain });
+    })
     .catch((error: unknown) => {
       funds = undefined;
       throw error;

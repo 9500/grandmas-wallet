@@ -19,7 +19,8 @@ import { Wallets } from './Wallets.js';
  * The recoverer's screens without a chain, for looking at them in a browser: the first run (`fixtures.html?show=start`),
  * a bank's code for a new customer (`show=bank`), a friend's code and the question that follows a phone's request
  * (`show=friend`), the settings (`show=settings`), and the list of wallets with the balance and its "Send all"
- * (`show=wallets`, and `&earlier` with coins an earlier version kept with wallets). The code offers its session through the relays of
+ * (`show=wallets`, `&earlier` with coins an earlier version kept with wallets, `&opening` with an account that
+ * does not open). The code offers its session through the relays of
  * `config.json`, so that a phone can ask over it. Served by the development server (`fixtures.html`), or by a build
  * that includes it; the page's own build does not. The encryption key is a new one at every load, the balance is
  * a figure given here, and nothing reads or checks the chain: a wallet asked for here is not created.
@@ -49,7 +50,9 @@ if (show !== 'start') {
   keep('settings', { startingSatoshis: '20000', challengeDelay: { unit: 'time512', value: 169 } });
 }
 let held = 1_250_000n;
-useFixedFunds({
+// With `&opening`: an account that does not get past opening, as when the check of block headers is stuck.
+const never = new URLSearchParams(window.location.search).has('opening');
+useFixedFunds(never ? new Promise<RecovererFunds>(() => undefined) : ({
   address: async () => p2pkhLockingBytecode(new Uint8Array(20).fill(0x5a)),
   balance: async () => held,
   // There is no chain here: a set-up that begins stays at its beginning.
@@ -67,7 +70,7 @@ useFixedFunds({
     held += 9_474n;
     return { transactionId: '', bytes: 326, feeSatoshis: 326n, remainderSatoshis: 0n };
   },
-} as unknown as RecovererFunds);
+} as unknown as RecovererFunds));
 
 const Root = () => {
   const arrivals = useArrivals();
@@ -91,7 +94,7 @@ const Root = () => {
           })}
     >
       <Incoming key={arrivals} session={session} onChanged={() => undefined} toast={toast} onShowRequests={() => undefined} />
-      {show === 'start' ? <Start onDone={() => toast('Chosen.')} /> : show === 'settings' ? <Settings onSaved={() => toast('Saved.')} /> : show === 'wallets' ? <Wallets session={session} onNew={() => undefined} /> : <NewWallet session={session} onDone={() => undefined} />}
+      {show === 'start' ? <Start onDone={() => toast('Chosen.')} /> : show === 'settings' ? <Settings session={session} onSaved={() => toast('Saved.')} /> : show === 'wallets' ? <Wallets session={session} onNew={() => undefined} /> : <NewWallet session={session} onDone={() => undefined} />}
       {toastElement}
     </Frame>
   );

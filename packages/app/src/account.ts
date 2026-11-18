@@ -97,11 +97,13 @@ export class Account implements WalletBackend {
    * What the engine hears about a transaction before its header check has reached the tip is dropped and
    * not asked for again, so nothing is made known to it before then.
    */
-  static async open(engine: Engine, options: { headerCheckTimeoutMs?: number; pollMs?: number } = {}): Promise<Account> {
+  static async open(engine: Engine, options: { headerCheckTimeoutMs?: number; pollMs?: number; onProgress?: (checked: { verifiedHeight: number; currentHeight: number }) => void } = {}): Promise<Account> {
     const deadline = Date.now() + (options.headerCheckTimeoutMs ?? 120_000);
     let first: number | undefined;
     for (;;) {
       const status = await engine.getChainStatus();
+      // How far the header check has come, for a page that shows it while it waits.
+      options.onProgress?.({ verifiedHeight: status.verifiedHeight, currentHeight: status.currentHeight });
       if (status.verifiedHeight >= status.currentHeight) break;
       first ??= status.verifiedHeight;
       if (Date.now() > deadline) throw new HeaderCheckBehind(status.verifiedHeight, status.currentHeight, status.verifiedHeight !== first);

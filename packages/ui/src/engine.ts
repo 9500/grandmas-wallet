@@ -3,7 +3,7 @@ import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { ElectrumWebSocket } from '@electrum-cash/web-socket';
 import { Engine, XO_SUPPORTED_NETWORKS, resolveElectrumServersForNetwork } from '@xo-cash/engine';
 
-import { clearHeaderResetMark, markHeadersForReset, resetMarkedHeaders } from './engine-headers.js';
+import { HEADER_RESET_MARK, clearHeaderResetMark, markHeadersForReset, resetMarkedHeaders } from './engine-headers.js';
 import type { Environment } from './environment.js';
 
 /**
@@ -85,13 +85,13 @@ const engineServers = async (environment: Environment): Promise<unknown[]> => {
  * Open the account of a set of twelve words. The engine keeps its state in this browser's database, apart
  * for each set of words. The account is ready when the engine's check of block headers has reached the tip.
  */
-export const openAccount = async (words: string, environment: Environment): Promise<Account> => {
+export const openAccount = async (words: string, environment: Environment, onProgress?: (checked: { verifiedHeight: number; currentHeight: number }) => void): Promise<Account> => {
   const electrumServers = (await engineServers(environment)) as NonNullable<Parameters<typeof Engine.create>[1]>['electrumServers'];
   // A header store the last load found stuck is deleted before the engine opens it (see engine-headers.ts).
   await resetMarkedHeaders(sessionStorage, indexedDB);
   const engine = await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, ...(electrumServers === undefined ? {} : { electrumServers }) });
   try {
-    const account = await Account.open(engine);
+    const account = await Account.open(engine, onProgress === undefined ? {} : { onProgress });
     clearHeaderResetMark(sessionStorage);
     return account;
   } catch (error) {
@@ -103,6 +103,16 @@ export const openAccount = async (words: string, environment: Environment): Prom
     }
     throw error;
   }
+};
+
+/**
+ * Make the engine's store of block headers afresh and load the page again, when the user asks for it: for a page
+ * that does not get past opening its account. The store is a cache of what the servers give; keys, wallets and
+ * coins are not in it (see engine-headers.ts).
+ */
+export const recheckChain = (): void => {
+  sessionStorage.setItem(HEADER_RESET_MARK, 'pending');
+  location.reload();
 };
 
 /** The network the wallet's keys and addresses are made for. A local chain uses the test network's. */

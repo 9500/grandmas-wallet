@@ -1,11 +1,11 @@
 import { type RecovererFunds, addressOf } from '@grandmas-wallet/app';
 import { InsufficientFundsError } from '@grandmas-wallet/core';
-import { Amount, Button, Card, Field, HandOff, KeyValues, Loading, Notice, Sat, TaskStatus, TextInput, Value, lockingBytecodeOfAddress, plainError, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Field, HandOff, KeyValues, Loading, Notice, Sat, TaskStatus, TextInput, Value, lockingBytecodeOfAddress, plainError, recheckChain, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
 import { heldForSetUps } from './offered-session.js';
-import { type Session, fundsOf } from './session.js';
+import { type Session, fundsOf, openingProgress } from './session.js';
 
 /** The recoverer's own coins, once the page's account is open. */
 export const useFunds = (session: Session): { funds?: RecovererFunds; problem?: string } => {
@@ -19,17 +19,66 @@ export const useFunds = (session: Session): { funds?: RecovererFunds; problem?: 
   return state;
 };
 
-/** What the recoverer's balance holds now, read again every few seconds and whenever `again` changes. */
-export const useBalance = (funds: RecovererFunds | undefined, again?: unknown): bigint | undefined => {
-  const [balance, setBalance] = useState<bigint | undefined>();
+/**
+ * What the recoverer's balance holds now, read again every few seconds and whenever `again` changes, and why it
+ * could not be read when that is so.
+ */
+export const useBalanceRead = (funds: RecovererFunds | undefined, again?: unknown): { balance?: bigint; problem?: string } => {
+  const [read, setRead] = useState<{ balance?: bigint; problem?: string }>({});
   useEvery(
     8_000,
     async () => {
-      if (funds !== undefined) setBalance(await funds.balance());
+      if (funds === undefined) return;
+      try {
+        setRead({ balance: await funds.balance() });
+      } catch (error) {
+        // The last figure stays; the page says that it could not be read again.
+        setRead((before) => ({ ...before, problem: plainError(error) }));
+      }
     },
     [funds, again],
   );
-  return balance;
+  return read;
+};
+
+/** What the recoverer's balance holds now. */
+export const useBalance = (funds: RecovererFunds | undefined, again?: unknown): bigint | undefined => useBalanceRead(funds, again).balance;
+
+/**
+ * While the account opens: how far the check of block headers has come, and, when it takes long, a way to make
+ * that check afresh. Nothing of the recoverer's is in what is made afresh.
+ */
+const Opening = () => {
+  const [started] = useState(() => Date.now());
+  const [, setTick] = useState(0);
+  useEvery(1_000, () => setTick((count) => count + 1), []);
+  const checked = openingProgress();
+  const seconds = Math.floor((Date.now() - started) / 1000);
+  return (
+    <div class="stack">
+      <Loading>
+        Opening your account. The page checks the chain's block headers first.
+        {checked !== undefined && checked.verifiedHeight < checked.currentHeight && (
+          <span class="small opening-progress" data-testid="opening-progress">
+            {' '}
+            {checked.verifiedHeight.toLocaleString('en-US')} of {checked.currentHeight.toLocaleString('en-US')} checked.
+          </span>
+        )}
+      </Loading>
+      {seconds >= 30 && (
+        <Notice tone="warn">
+          <div class="stack-s">
+            <span>This is taking longer than it should. The page can check the chain again from the start; your balance and the wallets you look after are not touched.</span>
+            <div>
+              <Button small kind="secondary" onClick={recheckChain}>
+                Check the chain again
+              </Button>
+            </div>
+          </div>
+        </Notice>
+      )}
+    </div>
+  );
 };
 
 /**
@@ -43,7 +92,7 @@ export const useBalance = (funds: RecovererFunds | undefined, again?: unknown): 
 export const FundsCard = ({ session, funds, problem, note, short }: { session: Session; funds: RecovererFunds | undefined; problem: string | undefined; note?: ComponentChildren; short?: (balance: bigint) => ComponentChildren }) => {
   const [address, setAddress] = useState<string | undefined>();
   const [sent, setSent] = useState(0);
-  const balance = useBalance(funds, sent);
+  const { balance, problem: unread } = useBalanceRead(funds, sent);
   useEffect(() => {
     if (funds !== undefined) void funds.address().then((locking) => setAddress(addressOf(locking, session.environment.network === 'mainnet' ? 'mainnet' : 'chipnet')));
   }, [funds]);
@@ -54,9 +103,14 @@ export const FundsCard = ({ session, funds, problem, note, short }: { session: S
       {problem !== undefined ? (
         <Notice tone="bad">{problem}</Notice>
       ) : funds === undefined || balance === undefined ? (
-        <Loading>Opening your account. The page checks the chain's block headers first.</Loading>
+        unread !== undefined ? (
+          <Notice tone="bad">Your balance could not be read: {unread}</Notice>
+        ) : (
+          <Opening />
+        )
       ) : (
         <div class="stack">
+          {unread !== undefined && <Notice tone="warn">The balance could not be read again just now: {unread}</Notice>}
           <div class="balance">
             <span class="balance-main" data-testid="funds-balance" data-value={balance.toString()}>
               <Amount satoshis={balance} />

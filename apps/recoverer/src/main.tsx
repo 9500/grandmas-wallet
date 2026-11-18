@@ -96,6 +96,7 @@ const Root = () => {
         <NewWallet session={session} onDone={() => navigate('wallets')} />
       ) : route === 'settings' ? (
         <Settings
+          session={session}
           onSaved={() => {
             toast('Saved.');
             changed();
