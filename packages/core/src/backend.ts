@@ -45,9 +45,19 @@ export interface TransactionRequest {
    * The coins the transaction spends, in order. A coin of the action's own template names the template
    * input it stands for; a coin of another template is unlocked the way its own script says.
    */
-  inputs: { coin: AccountCoin; inputIdentifier?: string }[];
+  inputs: { coin: AccountCoin; inputIdentifier?: string; unlocking?: GivenUnlocking }[];
   /** The outputs, in order: an output of the template by name, or any output given whole. */
   outputs: ({ outputIdentifier: string } | Output)[];
+}
+
+/**
+ * The unlocking of a coin of an application's contract, worked out by the wallet from the template: a coin that
+ * needs no key of the account, at a script the key holder does not follow. The key holder puts it into the
+ * transaction as it is.
+ */
+export interface GivenUnlocking {
+  bytecode: Uint8Array;
+  sequenceNumber: number;
 }
 
 /** A transaction that is signed and checked, and not yet sent. */

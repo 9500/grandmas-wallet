@@ -1,8 +1,8 @@
 import { type Output, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
-import { type ChainReader, type TemplateValues, type Utxo, TemplateError, templateLockingBytecode, valueFromBytes } from '@grandmas-wallet/core';
+import { type ChainReader, type TemplateValues, type Utxo, TemplateError, templateLockingBytecode, valueFromBytes, variableType } from '@grandmas-wallet/core';
 import type { XOTemplate } from '@xo-cash/types';
 
-import { type AuthorityEntry, type ValueSource, isCompanionPosition } from './declaration.js';
+import { type AuthorityEntry, type ValueSource, isCompanionPosition, readSource } from './declaration.js';
 
 /**
  * Finding the position a token controls, from the token, a template's recovery declaration and the chain
@@ -53,11 +53,15 @@ const outputsOf = async (chain: ChainReader, transactionId: string): Promise<Out
   return transaction.outputs;
 };
 
-/** The unspent coins at a script, whole. */
-export const coinsAt = async (chain: ChainReader, lockingBytecode: Uint8Array): Promise<Utxo[]> => {
+/**
+ * The unspent coins at a script, whole.
+ * @param category - only coins with a token of this category; a server that lists tokens saves reading the others
+ */
+export const coinsAt = async (chain: ChainReader, lockingBytecode: Uint8Array, category?: string): Promise<Utxo[]> => {
   const coins: Utxo[] = [];
   const outputs = new Map<string, Output[]>();
   for (const entry of await chain.listUnspent(lockingBytecode)) {
+    if (category !== undefined && (!entry.hasToken || (entry.token !== undefined && entry.token.category !== category))) continue;
     const known = outputs.get(entry.transactionId) ?? (await outputsOf(chain, entry.transactionId));
     outputs.set(entry.transactionId, known);
     const output = known[entry.index];
@@ -66,13 +70,30 @@ export const coinsAt = async (chain: ChainReader, lockingBytecode: Uint8Array): 
   return coins;
 };
 
-interface Sources {
+export interface Sources {
   token: TokenOnChain;
+  /** What the coin that carries the token holds. */
+  tokenSatoshis?: bigint;
   companion?: Output;
   position?: Output;
   positionSatoshis?: bigint;
   tokenInputIndex?: number;
+  /** The application's coins the action spends, by template input, as the wallet read them from the chain. */
+  inputs?: Record<string, Output>;
 }
+
+const NUMERIC = new Set(['integer', 'bigint', 'satoshis', 'token_amount']);
+
+/** A part of a commitment as a value: a whole number as `OP_BIN2NUM` reads it, or hex. */
+const fromPart = (template: XOTemplate, variable: string, bytes: Uint8Array, range: { start: number; end: number }): string | bigint => {
+  if (range.end <= range.start || range.end > bytes.length) throw new TemplateError(`"${variable}" is taken from bytes ${range.start} to ${range.end - 1} of a commitment of ${bytes.length} bytes.`);
+  const part = bytes.slice(range.start, range.end);
+  if (!NUMERIC.has(variableType(template, variable) ?? '')) return hex(part);
+  let value = 0n;
+  for (let index = part.length - 1; index >= 0; index--) value = (value << 8n) | BigInt(part[index] as number);
+  const top = 0x80n << BigInt(8 * (part.length - 1));
+  return (value & top) === 0n ? value : -(value & ~top);
+};
 
 /**
  * The values a declaration takes from the token and the chain.
@@ -83,26 +104,44 @@ export const valuesFrom = (template: XOTemplate, wanted: Record<string, ValueSou
   const missing = (variable: string, source: string): never => {
     throw new TemplateError(`"${variable}" is taken from ${source}, which is not at hand.`);
   };
+  const commitment = (variable: string, bytes: Uint8Array | undefined, what: string, range: { start: number; end: number } | undefined): TemplateValues[string] => {
+    if (bytes === undefined) return missing(variable, what);
+    return range === undefined ? valueFromBytes(template, variable, bytes) : fromPart(template, variable, bytes, range);
+  };
   for (const [variable, source] of Object.entries(wanted)) {
-    switch (source) {
+    const { from, input, field, range } = readSource(source);
+    const output = from === 'companion' ? sources.companion : from === 'position' ? sources.position : from === 'input' ? sources.inputs?.[input ?? ''] : undefined;
+    switch (`${from}.${field}`) {
       case 'token.category':
         values[variable] = hex(sources.token.category);
         break;
       case 'token.commitment':
-        values[variable] = valueFromBytes(template, variable, sources.token.commitment);
+        values[variable] = commitment(variable, sources.token.commitment, 'the token', range);
         break;
       case 'token.inputIndex':
         values[variable] = sources.tokenInputIndex === undefined ? missing(variable, 'the place of the token among the inputs') : BigInt(sources.tokenInputIndex);
         break;
+      case 'token.valueSatoshis':
+        values[variable] = sources.tokenSatoshis ?? missing(variable, 'the coin that carries the token');
+        break;
       case 'companion.commitment':
-        values[variable] = sources.companion?.token?.nft === undefined ? missing(variable, 'the companion coin') : valueFromBytes(template, variable, sources.companion.token.nft.commitment);
+        values[variable] = commitment(variable, sources.companion?.token?.nft?.commitment, 'the companion coin', range);
         break;
       case 'position.commitment':
-        values[variable] = sources.position?.token?.nft === undefined ? missing(variable, 'the position\'s own token') : valueFromBytes(template, variable, sources.position.token.nft.commitment);
+        values[variable] = commitment(variable, sources.position?.token?.nft?.commitment, 'the position\'s own token', range);
         break;
       case 'position.valueSatoshis':
         values[variable] = sources.positionSatoshis ?? sources.position?.valueSatoshis ?? missing(variable, 'the position');
         break;
+      default: {
+        // A coin of the application's, read from the chain.
+        const what = `the application's input "${input ?? ''}"`;
+        if (output === undefined) return missing(variable, what);
+        if (field === 'valueSatoshis') values[variable] = output.valueSatoshis;
+        else if (field === 'tokenAmount') values[variable] = output.token?.amount ?? 0n;
+        else if (field === 'category') values[variable] = output.token === undefined ? missing(variable, `the token of ${what}`) : hex(output.token.category);
+        else values[variable] = commitment(variable, output.token?.nft?.commitment, `the token of ${what}`, range);
+      }
     }
   }
   return values;
@@ -143,7 +182,9 @@ export const findPosition = async (chain: ChainReader, template: XOTemplate, ent
     return { status: 'incomplete', note: `The companion coin cannot be worked out from the token: ${describe(error)}`, variables: {}, coins: [] };
   }
   const category = hex(token.category);
-  const companions = (await coinsAt(chain, companionAt)).filter((coin) => coin.output.token !== undefined && hex(coin.output.token.category) === category);
+  const companions = (await coinsAt(chain, companionAt, category)).filter(
+    (coin) => coin.output.token !== undefined && hex(coin.output.token.category) === category && (place.companion.commitment === undefined || hex(coin.output.token.nft?.commitment ?? new Uint8Array()) === place.companion.commitment),
+  );
   if (companions.length === 0) {
     const used = (await chain.getHistory(companionAt)).length > 0;
     return { status: used ? 'closed' : 'not found', note: used ? 'Its companion coin is no longer there.' : 'The chain shows no companion coin for this token.', variables: {}, coins: [] };

@@ -16,9 +16,42 @@ export const RECOVERY_PROFILE_VERSION = 1;
 export const BINDING_KINDS = ['receive', 'change', 'return', 'lasting'] as const;
 export type BindingKind = (typeof BINDING_KINDS)[number];
 
-/** Where the wallet takes a variable's value from when it works from a token and the chain. */
-export const VALUE_SOURCES = ['token.category', 'token.commitment', 'token.inputIndex', 'companion.commitment', 'position.commitment', 'position.valueSatoshis'] as const;
-export type ValueSource = (typeof VALUE_SOURCES)[number];
+/**
+ * Where the wallet takes a variable's value from when it works from a token and the chain:
+ *
+ * - `token.category`, `token.commitment`, `token.valueSatoshis`: the authority token the action is about;
+ *   `token.inputIndex`: the number of the input that spends it
+ * - `companion.commitment`: the companion coin a position was found through
+ * - `position.commitment`, `position.valueSatoshis`: the position
+ * - `input.<input>.category`, `.commitment`, `.tokenAmount`, `.valueSatoshis`: a coin of the application that
+ *   the action spends as the template input `<input>`, read from the chain by the wallet
+ *
+ * A commitment can be read in part: `position.commitment[1..7]` is its bytes 1 to 6. A whole number is read
+ * from bytes as scripts write numbers; from a part, as `OP_BIN2NUM` reads it (fixed-width fields).
+ */
+export type ValueSource = string;
+
+const SOURCE = /^(?:token\.(?:category|inputIndex|valueSatoshis|commitment(?:\[\d{1,3}\.\.\d{1,3}\])?)|companion\.commitment(?:\[\d{1,3}\.\.\d{1,3}\])?|position\.(?:valueSatoshis|commitment(?:\[\d{1,3}\.\.\d{1,3}\])?)|input\.[A-Za-z0-9_]{1,80}\.(?:category|tokenAmount|valueSatoshis|commitment(?:\[\d{1,3}\.\.\d{1,3}\])?))$/;
+
+/** A source, taken apart. */
+export interface ReadSource {
+  from: 'token' | 'companion' | 'position' | 'input';
+  /** For `input`: the template input. */
+  input?: string;
+  field: 'category' | 'commitment' | 'inputIndex' | 'valueSatoshis' | 'tokenAmount';
+  /** Bytes `start` up to `end`, of a commitment. */
+  range?: { start: number; end: number };
+}
+
+export const readSource = (source: ValueSource): ReadSource => {
+  const [path = '', range] = source.split('[');
+  const parts = path.split('.');
+  const from = parts[0] as ReadSource['from'];
+  const input = from === 'input' ? parts[1] : undefined;
+  const field = parts.at(-1) as ReadSource['field'];
+  const bounds = range === undefined ? undefined : /^(\d+)\.\.(\d+)\]$/.exec(range);
+  return { from, ...(input === undefined ? {} : { input }), field, ...(bounds === undefined || bounds === null ? {} : { range: { start: Number(bounds[1]), end: Number(bounds[2]) } }) };
+};
 
 /** A position whose address follows from the token alone. */
 export interface DirectPosition {
@@ -33,7 +66,8 @@ export interface DirectPosition {
  * not taken for the position.
  */
 export interface CompanionPosition {
-  companion: { lockingScript: string; variables?: Record<string, ValueSource>; tokenCategory: 'token.category' };
+  /** With `commitment`, only a companion whose token has that commitment (hex) is a candidate. */
+  companion: { lockingScript: string; variables?: Record<string, ValueSource>; tokenCategory: 'token.category'; commitment?: string };
   relative: number;
   genuine: { lockingScript: string; variables: Record<string, ValueSource>; tokenCategory?: string };
 }
@@ -44,6 +78,19 @@ export interface AuthorityEntry {
   position: DirectPosition | CompanionPosition;
   /** The actions the token's holder can take on the position. */
   actions: string[];
+  /** Template variables the wallet reads from the position to show what it holds, in the template's words. */
+  state?: Record<string, ValueSource>;
+}
+
+/**
+ * A coin of the application that an action spends besides the position: a contract every user of the
+ * application shares, at a script the template gives. A page may name the coin; the wallet then checks that it
+ * is unspent at that script and carries the token described. Without a page the wallet finds one itself.
+ */
+export interface ApplicationInput {
+  lockingScript: string;
+  /** The token the coin carries: its category (hex), its capability, its commitment (hex). What is left out may be anything. */
+  token?: { category?: string; capability?: 'none' | 'mutable' | 'minting'; commitment?: string };
 }
 
 /** The wallet's parts of one action. */
@@ -54,6 +101,16 @@ export interface ActionEntry {
   spends?: string;
   /** The template input that each coin of the position is spent as. */
   position?: string;
+  /** The template input that the companion coin the position was found through is spent as. */
+  companion?: string;
+  /** The application's other inputs, by template input. */
+  inputs?: Record<string, ApplicationInput>;
+  /**
+   * Variables only the application works out, with arithmetic of its own. When the wallet carries the action
+   * out by itself, from its list of tokens, it asks the user for every value it cannot fill, except these: an
+   * action that needs one of them is offered only through the application.
+   */
+  fromApplication?: string[];
   /** Variables that hold a locking script of the wallet's, with the kind of each. */
   outputs?: Record<string, BindingKind>;
   /** Variables the wallet fills from the token and the chain. */
@@ -97,7 +154,8 @@ const fail = (message: string): never => {
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isHash = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 const name = (value: unknown, what: string): string => (typeof value === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(value) ? value : fail(`The declaration's ${what} is not a name.`));
-const isSource = (value: unknown): value is ValueSource => (VALUE_SOURCES as readonly unknown[]).includes(value);
+const isSource = (value: unknown): value is ValueSource => typeof value === 'string' && SOURCE.test(value);
+const isHex = (value: unknown): value is string => typeof value === 'string' && /^([0-9a-f]{2})*$/.test(value) && value.length <= 256;
 
 const sources = (value: unknown, what: string): Record<string, ValueSource> => {
   if (!isObject(value)) return fail(`The declaration's ${what} are missing.`);
@@ -119,11 +177,13 @@ const position = (value: unknown, entry: string): DirectPosition | CompanionPosi
   // Without it a look-alike of the companion coin would be taken for the position.
   if (!isObject(genuine)) return fail(`The declaration does not say what makes the position of "${entry}" genuine.`);
   if (genuine['tokenCategory'] !== undefined && genuine['tokenCategory'] !== 'token.category' && !isHash(genuine['tokenCategory'])) return fail(`The token the position of "${entry}" must carry is not named by a category.`);
+  if (companion['commitment'] !== undefined && !isHex(companion['commitment'])) return fail(`The commitment of the companion coin of "${entry}" is not hex.`);
   return {
     companion: {
       lockingScript: name(companion['lockingScript'], `companion script of "${entry}"`),
       ...(companion['variables'] === undefined ? {} : { variables: sources(companion['variables'], `companion variables of "${entry}"`) }),
       tokenCategory: 'token.category',
+      ...(companion['commitment'] === undefined ? {} : { commitment: companion['commitment'] as string }),
     },
     relative,
     genuine: {
@@ -132,6 +192,26 @@ const position = (value: unknown, entry: string): DirectPosition | CompanionPosi
       ...(genuine['tokenCategory'] === undefined ? {} : { tokenCategory: genuine['tokenCategory'] as string }),
     },
   };
+};
+
+const applicationInputs = (value: unknown, action: string): Record<string, ApplicationInput> => {
+  if (!isObject(value)) return fail(`The application's inputs of the action "${action}" cannot be read.`);
+  const read: Record<string, ApplicationInput> = {};
+  for (const [input, described] of Object.entries(value)) {
+    if (!isObject(described)) return fail(`The input "${input}" of the action "${action}" cannot be read.`);
+    const { token } = described;
+    if (token !== undefined) {
+      if (!isObject(token)) return fail(`The token of the input "${input}" of the action "${action}" cannot be read.`);
+      if (token['category'] !== undefined && !isHash(token['category'])) return fail(`The token of the input "${input}" is not named by a category.`);
+      if (token['capability'] !== undefined && !['none', 'mutable', 'minting'].includes(token['capability'] as string)) return fail(`The token of the input "${input}" has a capability that is not known.`);
+      if (token['commitment'] !== undefined && !isHex(token['commitment'])) return fail(`The commitment of the token of the input "${input}" is not hex.`);
+    }
+    read[name(input, 'input')] = {
+      lockingScript: name(described['lockingScript'], `script of the input "${input}"`),
+      ...(token === undefined ? {} : { token: token as NonNullable<ApplicationInput['token']> }),
+    };
+  }
+  return read;
 };
 
 const actionEntry = (value: unknown, action: string): ActionEntry => {
@@ -147,6 +227,11 @@ const actionEntry = (value: unknown, action: string): ActionEntry => {
     ...(value['creates'] === undefined ? {} : { creates: name(value['creates'], `category variable of "${action}"`) }),
     ...(value['spends'] === undefined ? {} : { spends: name(value['spends'], `spent token of "${action}"`) }),
     ...(value['position'] === undefined ? {} : { position: name(value['position'], `position input of "${action}"`) }),
+    ...(value['companion'] === undefined ? {} : { companion: name(value['companion'], `companion input of "${action}"`) }),
+    ...(value['inputs'] === undefined ? {} : { inputs: applicationInputs(value['inputs'], action) }),
+    ...(value['fromApplication'] === undefined
+      ? {}
+      : { fromApplication: Array.isArray(value['fromApplication']) ? value['fromApplication'].map((variable) => name(variable, `variables of "${action}" only the application works out`)) : fail(`The variables of "${action}" only the application works out are not a list.`) }),
     ...(Object.keys(outputs).length === 0 ? {} : { outputs }),
     ...(value['variables'] === undefined ? {} : { variables: sources(value['variables'], `variables of "${action}"`) }),
   };
@@ -179,6 +264,7 @@ export const readDeclaration = (text: string): ReadDeclaration => {
       token: name(value['token'], `token output of "${entry}"`),
       position: position(value['position'], entry),
       actions: Array.isArray(listed) ? listed.map((action) => name(action, `actions of "${entry}"`)) : fail(`The authority entry "${entry}" lists no actions.`),
+      ...(value['state'] === undefined ? {} : { state: sources(value['state'], `state of "${entry}"`) }),
     };
   }
   const actionEntries: Record<string, ActionEntry> = {};

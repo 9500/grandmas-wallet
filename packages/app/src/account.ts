@@ -259,11 +259,21 @@ export class Account implements WalletBackend {
    */
   async prepare(request: TransactionRequest): Promise<PreparedTransaction> {
     const variables = Object.entries(request.variables ?? {}).map(([variableIdentifier, value]) => ({ variableIdentifier, roleIdentifier: request.role, value }));
-    const inputs = request.inputs.map(({ coin, inputIdentifier }) => ({
+    // Every input and output is given its place. The engine puts items whose template gives them an index
+    // first, in that order, and the others after them; a template that leaves a place free for the wallet
+    // (the coin that defines a new token category is input 0) would otherwise be built in another order.
+    // A coin of an application's contract that the account does not follow comes with its unlocking, which the
+    // engine takes as another participant's input: it puts it into the transaction as given.
+    const inputs = request.inputs.map(({ coin, inputIdentifier, unlocking }, transactionIndex) => ({
       outpointTransactionHash: coin.utxo.transactionHash,
       outpointIndex: coin.utxo.index,
+      transactionIndex,
       ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
+      ...(unlocking === undefined ? {} : { unlockingBytecode: unlocking.bytecode, sequenceNumber: unlocking.sequenceNumber }),
     }));
+    // An output of the template carries the account's role: the engine reads a template's `relevant: false` for the
+    // role an output is added in, and with no role it follows every script an output pays to.
+    const outputs = request.outputs.map((output, transactionIndex) => ({ ...output, transactionIndex, ...('outputIdentifier' in output ? { roleIdentifier: request.role } : {}) }));
     // The engine unlocks a script with the key of the invitation that first made the script known. The
     // action that makes the controller key must therefore be carried out in the invitation the key was made
     // for: a new invitation for it would make a second key, and the controller would later be signed with that.
@@ -286,7 +296,7 @@ export class Account implements WalletBackend {
       invitationIdentifier = stored.invitation.invitationIdentifier;
     }
     try {
-      await this.engine.appendInvitation(invitationIdentifier, { outputs: request.outputs } as unknown as Parameters<Engine['appendInvitation']>[1]);
+      await this.engine.appendInvitation(invitationIdentifier, { outputs } as unknown as Parameters<Engine['appendInvitation']>[1]);
       for (const index of await this.engine.listOwnInputIndexes(invitationIdentifier)) await this.engine.signInvitation(invitationIdentifier, index);
       const { builtTransaction } = await this.engine.executeAction(invitationIdentifier, { broadcastTransaction: false });
       const transaction = decodeTransactionBch(hexToBin(builtTransaction.serializedTransaction));

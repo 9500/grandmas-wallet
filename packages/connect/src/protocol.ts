@@ -79,6 +79,12 @@ export interface ActionDetails {
   creates?: string;
   /** The categories of the wallet's tokens the action spends. */
   spends?: string[];
+  /**
+   * The application's own coins the action is to spend, by template input, as `<transaction id>:<output index>`:
+   * which of the contracts its users share the application chose. The wallet reads each from the chain and
+   * checks it against the template's declaration.
+   */
+  inputs?: Record<string, string>;
 }
 
 export interface ActionRequest extends Envelope, ActionDetails {
@@ -218,7 +224,7 @@ const readTexts = (definition: unknown): TemplateTexts => {
  */
 export const parseRequest = (message: unknown): ActionRequest => {
   if (!isObject(message) || message['action'] !== ACTION_REQUEST) throw new ProtocolError('Not a request.');
-  const { time, sequence, id, template, definition, templateAction, role, variables, bindings, creates, spends } = message;
+  const { time, sequence, id, template, definition, templateAction, role, variables, bindings, creates, spends, inputs } = message;
   if (typeof time !== 'number' || typeof sequence !== 'number' || !isText(id, 80) || !isText(templateAction, 80) || !isText(role, 80)) {
     throw new ProtocolError('The request is missing something or has a field of the wrong kind.');
   }
@@ -226,6 +232,10 @@ export const parseRequest = (message: unknown): ActionRequest => {
   if (creates !== undefined && !isText(creates, 80)) throw new ProtocolError('The request names the variable of a new token in a form this wallet does not accept.');
   if (spends !== undefined && (!Array.isArray(spends) || spends.length > 8 || !spends.every(isHash))) throw new ProtocolError('The request names the tokens it spends in a form this wallet does not accept.');
   const bound = bindings === undefined ? undefined : readValues(bindings, 'bindings');
+  const named = inputs === undefined ? undefined : readValues(inputs, 'inputs');
+  if (named !== undefined && (Object.keys(named).length > 16 || !Object.values(named).every((outpoint) => typeof outpoint === 'string' && /^[0-9a-f]{64}:\d{1,5}$/.test(outpoint)))) {
+    throw new ProtocolError('The request names coins in a form this wallet does not accept.');
+  }
   if (bound !== undefined && Object.values(bound).some((source) => typeof source !== 'string')) throw new ProtocolError('The request\'s bindings are not names.');
   return {
     action: ACTION_REQUEST,
@@ -240,6 +250,7 @@ export const parseRequest = (message: unknown): ActionRequest => {
     ...(bound === undefined ? {} : { bindings: bound as Record<string, string> }),
     ...(creates === undefined ? {} : { creates }),
     ...(spends === undefined ? {} : { spends: spends as string[] }),
+    ...(named === undefined ? {} : { inputs: named as Record<string, string> }),
   };
 };
 
@@ -261,7 +272,8 @@ export const sameRequest = (a: ActionDetails, b: ActionDetails): boolean =>
   a.creates === b.creates &&
   (a.spends ?? []).join() === (b.spends ?? []).join() &&
   sameValues(a.variables, b.variables) &&
-  sameValues(a.bindings, b.bindings);
+  sameValues(a.bindings, b.bindings) &&
+  sameValues(a.inputs, b.inputs);
 
 /** The standard WizardConnect request for signatures on a transaction the application built. */
 export const SIGN_TRANSACTION_REQUEST = 'sign_transaction_request';

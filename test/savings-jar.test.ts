@@ -217,7 +217,8 @@ describe('a savings jar', () => {
     // from the key it holds, the template it kept and the chain.
     const held = await jarOf(device);
     expect(held.actions).toEqual([
-      { action: 'deposit', role: 'saver', name: 'Pay into a savings jar', description: expect.stringContaining('Add savings') as string },
+      // The amount is the user's to give; the wallet asks for it in the template's words.
+      { action: 'deposit', role: 'saver', name: 'Pay into a savings jar', description: expect.stringContaining('Add savings') as string, asks: [{ variable: 'savedSatoshis', name: 'Amount to save', description: 'Satoshis to put into the jar.', type: 'satoshis' }] },
       { action: 'withdraw', role: 'saver', name: 'Empty a savings jar', description: expect.stringContaining('Take everything out') as string },
     ]);
     const deposit = device.applications.actionOn(held, 'deposit', { savedSatoshis: 5_000 });

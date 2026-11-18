@@ -26,6 +26,8 @@ export interface UnspentOutputEntry {
   /** 0 or less while unconfirmed. */
   height: number;
   hasToken: boolean;
+  /** The token, when the server lists it. Used only to narrow a search: what is found is read from its transaction. */
+  token?: { category: string };
 }
 
 export interface HistoryEntry {

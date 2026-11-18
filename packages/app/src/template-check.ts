@@ -180,6 +180,18 @@ const violationsOf = (template: XOTemplate, declaration: RecoveryDeclaration): V
     if (action.position !== undefined && template.inputs?.[action.position] === undefined) {
       violations.push({ rule: 3, what: `The action "${name}" spends its position as the input "${action.position}", which the template does not have.`, consequence: lost });
     }
+    if (action.companion !== undefined && template.inputs?.[action.companion] === undefined) {
+      violations.push({ rule: 3, what: `The action "${name}" spends the coin its position was found through as the input "${action.companion}", which the template does not have.`, consequence: lost });
+    }
+    for (const [input, described] of Object.entries(action.inputs ?? {})) {
+      if (template.inputs?.[input] === undefined) violations.push({ rule: 3, what: `The action "${name}" finds a coin for the input "${input}", which the template does not have.`, consequence: lost });
+      if (template.lockingScripts?.[described.lockingScript] === undefined) {
+        violations.push({ rule: 3, what: `The action "${name}" finds the input "${input}" at the locking script "${described.lockingScript}", which the template does not have.`, consequence: lost });
+      }
+    }
+    for (const variable of action.fromApplication ?? []) {
+      if (template.variables?.[variable] === undefined) violations.push({ rule: 3, what: `The action "${name}" leaves "${variable}" to the application, and the template has no such variable.`, consequence: lost });
+    }
     for (const variable of Object.keys(action.outputs ?? {})) {
       if (variableType(template, variable) !== 'locking_script') {
         violations.push({ rule: 2, what: `The action "${name}" leaves "${variable}" to the wallet, but the template does not use it as a locking script.`, consequence: 'The wallet could not put its own address there.' });

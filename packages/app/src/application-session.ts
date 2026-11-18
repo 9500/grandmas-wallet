@@ -30,6 +30,7 @@ export const actionOf = (entry: LedgerEntry): ApplicationAction => ({
   ...(entry.bindings === undefined ? {} : { bindings: entry.bindings }),
   ...(entry.creates === undefined ? {} : { creates: entry.creates }),
   ...(entry.spends === undefined ? {} : { tokens: entry.spends }),
+  ...(entry.inputs === undefined ? {} : { inputs: entry.inputs }),
   application: entry.application,
 });
 

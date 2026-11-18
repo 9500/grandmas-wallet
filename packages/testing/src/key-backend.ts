@@ -2,6 +2,7 @@ import { type Output, binToHex, hash160, hexToBin } from '@bitauth/libauth';
 import {
   type AccountCoin,
   type FollowedScript,
+  type GivenUnlocking,
   type InputSpec,
   type KeyPair,
   type KeyedAddressKind,
@@ -131,7 +132,9 @@ export class KeyBackend implements WalletBackend {
   }
 
   /** The input that spends a coin the way its script says, as the engine would unlock it. */
-  private inputFor(coin: AccountCoin, request: TransactionRequest, inputIdentifier: string | undefined): InputSpec {
+  private inputFor(coin: AccountCoin, request: TransactionRequest, inputIdentifier: string | undefined, unlocking?: GivenUnlocking): InputSpec {
+    // A coin of an application's contract given with its unlocking, as the engine takes another participant's input.
+    if (unlocking !== undefined) return { utxo: coin.utxo, sequence: unlocking.sequenceNumber, unlock: () => unlocking.bytecode };
     const known = this.known.get(hex(coin.utxo.output.lockingBytecode));
     if (known === undefined) throw new Error('The transaction names a coin at a script this account does not follow.');
     const variables = request.variables ?? {};
@@ -208,13 +211,15 @@ export class KeyBackend implements WalletBackend {
   async prepare(request: TransactionRequest): Promise<PreparedTransaction> {
     const imported = this.imported.get(request.template);
     const built = buildTransaction({
-      inputs: request.inputs.map(({ coin, inputIdentifier }) => this.inputFor(coin, request, inputIdentifier)),
+      inputs: request.inputs.map(({ coin, inputIdentifier, unlocking }) => this.inputFor(coin, request, inputIdentifier, unlocking)),
       outputs: request.outputs.map((output) => this.outputFor(output, request)),
       // An action of an application's template has the lock time its template gives it.
       ...(imported === undefined ? {} : { locktime: templateTransaction(imported.definition, request.action, typedValues(imported.definition, request.variables ?? {})).locktime }),
       signingType: ENGINE_SIGNING_TYPE,
-      // Closing destroys the identity token on purpose; nothing else may drop a token.
-      allowTokenBurn: request.template === 'controller' && request.action === 'close',
+      // Closing destroys the identity token on purpose. An application's action may destroy tokens of the
+      // application's coins, or send tokens to a data output; the wallet has checked that none of its own is
+      // dropped, and the network's rules decide the rest.
+      allowTokenBurn: (request.template === 'controller' && request.action === 'close') || imported !== undefined,
     });
     const check = checkBeforeSending(built);
     if (check !== true) throw new Error(`The transaction fails the check before sending: ${check}`);

@@ -57,6 +57,31 @@ export class SimulatedChain implements ChainReader {
     return transactionId;
   }
 
+  /**
+   * Take in outputs that exist elsewhere, such as a recorded snapshot of another chain, under their own
+   * outpoints. Each is given a transaction of its own here, made of data outputs and the output at its index;
+   * reading that transaction gives the output, though it does not hash to the outpoint's identifier.
+   */
+  adopt(outputs: { transactionId: string; index: number; output: Output }[]): void {
+    const byTransaction = new Map<string, { index: number; output: Output }[]>();
+    for (const { transactionId, index, output } of outputs) byTransaction.set(transactionId, [...(byTransaction.get(transactionId) ?? []), { index, output }]);
+    for (const [transactionId, entries] of byTransaction) {
+      const length = Math.max(...entries.map(({ index }) => index)) + 1;
+      const all = Array.from({ length }, (_, index): Output => entries.find((entry) => entry.index === index)?.output ?? { lockingBytecode: Uint8Array.of(0x6a), valueSatoshis: 0n });
+      const encoded = encodeTransactionBch({
+        version: 2,
+        locktime: 0,
+        inputs: [{ outpointTransactionHash: hexToBin(transactionId), outpointIndex: 0xffff, sequenceNumber: 0, unlockingBytecode: new Uint8Array(0) }],
+        outputs: all,
+      });
+      this.transactions.set(transactionId, binToHex(encoded));
+      for (const { index, output } of entries) {
+        this.unspent.set(`${transactionId}:${index}`, { output, createdMs: this.nowMs });
+        this.remember(output.lockingBytecode, transactionId);
+      }
+    }
+  }
+
   balanceOf(lockingBytecode: Uint8Array): bigint {
     const wanted = binToHex(lockingBytecode);
     return [...this.unspent.values()]
@@ -74,7 +99,7 @@ export class SimulatedChain implements ChainReader {
       .filter(([, { output }]) => binToHex(output.lockingBytecode) === wanted)
       .map(([outpoint, { output }]) => {
         const [transactionId = '', index = '0'] = outpoint.split(':');
-        return { transactionId, index: Number(index), valueSatoshis: output.valueSatoshis, height: 0, hasToken: output.token !== undefined };
+        return { transactionId, index: Number(index), valueSatoshis: output.valueSatoshis, height: 0, hasToken: output.token !== undefined, ...(output.token === undefined ? {} : { token: { category: binToHex(output.token.category) } }) };
       });
   };
 
