@@ -10,13 +10,13 @@ const cameras = (...labels: string[]): CameraInfo[] => labels.map((label, index)
 const labels = (round: CameraInfo[]): string[] => round.map((camera) => camera.label);
 
 describe('the cameras', () => {
-  it('are told apart by the way they face, in the words phones use', () => {
+  it('OP04: are told apart by the way they face, in the words phones use', () => {
     expect(['camera2 0, facing back', 'Back Camera', 'Back Ultra Wide Camera', 'Rückkamera', 'Caméra arrière', 'Cámara trasera'].map(facingOf)).toEqual(Array(6).fill('rear'));
     expect(['camera2 1, facing front', 'Front Camera', 'FaceTime HD Camera', 'Frontkamera', 'Caméra avant'].map(facingOf)).toEqual(Array(5).fill('front'));
     expect(['Integrated Webcam', 'USB Video Device', 'Default Camera', 'Camera 2'].map(facingOf)).toEqual(Array(4).fill('unknown'));
   });
 
-  it('name their lens only where the label names one', () => {
+  it('OP04: name their lens only where the label names one', () => {
     expect(lensOf('Back Ultra Wide Camera')).toBe('Ultra wide');
     expect(lensOf('Back Telephoto Camera')).toBe('Telephoto');
     expect(lensOf('Back Dual Wide Camera')).toBe('Dual wide');
@@ -26,19 +26,19 @@ describe('the cameras', () => {
     expect(lensOf('Intel RealSense')).toBeUndefined();
   });
 
-  it('go round the rear ones only, the main lens first and a telephoto lens last', () => {
+  it('OP04: go round the rear ones only, the main lens first and a telephoto lens last', () => {
     const phone = cameras('Front Camera', 'Back Telephoto Camera', 'Back Ultra Wide Camera', 'Back Camera', 'Back Dual Wide Camera');
     expect(labels(cameraRound(phone))).toEqual(['Back Camera', 'Back Dual Wide Camera', 'Back Ultra Wide Camera', 'Back Telephoto Camera']);
     const android = cameras('camera2 1, facing front', 'camera2 0, facing back', 'camera2 2, facing back', 'camera2 3, facing front');
     expect(labels(cameraRound(android))).toEqual(['camera2 0, facing back', 'camera2 2, facing back']);
   });
 
-  it('are all offered when none can be told to face the rear', () => {
+  it('OP04: are all offered when none can be told to face the rear', () => {
     expect(labels(cameraRound(cameras('FaceTime HD Camera', 'USB Camera')))).toEqual(['FaceTime HD Camera', 'USB Camera']);
     expect(cameraRound([])).toEqual([]);
   });
 
-  it('follow one another round, starting again after the last', () => {
+  it('OP04: follow one another round, starting again after the last', () => {
     const round = cameraRound(cameras('Back Camera', 'Back Ultra Wide Camera', 'Back Telephoto Camera'));
     expect(nextCamera(round, 'id-0')?.id).toBe('id-1');
     expect(nextCamera(round, 'id-1')?.id).toBe('id-2');
@@ -48,7 +48,7 @@ describe('the cameras', () => {
     expect(nextCamera([], 'id-0')).toBeUndefined();
   });
 
-  it('are described by their place in the round and their lens', () => {
+  it('OP04: are described by their place in the round and their lens', () => {
     const round = cameraRound(cameras('Front Camera', 'Back Camera', 'Back Ultra Wide Camera', 'Back Telephoto Camera'));
     expect(describeCamera(round, 'id-1')).toBe('Camera 1 of 3');
     expect(describeCamera(round, 'id-2')).toBe('Camera 2 of 3 · Ultra wide');
@@ -68,7 +68,7 @@ describe('what a field takes', () => {
   const testAddress = addressOf('bchtest');
   const mainAddress = addressOf('bitcoincash');
 
-  it('a recoverer\'s link, and nothing else, in the field for it', async () => {
+  it('OP04: a recoverer\'s link, and nothing else, in the field for it', async () => {
     const link = await makeLink('https://wallet.example/', 'recoverer', { name: 'Anna', page: 'https://recoverer.example/', publicKey: 'ab'.repeat(32) });
     expect(RECOVERER_LINK.accept(`${link}\n`)).toBe(link);
     expect(RECOVERER_LINK.accept(await makeLink('https://wallet.example/', 'handover', { sealed: '00' }))).toBeUndefined();
@@ -77,13 +77,13 @@ describe('what a field takes', () => {
     expect(HANDOVER_LINK.accept(link)).toBeUndefined();
   });
 
-  it('an application\'s connection address, in either of its forms', () => {
+  it('OP04: an application\'s connection address, in either of its forms', () => {
     expect(CONNECTION_ADDRESS.accept('wiz://?p=abc&s=def')).toBe('wiz://?p=abc&s=def');
     expect(CONNECTION_ADDRESS.accept('WIZ://?P=ABC%3FS=DEF')).toBe('WIZ://?P=ABC%3FS=DEF');
     expect(CONNECTION_ADDRESS.accept(testAddress)).toBeUndefined();
   });
 
-  it('an address of the page\'s network, with or without its prefix; a payment request gives its address', () => {
+  it('OP04: an address of the page\'s network, with or without its prefix; a payment request gives its address', () => {
     const field = paymentAddress('testnet');
     expect(field.accept(testAddress)).toBe(testAddress);
     expect(field.accept(testAddress.replace('bchtest:', ''))).toBe(testAddress.replace('bchtest:', ''));

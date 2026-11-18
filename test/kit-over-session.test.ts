@@ -63,7 +63,7 @@ const start = async () => {
 };
 
 describe('a recovery kit over a session', () => {
-  it('is, byte for byte, the kit the link carries, and is kept through the same checks', async () => {
+  it('RC12: is, byte for byte, the kit the link carries, and is kept through the same checks', async () => {
     const { chain, storeAt, device, particulars, sent, courier, received } = await start();
     const envelope = await sealedOfLink('enroll', sent.link);
     expect((await courier.send({ expected: particulars, kind: 'enroll', sealed: envelope, timeoutMs: 2_000 })).status).toBe('received');
@@ -76,7 +76,7 @@ describe('a recovery kit over a session', () => {
     expect(taken.recoveryKey.keyHash).toEqual(credentialKeys(CREDENTIAL_WORDS, 'testnet', kitTemplates()).recoveryKey.keyHash);
   });
 
-  it('is refused like a link when it was altered on the way', async () => {
+  it('RC12: is refused like a link when it was altered on the way', async () => {
     const { chain, storeAt, device, particulars, sent, courier, received } = await start();
     const altered = (await sealedOfLink('enroll', sent.link)).slice();
     altered[altered.length - 20] = (altered[altered.length - 20] ?? 0) ^ 1;
@@ -85,7 +85,7 @@ describe('a recovery kit over a session', () => {
     await expect(acceptEnrollment({ link, privateKey: device.privateKey, chain, network: 'testnet', storeAt })).rejects.toBeInstanceOf(EnrollmentError);
   });
 
-  it('cannot be opened by another recoverer, whatever page it reached', async () => {
+  it('RC12: cannot be opened by another recoverer, whatever page it reached', async () => {
     const { chain, storeAt, sent } = await start();
     const stranger = await generateRecipientKeyPair();
     const link = await linkOfSealed('enroll', PAGE, await sealedOfLink('enroll', sent.link));
@@ -94,7 +94,7 @@ describe('a recovery kit over a session', () => {
 });
 
 describe('a takeover request over a session', () => {
-  it('is the request the link carries, and the recoverer saves it as from the link', async () => {
+  it('RC12: is the request the link carries, and the recoverer saves it as from the link', async () => {
     const { chain, storeAt, device, particulars, sent, courier, received } = await start();
     const { kept } = await acceptEnrollment({ link: sent.link, privateKey: device.privateKey, chain, network: 'testnet', storeAt });
     // A new phone asks to take the wallet over.

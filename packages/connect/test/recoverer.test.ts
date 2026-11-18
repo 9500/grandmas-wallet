@@ -71,7 +71,7 @@ describe('the messages', () => {
     expect(readRecovererMessage({ action: SEALED, time: 1, id: 'one', kind: 'enroll', sealed: 'abc' })).toBeUndefined();
   });
 
-  it('of another extension are not taken: an application\'s request means nothing here', async () => {
+  it('RC13: of another extension are not taken: an application\'s request means nothing here', async () => {
     expect(readRecovererMessage({ action: ACTION_REQUEST, time: 1, sequence: 2, id: 'request', template: {}, templateAction: 'deposit', role: 'saver', variables: {} })).toBeUndefined();
     const wires = queues();
     const { desk, received } = deskFor();
@@ -84,7 +84,7 @@ describe('the messages', () => {
 });
 
 describe('a sealed message over a session', () => {
-  it('reaches the recoverer\'s page byte for byte, which says that it has it and then that it kept it', async () => {
+  it('RC12: reaches the recoverer\'s page byte for byte, which says that it has it and then that it kept it', async () => {
     const wires = queues();
     const { desk, received } = deskFor();
     const courier = new SealedCourier(wires.wallet);
@@ -103,7 +103,7 @@ describe('a sealed message over a session', () => {
     expect(answers).toEqual(['received', 'kept']);
   });
 
-  it('refused by the recoverer\'s page comes back with its reason', async () => {
+  it('RC13: refused by the recoverer\'s page comes back with its reason', async () => {
     const wires = queues();
     const courier = new SealedCourier(wires.wallet);
     const refusing = new SealedDesk({ particulars: () => ANNA, onSealed: (sealed) => void refusing.answer(sealed.id, 'refused', 'This kit is for a wallet on another network.') });
@@ -126,7 +126,7 @@ describe('a sealed message over a session', () => {
     expect((await sending).status).toBe('received');
   });
 
-  it('is not sent to a page that answers in the name of another recoverer', async () => {
+  it('RC13: is not sent to a page that answers in the name of another recoverer', async () => {
     const wires = queues();
     const courier = new SealedCourier(wires.wallet);
     deskFor({ ...ANNA, publicKey: 'b2'.repeat(32) }).desk.attach(wires.desk);
@@ -134,7 +134,7 @@ describe('a sealed message over a session', () => {
     expect(wires.sentToDesk.filter((message) => message.action === SEALED)).toEqual([]);
   });
 
-  it('to a page that does not answer gives up in time, so that the wallet shows the link instead', async () => {
+  it('RC13: to a page that does not answer gives up in time, so that the wallet shows the link instead', async () => {
     const wires = queues();
     const courier = new SealedCourier(wires.wallet);
     deskFor().desk.attach(wires.desk);
@@ -179,7 +179,7 @@ describe('over a WizardConnect session, through a relay', () => {
     return { session, desk, received, joined, courier, deskStatus, walletStatus };
   };
 
-  it('hands a kit over: the particulars, then the sealed bytes, then the answer', async () => {
+  it('RC12: hands a kit over: the particulars, then the sealed bytes, then the answer', async () => {
     const { courier, received, deskStatus, walletStatus, session } = await connect();
     expect(session.uri).toMatch(/^wiz:\/\/127\.0\.0\.1:\d+\?p=/);
     expect(await courier.particulars(10_000)).toEqual(ANNA);
@@ -191,7 +191,7 @@ describe('over a WizardConnect session, through a relay', () => {
     expect(walletStatus.some((status) => status.state === 'connected' && status.peerName === 'Anna')).toBe(true);
   }, 30_000);
 
-  it('hands over a sealed message too large for one relay message, in chunks', async () => {
+  it('RC12: hands over a sealed message too large for one relay message, in chunks', async () => {
     const { courier, received } = await connect();
     const large = Uint8Array.from({ length: 120_000 }, (_, index) => (index * 31) % 256);
     expect((await courier.send({ expected: ANNA, kind: 'enroll', sealed: large, timeoutMs: 20_000 })).status).toBe('received');
@@ -200,7 +200,7 @@ describe('over a WizardConnect session, through a relay', () => {
     expect(relay.published().largest).toBeLessThan(2 * large.length);
   }, 40_000);
 
-  it('gives up on a recoverer\'s page that is gone, in time for the wallet to show the link', async () => {
+  it('RC13: gives up on a recoverer\'s page that is gone, in time for the wallet to show the link', async () => {
     let state = 'connecting';
     const session = openDeskSession({ name: 'Anna', relays: [relay.url], onStatus: (status) => void (state = status.state) });
     const uri = session.uri;
@@ -215,7 +215,7 @@ describe('over a WizardConnect session, through a relay', () => {
     expect(Date.now() - started).toBeLessThan(5_000);
   }, 20_000);
 
-  it('is not served to a wallet that does not announce the extension, such as one connecting as for an application', async () => {
+  it('RC13: is not served to a wallet that does not announce the extension, such as one connecting as for an application', async () => {
     const deskStatus: LinkStatus[] = [];
     const received: ReceivedSealed[] = [];
     const session = openDeskSession({ name: 'Anna', relays: [relay.url], onStatus: (status) => deskStatus.push(status) });
@@ -229,7 +229,7 @@ describe('over a WizardConnect session, through a relay', () => {
     expect(RECOVERER_EXTENSION).toBe('gw_recoverer_v1');
   }, 20_000);
 
-  it('takes no message of another extension that arrives on it', async () => {
+  it('RC13: takes no message of another extension that arrives on it', async () => {
     const { joined, courier, received } = await connect();
     await courier.particulars(10_000);
     // An application's request, sent on the recoverer's session: the page does not take it.

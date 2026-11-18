@@ -14,26 +14,28 @@ The same course runs unattended in `scripts/browser-run.ts`; its last runs are r
 - **About 0.0002 BCH of chipnet coins** in any chipnet wallet, to send to the new wallet. Creating the wallet takes 8,173 satoshis with the allowance for the recoverer; the rest is yours to play with.
 - **About twenty minutes.** A block comes about once a minute on chipnet, and the shortest waiting period is 512 seconds of the chain's clock, which in practice is ten to fifteen minutes.
 
-Links carry everything between the pages. Where the text says "send the link", copy it with the button beside it and open it in the other page's profile; between real devices, the QR code does the same.
+Links carry everything between the pages. Where the text says "send the link", copy it with the button beside it and open it in the other page's profile. Between a computer and a real phone, the **Scan** button beside each field of the wallet reads the QR code instead: with the phone's camera, or from a picture. When the recoverer's page is open at the same time as the wallet, setting up recovery needs no link at all (steps 1 to 3).
 
 ## 1. The recoverer gives their link
 
-On the recoverer's page, open **Your link**, enter a name (say, Anna) and copy the link. Note the fingerprint under it.
+On the recoverer's page, open **Your link**, enter a name (say, Anna) and copy the link. Note the fingerprint beside it.
+
+The page also shows a QR code. With the wallet on a real phone, leave this page open and let the phone scan the code in step 2 instead of copying the link: the code also opens a connection between the two pages, and the kit comes back over it by itself. The link works at any time; the code's connection only while this page stays open.
 
 ## 2. Grandma makes a wallet
 
-1. On the old phone, open the recoverer's link. The wallet page opens and says whose link it is. Choose **Make a new wallet**.
+1. On the old phone, open the recoverer's link. The wallet page opens and says whose link it is. Choose **Make a new wallet**. Or, with the code: choose **Make a new wallet**, press **Scan** beside "Your recoverer's link", point the phone at the code on the recoverer's page, and press **Use this link**. The recoverer's page then says that a phone is connected.
 2. Compare the fingerprint with the one the recoverer's page shows, and tick **The fingerprints are the same**. In life this is done over the phone or face to face: it is what makes sure the kit is sealed to the right person.
 3. Choose the waiting period. Take **about 9 minutes**, the one for trying things out.
 4. Leave the allowance ticked and press **Continue**.
 5. The page shows an address and the amount it needs. Send chipnet coins to it. When they have arrived, press **Create the wallet**.
-6. The page shows the link of the **recovery kit** at once: the wallet does not wait for a block. Send it to the recoverer.
+6. The page makes the **recovery kit** at once: the wallet does not wait for a block. If the phone scanned the recoverer's code and their page is still open, the kit goes straight there, and the wallet says that the recoverer's page has it; the link is folded away under "Send it as a link instead". Otherwise the page shows the link: send it to the recoverer.
 
 The page can be closed and opened again at any step; it continues where it was.
 
 ## 3. The recoverer takes the kit in
 
-Open the kit link on the recoverer's page, enter whose wallet it is, and press **Check and keep the kit**. The recoverer's page checks the kit against the chain, keeps it, and leaves a receipt in the backup stores.
+Open the kit link on the recoverer's page; a kit that came over the connection is already shown at the top of the page, as if its link had been opened. Enter whose wallet it is, and press **Check and keep the kit**. The wallet, if the kit came over the connection, says that it was kept. The recoverer's page checks the kit against the chain, keeps it, and leaves a receipt in the backup stores.
 
 Within a short while the wallet's home screen changes from "Recovery is not on yet" to **Protected**. Recovery is on only from this moment: the wallet does not say so because it sent a kit, but because it found the recoverer's receipt for exactly what it sent.
 
@@ -47,7 +49,7 @@ Within a short while the wallet's home screen changes from "Recovery is not on y
 
 This shows what protects Grandma when her recoverer is deceived, or the recoverer's key is stolen.
 
-1. On the new phone, open the recoverer's link and choose **Take over my wallet on this phone**. Tick the fingerprint box and press **Make my request**. Send the link it shows to the recoverer.
+1. On the new phone, open the recoverer's link and choose **Take over my wallet on this phone**. Tick the fingerprint box and press **Make my request**. Send the link it shows to the recoverer. (If the new phone scanned the code of the recoverer's **Your link** screen instead, with that page open, the request goes there by itself and is already among the recoverer's requests.)
 2. On the recoverer's page, open that link, choose **See the request**, pick Grandma's wallet, tick **I have made sure who is asking**, and press **Save it for this wallet**. Then press **Ask the network to move the wallet**.
 3. Within a minute or so the old phone shows a red card: **Someone asked to move your wallet**, with the fingerprint of the key that would get it and the time until which it can be refused.
 4. Press **Refuse the request**. The wallet stays with the old phone. The recoverer's page shows that the request was refused.
@@ -59,7 +61,7 @@ This shows what protects Grandma when her recoverer is deceived, or the recovere
 2. The new phone still shows its request from step 5, and the recoverer still has it saved. On the recoverer's page, open Grandma's wallet and press **Ask the network again**. (Starting fresh works too: repeat the first two parts of step 5.)
 3. The waiting period runs. The recoverer's page shows when it ends by the chain's clock. Both pages can be closed meanwhile.
 4. When it has passed, the recoverer presses **Complete the move**. The recoverer's page then shows a link for the new phone at once. Send it there.
-5. The new phone opens the link, checks the wallet's history on the chain, and brings the coins over: it finds them with the old phone's viewing key, which the recoverer kept, and moves them to its own addresses. Press **Open the wallet**. The balance is back, less the fees, and after a short while the wallet is **Protected** again with the same recoverer.
+5. The new phone opens the link, or scans its code from the recoverer's screen with the **Scan** button beside "The link from your recoverer". It checks the wallet's history on the chain, and brings the coins over: it finds them with the old phone's viewing key, which the recoverer kept, and moves them to its own addresses. Press **Open the wallet**. The balance is back, less the fees, and after a short while the wallet is **Protected** again with the same recoverer.
 
 If you now open the old phone's profile again, it says **This wallet now belongs to another key**. It cannot spend what was moved, and it gives out no address.
 
@@ -80,6 +82,7 @@ On the recoverer's page, each wallet shows its **fee coins**: what the recoverer
 
 - **Watching in the background.** The page checks the wallet every fifteen seconds while it is open, and says so. A phone with the page closed, or switched off, does not watch, and nothing wakes it when a request appears. A released wallet needs an application that runs in the background, or a service that alerts the phone. The wallet does say afterwards when it was not running during a waiting period.
 - **A waiting period worth relying on.** Nine minutes is for trying things out. The choices go up to a week.
+- **The scanner on every phone.** Reading codes was tried in a browser with simulated cameras. Going round a phone's rear cameras, and zoom, have not been tried on real phones.
 - **Keys kept safely.** Both pages keep their keys in the browser's storage, unencrypted. That is acceptable for coins without value and nothing else.
 - **A real second person.** The fingerprint comparisons and the recoverer's "I have made sure who is asking" stand for a phone call or a visit. Ticking a box in the next tab shows the step, not its worth.
 - **Applications.** The wallet page is a wallet only. The Savings Jar application that uses it through XO templates comes in a later stage; its address shows a notice until then.
