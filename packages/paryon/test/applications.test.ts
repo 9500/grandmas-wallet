@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { type Output, type TransactionCommon, binToHex, createVirtualMachineBch2025, decodeTransactionBch, encodeTransactionBch, hexToBin } from '@bitauth/libauth';
 import { type ApplicationAction, type HeldToken, ActionRefusedError, readDeclaration } from '@grandmas-wallet/app';
-import { type BuiltTransaction, type InputSpec, type Utxo, readTemplate } from '@grandmas-wallet/core';
+import { type BuiltTransaction, type InputSpec, type Utxo, readTemplate, textHash } from '@grandmas-wallet/core';
 import { describe, expect, it } from 'vitest';
 
 import { type Device, deviceWith } from '../../../test/support/applications.js';
@@ -173,6 +173,26 @@ describe('the Paryon template', () => {
   });
 });
 
+describe('a wallet that trusted the declaration before it named the tokens', () => {
+  it('keeps the declaration it has, and takes the new one when the page presents it and the user approves', async () => {
+    const device = await loanDevice(1_000_000n);
+    // The declaration as it was frozen before: the same, without the names.
+    const { tokens: _names, ...earlier } = JSON.parse(presented.declaration) as Record<string, unknown>;
+    const before = JSON.stringify(earlier);
+    expect(textHash(before)).toBe('f514e6506e88a440d33f81259d73c707b8b10bf7369401d0e64d5a14139ddeda');
+    await device.applications.trust({ ...presented.names, declaration: textHash(before) }, { template: presented.template, declaration: before });
+    expect(device.applications.names().fungible(hex(contracts.paryonCategory))).toBeUndefined();
+    // The page asks with the new declaration: the wallet asks for the texts, shows the template to be trusted again, and keeps the old one until then.
+    expect(device.applications.has(presented.names)).toBe(false);
+    expect(device.applications.describe(presented.names, presented.texts)).toMatchObject({ trusted: false, replacesDeclaration: true, verdict: { statement: 'not verified' } });
+    expect(device.applications.templates[0]?.declaration?.contentHash).toBe(textHash(before));
+    await device.applications.trust(presented.names, presented.texts);
+    expect(device.applications.templates).toHaveLength(1);
+    expect(device.applications.templates[0]).toMatchObject({ declaration: { contentHash: presented.names.declaration }, stored: false });
+    expect(device.applications.names().fungible(hex(contracts.paryonCategory))?.named).toMatchObject({ symbol: 'PUSD', decimals: 2 });
+  });
+});
+
 describe('a ParyonUSD loan through the wallet, from the template (PY02)', () => {
   const DEBT = 200_00n;
   const COLLATERAL = collateralAtRatio(DEBT, STORED_PRICE, 125n);
@@ -198,6 +218,11 @@ describe('a ParyonUSD loan through the wallet, from the template (PY02)', () => 
       { action: 'close', asks: undefined, needs: false },
     ]);
     expect(device.applications.describe(presented.names).verdict.statement).toBe('verified');
+    // The declaration names the borrowed PUSD, in cents, and the loan key; the wallet shows them as the template's names.
+    const template = { identifier: presented.names.identifier, name: readTemplate(presented.template).definition.name as string };
+    expect(loan.names?.nft).toEqual({ named: { name: 'Loan key', from: [template] } });
+    const pusd = (await device.applications.tokens()).find((token) => token.category === hex(contracts.paryonCategory));
+    expect(pusd?.names?.fungible).toEqual({ named: { name: 'ParyonUSD', symbol: 'PUSD', decimals: 2, from: [template] } });
   });
 
   it('PY02: a wallet without a coin that can define the key pays itself first, and the key is made with what is left over at output 0', async () => {

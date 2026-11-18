@@ -118,4 +118,6 @@ export const savingsJarDeclarationSource = {
       variables: { keyCategory: 'token.category', unlockTime: 'token.commitment', unlockTimeBytes: 'token.commitment', keyInput: 'token.inputIndex' },
     },
   },
+  // What a wallet that trusts the template may call the key.
+  tokens: { jarKey: { kind: 'nft', authority: 'jarKey', name: 'Jar key' } },
 } as const;
