@@ -2,7 +2,7 @@ import { binToHex } from '@bitauth/libauth';
 import { type ActionOutcome, type ActionPreview, type ApplicationAction, type HeldToken, type TemplateSummary, type TokenAction, NotStoredError, actionOf } from '@grandmas-wallet/app';
 import { readLink } from '@grandmas-wallet/app/links';
 import type { LedgerEntry, Proposal } from '@grandmas-wallet/connect';
-import { Amount, Button, Card, Field, KeyValues, Loading, Notice, PageHead, Pill, Spinner, TaskStatus, TextArea, TextInput, Value, formatTime, lockingBytecodeOfAddress, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Field, Info, KeyValues, Loading, Notice, PageHead, Pill, Spinner, TaskStatus, TextInput, Value, formatTime, lockingBytecodeOfAddress, useTask } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
@@ -10,7 +10,7 @@ import { ActionReview, Hex, Part, TemplateView, TypedValue, plainRefusal, refusa
 import { type ApplicationsPart, type PositionsAsk, relayOf } from './connections.js';
 import type { Owner } from './OwnerApp.js';
 import { CONNECTION_ADDRESS } from './scan.js';
-import { WithScan } from './Scanner.js';
+import { CameraIcon, ScanDialog } from './Scanner.js';
 import { chooseToken } from './token-choice.js';
 import { type Connection, keep, kept } from './session.js';
 import { NameSource, TokenAmount, TokenNamesContext } from './token-words.js';
@@ -71,7 +71,7 @@ const Main = ({ owner, onView }: { owner: Owner; onView: (view: View) => void })
   const proposalOf = (entry: LedgerEntry): Proposal | undefined => apps.proposals.find((proposal) => proposal.entry === entry || keyOf(proposal.entry) === keyOf(entry));
   return (
     <div class="stack">
-      <PageHead title="Applications">Connect to an application, decide on what it asks, and act on what your tokens control.</PageHead>
+      <PageHead title="Applications" />
       <div class="grid two apps-layout">
         <div class="stack">
           {shown.map((entry) => (
@@ -92,13 +92,25 @@ const Main = ({ owner, onView }: { owner: Owner; onView: (view: View) => void })
           <Tokens owner={owner} onView={onView} />
         </div>
         <div class="stack">
-          <Connections owner={owner} />
+          <Connect owner={owner} />
+          <Connected owner={owner} />
           <EarlierRequests owner={owner} />
         </div>
       </div>
     </div>
   );
 };
+
+/** A card's title with its explanation behind a "?", and what goes on the other side. */
+const TitleInfo = ({ title, label, info, aside }: { title: string; label: string; info: ComponentChildren; aside?: ComponentChildren }) => (
+  <div class="card-head">
+    <h2 class="title-info">
+      {title}
+      <Info label={label}>{info}</Info>
+    </h2>
+    {aside}
+  </div>
+);
 
 // ------------------------------------------------------------------ connecting
 
@@ -112,78 +124,120 @@ const STATES: Record<string, { label: string; tone?: 'good' | 'warn' | 'accent' 
 /** The application's own name for itself, as far as the wallet knows it. */
 export const nameOf = (apps: ApplicationsPart, pairing: string): string | undefined => apps.statuses[pairing]?.peerName ?? apps.connections.find((connection) => connection.pairing === pairing)?.name;
 
-const Connections = ({ owner }: { owner: Owner }) => {
+/**
+ * Connecting: the application's code scanned, or its link pasted. A page opened from an application's connection
+ * link shows the link, and connects only when the user says so.
+ */
+const Connect = ({ owner }: { owner: Owner }) => {
   const { apps } = owner;
   const incoming = kept('incoming');
   const fromLink = incoming?.kind === 'connect';
   const [text, setText] = useState(fromLink ? incoming.text : '');
   const [linked, setLinked] = useState(fromLink);
+  const [pasting, setPasting] = useState(fromLink);
+  const [scanning, setScanning] = useState(false);
   const task = useTask();
 
-  const connect = () =>
+  const connect = (value: string) =>
     task.run('connect', async () => {
-      const trimmed = text.trim();
+      const trimmed = value.trim();
       let offer: { uri: string; name?: string } | undefined;
       if (/^wiz:/i.test(trimmed)) offer = { uri: trimmed };
       else {
         const read = await readLink<{ uri?: unknown; name?: unknown }>(trimmed, 'connect').catch(() => undefined);
         if (typeof read?.uri === 'string' && /^wiz:/i.test(read.uri)) offer = { uri: read.uri, ...(typeof read.name === 'string' ? { name: read.name } : {}) };
       }
-      if (offer === undefined) throw new Error('This is not an application\'s connection address. It begins with "wiz://".');
+      if (offer === undefined) throw new Error('This is not an application\'s connection link. It begins with "wiz://".');
       try {
         apps.connect(offer.uri, offer.name);
       } catch (error) {
-        throw new Error(`The address cannot be used: ${(error as Error).message}`, { cause: error });
+        throw new Error(`The link cannot be used: ${(error as Error).message}`, { cause: error });
       }
       if (fromLink) keep('incoming', undefined);
       setLinked(false);
+      setPasting(false);
       setText('');
       owner.toast('Connecting to the application.');
     });
 
+  // A scanned code connects at once; if it cannot be used, it stays in the field with the reason.
+  const scanned = (value: string) => {
+    setText(value);
+    setPasting(true);
+    void connect(value);
+  };
+
   return (
-    <Card title="Connections">
-      {apps.connections.length === 0 ? (
-        <p class="muted">No application is connected.</p>
-      ) : (
-        <ul class="list connections">
-          {apps.connections.map((connection) => (
-            <ConnectionRow owner={owner} connection={connection} />
-          ))}
-        </ul>
+    <Card cls="connect-card">
+      <TitleInfo
+        title="Connect an app"
+        label="About connecting an app"
+        info={
+          <>
+            <span>The app shows a code, or a link starting with wiz://, when you choose to connect a wallet. Scan the code, paste the link, or open the app's link on this phone.</span>
+            <span>A connected app can ask this wallet to carry out actions of its template. Each one waits for your approval here. It learns the addresses in its own transactions and nothing else about the wallet.</span>
+          </>
+        }
+      />
+      {linked && (
+        <Notice tone="wait">
+          You opened an application's connection link. Connect only if you meant to; nothing is asked or sent until you connect.
+        </Notice>
       )}
-      <div class="connect-form">
-        {linked && (
-          <Notice tone="wait">
-            You opened an application's connection link. Connect only if you meant to; nothing is asked or sent until you connect.
-          </Notice>
-        )}
-        <Field label="Connect to an application" id="connect-address" hint="The application shows this address, starting with wiz://, when you choose to connect a wallet. Paste it here, or open the application's link on this phone." error={task.error?.message}>
-          <WithScan filter={CONNECTION_ADDRESS} onScan={setText}>
-            <TextArea id="connect-address" rows={2} value={text} onInput={setText} placeholder="wiz://…" invalid={task.error !== undefined} />
-          </WithScan>
-        </Field>
-        <div class="row">
-          <Button task={task} name="connect" disabled={text.trim() === ''} onClick={() => void connect()}>
-            Connect
-          </Button>
-          {linked && (
-            <Button
-              kind="quiet"
-              onClick={() => {
-                keep('incoming', undefined);
-                setLinked(false);
-                setText('');
-              }}
-            >
-              Not now
+      {pasting ? (
+        <>
+          <Field label="Connection link" id="connect-address" error={task.error?.message}>
+            <TextInput id="connect-address" value={text} onInput={setText} placeholder="wiz://…" invalid={task.error !== undefined} />
+          </Field>
+          <div class="actions">
+            <Button task={task} name="connect" disabled={text.trim() === ''} onClick={() => void connect(text)}>
+              Connect
             </Button>
-          )}
+            {linked ? (
+              <Button
+                kind="quiet"
+                onClick={() => {
+                  keep('incoming', undefined);
+                  setLinked(false);
+                  setPasting(false);
+                  setText('');
+                }}
+              >
+                Not now
+              </Button>
+            ) : (
+              <Button kind="quiet" onClick={() => setPasting(false)}>
+                Scan instead
+              </Button>
+            )}
+          </div>
+        </>
+      ) : (
+        <div class="connect-ways">
+          <Button block onClick={() => setScanning(true)}>
+            <CameraIcon /> Scan the app's code
+          </Button>
+          <Button kind="link" onClick={() => setPasting(true)}>
+            Paste a link instead
+          </Button>
         </div>
-        <p class="small muted">
-          A connected application can ask this wallet to carry out actions of its template. Each one waits for your approval here. It learns the addresses in its own transactions and nothing else about the wallet.
-        </p>
-      </div>
+      )}
+      {scanning && <ScanDialog filter={CONNECTION_ADDRESS} onScan={scanned} onClose={() => setScanning(false)} />}
+    </Card>
+  );
+};
+
+/** The applications this wallet is connected to; nothing while there are none. */
+const Connected = ({ owner }: { owner: Owner }) => {
+  const { apps } = owner;
+  if (apps.connections.length === 0) return null;
+  return (
+    <Card title="Connected apps" cls="connected-card">
+      <ul class="list connections">
+        {apps.connections.map((connection) => (
+          <ConnectionRow owner={owner} connection={connection} />
+        ))}
+      </ul>
     </Card>
   );
 };
@@ -415,7 +469,7 @@ const EarlierRequests = ({ owner }: { owner: Owner }) => {
   if (entries.length === 0) return null;
   const label = (entry: LedgerEntry): string => apps.applications.describeAction(actionOf(entry)) ?? `The action "${entry.templateAction}" of a template this phone does not keep`;
   return (
-    <Card title="Earlier requests">
+    <Card title="Earlier requests" cls="earlier-card">
       <ul class="list">
         {entries.map((entry) => {
           const transactionId = typeof entry.result?.['transactionId'] === 'string' ? entry.result['transactionId'] : undefined;
@@ -472,17 +526,19 @@ const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void 
     void read();
   }, [apps.version, count]);
   return (
-    <Card
-      title="Tokens"
-      aside={
-        tokens !== undefined && (
-          <Button small kind="quiet" task={task} name="read" onClick={() => void read()}>
-            Read again
-          </Button>
-        )
-      }
-    >
-      <p class="small muted card-lead">Tokens this wallet holds, with what each controls where a template you trust says so. Every token is kept and moves with the wallet in a recovery, whether or not its meaning is known.</p>
+    <Card cls="tokens-card">
+      <TitleInfo
+        title="Tokens"
+        label="About the tokens"
+        info="Tokens this wallet holds, with what each controls where a template you trust says so. Every token is kept and moves with the wallet in a recovery, whether or not its meaning is known."
+        aside={
+          tokens !== undefined && tokens.length > 0 && (
+            <Button small kind="quiet" task={task} name="read" onClick={() => void read()}>
+              Read again
+            </Button>
+          )
+        }
+      />
       {tokens === undefined ? (
         task.error === undefined ? (
           <div class="tokens-loading">
@@ -492,7 +548,7 @@ const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void 
           <TaskStatus task={task} name="read" />
         )
       ) : tokens.length === 0 ? (
-        <p class="empty">This wallet holds no tokens.</p>
+        <p class="tokens-none">No tokens yet.</p>
       ) : (
         <>
           {task.error !== undefined && <TaskStatus task={task} name="read" />}

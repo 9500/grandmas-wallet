@@ -56,7 +56,7 @@ interface Zoom {
   value: number;
 }
 
-const CameraIcon = () => (
+export const CameraIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true" class="scan-icon">
     <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
     <circle cx="12" cy="13" r="3.5" />

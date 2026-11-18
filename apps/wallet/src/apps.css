@@ -3,16 +3,22 @@
  * in parts (the template, its words, the wallet's figures), connections and the list of tokens.
  */
 
-/* On a phone: requests, then connections, then tokens, then earlier requests. On a desktop: two columns. */
+/*
+ * On a phone: open requests, connecting, the connected apps, the tokens, earlier requests. On a desktop: two columns,
+ * the requests and the tokens on the left, connecting and the earlier requests on the right.
+ */
 @media (max-width: 959.98px) {
   .apps-layout > .stack { display: contents; }
   .apps-layout .request-card { order: 1; }
-  .apps-layout > .stack:last-child > :first-child { order: 2; }
-  .apps-layout > .stack:first-child > :last-child { order: 3; }
-  .apps-layout > .stack:last-child > :nth-child(2) { order: 4; }
+  .apps-layout .connect-card { order: 2; }
+  .apps-layout .connected-card { order: 3; }
+  .apps-layout .tokens-card { order: 4; }
+  .apps-layout .earlier-card { order: 5; }
 }
 
 .card-lead { margin-top: -4px; }
+/* A card's title with its "?" */
+.title-info { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 
 /* A long hexadecimal value: shortened, whole on a tap. */
 button.hex {
@@ -173,23 +179,23 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .fold > .moved-note:first-of-type { margin: 0; }
 .failure { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 
-/* Connections */
-.connections { margin-bottom: 16px; }
+/* Connecting, and the connected apps */
+.connect-card > .notice { margin-bottom: 12px; }
+.connect-card .field { margin-bottom: 0; }
+.connect-ways { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.connect-ways > button.link { align-self: center; }
+.connect-ways .scan-icon { width: 20px; height: 20px; }
 .connection { align-items: flex-start; flex-wrap: wrap; row-gap: 6px; }
 .connection > :first-child { flex: 1 1 14em; }
 .connection-name { font-weight: 600; overflow-wrap: break-word; }
 .connection .pill { flex: none; }
 .connection-reason { margin: 6px 0 0; }
 .connection-actions { margin-top: 8px; }
-.connect-form { border-top: 1px solid var(--line); padding-top: 16px; }
-.connect-form > .notice { margin-bottom: 12px; }
-.connect-form .field { margin-bottom: 12px; }
-.connect-form textarea { min-height: 64px; }
-.connect-form > p { margin-top: 12px; }
 .earlier-error { margin: 6px 0 0; overflow-wrap: anywhere; }
 
 /* Tokens */
 .tokens-loading { display: flex; gap: 10px; align-items: center; color: var(--muted); padding: 8px 0; }
+.tokens-none { margin: 0; color: var(--muted); }
 .token { display: flex; flex-direction: column; gap: 10px; }
 .token-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .token-head > :first-child { min-width: 0; }

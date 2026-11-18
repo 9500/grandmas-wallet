@@ -1,7 +1,7 @@
 /*
  * The Send screen's parts: the choice between Bitcoin Cash and a token, the list of tokens to choose from, the
- * amount with what is available beside its label, the figure a review is about, and the review of a token that
- * gives its holder more than itself.
+ * amount with what is available beside its label and "Max" beside its field, the figure a review is about, and the
+ * review of a token that gives its holder more than itself.
  */
 
 .send-page { max-width: 640px; }
@@ -34,9 +34,10 @@
 .token-picker .choice-text > span { font-weight: 600; }
 .token-picker .choice-text small { overflow-wrap: anywhere; }
 
-.token-amount-row { display: flex; gap: 8px; align-items: center; }
-.token-amount-row .input-unit { flex: 1 1 auto; min-width: 0; }
-.token-amount-row > button { flex: none; }
+/* an amount with "Max" beside it */
+.amount-row { display: flex; gap: 8px; align-items: center; }
+.amount-row .input-unit { flex: 1 1 auto; min-width: 0; }
+.amount-row > button { flex: none; align-self: stretch; min-width: 72px; }
 .token-unit input { padding-right: 76px; }
 .token-unit span { max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

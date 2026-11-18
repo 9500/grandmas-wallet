@@ -70,6 +70,11 @@ export interface MonitorOptions {
    * it is called again.
    */
   autoCancel?: () => Promise<unknown>;
+  /**
+   * Whether `autoCancel` is to be used, asked each time a request is seen, so that a setting the user changes
+   * takes effect at the next check. Without it, `autoCancel` is always used.
+   */
+  autoCancelOn?: () => boolean;
   /** Default 90 seconds. */
   retryAfterMs?: number;
   /** Milliseconds; for tests. */
@@ -116,7 +121,7 @@ export class Monitor {
       this.status = status;
       options.onStatus(status, history);
     }
-    if (status.kind === 'recovery-requested' && options.autoCancel !== undefined) {
+    if (status.kind === 'recovery-requested' && options.autoCancel !== undefined && (options.autoCancelOn?.() ?? true)) {
       // The request is identified by where the controller is now. A cancellation moves the controller on;
       // a request that shows at another place is a new one, and one that stays is tried again after a while.
       const place = `${hex(history.current.utxo.transactionHash)}:${history.current.utxo.index}`;

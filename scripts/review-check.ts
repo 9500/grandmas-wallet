@@ -11,7 +11,7 @@
 // section opens; the buttons to decide stay within reach of a thumb on a phone.
 //
 // Screenshots, for a phone and a desktop, go to docs/screens/: wallet-receive, wallet-receive-vault,
-// wallet-receive-again, wallet-send-form, wallet-send-review, wallet-send-everything, wallet-send-done, the phone's
+// wallet-receive-again, wallet-send-form, wallet-send-review, wallet-send-max, wallet-send-everything, wallet-send-done, the phone's
 // wallet-info-open-phone, and wallet-review-borrow, wallet-review-close and wallet-review-box-open, each also with
 // its details open (-details).
 //
@@ -155,11 +155,26 @@ try {
   await page.getByTestId('sent-transaction').waitFor();
   await shoot(page, 'wallet-send-done');
   await page.getByRole('button', { name: 'Send another payment' }).click();
+  check((await page.getByRole('button', { name: 'Review' }).count()) === 1 && (await page.getByRole('button', { name: /Send everything/ }).count()) === 0, 'the form has one Review button, and "Max" instead of a button to send everything');
+  // "Max" before an address is entered: an estimate, worked out again in the review.
+  await page.getByRole('button', { name: 'Max', exact: true }).click();
+  await page.getByText('Everything the wallet can send', { exact: true }).waitFor();
+  const filled = await page.getByLabel('Amount').inputValue();
+  check(Number(filled) > 0, `"Max" fills the amount with what would arrive (${filled} BCH) and says so under the field`);
+  await shoot(page, 'wallet-send-max');
   await page.getByLabel('To').fill(destination);
-  await page.getByRole('button', { name: 'Send everything instead' }).click();
+  await page.getByRole('button', { name: 'Review', exact: true }).click();
   await page.getByText('Arrives', { exact: true }).first().waitFor();
   check(((await page.locator('dd').nth(1).textContent()) ?? '').includes('BCH'), 'sending everything shows what arrives as the second figure');
+  check((await page.getByText('Check and send').count()) === 1 && (await page.getByRole('button', { name: 'Send', exact: true }).count()) === 1, 'in the same "Check and send" card, with one Send button');
   await shoot(page, 'wallet-send-everything');
+  await page.getByRole('button', { name: 'Change', exact: true }).click();
+  await page.getByLabel('Amount').fill('0.0001');
+  check(!(await page.getByText('Everything the wallet can send', { exact: true }).isVisible()), 'an amount typed by hand leaves "Max"');
+  await page.goto(at('show=send&little'));
+  await page.getByRole('button', { name: 'Max', exact: true }).click();
+  await page.getByText('Too little to send').waitFor();
+  check(await page.getByText('The smallest amount that can arrive').isVisible(), 'with too little, "Max" says so, with the three figures');
 
   // ---------------------------------------------------------------- Send: a token
   await page.goto(at('show=send-token'));

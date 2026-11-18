@@ -88,7 +88,10 @@ const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: O
   const [arrival, setArrival] = useState(() => kept('arrival'));
   const [toastElement, toast] = useToast();
   const [dismissed, setDismissed] = useState(false);
-  const watch = useWatch(session, wallet, seed.controllerKey.keyHash);
+  const watch = useWatch(session, wallet, seed.controllerKey.keyHash, (sent) => {
+    noteActivity({ what: 'Refused a recovery request without asking', transactionId: sent.transactionId, bytes: sent.bytes, fee: String(sent.feeSatoshis), remainder: String(sent.remainderSatoshis) });
+    toast('A request to move this wallet was refused.');
+  });
   const apps = useApplications({
     session,
     wallet,
@@ -176,7 +179,6 @@ const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: O
           if (setup !== undefined) keep('setup', { ...setup, recipient: next.recipient });
         }
       }
-      if (kind === 'waiting period') keep('newDelay', undefined);
       setChange({});
       if (made.sent !== undefined) toast(kind === 'new seed' ? 'The wallet now belongs to your new phone.' : 'The change is made.');
       await checkReceipts();

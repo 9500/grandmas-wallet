@@ -1,5 +1,6 @@
 import type { EverythingQuote, HeldToken, PaymentQuote, SendableToken, SentEverything, TokenSendQuote, TokenSendRequest } from '@grandmas-wallet/app';
 import { TokenSendError, formatUnits, parseUnits, sendableTokens } from '@grandmas-wallet/app';
+import { encodeLockingBytecodeP2sh32 } from '@bitauth/libauth';
 import { InsufficientFundsError } from '@grandmas-wallet/core';
 import {
   Amount,
@@ -41,16 +42,16 @@ import './send.css';
 
 type Stage =
   | { at: 'form' }
-  | { at: 'review'; to: string; locking: Uint8Array; amount: bigint; quote: PaymentQuote }
-  | { at: 'review-everything'; to: string; locking: Uint8Array; quote: EverythingQuote }
+  | { at: 'review'; to: string; locking: Uint8Array; pay: { amount: bigint; quote: PaymentQuote } }
+  | { at: 'review'; to: string; locking: Uint8Array; everything: EverythingQuote }
   | { at: 'cannot'; total: bigint; fee: bigint; smallest: bigint }
   | { at: 'sent'; transactionIds: string[]; fee: bigint; bytes: number; amount: bigint; remainder: bigint };
 
 /**
  * Paying (proposal section 8): the fee of the transaction is shown before approval, with any remainder too
- * small to return; "send everything" shows what will arrive, or, when it cannot be done, the three figures.
- * A wallet that holds tokens chooses first between Bitcoin Cash and a token. Explanations are behind a "?" where
- * they belong; what guards against losing coins or tokens is always in view.
+ * small to return; "Max" sends everything, and the review shows what will arrive, or, when it cannot be done, the
+ * three figures. A wallet that holds tokens chooses first between Bitcoin Cash and a token. Explanations are behind
+ * a "?" where they belong; what guards against losing coins or tokens is always in view.
  */
 export const Send = ({ owner }: { owner: Owner }) => {
   const [chosen] = useState(takeChosenToken);
@@ -77,16 +78,48 @@ export const Send = ({ owner }: { owner: Owner }) => {
   );
 };
 
+/**
+ * Where "Max" works out what would arrive before an address is entered: a script hash, the longest ordinary
+ * destination, so that the estimate is never above what arrives. The review works it out again for the address.
+ */
+const ESTIMATE_DESTINATION = encodeLockingBytecodeP2sh32(new Uint8Array(32));
+
+/** An amount of satoshis as the amount field takes it. */
+const bchText = (satoshis: bigint): string => formatBch(satoshis).replace(/,/g, '');
+
 const CoinSend = ({ owner }: { owner: Owner }) => {
   const [stage, setStage] = useState<Stage>({ at: 'form' });
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
+  // "Max": the field holds what would arrive, and the review sends everything, so that nothing is left behind as dust.
+  const [max, setMax] = useState(false);
   const [errors, setErrors] = useState<{ to?: string; amount?: string }>({});
   const task = useTask();
   const network = owner.session.network;
 
-  const review = (everything: boolean) =>
-    task.run(everything ? 'everything' : 'review', async () => {
+  const cannot = (error: InsufficientFundsError): void => setStage({ at: 'cannot', total: error.totalSatoshis, fee: error.feeSatoshis, smallest: error.neededSatoshis - error.feeSatoshis });
+
+  const fillMax = () =>
+    task.run('max', async () => {
+      let locking = ESTIMATE_DESTINATION;
+      try {
+        locking = lockingBytecodeOfAddress(to, network);
+      } catch {
+        // No address yet, or not one that reads: an estimate now, the exact figures in the review.
+      }
+      try {
+        const quote = await owner.wallet.quoteSendEverything(locking);
+        setAmount(bchText(quote.sentSatoshis));
+        setMax(true);
+        setErrors({ ...(errors.to === undefined ? {} : { to: errors.to }) });
+      } catch (error) {
+        if (!(error instanceof InsufficientFundsError)) throw error;
+        cannot(error);
+      }
+    });
+
+  const review = () =>
+    task.run('review', async () => {
       const found: { to?: string; amount?: string } = {};
       let locking: Uint8Array | undefined;
       try {
@@ -94,21 +127,21 @@ const CoinSend = ({ owner }: { owner: Owner }) => {
       } catch (error) {
         found.to = (error as Error).message;
       }
-      const satoshis = everything ? 0n : parseBch(amount);
+      const satoshis = max ? 0n : parseBch(amount);
       if (typeof satoshis === 'string') found.amount = satoshis;
       setErrors(found);
       if (locking === undefined || typeof satoshis === 'string') return;
-      if (everything) {
+      if (max) {
         try {
-          setStage({ at: 'review-everything', to: to.trim(), locking, quote: await owner.wallet.quoteSendEverything(locking) });
+          setStage({ at: 'review', to: to.trim(), locking, everything: await owner.wallet.quoteSendEverything(locking) });
         } catch (error) {
           if (!(error instanceof InsufficientFundsError)) throw error;
-          setStage({ at: 'cannot', total: error.totalSatoshis, fee: error.feeSatoshis, smallest: error.neededSatoshis - error.feeSatoshis });
+          cannot(error);
         }
         return;
       }
       try {
-        setStage({ at: 'review', to: to.trim(), locking, amount: satoshis, quote: await owner.wallet.quotePay([{ lockingBytecode: locking, valueSatoshis: satoshis }]) });
+        setStage({ at: 'review', to: to.trim(), locking, pay: { amount: satoshis, quote: await owner.wallet.quotePay([{ lockingBytecode: locking, valueSatoshis: satoshis }]) } });
       } catch (error) {
         if (error instanceof InsufficientFundsError) {
           setErrors({ amount: `The wallet can spend ${formatSatoshis(error.totalSatoshis)} satoshis; this payment and its fee need ${formatSatoshis(error.neededSatoshis)}.` });
@@ -124,22 +157,25 @@ const CoinSend = ({ owner }: { owner: Owner }) => {
 
   const send = () =>
     task.run('send', async (progress) => {
-      if (stage.at === 'review') {
+      if (stage.at !== 'review') return;
+      const where = shorten(stage.to.replace(/^[a-z]+:/, ''), 10, 6);
+      if ('pay' in stage) {
+        const { amount: paid } = stage.pay;
         progress('Signing and sending');
-        const sent = await owner.wallet.pay([{ lockingBytecode: stage.locking, valueSatoshis: stage.amount }]);
-        owner.sent(`Sent ${formatSatoshis(stage.amount)} sat to ${shorten(stage.to.replace(/^[a-z]+:/, ''), 10, 6)}`, sent, stage.amount);
-        setStage({ at: 'sent', transactionIds: [sent.transactionId], fee: sent.feeSatoshis, bytes: sent.bytes, amount: stage.amount, remainder: sent.remainderSatoshis });
-      } else if (stage.at === 'review-everything') {
+        const sent = await owner.wallet.pay([{ lockingBytecode: stage.locking, valueSatoshis: paid }]);
+        owner.sent(`Sent ${formatSatoshis(paid)} sat to ${where}`, sent, paid);
+        setStage({ at: 'sent', transactionIds: [sent.transactionId], fee: sent.feeSatoshis, bytes: sent.bytes, amount: paid, remainder: sent.remainderSatoshis });
+      } else {
         progress('Signing and sending everything');
         const sent: SentEverything = await owner.wallet.sendEverything(stage.locking);
-        for (const transaction of sent.transactions) owner.sent(`Sent everything to ${shorten(stage.to.replace(/^[a-z]+:/, ''), 10, 6)}`, transaction);
+        for (const transaction of sent.transactions) owner.sent(`Sent everything to ${where}`, transaction);
         setStage({ at: 'sent', transactionIds: sent.transactions.map((entry) => entry.transactionId), fee: sent.feeSatoshis, bytes: sent.transactions.reduce((sum, entry) => sum + entry.bytes, 0), amount: sent.sentSatoshis, remainder: 0n });
       }
     });
 
   const back = () => setStage({ at: 'form' });
 
-  const hint = amountHint(amount);
+  const hint = max ? 'Everything the wallet can send' : amountHint(amount);
   return (
     <div class="stack">
         {stage.at === 'form' && (
@@ -149,7 +185,7 @@ const CoinSend = ({ owner }: { owner: Owner }) => {
                 <TextInput id="to" value={to} onInput={setTo} placeholder={network === 'mainnet' ? 'bitcoincash:…' : 'bchtest:…'} invalid={errors.to !== undefined} />
               </WithScan>
             </Field>
-            {/* The names of the "?" buttons here hold neither "to" nor "amount": the scripted courses find the fields by those labels. */}
+            {/* The names of the "?" buttons and of "Max" here hold neither "to" nor "amount": the scripted courses find the fields by those labels. */}
             <div class="field">
               <div class="field-head">
                 <InfoLabel htmlFor="amount" label="About BCH units" info="In BCH. One BCH is 100,000,000 satoshis.">
@@ -159,73 +195,79 @@ const CoinSend = ({ owner }: { owner: Owner }) => {
                   {owner.balance === undefined ? '…' : <Amount satoshis={owner.balance.recoverable} />}
                 </Available>
               </div>
-              <div class="input-unit">
-                <TextInput id="amount" numeric value={amount} onInput={setAmount} placeholder="0.00" invalid={errors.amount !== undefined} />
-                <span>BCH</span>
+              <div class="amount-row">
+                <div class="input-unit">
+                  <TextInput
+                    id="amount"
+                    numeric
+                    value={amount}
+                    onInput={(value) => {
+                      setAmount(value);
+                      setMax(false);
+                    }}
+                    placeholder="0.00"
+                    invalid={errors.amount !== undefined}
+                  />
+                  <span>BCH</span>
+                </div>
+                <Button kind="quiet" small task={task} name="max" onClick={() => void fillMax()}>
+                  Max
+                </Button>
               </div>
               {errors.amount !== undefined ? <div class="field-error">{errors.amount}</div> : hint !== undefined && <div class="hint">{hint}</div>}
             </div>
             <TaskStatus task={task} />
             <div class="actions">
-              <Button task={task} name="review" onClick={() => void review(false)}>
+              <Button task={task} name="review" onClick={() => void review()}>
                 Review
-              </Button>
-              <Button kind="quiet" task={task} name="everything" onClick={() => void review(true)}>
-                Send everything instead
               </Button>
             </div>
           </Card>
         )}
         {stage.at === 'review' && (
           <Card title="Check and send" cls="send-review">
-            <Hero label="You send" to={stage.to}>
-              {formatBch(stage.amount)}
-            </Hero>
-            <KeyValues
-              entries={[
-                ['To', <span class="mono">{shorten(stage.to, 16, 8)}</span>],
-                ['Amount', <Amount satoshis={stage.amount} exact />],
-                [<FeeName detail={`${stage.quote.bytes} bytes at one satoshi per byte, which is what the network asks.`} />, <Sat satoshis={stage.quote.feeSatoshis} />],
-                [<strong>Leaves the wallet</strong>, <strong><Amount satoshis={stage.amount + stage.quote.feeSatoshis} exact /></strong>],
-              ]}
-            />
-            {stage.quote.remainderSatoshis > 0n && (
-              <Notice>
-                The fee includes <Sat satoshis={stage.quote.remainderSatoshis} /> that is too little to come back as change.
-              </Notice>
+            {'pay' in stage ? (
+              <>
+                <Hero label="You send" to={stage.to}>
+                  {formatBch(stage.pay.amount)}
+                </Hero>
+                <KeyValues
+                  entries={[
+                    ['To', <span class="mono">{shorten(stage.to, 16, 8)}</span>],
+                    ['Amount', <Amount satoshis={stage.pay.amount} exact />],
+                    [<FeeName detail={`${stage.pay.quote.bytes} bytes at one satoshi per byte, which is what the network asks.`} />, <Sat satoshis={stage.pay.quote.feeSatoshis} />],
+                    [<strong>Leaves the wallet</strong>, <strong><Amount satoshis={stage.pay.amount + stage.pay.quote.feeSatoshis} exact /></strong>],
+                  ]}
+                />
+                {stage.pay.quote.remainderSatoshis > 0n && (
+                  <Notice>
+                    The fee includes <Sat satoshis={stage.pay.quote.remainderSatoshis} /> that is too little to come back as change.
+                  </Notice>
+                )}
+              </>
+            ) : (
+              <>
+                <Hero label="You send everything" to={stage.to}>
+                  {formatBch(stage.everything.sentSatoshis)}
+                </Hero>
+                <KeyValues
+                  entries={[
+                    ['To', <span class="mono">{shorten(stage.to, 16, 8)}</span>],
+                    [<strong>Arrives</strong>, <strong><Amount satoshis={stage.everything.sentSatoshis} exact /></strong>],
+                    [<FeeName detail={`${stage.everything.transactions === 1 ? 'One transaction' : `${stage.everything.transactions} transactions`}, at one satoshi per byte, which is what the network asks.`} />, <Sat satoshis={stage.everything.feeSatoshis} />],
+                  ]}
+                />
+                {(owner.balance?.tokens.length ?? 0) > 0 && <Notice>Tokens stay where they are.</Notice>}
+                {stage.everything.leftOut > 0 && <Notice>{stage.everything.leftOut} coin(s) hold less than it costs to send them and stay in the wallet.</Notice>}
+              </>
             )}
             <TaskStatus task={task} name="send" />
             <div class="actions">
               <Button task={task} name="send" onClick={() => void send()}>
                 Send
               </Button>
-              <Button kind="quiet" onClick={back}>
+              <Button kind="quiet" disabled={task.busy !== undefined} onClick={back}>
                 Change
-              </Button>
-            </div>
-          </Card>
-        )}
-        {stage.at === 'review-everything' && (
-          <Card title="Send everything" cls="send-review">
-            <Hero label="You send everything" to={stage.to}>
-              {formatBch(stage.quote.sentSatoshis)}
-            </Hero>
-            <KeyValues
-              entries={[
-                ['To', <span class="mono">{shorten(stage.to, 16, 8)}</span>],
-                [<strong>Arrives</strong>, <strong><Amount satoshis={stage.quote.sentSatoshis} exact /></strong>],
-                [<FeeName detail={`${stage.quote.transactions === 1 ? 'One transaction' : `${stage.quote.transactions} transactions`}, at one satoshi per byte, which is what the network asks.`} />, <Sat satoshis={stage.quote.feeSatoshis} />],
-              ]}
-            />
-            {(owner.balance?.tokens.length ?? 0) > 0 && <Notice>Tokens stay where they are.</Notice>}
-            {stage.quote.leftOut > 0 && <Notice>{stage.quote.leftOut} coin(s) hold less than it costs to send them and stay in the wallet.</Notice>}
-            <TaskStatus task={task} name="send" />
-            <div class="actions">
-              <Button task={task} name="send" onClick={() => void send()}>
-                Send everything
-              </Button>
-              <Button kind="quiet" onClick={back}>
-                Back
               </Button>
             </div>
           </Card>
@@ -268,6 +310,7 @@ const CoinSend = ({ owner }: { owner: Owner }) => {
                 onClick={() => {
                   setTo('');
                   setAmount('');
+                  setMax(false);
                   back();
                 }}
               >
@@ -547,13 +590,13 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
                       </InfoLabel>
                       <Available>{amountText(token.amount, token.names)}</Available>
                     </div>
-                    <div class="token-amount-row">
+                    <div class="amount-row">
                       <div class="input-unit token-unit">
                         <TextInput id="token-amount" numeric value={amount} onInput={setAmount} placeholder={decimals === 0 ? '0' : `0.${'0'.repeat(decimals)}`} invalid={errors.amount !== undefined} />
                         <span>{symbol}</span>
                       </div>
                       <Button kind="quiet" small onClick={() => setAmount(formatUnits(token.amount, decimals).replace(/,/g, ''))}>
-                        All
+                        Max
                       </Button>
                     </div>
                     {errors.amount !== undefined ? <div class="field-error">{errors.amount}</div> : <TokenAmountHint text={amount} decimals={decimals} token={token} />}

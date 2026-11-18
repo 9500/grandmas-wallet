@@ -20,7 +20,7 @@ const server = (chain: SimulatedChain) => {
   return { reader, hidden };
 };
 
-const setup = (autoCancel = false) => {
+const setup = (autoCancel = false, on?: () => boolean) => {
   const chain = new SimulatedChain();
   const wallet = TestWallet.create(chain, { owner, recovererKeyHash: recoverer.keyHash });
   const first = server(chain);
@@ -43,6 +43,7 @@ const setup = (autoCancel = false) => {
             // Any action by the owner clears the request.
             cancellations.push(wallet.authorize(owner));
           },
+          ...(on === undefined ? {} : { autoCancelOn: on }),
         }
       : {}),
   });
@@ -90,6 +91,25 @@ describe('watching for recovery requests', () => {
     expect(await monitor.check()).toEqual({ kind: 'quiet' });
     expect(cancellations).toHaveLength(1);
     expect(wallet.controller().state.status).toBe('active');
+  });
+
+  it('asks whether to cancel each time it sees a request, so that a changed setting counts at the next check', async () => {
+    const setting = { on: false };
+    const { wallet, monitor, cancellations } = setup(true, () => setting.on);
+    wallet.requestRecovery(recoverer, stranger.keyHash);
+    expect((await monitor.check())?.kind).toBe('recovery-requested');
+    expect(cancellations).toHaveLength(0);
+    // Turned on while the request is open: the next check cancels it, without waiting for a retry.
+    setting.on = true;
+    await monitor.check();
+    expect(cancellations).toHaveLength(1);
+    expect(await monitor.check()).toEqual({ kind: 'quiet' });
+    // Turned off again: a new request is left to the owner.
+    setting.on = false;
+    wallet.requestRecovery(recoverer, stranger.keyHash);
+    expect((await monitor.check())?.kind).toBe('recovery-requested');
+    await monitor.check();
+    expect(cancellations).toHaveLength(1);
   });
 
   it('RC09: when its cancellation does not stay in the chain, the request is seen again and cancelled again', async () => {

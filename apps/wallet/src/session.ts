@@ -113,8 +113,6 @@ export interface Kept {
   moveOut: { updateLink: string; moveLink: string; fingerprint: string };
   /** A new recoverer being enrolled. */
   newRecoverer: { recipient: StoredRecipient; credentialWords: string; link: string; delay?: ChallengeDelay };
-  /** A new waiting period being announced. */
-  newDelay: { delay: ChallengeDelay; link: string };
   /** After a takeover, a move or a restore: where bringing the coins over stands. */
   arrival: { from: 'takeover' | 'move' | 'restore'; missing: string[]; searched?: 'quick' | 'full'; swept?: boolean };
   watchLog: WatchLog;
@@ -123,7 +121,7 @@ export interface Kept {
   receive: { number: number; again: boolean };
   /** The vault address shown, likewise. */
   vaultReceive: { number: number; again: boolean };
-  /** Refuse a request to another key without asking. */
+  /** Refuse a request to another key without asking. On unless the user turned it off. */
   autoCancel: boolean;
   /**
    * Kept by phones that made their wallet themselves, when the network no longer had its creation. Read by nothing new.
@@ -166,6 +164,9 @@ export interface Connection {
 
 export const kept = <Name extends keyof Kept>(name: Name): Kept[Name] | undefined => vault.get<Kept[Name]>(name);
 export const keep = <Name extends keyof Kept>(name: Name, value: Kept[Name] | undefined): void => (value === undefined ? vault.remove(name) : vault.set(name, value));
+
+/** Whether a request to another key is refused without asking: so unless the user turned it off. */
+export const refusesWithoutAsking = (): boolean => kept('autoCancel') !== false;
 
 export interface Session {
   environment: Environment;

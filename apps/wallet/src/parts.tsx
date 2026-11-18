@@ -1,5 +1,3 @@
-import { describeDelay } from '@grandmas-wallet/app';
-import type { ChallengeDelay } from '@grandmas-wallet/core';
 import { Button, Choice, Field, Fingerprint, Notice, Sat, TextArea, formatDuration, formatTime, shorten, useTask } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
@@ -8,26 +6,6 @@ import { joinRecoverer, leaveRecoverer } from './hand-to-recoverer.js';
 import { RECOVERER_LINK } from './scan.js';
 import { WithScan } from './Scanner.js';
 import { type Activity, type StoredRecipient, keep, kept, readRecipientLink, recipientFingerprint } from './session.js';
-
-/** Waiting periods to choose from. Counted in time, by the chain's clock, in steps of 512 seconds. */
-export const DELAYS: { delay: ChallengeDelay; hint: string }[] = [
-  { delay: { unit: 'time512', value: 1 }, hint: 'For trying the wallet out. Too short to rely on.' },
-  { delay: { unit: 'time512', value: 7 }, hint: 'Enough if this phone is nearly always on and online.' },
-  { delay: { unit: 'time512', value: 169 }, hint: 'A day to notice and say no.' },
-  { delay: { unit: 'time512', value: 1182 }, hint: 'A week. Safer, and a lost phone takes a week to replace.' },
-];
-
-export const sameDelay = (a: ChallengeDelay, b: ChallengeDelay): boolean => a.unit === b.unit && a.value === b.value;
-
-export const DelayPicker = ({ value, onChange, name }: { value: ChallengeDelay; onChange: (delay: ChallengeDelay) => void; name: string }) => (
-  <div role="radiogroup">
-    {DELAYS.map(({ delay, hint }) => (
-      <Choice type="radio" name={name} checked={sameDelay(delay, value)} onChange={() => onChange(delay)} title={describeDelay(delay)}>
-        {hint}
-      </Choice>
-    ))}
-  </div>
-);
 
 /**
  * Taking in a recoverer's link: from the page's address when the page was opened with one, scanned, or pasted.

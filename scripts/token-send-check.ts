@@ -4,11 +4,11 @@
 //
 // Checked: the Send screen opens on the token another screen chose, with the choice between Bitcoin Cash and a
 // token; a token named by a trusted template shows its name, its amount in its decimals and where the name comes
-// from; an amount with more decimals than the token has is refused, not rounded; "All" fills the whole balance; a
+// from; an amount with more decimals than the token has is refused, not rounded; "Max" fills the whole balance; a
 // plain address is refused before anything is built, with what to ask the receiver for; a token address gives the
 // review with what goes, the token change and the fee; a token that controls something says what, and cannot be
-// sent until the user ticks that they understand; the Receive screen's switch shows the same address in its token
-// form, in the text, the copy button and the code. Screenshots, for a phone and a desktop, go to docs/screens/:
+// sent until the user ticks that they understand; the Receive screen shows the address in its token form first, and
+// its switch shows the same address in the plain form, in the text, the copy button and the code. Screenshots, for a phone and a desktop, go to docs/screens/:
 // wallet-send-token-choice, wallet-send-token-review, wallet-send-token-controls, wallet-send-token-plain-address
 // and wallet-receive-token.
 //
@@ -100,8 +100,8 @@ try {
   await page.getByRole('button', { name: 'Review' }).click();
   await page.locator('.field-error', { hasText: 'Nothing is rounded' }).waitFor();
   check(!(await page.getByText('Check and send').isVisible()), 'an amount with more decimals than the token has is refused, not rounded');
-  await page.getByRole('button', { name: 'All', exact: true }).click();
-  check((await page.locator('#token-amount').inputValue()) === '250.00', '"All" fills the whole balance, 250.00');
+  await page.getByRole('button', { name: 'Max', exact: true }).click();
+  check((await page.locator('#token-amount').inputValue()) === '250.00', '"Max" fills the whole balance, 250.00');
 
   await page.locator('#token-amount').fill('12.50');
   await page.locator('#token-to').fill(plainAddress);
@@ -148,15 +148,17 @@ try {
   await page.goto(`http://localhost:${PORT}/fixtures.html?show=receive`);
   const shown = page.getByTestId('receive-address');
   await shown.waitFor();
-  const plain = (await shown.getAttribute('data-value')) ?? '';
-  check((await shown.getAttribute('data-form')) === 'plain' && /^bchtest:p/.test(plain), 'the Receive screen shows the plain form by default');
-  await page.getByRole('checkbox', { name: /Receiving a token\?/ }).check();
-  await page.locator('[data-form="tokens"]').waitFor();
   const tokens = (await shown.getAttribute('data-value')) ?? '';
-  const both = [cashAddressToLockingBytecode(plain), cashAddressToLockingBytecode(tokens)] as { bytecode: Uint8Array; tokenSupport: boolean }[];
-  check(/^bchtest:r/.test(tokens) && both[1]?.tokenSupport === true && Buffer.from(both[0]?.bytecode ?? []).equals(Buffer.from(both[1]?.bytecode ?? [])), 'the switch shows the same address in its token form');
+  check((await shown.getAttribute('data-form')) === 'tokens' && /^bchtest:r/.test(tokens) && (await page.getByRole('checkbox', { name: /Receiving a token\?/ }).isChecked()), 'the Receive screen shows the token form by default, "Receiving a token?" ticked');
   check((await page.getByRole('button', { name: 'Copy token address' }).count()) === 1 && (await page.getByLabel('QR code of the token address').count()) === 1, 'and the copy button and the code follow it');
   check(await page.getByText('The same address, written for wallets that send tokens.').isVisible(), 'one line says it is the same address');
+  await page.getByRole('checkbox', { name: /Receiving a token\?/ }).uncheck();
+  await page.locator('[data-form="plain"]').waitFor();
+  const plain = (await shown.getAttribute('data-value')) ?? '';
+  const both = [cashAddressToLockingBytecode(plain), cashAddressToLockingBytecode(tokens)] as { bytecode: Uint8Array; tokenSupport: boolean }[];
+  check(/^bchtest:p/.test(plain) && both[1]?.tokenSupport === true && Buffer.from(both[0]?.bytecode ?? []).equals(Buffer.from(both[1]?.bytecode ?? [])), 'unticked, the switch shows the same address in its plain form');
+  check((await page.getByRole('button', { name: 'Copy address' }).count()) === 1 && (await page.getByLabel('QR code of the address').count()) === 1, 'and the copy button and the code follow it');
+  await page.getByRole('checkbox', { name: /Receiving a token\?/ }).check();
   await page.getByRole('button', { name: 'For regular payments' }).click();
   await page.locator('[data-form="tokens"]').waitFor();
   check(((await shown.getAttribute('data-value')) ?? '') !== tokens, 'the switch applies to the lasting address as well');

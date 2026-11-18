@@ -15,6 +15,13 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hook
 const WIDEST = 320;
 const EDGE = 12;
 
+/**
+ * The bubble until it is placed: measured out of the page's layout, at the screen's corner. Laid out beside a button
+ * near the right edge, it would stick out of the screen sideways; a phone's browser then scrolls the page, and the
+ * bubble would be placed from where the button had moved to.
+ */
+const UNPLACED = { position: 'fixed', left: '0px', top: '0px', visibility: 'hidden' } as const;
+
 export const Info = ({ label, children, wide }: { label: string; children: ComponentChildren; wide?: boolean }) => {
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<{ left: number; arrow: number; above: boolean; width: number } | undefined>();
@@ -80,7 +87,7 @@ export const Info = ({ label, children, wide }: { label: string; children: Compo
         role="note"
         class={`info-bubble${place?.above === true ? ' above' : ''}`}
         hidden={!open}
-        style={place === undefined ? { visibility: 'hidden' } : ({ left: `${place.left}px`, width: `${place.width}px`, '--arrow': `${place.arrow}px` } as Record<string, string>)}
+        style={place === undefined ? UNPLACED : ({ left: `${place.left}px`, width: `${place.width}px`, '--arrow': `${place.arrow}px` } as Record<string, string>)}
       >
         {children}
       </span>

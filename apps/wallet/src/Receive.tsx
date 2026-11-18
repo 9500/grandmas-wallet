@@ -11,15 +11,16 @@ type Kind = 'once' | 'vault';
 /**
  * Receiving (proposal section 8): a fresh address for each payment, and a vault address for a payer who
  * keeps the address for years. When the window of unused addresses is full, an address already given out is
- * shown again, and the page says so. Every address can hold tokens: a switch shows the same address in the
- * form that says so, which wallets that send tokens ask for. What each kind is for is behind a "?".
+ * shown again, and the page says so. Every address can hold tokens: it is shown first in the form that says so,
+ * which wallets that send tokens ask for, and a switch shows the plain form. What each kind is for is behind a "?".
  */
 export const Receive = ({ owner }: { owner: Owner }) => {
   const { wallet } = owner;
   const [kind, setKind] = useState<Kind>('once');
   const [once, setOnce] = useState(() => kept('receive'));
   const [vault, setVault] = useState(() => kept('vaultReceive'));
-  const [tokens, setTokens] = useState(false);
+  // The token form is shown first: it pays the same as the plain one, and wallets that send tokens ask for it.
+  const [tokens, setTokens] = useState(true);
   const task = useTask();
   const shown = kind === 'once' ? once : vault;
 

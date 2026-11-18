@@ -1,25 +1,25 @@
 import { generateBip39Mnemonic } from '@bitauth/libauth';
 import { type NewSeedPreparation, describeDelay, enroll, makeUserBackup, sendUpdate, userBackupText } from '@grandmas-wallet/app';
 import { makeLink, readLink } from '@grandmas-wallet/app/links';
-import type { ChallengeDelay } from '@grandmas-wallet/core';
 import { sealedOfLink } from '@grandmas-wallet/app/hand-off';
 import { Button, Card, Choice, Field, Fingerprint, HandOff, Info, KeyValues, LinkRow, Notice, PageHead, Segmented, TaskStatus, TextArea, CopyButton, download, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import type { Owner } from './OwnerApp.js';
-import { DELAYS, DelayPicker, RecipientCheck, RecipientEntry, Waiting, sameDelay } from './parts.js';
+import { RecipientCheck, RecipientEntry, Waiting } from './parts.js';
 import { ProtectionStatus } from './Protection.js';
-import { type StoredRecipient, deviceWords, keep, kept, recipientFingerprint, recipientOf, sealedContent } from './session.js';
+import { type StoredRecipient, deviceWords, keep, kept, recipientFingerprint, recipientOf, refusesWithoutAsking, sealedContent } from './session.js';
 import { handToRecoverer } from './hand-to-recoverer.js';
 import { PREPARE_LINK } from './scan.js';
 import { WithScan } from './Scanner.js';
 import { SealedHandOff } from './SealedHandOff.js';
 
-type View = 'main' | 'move' | 'recoverer' | 'delay' | 'backup';
+type View = 'main' | 'move' | 'recoverer' | 'backup';
 
-/** Recovery and everything rarer: the recoverer, the waiting period, a new phone, the user's own backup. */
+/** Recovery and everything rarer: the recoverer, a new phone, the user's own backup. The waiting period is shown; it is set when the wallet is made. */
 export const Recovery = ({ owner }: { owner: Owner }) => {
-  const [auto, setAutoState] = useState(() => kept('autoCancel') === true);
+  const [auto, setAutoState] = useState(refusesWithoutAsking);
+  // The watch reads the setting each time it sees a request: a change counts from the next check.
   const setAuto = (value: boolean) => {
     keep('autoCancel', value);
     setAutoState(value);
@@ -28,13 +28,13 @@ export const Recovery = ({ owner }: { owner: Owner }) => {
   const back = () => setView('main');
   if (view === 'move') return <MoveOut owner={owner} onBack={back} />;
   if (view === 'recoverer') return <NewRecoverer owner={owner} onBack={back} />;
-  if (view === 'delay') return <NewDelay owner={owner} onBack={back} />;
   if (view === 'backup') return <Backup owner={owner} onBack={back} />;
   const recipient = kept('recipient');
   const history = owner.watch.history;
   const announced = kept('arrangement')?.change;
-  // A change that has been made is in effect; it is only followed until a block holds it.
-  const pending = announced?.made === undefined ? announced : undefined;
+  // A change that has been made is in effect; it is only followed until a block holds it. A change of the waiting
+  // period announced by an earlier version of the page is still made, and not shown here.
+  const pending = announced?.made === undefined && (announced?.kind === 'new seed' || announced?.kind === 'new recoverer') ? announced : undefined;
   return (
     <div class="stack">
       <PageHead title="Recovery" />
@@ -53,26 +53,26 @@ export const Recovery = ({ owner }: { owner: Owner }) => {
             <p class="small muted">This page checks the wallet every 15 seconds while it is open. A phone with the page closed, or switched off, does not watch; keep it open, or open it at least once within every waiting period.</p>
           </Card>
           {pending !== undefined && (
-            <Card title={pending.kind === 'new seed' ? 'Moving to a new phone' : pending.kind === 'new recoverer' ? 'Changing your recoverer' : 'Changing the waiting period'} tone="warn">
+            <Card title={pending.kind === 'new seed' ? 'Moving to a new phone' : 'Changing your recoverer'} tone="warn">
               <ChangeState owner={owner} />
               <div class="actions">
-                <Button kind="secondary" onClick={() => setView(pending.kind === 'new seed' ? 'move' : pending.kind === 'new recoverer' ? 'recoverer' : 'delay')}>
+                <Button kind="secondary" onClick={() => setView(pending.kind === 'new seed' ? 'move' : 'recoverer')}>
                   Show the links again
                 </Button>
               </div>
             </Card>
           )}
           <Card>
-            <Choice type="checkbox" checked={auto} onChange={(value) => { setAuto(value); owner.toast(value ? 'Requests are refused without asking while this page is open.' : 'You are asked before a request is refused.'); }} title="Refuse requests without asking">
-              While this page is open, a request to a key this phone does not hold is refused at once. Takes effect when the page is opened again.
-            </Choice>
+            <div class="choice-info">
+              <Choice type="checkbox" checked={auto} onChange={(value) => { setAuto(value); owner.toast(value ? 'Requests are refused without asking while this page is open.' : 'You are asked before a request is refused.'); }} title="Refuse requests without asking" />
+              <Info label="About refusing without asking">While this page is open, a request to a key this phone does not hold is refused at once.</Info>
+            </div>
           </Card>
         </div>
         <div class="stack">
           <Card title="Changes">
             <LinkRow label="Move to a new phone" hint="Your old phone hands the wallet over, with no waiting period." onClick={() => setView('move')} />
             <LinkRow label="Change your recoverer" hint="Another person, or the same with a new key." onClick={() => setView('recoverer')} />
-            <LinkRow label="Change the waiting period" hint={history === undefined ? undefined : `Now ${describeDelay(history.current.state.challengeDelay)}.`} onClick={() => setView('delay')} />
             <LinkRow label="Your own backup" hint="Twelve words and the wallet's identity, kept by you." onClick={() => setView('backup')} />
             <LinkRow label="Technical details" hint="Identity, keys, servers. Erase this phone." onClick={() => owner.navigate('details')} />
           </Card>
@@ -319,59 +319,23 @@ const NewRecoverer = ({ owner, onBack }: { owner: Owner; onBack: () => void }) =
   );
 };
 
-/** A new waiting period: announced to the recoverer, made after its prepared receipt. */
-const NewDelay = ({ owner, onBack }: { owner: Owner; onBack: () => void }) => {
-  const current = owner.watch.history?.current.state.challengeDelay;
-  const [pending, setPending] = useState(() => kept('newDelay'));
-  const [delay, setDelay] = useState<ChallengeDelay>(() => DELAYS.find((entry) => current === undefined || !sameDelay(entry.delay, current))?.delay ?? { unit: 'time512', value: 7 });
-  const task = useTask();
-  const announce = () =>
-    task.run('announce', async () => {
-      const recipient = kept('recipient');
-      const arrangement = kept('arrangement');
-      if (recipient === undefined || arrangement === undefined) throw new Error(noRecipient);
-      const sent = await sendUpdate({ wallet: owner.wallet, seed: owner.seed, chain: owner.session.chain, arrangement, recipient: recipientOf(recipient), challengeDelay: delay });
-      const made = { delay, link: await makeLink(recipient.page, 'update', sealedContent(sent.sealed)) };
-      keep('arrangement', sent.arrangement);
-      keep('newDelay', made);
-      setPending(made);
-    });
-  return (
-    <div class="stack">
-      <Back onBack={onBack} />
-      <PageHead title="Change the waiting period">{current === undefined ? '' : `Now ${describeDelay(current)}.`}</PageHead>
-      {pending !== undefined ? (
-        <Card title={`To ${describeDelay(pending.delay)}`}>
-          <HandOff text={pending.link} qrLabel="QR code of the update for your recoverer" copyLabel="Copy link" testId="delay-link">
-            <p>Send this link to {kept('recipient')?.name || 'your recoverer'}. Once they have taken it in, this phone makes the change.</p>
-          </HandOff>
-          <div class="actions">{kept('arrangement')?.change?.kind === 'waiting period' && kept('arrangement')?.change?.made === undefined ? <ChangeState owner={owner} /> : <Notice tone="good">The waiting period is changed.</Notice>}</div>
-        </Card>
-      ) : (
-        <Card>
-          <DelayPicker value={delay} onChange={setDelay} name="new-delay" />
-          <TaskStatus task={task} name="announce" />
-          <div class="actions">
-            <Button task={task} name="announce" disabled={current !== undefined && sameDelay(current, delay)} onClick={() => void announce()}>
-              Tell my recoverer
-            </Button>
-          </div>
-        </Card>
-      )}
-    </div>
-  );
+/** The backup's text, as this phone makes it. */
+const backupOf = async (owner: Owner, complete: boolean): Promise<string> => {
+  const arrangement = kept('arrangement');
+  return userBackupText(await makeUserBackup({ words: deviceWords(), wallet: owner.wallet, network: owner.session.network, chain: owner.session.chain, ...(arrangement === undefined ? {} : { arrangement }), complete }));
 };
 
-/** The backup the user keeps (section 18.1): the least, or complete. */
-const Backup = ({ owner, onBack }: { owner: Owner; onBack: () => void }) => {
+/**
+ * The backup the user keeps (section 18.1): the least, or complete. The complete backup's long line is shown whole,
+ * wrapped in the box. `make` is for the fixtures page, which has no chain to make one from.
+ */
+export const Backup = ({ owner, onBack, make }: { owner: Owner; onBack: () => void; make?: (complete: boolean) => Promise<string> }) => {
   const [kind, setKind] = useState<'least' | 'complete'>('least');
   const [text, setText] = useState<string | undefined>();
   const task = useTask();
   const show = (complete: boolean) =>
     task.run('show', async () => {
-      const arrangement = kept('arrangement');
-      const backup = await makeUserBackup({ words: deviceWords(), wallet: owner.wallet, network: owner.session.network, chain: owner.session.chain, ...(arrangement === undefined ? {} : { arrangement }), complete });
-      setText(userBackupText(backup));
+      setText(await (make ?? ((full: boolean) => backupOf(owner, full)))(complete));
     });
   const earlier = owner.wallet.stored.earlierSeeds?.length ?? 0;
   return (
@@ -411,7 +375,7 @@ const Backup = ({ owner, onBack }: { owner: Owner; onBack: () => void }) => {
                     {text
                       .trimEnd()
                       .split('\n')
-                      .map((line) => (line.startsWith('more: ') ? <div class="muted">more: … one line of {line.length.toLocaleString('en-US')} characters, included when you copy or save</div> : <div>{line}</div>))}
+                      .map((line) => <div class={line.startsWith('more: ') ? 'backup-more' : undefined}>{line}</div>)}
                   </div>
                   <div class="row">
                     <CopyButton text={text} small label="Copy" />

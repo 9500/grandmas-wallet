@@ -337,6 +337,10 @@ textarea { min-height: 96px; font-family: var(--mono); font-size: 14px; resize: 
 .choice input { margin: 3px 0 0; width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
 .choice-text { display: flex; flex-direction: column; }
 .choice-text small { color: var(--muted); font-size: 14px; }
+/* a choice with its explanation behind a "?" beside it */
+.choice-info { display: flex; align-items: center; gap: 12px; }
+.choice-info > .choice { flex: 1 1 auto; min-width: 0; margin: 0; }
+.choice-info > .info { flex: none; }
 
 /* ------------------------------------------------------------------ values to hand over */
 
@@ -443,6 +447,8 @@ button.link { align-self: flex-start; }
 .card > h2 + .linkrow { border-top: 0; }
 @media (max-width: 400px) { .netchip .chip-more { display: none; } }
 .backup-text > div { word-break: normal; overflow-wrap: anywhere; }
+/* The complete backup's long line, whole: wrapped at any character inside the box, a little smaller than the lines to write down. */
+.backup-text > .backup-more { word-break: break-all; font-size: 12.5px; line-height: 1.5; margin-top: 4px; }
 .fingerprint { font-size: clamp(18px, 5.4vw, 22px); white-space: nowrap; }
 .step-title { line-height: 1.35; padding-top: 3px; }
 

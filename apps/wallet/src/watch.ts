@@ -1,6 +1,7 @@
 import { binToHex, hexToBin } from '@bitauth/libauth';
 import {
   type OwnerWallet,
+  type Sent,
   type Protection,
   type RequestTiming,
   type WatchStatus,
@@ -14,7 +15,7 @@ import {
 import { type ControllerHistory, readControllerHistory } from '@grandmas-wallet/core';
 import { useEffect, useRef, useState } from 'preact/hooks';
 
-import { type Session, keep, kept } from './session.js';
+import { type Session, keep, kept, refusesWithoutAsking } from './session.js';
 
 /**
  * Watching the wallet's controller while the page is open (proposal section 17): the monitor reads the
@@ -34,8 +35,13 @@ export interface Watch {
 
 const now = (): number => Math.floor(Date.now() / 1000);
 
-export const useWatch = (session: Session, wallet: OwnerWallet, ownerKeyHash: Uint8Array): Watch & { check: () => Promise<void> } => {
+/**
+ * @param onRefused - called when the page refused a request without asking, with the transaction that did it
+ */
+export const useWatch = (session: Session, wallet: OwnerWallet, ownerKeyHash: Uint8Array, onRefused?: (sent: Sent) => void): Watch & { check: () => Promise<void> } => {
   const [watch, setWatch] = useState<Watch>({});
+  const refused = useRef(onRefused);
+  refused.current = onRefused;
   const monitor = useRef<Monitor | undefined>(undefined);
   const identity = wallet.stored.identity as string;
 
@@ -88,7 +94,13 @@ export const useWatch = (session: Session, wallet: OwnerWallet, ownerKeyHash: Ui
         intervalMs: 15_000,
         onStatus: () => undefined,
         onError: (error) => setWatch((before) => ({ ...before, problem: error.message })),
-        ...(kept('autoCancel') === true ? { autoCancel: () => wallet.cancel() } : {}),
+        // The setting is read when a request is seen, so that a change on the Recovery screen counts at the next check.
+        autoCancel: async () => {
+          const sent = await wallet.cancel();
+          // The owner did not press anything: what the page did is shown and kept in the wallet's activity.
+          refused.current?.(sent);
+        },
+        autoCancelOn: refusesWithoutAsking,
       });
       monitor.current = watcher;
       // Every check, changed or not, notes that the device was watching and works the protection out again.

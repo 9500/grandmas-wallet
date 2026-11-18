@@ -3,16 +3,17 @@ import './apps.css';
 import './set-up.css';
 
 import { type Output, binToHex, encodeLockingBytecodeP2sh32 as p2sh32, generateBip39Mnemonic, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
-import { type ActionPreview, type HeldToken, type TemplateSummary, type TokenNaming, TokenNames, type TokenSendQuote, type TokenSendRequest, walletTemplateNumbers } from '@grandmas-wallet/app';
-import { type ChallengeDelay, INPUT_BYTES, deriveSeedKeys, smallestOutputValue, transactionBytes } from '@grandmas-wallet/core';
+import { type ActionPreview, type HeldToken, type TemplateSummary, type TokenNaming, TokenNames, type TokenSendQuote, type TokenSendRequest, type UserBackup, userBackupText, walletTemplateNumbers } from '@grandmas-wallet/app';
+import { type ChallengeDelay, INPUT_BYTES, InsufficientFundsError, deriveSeedKeys, smallestOutputValue, transactionBytes } from '@grandmas-wallet/core';
 import { sealPackage, signEnrollmentRequest } from '@grandmas-wallet/enrollment';
 import { Button, Card, Field, Frame, PageHead, Pill, TextArea, TextInput, formatTime } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
 import { ActionReview } from './ActionReview.js';
-import { TokenRow } from './Apps.js';
+import { Apps, TokenRow } from './Apps.js';
 import { Receive } from './Receive.js';
+import { Backup, Recovery } from './Recovery.js';
 import { Send } from './Send.js';
 import { chooseToken } from './token-choice.js';
 import { askToSetUp, meetRecoverer } from './hand-to-recoverer.js';
@@ -20,22 +21,24 @@ import type { Owner } from './OwnerApp.js';
 import { RECOVERER_LINK, paymentAddress } from './scan.js';
 import { ScanDialog, WithScan } from './Scanner.js';
 import { ScanCode } from './ScanCode.js';
-import type { Session, StoredRecipient } from './session.js';
+import { type Session, type StoredRecipient, keep } from './session.js';
 import { Ready, SettingUpView } from './SetUp.js';
 import { TokenNamesContext } from './token-words.js';
 import { Welcome } from './Welcome.js';
 
 /*
  * Parts of the wallet's screens, fed from fixed data, for looking at them in a browser without a wallet: the
- * Applications screen (`fixtures.html?show=tokens`), a request for a decision on an action (`show=review` to
- * borrow, `closing` to repay and close, `box-open` and `box-empty` for the actions of a second template), the
- * fields that take a scanned code (`show=scan`, and `&open` to show the scanner already opened), and a
- * recoverer's code taken in, with something sealed handed to the recoverer's page over the session the code
- * offers (`show=recoverer`), the Send screen for Bitcoin Cash (`show=send`) and with tokens to choose from
- * (`show=send-token`, `&nft` to open with the key chosen), and the Receive screen (`show=receive`, `&again` for an
- * address shown again). Served by the development server; the build of the page does not include it. The
- * templates here are invented examples, as a template would describe itself, and what is handed to the recoverer
- * is a sample that their page cannot open.
+ * list of tokens (`fixtures.html?show=tokens`), the Applications screen (`show=apps`, `&connected` with a connection,
+ * `&held` with tokens, `&linked` as opened from an application's connection link), a request for a decision on an
+ * action (`show=review` to borrow, `closing` to repay and close, `box-open` and `box-empty` for the actions of a
+ * second template), the fields that take a scanned code (`show=scan`, and `&open` to show the scanner already
+ * opened), and a recoverer's code taken in, with something sealed handed to the recoverer's page over the session the
+ * code offers (`show=recoverer`), the Send screen for Bitcoin Cash (`show=send`, `&little` for a wallet that holds
+ * too little to send everything) and with tokens to choose from (`show=send-token`, `&nft` to open with the key
+ * chosen), the Receive screen (`show=receive`, `&again` for an address shown again), the Recovery screen
+ * (`show=recovery`) and the user's own backup (`show=backup`, with a sample complete backup). Served by the
+ * development server; the build of the page does not include it. The templates here are invented examples, as a
+ * template would describe itself, and what is handed to the recoverer is a sample that their page cannot open.
  */
 
 const CATEGORY = '5c1d8c7d635141a15d9d41747ebe30422ca50237c41c54c45714d09114439382';
@@ -387,16 +390,31 @@ const again = new URLSearchParams(window.location.search).has('again');
 /** A payment of Bitcoin Cash from two coins, with change: the fee as the wallet would work it out. */
 const paymentBytes = transactionBytes([INPUT_BYTES.byKey, INPUT_BYTES.byKey], [{ lockingBytecode: destination, valueSatoshis: 0n }, { lockingBytecode: destination, valueSatoshis: 0n }]);
 
+/** What the fixtures' wallet can spend: `&little` for less than sending it would cost. */
+const spendable = new URLSearchParams(window.location.search).has('little') ? 500n : 52_340n;
+/** Sending everything from the two coins to one destination, with the fee that destination's length gives. */
+const everythingOf = (to: Uint8Array) => {
+  const bytes = transactionBytes([INPUT_BYTES.byKey, INPUT_BYTES.byKey], [{ lockingBytecode: to, valueSatoshis: 0n }]);
+  const fee = BigInt(bytes);
+  const smallest = smallestOutputValue({ lockingBytecode: to, valueSatoshis: 0n });
+  if (spendable - fee < smallest) throw new InsufficientFundsError(spendable, fee, fee + smallest, 'too little to send everything.');
+  return { sentSatoshis: spendable - fee, feeSatoshis: fee, bytes, transactions: 1, leftOut: 0 };
+};
+
 /** A wallet that holds the tokens above, quotes as the wallet would, and sends nothing. */
 const tokenOwner = {
   session: { network: 'testnet', environment: { explorer: '' } },
-  balance: { recoverable: 52_340n, vault: 0n, notRecoverable: 0n, voided: 0n, toSweep: 0n, tokens: held.map(() => ({})) },
+  balance: { recoverable: spendable, vault: 0n, notRecoverable: 0n, voided: 0n, toSweep: 0n, tokens: held.map(() => ({})) },
   apps: { version: 0, applications: { tokens: async () => held, suggestions: [] } },
   wallet: {
     quoteTokens: async (request: TokenSendRequest) => quoteOf(request),
     sendTokens: async (request: TokenSendRequest) => ({ transactionId: '3f'.repeat(32), bytes: quoteOf(request).bytes, feeSatoshis: quoteOf(request).feeSatoshis, remainderSatoshis: 0n, quote: quoteOf(request) }),
     quotePay: async () => ({ feeSatoshis: BigInt(paymentBytes), remainderSatoshis: 0n, bytes: paymentBytes, change: true }),
-    quoteSendEverything: async () => ({ sentSatoshis: 52_340n - 175n, feeSatoshis: 175n, bytes: 175, transactions: 1, leftOut: 0 }),
+    quoteSendEverything: async (to: Uint8Array) => everythingOf(to),
+    sendEverything: async (to: Uint8Array) => {
+      const quote = everythingOf(to);
+      return { transactions: [{ transactionId: '5d'.repeat(32), bytes: quote.bytes, feeSatoshis: quote.feeSatoshis, remainderSatoshis: 0n }], sentSatoshis: quote.sentSatoshis, feeSatoshis: quote.feeSatoshis, leftOut: [] };
+    },
     pay: async () => ({ transactionId: '4e'.repeat(32), feeSatoshis: BigInt(paymentBytes), bytes: paymentBytes, remainderSatoshis: 0n }),
     receiveAddress: async () => ({ address: { number: 7 }, again }),
     vaultAddress: async () => ({ address: { number: 2 }, again }),
@@ -430,14 +448,67 @@ const Destinations = () => (
 /** The same wallet with no tokens: the Send screen goes straight to Bitcoin Cash. */
 const coinOwner = { ...tokenOwner, balance: { ...tokenOwner.balance, tokens: [] } } as unknown as Owner;
 
-const show = new URLSearchParams(window.location.search).get('show') ?? 'tokens';
+// ------------------------------------------------------------------ the Applications screen, Recovery, the backup
+
+const params = new URLSearchParams(window.location.search);
+const appsHeld = params.has('held') ? [open, dollars, unknown] : [];
+const pairing = 'f3'.repeat(16);
+/** The Applications screen's part of a wallet: no request, a connection with `&connected`, tokens with `&held`. */
+const appsOwner = {
+  ...tokenOwner,
+  balance: { ...tokenOwner.balance, tokens: appsHeld.map(() => ({})) },
+  apps: {
+    version: 0,
+    connector: { ledger: [] },
+    proposals: [],
+    asks: [],
+    connections: params.has('connected') ? [{ uri: 'wiz://relay.example.org/?p=example', privateKey: '', pairing, name: 'Example app', addedAt: 1_795_000_000 }] : [],
+    statuses: params.has('connected') ? { [pairing]: { state: 'connected', peerName: 'Example app' } } : {},
+    applications: { readBackup: async () => undefined, names: () => reviewNames, tokens: async () => appsHeld, suggestions: [], describeAction: () => undefined },
+    changed: () => undefined,
+    connect: () => undefined,
+    retry: () => undefined,
+    end: () => undefined,
+    answerAsk: () => undefined,
+  },
+} as unknown as Owner;
+if (params.get('show') === 'apps') keep('incoming', params.has('linked') ? { kind: 'connect', text: 'wiz://relay.example.org/?p=example-from-a-link' } : undefined);
+
+/** A wallet whose watch has found it quiet and protected, with a waiting period of a day. */
+const recoveryOwner = {
+  ...tokenOwner,
+  wallet: { ...tokenOwner.wallet, recovery: 'on', stored: { earlierSeeds: [{}] } },
+  recovery: { on: true, reasons: [] },
+  watch: { status: { kind: 'quiet' }, history: { current: { state: { challengeDelay: { unit: 'time512', value: 169 } } } }, protection: { full: true, canRefuse: true, gaps: [], notWatched: [] }, check: async () => undefined },
+  change: {},
+} as unknown as Owner;
+
+/** A complete backup as the wallet writes it, with sample words and a wallet that had one earlier phone. */
+const sampleBackup: UserBackup = {
+  network: 'testnet',
+  addressScheme: 1,
+  identity: 'b7'.repeat(32),
+  words: 'sample words only shown on the fixtures page and never a real wallet of anyone at all',
+  creationTransactionId: '9c'.repeat(32),
+  earlierViewingKeyRecords: [{ json: JSON.stringify({ kind: 'viewing key', network: 'testnet', walletIdentity: 'b7'.repeat(32), seed: 1, viewingKey: `xpub${'6Cvz3Hq'.repeat(15)}`, firstAddress: 0 }), signature: '30'.repeat(72) }] as unknown as NonNullable<UserBackup['earlierViewingKeyRecords']>,
+  archives: [
+    { stores: ['https://store-one.example.org/', 'https://store-two.example.org/'], archiveId: '4e'.repeat(16), contentKey: 'a1'.repeat(32) },
+    { stores: ['https://store-one.example.org/', 'https://store-two.example.org/'], archiveId: '7d'.repeat(16), contentKey: 'c2'.repeat(32) },
+  ] as unknown as NonNullable<UserBackup['archives']>,
+};
+const makeSample = async (complete: boolean): Promise<string> => {
+  const { creationTransactionId: _transaction, earlierViewingKeyRecords: _records, archives: _archives, ...least } = sampleBackup;
+  return userBackupText(complete ? sampleBackup : least);
+};
+
+const show = params.get('show') ?? 'tokens';
 const REVIEWS: Record<string, ActionPreview> = { review: borrowing, closing, 'box-open': boxOpening, 'box-empty': boxEmptying };
 if (show === 'send-token') chooseToken(new URLSearchParams(window.location.search).has('nft') ? `nft:${namedKey.outpoint}` : `fungible:${DOLLARS}`);
 const owner = { apps: { applications: { suggestions: [] } } } as unknown as Owner;
 const ignore = () => undefined;
 
 /** The wallet's own screens are shown in the frame the wallet gives them: with its navigation, and as wide. */
-const screen = show === 'send-token' || show === 'send' ? 'send' : show === 'receive' ? 'receive' : REVIEWS[show] !== undefined ? 'apps' : undefined;
+const screen = show === 'send-token' || show === 'send' ? 'send' : show === 'receive' ? 'receive' : REVIEWS[show] !== undefined || show === 'apps' ? 'apps' : show === 'recovery' || show === 'backup' ? 'recovery' : undefined;
 const navigation =
   screen === undefined
     ? {}
@@ -468,6 +539,12 @@ render(
         </>
       ) : show === 'receive' ? (
         <Receive owner={tokenOwner} />
+      ) : show === 'apps' ? (
+        <Apps owner={appsOwner} />
+      ) : show === 'recovery' ? (
+        <Recovery owner={recoveryOwner} />
+      ) : show === 'backup' ? (
+        <Backup owner={recoveryOwner} onBack={ignore} make={makeSample} />
       ) : show === 'scan' ? (
         <ScanFields />
       ) : show === 'welcome' ? (
