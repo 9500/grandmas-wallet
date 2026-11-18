@@ -3,7 +3,7 @@ import { type NewSeedPreparation, describeDelay, enroll, makeUserBackup, sendUpd
 import { makeLink, readLink } from '@grandmas-wallet/app/links';
 import type { ChallengeDelay } from '@grandmas-wallet/core';
 import { sealedOfLink } from '@grandmas-wallet/app/hand-off';
-import { Button, Card, Choice, Field, Fingerprint, HandOff, KeyValues, LinkRow, Notice, PageHead, Segmented, TaskStatus, TextArea, CopyButton, download, useTask } from '@grandmas-wallet/ui';
+import { Button, Card, Choice, Field, Fingerprint, HandOff, Info, KeyValues, LinkRow, Notice, PageHead, Segmented, TaskStatus, TextArea, CopyButton, download, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import type { Owner } from './OwnerApp.js';
@@ -272,7 +272,10 @@ const NewRecoverer = ({ owner, onBack }: { owner: Owner; onBack: () => void }) =
         </Card>
         <Card title="2. The change">
           {changing ? <ChangeState owner={owner} /> : <Notice tone="good">The wallet names {name} as its recoverer.</Notice>}
-          {/* info: The earlier recoverer's key stops working on the wallet. They keep what they were given and can go on seeing the addresses they know; to end that, also move to a new phone afterwards. */}
+          <p class="small muted">
+            What this means for the earlier recoverer{' '}
+            <Info label="About the earlier recoverer">The earlier recoverer's key stops working on the wallet. They keep what they were given and can go on seeing the addresses they know; to end that, also move to a new phone afterwards.</Info>
+          </p>
           <div class="actions">
             {changing && (
               <Button

@@ -2,7 +2,7 @@ import { hexToBin } from '@bitauth/libauth';
 import { type OwnerWallet, type OwnerWalletState, describeDelay, finishSetUp, firstAddressFor, requestSetUp } from '@grandmas-wallet/app';
 import type { Created } from '@grandmas-wallet/connect/recoverer';
 import type { ChallengeDelay } from '@grandmas-wallet/core';
-import { Button, Spinner, formatBch, formatSatoshis, plainError } from '@grandmas-wallet/ui';
+import { Button, Info, Spinner, formatBch, formatSatoshis, plainError } from '@grandmas-wallet/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 
 import { askToSetUp, leaveRecoverer, meetRecoverer } from './hand-to-recoverer.js';
@@ -156,8 +156,8 @@ export const SettingUpView = ({
       </div>
       {challengeDelay !== undefined && (
         <p class="small muted center">
-          Waiting period {describeDelay(challengeDelay)}
-          {/* info: If you lose this phone, they can move your wallet to a new one. They have to ask in public first, and for this long this phone can say no. They can never spend your coins. */}
+          Waiting period {describeDelay(challengeDelay)}{' '}
+          <Info label="What the waiting period is">If you lose this phone, they can move your wallet to a new one. They have to ask in public first, and for this long this phone can say no. They can never spend your coins.</Info>
         </p>
       )}
     </div>
@@ -178,8 +178,8 @@ export const Ready = ({ name, startingSatoshis, onOpen }: { name: string; starti
       <span class="balance-sub">{formatSatoshis(startingSatoshis)} satoshis</span>
     </div>
     <p class="set-up-protected">
-      Protected by <strong>{name || 'your recoverer'}</strong>
-      {/* info: If you lose this phone, they can move your wallet to a new one after a waiting period, during which this phone can say no. They can see what the wallet holds and can never spend from it. */}
+      Protected by <strong>{name || 'your recoverer'}</strong>{' '}
+      <Info label="What protected means">If you lose this phone, they can move your wallet to a new one after a waiting period, during which this phone can say no. They can see what the wallet holds and can never spend from it.</Info>
     </p>
     <div class="set-up-actions">
       <Button block onClick={onOpen}>

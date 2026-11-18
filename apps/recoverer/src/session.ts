@@ -69,9 +69,13 @@ export interface Kept {
   deskSession: { privateKey: string; secret: string; walletPublicKey?: string; for?: string };
 }
 
-/** Until the recoverer chooses, the starting balance and the waiting period of a new wallet. */
-export const DEFAULT_SETTINGS: Settings = { startingSatoshis: '10000', challengeDelay: { unit: 'time512', value: 169 } };
-export const settingsOf = (): Settings => kept('settings') ?? DEFAULT_SETTINGS;
+/**
+ * Until the recoverer chooses, the starting balance and the waiting period of a new wallet. On a test network
+ * the waiting period starts at the shortest, so that moving a wallet to a new phone can be tried out without
+ * a day's wait; with real coins it starts at a day.
+ */
+let onTestNetwork = false;
+export const settingsOf = (): Settings => kept('settings') ?? { startingSatoshis: '10000', challengeDelay: { unit: 'time512', value: onTestNetwork ? 1 : 169 } };
 
 /**
  * How this page works. A page that held kits before it could be asked keeps working as someone helping people
@@ -116,6 +120,7 @@ export const boot = async (): Promise<Session> => {
     key = { publicKey: binToHex(made.publicKey), privateKey: binToHex(made.privateKey) };
     keep('key', key);
   }
+  onTestNetwork = environment.network !== 'mainnet';
   const { chain, servers } = await connectChain(environment.chain, environment.secondsPerBlock);
   return { environment, network: keyNetwork(environment), chain, servers, storeAt, publicKey: hexToBin(key.publicKey), privateKey: hexToBin(key.privateKey) };
 };

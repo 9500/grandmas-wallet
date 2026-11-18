@@ -1,4 +1,4 @@
-import { Notice } from '@grandmas-wallet/ui';
+import { Info, Notice } from '@grandmas-wallet/ui';
 
 import { type Session, kept } from './session.js';
 
@@ -19,8 +19,10 @@ export const Welcome = ({ session, onChoose }: { session: Session; onChoose: (be
       </div>
       {lost !== undefined && (
         <Notice tone="warn">
-          Your set-up did not hold. Set it up again with {lost.name || 'your recoverer'}.
-          {/* info: The network no longer has the transaction that created your wallet. Coins sent to your addresses are still yours: this phone keeps their keys and moves them into the wallet once it is set up again. */}
+          Your set-up did not hold. Set it up again with {lost.name || 'your recoverer'}.{' '}
+          <Info label="Why the set-up did not hold">
+            The network no longer has the transaction that created your wallet. Coins sent to your addresses are still yours: this phone keeps their keys and moves them into the wallet once it is set up again.
+          </Info>
         </Notice>
       )}
       <div class="choices">

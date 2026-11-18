@@ -1,7 +1,7 @@
 import { hexToBin } from '@bitauth/libauth';
 import { type OwnerWallet, finishTakeover, startTakeover } from '@grandmas-wallet/app';
 import { makeLink } from '@grandmas-wallet/app/links';
-import { Button, Field, More, Spinner, TaskStatus, TextArea, useTask } from '@grandmas-wallet/ui';
+import { Button, Field, Info, More, Spinner, TaskStatus, TextArea, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import { followHandOver, handToRecoverer, leaveRecoverer, useHanding } from './hand-to-recoverer.js';
@@ -99,9 +99,13 @@ const Waiting = ({ session, onDone, onAgain }: { session: Session; onDone: (wall
         {failed ? (
           <p class="set-up-problem">{handing?.reason ?? `${name}'s page did not answer. Keep it open and try again.`}</p>
         ) : (
-          <p class="muted">Keep this page. You can close it and come back.</p>
+          <p class="muted">
+            Keep this page. You can close it and come back.{' '}
+            <Info label="What happens while you wait">
+              Your helper asks the network to move your wallet to this phone. Then a waiting period runs, in public, during which your old phone could refuse. Afterwards your helper completes the move and this phone receives the wallet.
+            </Info>
+          </p>
         )}
-        {/* info: Your helper asks the network to move your wallet to this phone. Then a waiting period runs, in public, during which your old phone could refuse. Afterwards your helper completes the move and this phone receives the wallet. */}
       </div>
       {failed && (
         <div class="set-up-actions">
