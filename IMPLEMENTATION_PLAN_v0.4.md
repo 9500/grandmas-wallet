@@ -133,7 +133,7 @@ Still open from stage 0: the pages against the local node, which stage 6 tries, 
 
 **Reads:** `design-1:packages/templates/src/grandmas-wallet.ts`, `design-1:packages/app/src/account.ts`, `design-1:packages/app/src/owner.ts`, `design-1:packages/xo-demo/src/run.ts`, [docs/xo-spike.md](docs/xo-spike.md).
 
-**Creating a wallet** uses the credential from stage 2: fund the funding address; pay itself if the coin is not an output 0; create the controller with the recovery key hash; check the creation; move the rest; set aside the owner's coin for cancelling and, if the user chose to give one, an allowance at the recoverer's fee address; wait for confirmation before giving out an address; continue correctly after a stop at any point.
+**Creating a wallet** uses the credential from stage 2: fund the funding address; pay itself if the coin is not an output 0; create the controller with the recovery key hash; check the creation; move the rest; set aside the owner's coin for cancelling and, if the user chose to give one, an allowance at the recoverer's fee address; continue correctly after a stop at any point. No step waits for a block; a creation that disappears is followed as the proposal's section 7.9 says (see "No waiting for a block" below).
 
 **Exit**
 
@@ -153,7 +153,7 @@ Still open from stage 0: the pages against the local node, which stage 6 tries, 
 **Exit** (simulated chain unless stated)
 
 - **RC01–RC11, BK01–BK03, BK07, BK08 and OP01** pass.
-- "Recovery is on" appears only with a receipt that matches what was sent and the controller's confirmed state (RC04, RC10).
+- "Recovery is on" appears only with a receipt that matches what was sent and the controller's state as the network shows it (RC04, RC10).
 - The enrollment message is measured as the link a phone has to read (RC01).
 - The recoverer pays for three cancelled requests, a fourth and its completion from its fee address, with an allowance and with coins it added itself; with an empty fee address its software says beforehand what is missing (RC06).
 - The interface offered to stage 7 for "this template is stored" exists and is tested without an application.
@@ -233,6 +233,12 @@ Three steps, each worth having without the next. Together they are **chipnet run
 - The notes for developer feedback are kept up to date through every stage in [docs/xo-feedback-notes.md](docs/xo-feedback-notes.md). The feedback itself is written by the owner.
 - The proposal is brought in line with what was built: its status table, measured sizes, the decisions taken, and every test with its result. This plan and the design page follow it, under a new common version number.
 - **Push.**
+
+## No waiting for a block (18 November 2026)
+
+The owner decided that everything that can go on before a block must, and that a wait for a block needs an extremely good reason, written down. The proposal's section 17 ("What still waits for a block") lists the four that remain, each with its reason: the count of a recovery's waiting period, a device stopping for good, a vault address before the creation can no longer be undone, and the time locks of applications. Everything else goes on as soon as the network has the transaction before it, and the wallet follows the chain until a block holds what it depends on: a creation that disappears gives a new identity with the coins collected by key (CR02), a change of owner or recoverer that disappears is made again (MG01, RC10), a completion that disappears puts the recoverer's kit back (RC07, MG05).
+
+This is tested on the simulated chain, which makes blocks on demand and lets a transaction disappear with everything built on it. Still to be run again with this behaviour: the browser course on the local node and on chipnet (stage 6, run C), the jar course in browsers (stage 8), and a creation that disappears on the local node, where a block can be undone and a conflicting transaction mined. Earlier run records stay as they were run.
 
 ## Which stage closes which test
 
