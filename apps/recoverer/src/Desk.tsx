@@ -74,12 +74,15 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
         return;
       }
       // After the completion, the hand-over is made as soon as the chain shows it, in a block or not.
-      if (seen.takenOver && current.handOverLink === undefined && current.kept.pending !== undefined && task.busy === undefined) {
+      // A request that is still saved has not been handed over: a hand-over link the page keeps is then an earlier
+      // recovery's, and is replaced.
+      if (seen.takenOver && current.kept.pending !== undefined && task.busy === undefined) {
         await task.run('handover', async (progress) => {
           progress('Making the hand-over for the new phone');
           const handed = await completeTakeover({ kept: current.kept, chain: session.chain, recoveryKey: recoveryKeyOf(current.kept.kit), storeAt: session.storeAt, save: (next) => saveWallet(identity, { ...current, kept: next }) });
           const link = await makeLink(session.environment.walletUrl, 'handover', { sealed: binToHex(handed.sealed) });
-          update({ ...current, kept: handed.kept, handOverLink: link });
+          const { handOverDelivered: _earlier, ...rest } = current;
+          update({ ...rest, kept: handed.kept, handOverLink: link });
           // Straight to the new phone, if it is on the session of the lost phone's code; its code is shown in any case.
           void handOverNow(binToHex(handed.sealed).slice(0, 32), handed.sealed).then((delivered) => {
             if (delivered) {
@@ -217,14 +220,15 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
             </Card>
           )}
 
-          {looked.handOverLink !== undefined && standing?.kind !== 'not named' && view?.takenOver === true && (
+          {looked.handOverLink !== undefined && looked.kept.pending === undefined && standing?.kind !== 'not named' && view?.takenOver === true && (
             <Card title={looked.handOverDelivered === true ? 'The new phone has the wallet' : 'Let the new phone scan this'} tone="good">
               <HandOff text={looked.handOverLink} qrLabel="QR code of the hand-over" copyLabel="Copy link" testId="handover-link">
                 <p>{looked.handOverDelivered === true ? 'It reached the new phone over the connection. The code stays here in case it is needed again.' : 'It is sealed to the new phone: only it can open it. It tells the phone which wallet it now owns and how to find the coins.'}</p>
               </HandOff>
             </Card>
           )}
-          {standing?.kind === 'quiet' && view?.takenOver !== true && <LostPhone session={session} identity={identity} recoverer={recoverer} toast={toast} onTaken={() => setLooked(wallets()[identity] ?? looked)} />}
+          {/* After a recovery that has been handed over, the wallet's new phone can be lost in its turn. */}
+          {standing?.kind === 'quiet' && !(view?.takenOver === true && looked.kept.pending !== undefined) && <LostPhone session={session} identity={identity} recoverer={recoverer} toast={toast} onTaken={() => setLooked(wallets()[identity] ?? looked)} />}
           <TaskStatus task={task} name="handover" />
         </div>
         <div class="stack">

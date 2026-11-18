@@ -10,7 +10,7 @@
 //   6. the phone is lost
 //
 // usage (from the repository's root):
-//   npx tsx scripts/browser-run.ts [local|chipnet] [--local-pages] [--until <step number>] [--from 10|11] [--screens] [--headed] [--ask-again]
+//   npx tsx scripts/browser-run.ts [local|chipnet] [--local-pages] [--until <step number>] [--from 10|11] [--screens] [--headed] [--ask-again] [--lost-twice]
 //                                  [--directory <name>] [--record <file name>]
 //
 // The wallet is set up by Anna from her own coins: the phone scans her code and asks over the session it offers,
@@ -25,6 +25,9 @@
 // The run measures the wall-clock time from the payment that funds the wallet to the wallet in use and to
 // "Protected", and from the completion of the takeover to the swept coins, and reads from the chain which of the
 // wallet's transactions were not in a block yet at those moments; the record says so in its head.
+//
+// --lost-twice: after step 7 the phone that took the wallet over is lost as well, a third phone takes it over with
+// the same recoverer, and the run ends there.
 //
 // --ask-again: the phone whose request is refused in step 5 is the same that takes over in step 7, and the
 // recoverer asks the network again with the request it saved (the course of docs/walkthrough.md).
@@ -179,6 +182,16 @@ const toStepNine = async (): Promise<{ recoverer: Device; newer: Device } | unde
   log('   the old phone, opened again, says the wallet belongs to another key');
   await shot(found.page, 'wallet-owned-elsewhere');
   await close(found);
+  if (process.argv.includes('--lost-twice')) {
+    // The phone that took the wallet over is lost in its turn: a third phone asks, with the same recoverer, and the
+    // run ends there. A phone that still had the wallet's page open would refuse the request by itself.
+    await close(next);
+    log('   the new phone is lost too: its profile is no longer opened, and a third phone asks');
+    const third = await newPhoneAsks(theCourse, recoverer, recovererLink, async () => undefined, await device('third-phone'));
+    await completeTakeover(theCourse, recoverer, third, async () => undefined);
+    log('   the wallet was recovered a second time, to the third phone');
+    return;
+  }
 
   // 8 ------------------------------------------------------------------
   if (!begin('The wallet moves to a newer phone, the new phone still working')) return;
