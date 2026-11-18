@@ -10,7 +10,7 @@
 //   6. an unwanted request is made and refused                12. the coins go back to where they came from
 //
 // usage (from the repository's root):
-//   npx tsx scripts/browser-run.ts [local|chipnet] [--until <step number>] [--screens] [--headed] [--ask-again]
+//   npx tsx scripts/browser-run.ts [local|chipnet] [--until <step number>] [--from 11|12] [--screens] [--headed] [--ask-again]
 //
 // --ask-again: the phone whose request is refused in step 6 is the same that takes over in step 8, and the
 // recoverer asks the network again with the request it saved (the course of docs/walkthrough.md).
@@ -23,11 +23,14 @@
 // from the key in .chipnet/funder-design-2.json and go back to it at the end; blocks and the waiting period
 // take their real time.
 //
+// --from 11 (or 12) continues a run that stopped there, with the profiles it left on disk; the log goes on
+// from the lines the stopped run wrote.
+//
 // Profiles and store data are under .chipnet/browser-run/ or .chipnet/browser-run-chipnet/ (not in git).
 // The log is written to docs/runs/; with --screens, screenshots of every main screen at 390x844 and
 // 1280x800 go to docs/screens/.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
@@ -42,6 +45,8 @@ const argument = (name: string): string | undefined => {
   return index === -1 ? undefined : (process.argv[index + 1] ?? '');
 };
 const until = Number(argument('until') ?? '99');
+/** Continue a run that stopped at step 11 or 12, with the browser profiles it left on disk. */
+const from = Number(argument('from') ?? '1');
 const takeScreens = process.argv.includes('--screens');
 const headed = process.argv.includes('--headed');
 /** The phone whose request was refused in step 6 is the one that takes over in step 8: the recoverer asks the network again. */
@@ -55,13 +60,18 @@ const patience = chipnet ? 10 : 1;
 // ------------------------------------------------------------------ the log
 
 const started = Date.now();
-const lines: string[] = [];
+// The log is kept on disk line by line, so that a run that stops leaves what it did, and one that continues goes on from it.
+mkdirSync(work, { recursive: true });
+const journal = `${work}log.txt`;
+const lines: string[] = from > 1 && existsSync(journal) ? readFileSync(journal, 'utf8').split('\n').filter((line) => line !== '') : [];
+if (from === 1) writeFileSync(journal, '');
 const elapsed = (): string => `${((Date.now() - started) / 1000).toFixed(0).padStart(4)} s`;
-const log = (line: string): void => {
-  const entry = `${elapsed()}  ${line}`;
+const note = (entry: string): void => {
   lines.push(entry);
+  appendFileSync(journal, `${entry}\n`);
   console.log(entry);
 };
+const log = (line: string): void => note(`${elapsed()}  ${line}`);
 const writeLog = (outcome: string): void => {
   mkdirSync(`${root}docs/runs`, { recursive: true });
   const where = chipnet
@@ -215,7 +225,8 @@ const begin = (title: string): boolean => {
   return true;
 };
 
-const main = async (): Promise<void> => {
+/** What a run needs before its first step: the public pages' version on chipnet, or the pages and stores of this checkout on the local node. */
+const prepare = async (): Promise<void> => {
   if (chipnet) {
     for (const [name, url] of [['wallet', WALLET], ['recoverer', RECOVERER]] as const) {
       const version = (await (await fetch(`${url}version.json`)).json()) as { commit?: string; branch?: string; network?: string; releasedAt?: string };
@@ -237,6 +248,10 @@ const main = async (): Promise<void> => {
     }
   }
 
+};
+
+/** Steps 1 to 10. Returns the two devices the last steps go on with, or nothing when the run was asked to stop earlier. */
+const firstSteps = async (): Promise<{ recoverer: Device; newer: Device } | undefined> => {
   if (askAgain) log('course: the phone whose request is refused in step 6 is the one that takes over in step 8 (--ask-again)');
 
   // 1 ------------------------------------------------------------------
@@ -511,8 +526,15 @@ const main = async (): Promise<void> => {
   await see(ben.page, 'Quiet', 60_000);
   await shot(ben.page, 'recoverer-wallets');
 
+  return { recoverer, newer };
+};
+
+/** Steps 11 and 12. */
+const lastSteps = async (recoverer: Device, newer: Device): Promise<void> => {
   // 11 ------------------------------------------------------------------
+  if (step < 11) {
   if (!begin('The owner keeps a backup, and restores the wallet from it on another phone')) return;
+  await newer.page.goto(`${WALLET}recovery`);
   await newer.page.getByRole('button', { name: /Your own backup/ }).click();
   await newer.page.getByRole('button', { name: 'Complete' }).click();
   await click(newer.page, 'Show the backup');
@@ -545,6 +567,7 @@ const main = async (): Promise<void> => {
   log(`   the restored phone shows ${(await restored.page.getByTestId('balance').textContent())?.replace('BCH', ' BCH')}, the same wallet with no waiting period`);
   await shot(restored.page, 'wallet-home-restored');
   await close(restored);
+  }
 
   // 12 ------------------------------------------------------------------
   if (!begin('The coins go back to where they came from')) return;
@@ -575,6 +598,25 @@ const main = async (): Promise<void> => {
     await wait(5_000);
     log(`   funding address: ${run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'balance'])}`);
   }
+};
+
+const main = async (): Promise<void> => {
+  if (from === 1) {
+    await prepare();
+    const reached = await firstSteps();
+    if (reached !== undefined) await lastSteps(reached.recoverer, reached.newer);
+    return;
+  }
+  if (from !== 11 && from !== 12) throw new Error('A run continues from step 11 or 12.');
+  note(`       continued from step ${from} on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC with the same browser profiles; the times below are seconds since then`);
+  await prepare();
+  step = from - 1;
+  const recoverer = await device('recoverer', false);
+  const newer = await device('newer-phone', false);
+  await newer.page.goto(WALLET);
+  await see(newer.page, 'In your wallet');
+  log(`   the newer phone's profile opens the wallet again: ${(await newer.page.getByTestId('balance').textContent())?.replace('BCH', ' BCH')}`);
+  await lastSteps(recoverer, newer);
 };
 
 try {
