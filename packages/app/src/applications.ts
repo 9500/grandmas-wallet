@@ -1298,7 +1298,9 @@ export class Applications {
                 ...(found.lockingBytecode === undefined ? {} : { lockingBytecode: hex(found.lockingBytecode) }),
                 ...(found.status === 'open' && entry.state !== undefined ? { state: positionState(read.definition, entry, found, onChain) } : {}),
               },
+              // An action that spends the position is offered only while there is one.
               actions: entry.actions.flatMap((action) => {
+                if (found.status !== 'open' && declaration.declaration.actions[action]?.position !== undefined) return [];
                 const described = read.definition.actions?.[action];
                 const [role] = Object.keys(described?.roles ?? {});
                 return described === undefined || role === undefined ? [] : [{ action, role, name: described.name ?? action, description: described.description ?? '', ...offered(read.definition, declaration.declaration, action, role) }];

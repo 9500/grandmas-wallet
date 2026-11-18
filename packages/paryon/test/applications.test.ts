@@ -297,6 +297,8 @@ describe('a ParyonUSD loan through the wallet, from the template (PY02)', () => 
     sameAsBuilders(closed, expectedClose.built);
     const after = await loanOf(device, keyCategory);
     expect(after.position?.status).toBe('closed');
+    // The key stays in the wallet; with the loan gone, nothing that would spend the loan is offered for it.
+    expect(after.actions ?? []).toEqual([]);
     expect((await device.applications.tokens()).some((token) => token.category === hex(contracts.paryonCategory))).toBe(false);
   });
 

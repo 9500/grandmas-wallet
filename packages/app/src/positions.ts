@@ -150,6 +150,13 @@ export const valuesFrom = (template: XOTemplate, wanted: Record<string, ValueSou
 const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
+ * Whether a script has ever been paid. A script that holds coins now has; only for one that holds none is its
+ * history read, which for a script that many share runs to tens of thousands of entries.
+ */
+const isUsed = async (chain: ChainReader, lockingBytecode: Uint8Array): Promise<boolean> =>
+  (await chain.listUnspent(lockingBytecode)).length > 0 || (await chain.getHistory(lockingBytecode)).length > 0;
+
+/**
  * Find the position a token controls under one authority entry of a declaration.
  *
  * A problem with a server is thrown, not answered: not being able to look is not the same as finding nothing.
@@ -170,7 +177,7 @@ export const findPosition = async (chain: ChainReader, template: XOTemplate, ent
     const found = { lockingScript: place.lockingScript, variables, lockingBytecode, coins };
     if (coins.length > 0) return { status: 'open', ...found };
     // The address must exist on chain as the template says (section 10.4): a token of another template leads nowhere.
-    const used = (await chain.getHistory(lockingBytecode)).length > 0;
+    const used = await isUsed(chain, lockingBytecode);
     return used ? { status: 'closed', note: 'It holds nothing now.', ...found } : { status: 'not found', note: 'The chain shows nothing at the address this token would lead to.', ...found };
   }
 
@@ -186,7 +193,7 @@ export const findPosition = async (chain: ChainReader, template: XOTemplate, ent
     (coin) => coin.output.token !== undefined && hex(coin.output.token.category) === category && (place.companion.commitment === undefined || hex(coin.output.token.nft?.commitment ?? new Uint8Array()) === place.companion.commitment),
   );
   if (companions.length === 0) {
-    const used = (await chain.getHistory(companionAt)).length > 0;
+    const used = await isUsed(chain, companionAt);
     return { status: used ? 'closed' : 'not found', note: used ? 'Its companion coin is no longer there.' : 'The chain shows no companion coin for this token.', variables: {}, coins: [] };
   }
   // Each candidate is checked: the category and the distance alone would let a look-alike pass.

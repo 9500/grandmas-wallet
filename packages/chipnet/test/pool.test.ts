@@ -70,6 +70,19 @@ describe('reading a wallet from several servers', () => {
     await expect(new ChainPool([down]).getHistory(new Uint8Array(1))).rejects.toThrow('No server returned');
   });
 
+  it('reads the history of a script that many share, tens of thousands of entries on each server, without stalling', async () => {
+    const entries = Array.from({ length: 50_000 }, (_, index) => ({ transactionId: index.toString(16).padStart(64, '0'), height: index + 1 }));
+    const server = (history: typeof entries): ChainReader => ({ getTransaction: async () => undefined, listUnspent: async () => [], getHistory: async () => history });
+    // The second server lists them in another order and has the last one unconfirmed.
+    const pool = new ChainPool([server(entries), server([...entries].reverse().map((entry, index) => (index === 0 ? { ...entry, height: 0 } : entry)))]);
+    const started = Date.now();
+    const history = await pool.getHistory(new Uint8Array([1]));
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(history).toHaveLength(50_000);
+    expect(history.filter((entry) => entry.height <= 0)).toHaveLength(1);
+    expect(pool.disagreements).toHaveLength(1);
+  });
+
   it('OP01: two servers that disagree about a confirmation: it is reported, and nothing is treated as final', async () => {
     const { chain, wallet } = setup();
     const latest = wallet.authorize(owner);

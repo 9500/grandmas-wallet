@@ -51,10 +51,12 @@ export class ChainPool implements ChainReader {
     const answered = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
     if (answered.length === 0) throw new Error('No server returned the history.');
     const identifiers = new Set(answered.flat().map((entry) => entry.transactionId));
+    // A script that many use has a history of tens of thousands of entries: each server's is looked up by identifier.
+    const heightsOf = answered.map((history) => new Map(history.map((entry) => [entry.transactionId, entry.height])));
     const combined: HistoryEntry[] = [];
     const disagreements: ConfirmationDisagreement[] = [];
     for (const transactionId of identifiers) {
-      const heights = answered.map((history) => history.find((entry) => entry.transactionId === transactionId)?.height);
+      const heights = heightsOf.map((byIdentifier) => byIdentifier.get(transactionId));
       const [first] = heights;
       const agreed = first !== undefined && first > 0 && heights.every((height) => height === first);
       const anyConfirmed = heights.some((height) => height !== undefined && height > 0);
