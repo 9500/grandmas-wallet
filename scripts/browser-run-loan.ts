@@ -538,7 +538,7 @@ const steps = async (): Promise<void> => {
   await next.page.goto(`${WALLET}send`);
   await next.page.getByLabel('To').first().fill(to);
   await click(next.page, 'Send everything instead');
-  const everything = next.page.getByText('The coin kept for cancelling goes too');
+  const everything = next.page.getByText('Arrives', { exact: true });
   const nothing = next.page.getByText('Too little to send');
   await everything.or(nothing).first().waitFor({ state: 'visible', timeout: 120_000 * patience });
   let walletPart = 'nothing more from the wallet, which had nothing left to send';
@@ -548,10 +548,10 @@ const steps = async (): Promise<void> => {
     await click(next.page, /^Send everything$/);
     await see(next.page, 'Sent');
     log(`   the new phone sent everything to ${to}: ${arrives} arrives, fee ${fee}`);
-    walletPart = `the wallet's coins (${arrives} arrived, fee ${fee}; the coin kept for cancelling went too)`;
+    walletPart = `the wallet's coins (${arrives} arrived, fee ${fee})`;
   } else {
     const earlier = /the new phone sent everything to \S+: (.+?) arrives, fee ([\d,]+ sat)/.exec(lines.join('\n'));
-    if (earlier !== null) walletPart = `the wallet's coins, sent by the part of the run that stopped (${earlier[1]} arrived, fee ${earlier[2]}; the coin kept for cancelling went too)`;
+    if (earlier !== null) walletPart = `the wallet's coins, sent by the part of the run that stopped (${earlier[1]} arrived, fee ${earlier[2]})`;
   }
   // The recoverer's page opens its account after it has checked the chain's block headers; it is given a few tries.
   let returnedText = 'not returned: the recoverer\'s page did not open its account';

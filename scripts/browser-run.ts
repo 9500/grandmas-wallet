@@ -137,14 +137,9 @@ const toStepTen = async (): Promise<{ recoverer: Device; newer: Device } | undef
   mark('refused');
   log('   refused');
   mine(1);
-  await see(old.page, 'This phone cannot refuse a request', 60_000);
-  log('   the coin for cancelling paid for the refusal; the wallet says that it cannot refuse another');
-  await shot(old.page, 'wallet-no-cancel-coin');
-  await click(old.page, 'Put a coin aside');
-  mine(1);
   await see(old.page, 'Protected', 60_000);
-  log('   a new coin is put aside; protected again');
-  await standingNow(old.page, `From the refusal to "Protected" again, with a new coin for cancelling: ${since('refused')}`);
+  log('   the fee of the refusal came from the wallet\'s coins; protected again');
+  await standingNow(old.page, `From the refusal to "Protected" again: ${since('refused')}`);
   await see(recoverer.page, 'The owner\'s phone refused your request', 60_000);
   log('   the recoverer sees the refusal; the wallet is protected again');
   if (!askAgain) await close(stranger);
@@ -247,7 +242,7 @@ const toStepTen = async (): Promise<{ recoverer: Device; newer: Device } | undef
   await standingNow(newer.page, `From Ben keeping the kit to "Recovery is on with Ben": ${since('ben')}`);
   await shot(newer.page, 'wallet-home-after-new-recoverer');
   await newer.page.getByRole('link', { name: 'Recovery' }).first().click();
-  await see(newer.page, 'Coin for cancelling: kept');
+  await see(newer.page, 'Refuse requests without asking');
   await shot(newer.page, 'wallet-recovery');
   await ben.page.goto(RECOVERER);
   await see(ben.page, 'Quiet', 60_000);
@@ -304,7 +299,7 @@ const lastSteps = async (recoverer: Device, newer: Device): Promise<void> => {
   await newer.page.getByRole('link', { name: 'Send' }).first().click();
   await newer.page.getByLabel('To').fill(elsewhere());
   await click(newer.page, 'Send everything instead');
-  await see(newer.page, 'The coin kept for cancelling goes too');
+  await newer.page.getByText('Arrives', { exact: true }).first().waitFor({ state: 'visible', timeout: 60_000 });
   const arrives = (await newer.page.locator('dd').nth(1).textContent()) ?? '';
   const everythingFee = (await newer.page.locator('dd').nth(2).textContent()) ?? '';
   await shot(newer.page, 'wallet-send-everything');

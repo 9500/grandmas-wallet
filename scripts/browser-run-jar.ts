@@ -510,7 +510,7 @@ const lastStep = async (recoverer: Device, next: Device): Promise<void> => {
   await next.page.goto(`${WALLET}send`);
   await next.page.getByLabel('To').fill(to);
   await click(next.page, 'Send everything instead');
-  const everything = next.page.getByText('The coin kept for cancelling goes too');
+  const everything = next.page.getByText('Arrives', { exact: true });
   const nothing = next.page.getByText('Too little to send');
   await everything.or(nothing).first().waitFor({ state: 'visible', timeout: 120_000 * patience });
   let walletPart: string;
@@ -520,13 +520,13 @@ const lastStep = async (recoverer: Device, next: Device): Promise<void> => {
     await click(next.page, /^Send everything$/);
     await see(next.page, 'Sent');
     log(`   the new phone sent everything to ${to}: ${arrives} arrives, fee ${fee}; the wallet says that tokens stay where they are, so the jar's key stays in the wallet`);
-    walletPart = `the wallet's coins (${arrives} arrived, fee ${fee}; the coin kept for cancelling went too)`;
+    walletPart = `the wallet's coins (${arrives} arrived, fee ${fee})`;
   } else {
     const holds = flat(await next.page.locator('dd').first().textContent());
     log(`   the wallet has nothing left to send: "Too little to send", it holds ${holds} it could spend`);
     // A continued run: the part that stopped may have sent everything already, as its log says.
     const earlier = /the new phone sent everything to \S+: (.+?) arrives, fee ([\d,]+ sat)/.exec(lines.join('\n'));
-    walletPart = earlier === null ? `nothing from the wallet, which held ${holds} it could spend` : `the wallet's coins, sent by the part of the run that stopped (${earlier[1]} arrived, fee ${earlier[2]}; the coin kept for cancelling went too)`;
+    walletPart = earlier === null ? `nothing from the wallet, which held ${holds} it could spend` : `the wallet's coins, sent by the part of the run that stopped (${earlier[1]} arrived, fee ${earlier[2]})`;
   }
   mine(1);
   await openDeskWorking(theCourse, recoverer);
