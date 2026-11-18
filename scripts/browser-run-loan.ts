@@ -37,7 +37,7 @@ import type { Locator, Page } from 'playwright';
 import { borrowPlan } from '../apps/loan/src/loan.js';
 import { generalProtocolsOracle, readMarket } from '../apps/loan/src/market.js';
 import { Electrum } from '../packages/chipnet/src/electrum.js';
-import { type Device, LOAN, RECOVERER, WALLET, argument, balanceOf, chipnet, click, completeTakeover, config, course, firstSteps, localPages, newPhoneAsks, openDesk, patience, root, see, valueOf, wait } from './browser-course.js';
+import { type Device, LOAN, RECOVERER, WALLET, argument, balanceOf, chipnet, click, completeTakeover, config, course, firstSteps, localPages, newPhoneAsks, openDesk, patience, reviewEverything, root, see, sendAllOfBalance, valueOf, wait } from './browser-course.js';
 
 if (!chipnet || !localPages) {
   console.error('The loan course runs on chipnet only, where Paryon\'s contracts are, with the pages of this checkout: npx tsx scripts/browser-run-loan.ts chipnet --local-pages');
@@ -222,8 +222,9 @@ const connect = async (wallet: Page, loanPage: Page): Promise<void> => {
   log(`   the loan page shows its connection address (${uri.length} characters) and waits for a wallet; it says: "${await textOf(loanPage.locator('.independent'))}"`);
   await shot(loanPage, 'loan-connect');
   await wallet.goto(`${WALLET}apps`);
-  await see(wallet, 'Connect to an application');
-  await wallet.locator('#connect-address').fill(uri);
+  // The Applications screen offers the scanner first; the course pastes the link the page showed.
+  await click(wallet, 'Paste a link instead');
+  await wallet.getByLabel('Connection link').fill(uri);
   await click(wallet, /^Connect$/);
   const row = wallet.locator('ul.connections li').first();
   await row.getByText('Connected', { exact: true }).waitFor({ state: 'visible', timeout: 120_000 * patience });
@@ -537,7 +538,7 @@ const steps = async (): Promise<void> => {
   }
   await next.page.goto(`${WALLET}send`);
   await next.page.getByLabel('To').first().fill(to);
-  await click(next.page, 'Send everything instead');
+  await reviewEverything(next.page);
   const everything = next.page.getByText('Arrives', { exact: true });
   const nothing = next.page.getByText('Too little to send');
   await everything.or(nothing).first().waitFor({ state: 'visible', timeout: 120_000 * patience });
@@ -545,7 +546,7 @@ const steps = async (): Promise<void> => {
   if (await everything.isVisible()) {
     const arrives = flat(await next.page.locator('dd').nth(1).textContent());
     const fee = flat(await next.page.locator('dd').nth(2).textContent());
-    await click(next.page, /^Send everything$/);
+    await click(next.page, /^Send$/);
     await see(next.page, 'Sent');
     log(`   the new phone sent everything to ${to}: ${arrives} arrives, fee ${fee}`);
     walletPart = `the wallet's coins (${arrives} arrived, fee ${fee})`;
@@ -557,25 +558,19 @@ const steps = async (): Promise<void> => {
   let returnedText = 'not returned: the recoverer\'s page did not open its account';
   for (let attempt = 1; attempt <= 4; attempt++) {
     await openDesk(recoverer.page);
-    const elsewhereRow = recoverer.page.getByText('Send the fee coins elsewhere');
-    if (!(await elsewhereRow.waitFor({ state: 'visible', timeout: 120_000 }).then(() => true, () => false))) {
+    // The recoverer has one balance; all of it goes back, from the card that shows it.
+    if (!(await recoverer.page.getByTestId('funds-balance').first().waitFor({ state: 'visible', timeout: 120_000 }).then(() => true, () => false))) {
       log(`   the recoverer's page has not opened its account yet ("${await textOf(recoverer.page.locator('.notice').first()).catch(() => '')}"); try ${attempt}`);
       continue;
     }
-    await elsewhereRow.evaluate((element) => element.scrollIntoView({ block: 'center' }));
-    await elsewhereRow.click();
-    await recoverer.page.getByLabel('To').fill(to);
-    await click(recoverer.page, 'Send them');
-    const returned = recoverer.page.getByText(/Sent; the fee was \d+ satoshis|holds too little to send on/).first();
-    await returned.waitFor({ state: 'visible', timeout: 120_000 * patience });
-    returnedText = flat(await returned.textContent());
+    returnedText = (await sendAllOfBalance(recoverer.page, to)) ?? 'nothing to return: the balance held nothing';
     break;
   }
-  log(`   Anna's fee coins: ${returnedText}`);
+  log(`   Anna's balance: ${returnedText}`);
   await wait(15_000);
   const after = funderBalance();
   log(`   funding address: ${after} satoshis`);
-  fact(`At the end the coins went back to ${to}, the address that paid for the run: ${walletPart}; ${keyPart}; the recoverer's fee coins: ${returnedText}. The funder held ${kept.course.funderAtStart ?? '?'} satoshis before the run and ${after} after it. What is left: the wallet's controller coin, which the pages do not close. Every profile stays on disk.`);
+  fact(`At the end the coins went back to ${to}, the address that paid for the run: ${walletPart}; ${keyPart}; the recoverer's balance: ${returnedText}. The funder held ${kept.course.funderAtStart ?? '?'} satoshis before the run and ${after} after it. What is left: the wallet's controller coin, which the pages do not close. Every profile stays on disk.`);
 };
 
 try {

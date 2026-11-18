@@ -327,7 +327,7 @@ export const course = (options: { directory: string; continuing: boolean; until:
   /**
    * After a reorganization of the chain, a page's engine may keep a checkpoint of a block that is no longer in
    * the chain and fail every header check from then on (docs/xo-feedback-notes.md, 18 November): the page then
-   * stays at "Opening this wallet's account". The engine's header store is a cache of what the servers give; it
+   * stays at "Opening this wallet". The engine's header store is a cache of what the servers give; it
    * is deleted (the IndexedDB databases named Electrum_…, on the page's origin) and the page is opened again.
    * What the page keeps itself, its keys and kits, is not touched. Nothing is done for a device whose engine
    * did not fail.
@@ -512,6 +512,17 @@ export const click = async (page: Page, name: string | RegExp, timeout = 180_000
   await button.evaluate((element) => element.scrollIntoView({ block: 'center' }));
   await button.click();
 };
+/**
+ * On the Send screen, with the address filled in: "Max", then the review of sending everything. When the wallet holds too
+ * little, "Max" itself shows "Too little to send", and there is nothing to review.
+ */
+export const reviewEverything = async (page: Page, timeout = 120_000): Promise<void> => {
+  await click(page, /^Max$/);
+  const filled = page.getByText('Everything the wallet can send', { exact: true });
+  const nothing = page.getByText('Too little to send');
+  await filled.or(nothing).first().waitFor({ state: 'visible', timeout: timeout * patience });
+  if (await filled.isVisible()) await click(page, /^Review$/);
+};
 export const tick = async (page: Page, name: string | RegExp): Promise<void> => {
   await page.getByLabel(name).first().check();
 };
@@ -528,12 +539,12 @@ export const openDesk = async (page: Page): Promise<void> => {
 
 /**
  * The recoverer's screen of its wallet, with the wallet's account open. A page whose engine failed its header
- * checks after a reorganization of the chain stays at "Opening this wallet's account": after three minutes of
+ * checks after a reorganization of the chain stays at "Opening this wallet": after three minutes of
  * that, its engine's header store is made afresh (see `freshEngine`) and the screen opened again.
  */
 export const openDeskWorking = async ({ freshEngine }: Course, recoverer: Device): Promise<void> => {
   await openDesk(recoverer.page);
-  const opening = recoverer.page.getByText('Opening this wallet\'s account');
+  const opening = recoverer.page.getByText('Opening this wallet');
   const behind = recoverer.page.getByText(/The engine's header check stands at \d+ of \d+/);
   for (let attempt = 0; attempt < 90 && (await opening.isVisible()) && !(await behind.isVisible()); attempt++) await wait(2_000);
   if (!(await opening.isVisible()) && !(await behind.isVisible())) return;
@@ -541,6 +552,25 @@ export const openDeskWorking = async ({ freshEngine }: Course, recoverer: Device
   await openDesk(recoverer.page);
   for (let attempt = 0; attempt < 150 && (await opening.isVisible()); attempt++) await wait(2_000);
   if (await behind.isVisible()) throw new Error(`the recoverer's page still says: ${await behind.first().textContent()}`);
+};
+
+/**
+ * The recoverer sends its whole balance to an address, from the card that shows the balance: "Send all", the
+ * address, the review, and the sending. Returns what the page says afterwards, or `undefined` when the balance
+ * holds nothing to send.
+ */
+export const sendAllOfBalance = async (page: Page, to: string): Promise<string | undefined> => {
+  const balance = page.getByTestId('funds-balance').first();
+  await balance.waitFor({ state: 'visible', timeout: 240_000 * patience });
+  if ((await balance.getAttribute('data-value')) === '0') return undefined;
+  await click(page, 'Send all');
+  await page.getByLabel('To').fill(to);
+  await click(page, 'Review');
+  await see(page, 'Arrives');
+  await click(page, 'Send all');
+  const sent = page.getByText(/The fee was [\d,]+ sat/).first();
+  await sent.waitFor({ state: 'visible', timeout: 120_000 * patience });
+  return ((await sent.textContent()) ?? '').replace(/\s+/g, ' ').trim();
 };
 
 /** The wallet's balance as its home screen shows it, in satoshis. */

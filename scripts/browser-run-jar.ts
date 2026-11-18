@@ -43,7 +43,7 @@ import { savingsJarScript } from '@grandmas-wallet/savings-jar';
 import type { Locator, Page } from 'playwright';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
-import { type Device, JAR, RECOVERER, WALLET, argument, balanceOf, blockSection, chipnet, click, completeTakeover, config, course, firstSteps, localPages, newPhoneAsks, openDeskWorking, pagesUsed, patience, recordFile, root, see, wait } from './browser-course.js';
+import { type Device, JAR, RECOVERER, WALLET, argument, balanceOf, blockSection, chipnet, click, completeTakeover, config, course, firstSteps, localPages, newPhoneAsks, openDeskWorking, pagesUsed, patience, recordFile, reviewEverything, root, see, sendAllOfBalance, wait } from './browser-course.js';
 
 const until = Number(argument('until') ?? '99');
 /** Continue a run that stopped in step 9 or later, with the browser profiles it left on disk. */
@@ -153,8 +153,9 @@ const connect = async (wallet: Page, jarPage: Page, who: string): Promise<string
   log(`   the Savings Jar page shows its connection address (${uri.length} characters, ${uri.slice(0, uri.indexOf('?') === -1 ? 30 : Math.min(uri.indexOf('?'), 60))}…) and waits for a wallet`);
   await shot(jarPage, `jar-connect${who}`);
   await wallet.goto(`${WALLET}apps`);
-  await see(wallet, 'Connect to an application');
-  await wallet.locator('#connect-address').fill(uri);
+  // The Applications screen offers the scanner first; the course pastes the link the page showed.
+  await click(wallet, 'Paste a link instead');
+  await wallet.getByLabel('Connection link').fill(uri);
   await click(wallet, /^Connect$/);
   const row = wallet.locator('ul.connections li').first();
   await row.getByText('Connected', { exact: true }).waitFor({ state: 'visible', timeout: 120_000 * patience });
@@ -509,7 +510,7 @@ const lastStep = async (recoverer: Device, next: Device): Promise<void> => {
   const to = elsewhere();
   await next.page.goto(`${WALLET}send`);
   await next.page.getByLabel('To').fill(to);
-  await click(next.page, 'Send everything instead');
+  await reviewEverything(next.page);
   const everything = next.page.getByText('Arrives', { exact: true });
   const nothing = next.page.getByText('Too little to send');
   await everything.or(nothing).first().waitFor({ state: 'visible', timeout: 120_000 * patience });
@@ -517,7 +518,7 @@ const lastStep = async (recoverer: Device, next: Device): Promise<void> => {
   if (await everything.isVisible()) {
     const arrives = flat(await next.page.locator('dd').nth(1).textContent());
     const fee = flat(await next.page.locator('dd').nth(2).textContent());
-    await click(next.page, /^Send everything$/);
+    await click(next.page, /^Send$/);
     await see(next.page, 'Sent');
     log(`   the new phone sent everything to ${to}: ${arrives} arrives, fee ${fee}; the wallet says that tokens stay where they are, so the jar's key stays in the wallet`);
     walletPart = `the wallet's coins (${arrives} arrived, fee ${fee})`;
@@ -530,23 +531,16 @@ const lastStep = async (recoverer: Device, next: Device): Promise<void> => {
   }
   mine(1);
   await openDeskWorking(theCourse, recoverer);
-  const elsewhereRow = recoverer.page.getByText('Send the fee coins elsewhere');
-  await elsewhereRow.evaluate((element) => element.scrollIntoView({ block: 'center' }));
-  await elsewhereRow.click();
-  await recoverer.page.getByLabel('To').fill(to);
-  await click(recoverer.page, 'Send them');
-  // The page says it in a toast, which goes after a few seconds: it is read once.
-  const returned = recoverer.page.getByText(/Sent; the fee was \d+ satoshis|holds too little to send on/).first();
-  await returned.waitFor({ state: 'visible', timeout: 120_000 * patience });
-  const returnedText = flat(await returned.textContent());
+  // The recoverer has one balance; she sends all of it back, from the card that shows it.
+  const returnedText = await sendAllOfBalance(recoverer.page, to);
   let recovererPart: string;
-  if (/^Sent/.test(returnedText)) {
-    log(`   Anna sent her fee coins back: ${returnedText}`);
-    recovererPart = `the recoverer's fee coins (${returnedText})`;
+  if (returnedText !== undefined) {
+    log(`   Anna sent her balance back: ${returnedText}`);
+    recovererPart = `the recoverer's balance (${returnedText})`;
   } else {
-    log(`   Anna's fee address: "${returnedText}"`);
-    const earlier = /Anna sent her fee coins back: (.+)$/m.exec(lines.join('\n'));
-    recovererPart = earlier === null ? `nothing from the recoverer, whose page said: "${returnedText}"` : `the recoverer's fee coins, sent by the part of the run that stopped (${earlier[1]}); her page now says: "${returnedText}"`;
+    log('   Anna\'s balance holds nothing');
+    const earlier = /Anna sent her balance back: (.+)$/m.exec(lines.join('\n'));
+    recovererPart = earlier === null ? 'nothing from the recoverer, whose balance held nothing' : `the recoverer's balance, sent by the part of the run that stopped (${earlier[1]})`;
   }
   mine(1);
   await next.page.goto(WALLET);

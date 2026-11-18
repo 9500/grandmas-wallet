@@ -45,7 +45,7 @@
 // 1280x800 go to docs/screens/.
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-import { type Device, RECOVERER, WALLET, argument, blockSection, chipnet, click, completeTakeover, course, firstSteps, localPages, newPhoneAsks, openDesk, openDeskWorking, pagesUsed, recordFile, root, see, tick, valueOf, wait } from './browser-course.js';
+import { type Device, RECOVERER, WALLET, argument, blockSection, chipnet, click, completeTakeover, course, firstSteps, localPages, newPhoneAsks, openDesk, openDeskWorking, pagesUsed, recordFile, reviewEverything, root, see, sendAllOfBalance, tick, valueOf, wait } from './browser-course.js';
 
 const until = Number(argument('until') ?? '99');
 /** Continue a run that stopped at step 10 or 11, with the browser profiles it left on disk. */
@@ -125,6 +125,11 @@ const toStepNine = async (): Promise<{ recoverer: Device; newer: Device } | unde
 
   // 5 ------------------------------------------------------------------
   if (!begin('A request the owner did not make is refused')) return;
+  // The wallet refuses such a request by itself unless the owner turned that off. This step shows the alarm and the
+  // refusal by hand, so it is turned off first; the watch reads the setting at its next check.
+  await old.page.getByRole('link', { name: 'Recovery' }).first().click();
+  await old.page.getByRole('checkbox', { name: 'Refuse requests without asking' }).uncheck();
+  log('   the owner turned "Refuse requests without asking" off, to be asked first');
   // A phone that is not the owner's scans the code of "Grandma lost their phone": Anna was deceived.
   const stranger = await newPhoneAsks(theCourse, recoverer, recovererLink, async () => undefined, await device('stranger'));
   await see(recoverer.page, 'The request is sent');
@@ -305,27 +310,20 @@ const lastSteps = async (recoverer: Device, newer: Device): Promise<void> => {
   else {
   await newer.page.getByRole('link', { name: 'Send' }).first().click();
   await newer.page.getByLabel('To').fill(elsewhere());
-  await click(newer.page, 'Send everything instead');
+  await reviewEverything(newer.page);
   await newer.page.getByText('Arrives', { exact: true }).first().waitFor({ state: 'visible', timeout: 60_000 });
   const arrives = (await newer.page.locator('dd').nth(1).textContent()) ?? '';
   const everythingFee = (await newer.page.locator('dd').nth(2).textContent()) ?? '';
   await shot(newer.page, 'wallet-send-everything');
-  await click(newer.page, /^Send everything$/);
+  await click(newer.page, /^Send$/);
   await see(newer.page, 'Sent');
   log(`   the wallet sent everything: ${arrives.replace('BCH', ' BCH')} arrives, fee ${everythingFee}`);
   mine(1);
   }
-  // Anna is no longer the wallet's recoverer. What is left at the wallet's fee address is hers, and she sends it on.
+  // Anna is no longer the wallet's recoverer. Nothing of hers is with the wallet: she has one balance, and sends all of it on.
   await openDeskWorking(theCourse, recoverer);
   await see(recoverer.page, 'The wallet no longer names you');
-  // The bar fixed at the bottom of a phone's screen would cover a row scrolled just into view.
-  const elsewhereRow = recoverer.page.getByText('Send the fee coins elsewhere');
-  await elsewhereRow.evaluate((element) => element.scrollIntoView({ block: 'center' }));
-  await elsewhereRow.click();
-  await recoverer.page.getByLabel('To').fill(elsewhere());
-  await click(recoverer.page, 'Send them');
-  await see(recoverer.page, /Sent; the fee was \d+ satoshis/);
-  log(`   Anna, no longer the recoverer, sent on what was left at the wallet's fee address: ${(await recoverer.page.getByText(/Sent; the fee was \d+ satoshis/).first().textContent())?.trim()}`);
+  log(`   Anna, no longer the recoverer, sent her whole balance on: ${(await sendAllOfBalance(recoverer.page, elsewhere())) ?? 'it held nothing'}`);
   mine(1);
   if (chipnet) {
     await wait(5_000);
