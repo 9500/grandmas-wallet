@@ -113,19 +113,44 @@ export const CONNECTION_ADDRESS: ScanFilter = {
  * (`bitcoincash:…?amount=…`) gives its address; the amount is left for the user to enter.
  */
 export const paymentAddress = (network: 'mainnet' | 'testnet'): ScanFilter => {
-  // As the send screen reads an address: a test network takes `bchtest` and `bchreg`, and the prefix may be left out.
-  const prefixes = network === 'mainnet' ? ['bitcoincash'] : ['bchtest', 'bchreg'];
-  const isAddress = (text: string): boolean =>
-    (text.includes(':') ? [text.toLowerCase()] : prefixes.map((prefix) => `${prefix}:${text.toLowerCase()}`)).some((candidate) => {
-      const decoded = cashAddressToLockingBytecode(candidate);
-      return typeof decoded !== 'string' && prefixes.includes(decoded.prefix);
-    });
+  const isAddress = addressReader(network);
   return {
     wants: 'A Bitcoin Cash address',
     wrong: network === 'mainnet' ? 'This code is not a Bitcoin Cash address.' : 'This code is not a Bitcoin Cash address for the test network.',
     accept: (text) => {
       const address = text.trim().split('?')[0] ?? '';
-      return address !== '' && isAddress(address) ? address : undefined;
+      return address !== '' && isAddress(address) !== undefined ? address : undefined;
     },
+  };
+};
+
+/**
+ * The address a token is sent to: only the form that says the receiving wallet takes tokens. A plain address,
+ * which a wallet that does not know tokens gives, is named as such and the scanner stays open.
+ */
+export const tokenAddress = (network: 'mainnet' | 'testnet'): ScanFilter => {
+  const read = addressReader(network);
+  return {
+    wants: 'The receiver\'s token address',
+    wrong: 'This code is not a token address. A plain address is refused for a token: ask the receiver for the address their wallet shows for receiving tokens.',
+    accept: (text) => {
+      const address = text.trim().split('?')[0] ?? '';
+      return address !== '' && read(address) === 'tokens' ? address : undefined;
+    },
+  };
+};
+
+/**
+ * As the send screen reads an address: a test network takes `bchtest` and `bchreg`, and the prefix may be left
+ * out. `tokens` for an address in the form that takes tokens, `plain` for the other, `undefined` for no address.
+ */
+const addressReader = (network: 'mainnet' | 'testnet') => {
+  const prefixes = network === 'mainnet' ? ['bitcoincash'] : ['bchtest', 'bchreg'];
+  return (text: string): 'tokens' | 'plain' | undefined => {
+    for (const candidate of text.includes(':') ? [text.toLowerCase()] : prefixes.map((prefix) => `${prefix}:${text.toLowerCase()}`)) {
+      const decoded = cashAddressToLockingBytecode(candidate);
+      if (typeof decoded !== 'string' && prefixes.includes(decoded.prefix)) return decoded.tokenSupport ? 'tokens' : 'plain';
+    }
+    return undefined;
   };
 };

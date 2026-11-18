@@ -18,7 +18,8 @@ import { type ReadDeclaration, type RecoveryDeclaration, type ValueSource, decla
  */
 
 export interface Violation {
-  rule: 1 | 2 | 3;
+  /** One of the three rules of section 12.1, or `names`: the declaration names tokens the template does not deal in. */
+  rule: 1 | 2 | 3 | 'names';
   /** What the template does. */
   what: string;
   /** What that means for recovery. */
@@ -201,6 +202,75 @@ const violationsOf = (template: XOTemplate, declaration: RecoveryDeclaration): V
   return violations;
 };
 
+const HEX_CATEGORY = /^[0-9a-f]{64}$/;
+const carries = (value: unknown): boolean => value !== undefined && value !== null && value !== '0' && value !== 0;
+
+/**
+ * The token categories a template names literally, with whether it deals in their amounts, their NFTs or both:
+ * from its outputs, and from the coins of the application's that its declaration describes.
+ */
+const literalCategories = (template: XOTemplate, declaration: RecoveryDeclaration): Map<string, { fungible: boolean; nft: boolean }> => {
+  const found = new Map<string, { fungible: boolean; nft: boolean }>();
+  const note = (category: unknown, kinds: { fungible: boolean; nft: boolean }): void => {
+    if (typeof category !== 'string' || !HEX_CATEGORY.test(category)) return;
+    const known = found.get(category) ?? { fungible: false, nft: false };
+    found.set(category, { fungible: known.fungible || kinds.fungible, nft: known.nft || kinds.nft });
+  };
+  // A category is written into an output, or into a variable of the template's that has a fixed value.
+  const literal = (category: unknown): unknown => {
+    const variable = typeof category === 'string' ? /^\$\(<([A-Za-z0-9_]+)>\)$/.exec(category)?.[1] : undefined;
+    return variable === undefined ? category : (template.variables?.[variable] as { value?: unknown } | undefined)?.value;
+  };
+  for (const output of Object.values(template.outputs ?? {})) {
+    const token = (output as { token?: { category?: unknown; amount?: unknown; nft?: unknown } }).token;
+    if (token !== undefined && token !== null) note(literal(token.category), { fungible: carries(token.amount), nft: token.nft !== undefined && token.nft !== null });
+  }
+  for (const action of Object.values(declaration.actions)) {
+    // A coin of the application's the template spends: what it carries besides what is described is not known.
+    for (const input of Object.values(action.inputs ?? {})) note(input.token?.category, { fungible: true, nft: true });
+  }
+  for (const entry of Object.values(declaration.authority)) {
+    if (isCompanionPosition(entry.position)) note(entry.position.genuine.tokenCategory, { fungible: false, nft: true });
+  }
+  return found;
+};
+
+/**
+ * Names the declaration gives tokens: each must be of tokens the template deals in, of the kind it says, and
+ * described once. A name for a category the template never touches would be a template naming someone else's
+ * tokens.
+ */
+const nameViolations = (template: XOTemplate, declaration: RecoveryDeclaration): Violation[] => {
+  const violations: Violation[] = [];
+  const misleading = 'A template could put its own name on tokens that are not its own. The wallet takes no such claim.';
+  const literal = literalCategories(template, declaration);
+  const described = new Set<string>();
+  for (const [entry, description] of Object.entries(declaration.tokens ?? {})) {
+    const which = description.category === undefined ? `authority:${description.authority ?? ''}` : `category:${description.category}/${description.kind}`;
+    if (described.has(which)) violations.push({ rule: 'names', what: `The declaration describes the same tokens twice; "${entry}" is the second.`, consequence: misleading });
+    described.add(which);
+    if (description.category !== undefined) {
+      const dealt = literal.get(description.category);
+      if (dealt === undefined) {
+        violations.push({ rule: 'names', what: `The declaration names the tokens of category ${description.category.slice(0, 12)}… "${description.name}", and the template deals in no token of that category.`, consequence: misleading });
+      } else if (description.kind === 'fungible' ? !dealt.fungible : !dealt.nft) {
+        violations.push({ rule: 'names', what: `The declaration names ${description.kind === 'fungible' ? 'amounts' : 'NFTs'} of category ${description.category.slice(0, 12)}… "${description.name}", and the template deals in no ${description.kind === 'fungible' ? 'amount' : 'NFT'} of that category.`, consequence: misleading });
+      }
+      continue;
+    }
+    const authority = declaration.authority[description.authority ?? ''];
+    if (authority === undefined) {
+      violations.push({ rule: 'names', what: `The declaration names the tokens of the authority entry "${description.authority ?? ''}", which it does not have.`, consequence: misleading });
+      continue;
+    }
+    const nft = (template.outputs?.[authority.token] as { token?: { nft?: unknown } } | undefined)?.token?.nft;
+    if (description.kind !== 'nft' || nft === undefined || nft === null) {
+      violations.push({ rule: 'names', what: `The declaration names the tokens of the authority entry "${description.authority ?? ''}" as ${description.kind === 'nft' ? 'NFTs, and the template makes no NFT there' : 'amounts; an authority token is an NFT'}.`, consequence: misleading });
+    }
+  }
+  return violations;
+};
+
 /**
  * The statement about a template.
  *
@@ -217,7 +287,7 @@ export const checkTemplate = (template: ReadTemplate, declaration: ReadDeclarati
       consequence: 'A key cannot be replaced. After a recovery the new owner could not act on what was made with it, and the earlier seed still could.',
     });
   }
-  if (declaration !== undefined) violations.push(...violationsOf(template.definition, declaration.declaration));
+  if (declaration !== undefined) violations.push(...violationsOf(template.definition, declaration.declaration), ...nameViolations(template.definition, declaration.declaration));
   if (violations.length > 0) return { statement: 'violation', violations };
   if (declaration === undefined) {
     return { statement: 'not verified', reasons: ['The template comes without a recovery declaration, so this wallet cannot tell how a token of it would lead to what the token controls.'] };

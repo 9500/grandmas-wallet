@@ -38,6 +38,12 @@ interface AddressBase {
   lockingBytecode: Uint8Array;
   /** The address as text, as a payer sees it. */
   address: string;
+  /**
+   * The same address in the CashAddress form that says it can receive tokens. It decodes to the same locking
+   * bytecode; wallets that send tokens look for this form, so that tokens do not go to a wallet that does not
+   * know them.
+   */
+  tokenAddress: string;
 }
 
 export interface RecoverableWalletAddress extends AddressBase {
@@ -54,6 +60,18 @@ export interface VaultWalletAddress extends AddressBase {
 export type WalletAddress = RecoverableWalletAddress | VaultWalletAddress;
 
 /**
+ * A locking bytecode as a CashAddress of the network: the plain form, or with `tokens` the form that says the
+ * address can receive tokens. Both decode to the same locking bytecode.
+ *
+ * @throws for a locking bytecode that has no CashAddress
+ */
+export const cashAddressOf = (lockingBytecode: Uint8Array, network: XoNetwork, options: { tokens?: boolean } = {}): string => {
+  const encoded = lockingBytecodeToCashAddress({ prefix: CASH_ADDRESS_PREFIX[network], bytecode: lockingBytecode, tokenSupport: options.tokens === true });
+  if (typeof encoded === 'string') throw new Error(encoded);
+  return encoded.address;
+};
+
+/**
  * Address `number` of a kind, for a wallet identity and a seed's viewing key.
  *
  * @throws if the number is outside the range of its kind
@@ -64,16 +82,15 @@ export const walletAddress = (identity: Uint8Array, viewingKey: ViewingKey, kind
   }
   const secret = addressSecret(viewingKey.blindingSeed, kind, number);
   const tag = addressTag(identity, secret);
-  const text = (lockingBytecode: Uint8Array): string => {
-    const encoded = lockingBytecodeToCashAddress({ prefix: CASH_ADDRESS_PREFIX[viewingKey.network], bytecode: lockingBytecode });
-    if (typeof encoded === 'string') throw new Error(encoded);
-    return encoded.address;
-  };
+  const texts = (lockingBytecode: Uint8Array): { address: string; tokenAddress: string } => ({
+    address: cashAddressOf(lockingBytecode, viewingKey.network),
+    tokenAddress: cashAddressOf(lockingBytecode, viewingKey.network, { tokens: true }),
+  });
   if (kind === ADDRESS_KIND.vault) {
     const script = vaultAddressScript(tag);
-    return { kind, number, secret, tag, script, lockingBytecode: script.lockingBytecode, address: text(script.lockingBytecode) };
+    return { kind, number, secret, tag, script, lockingBytecode: script.lockingBytecode, ...texts(script.lockingBytecode) };
   }
   const keyHash = viewingKeyHash(viewingKey, kind, number);
   const script = recoverableAddressScript(tag, keyHash);
-  return { kind, number, secret, tag, keyHash, script, lockingBytecode: script.lockingBytecode, address: text(script.lockingBytecode) };
+  return { kind, number, secret, tag, keyHash, script, lockingBytecode: script.lockingBytecode, ...texts(script.lockingBytecode) };
 };

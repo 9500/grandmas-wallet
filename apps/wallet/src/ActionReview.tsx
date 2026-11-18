@@ -30,10 +30,11 @@ export const Part = ({ title, note, children, cls }: { title: string; note?: Com
   </section>
 );
 
-const RULES: Record<1 | 2 | 3, string> = {
+const RULES: Record<1 | 2 | 3 | 'names', string> = {
   1: 'Rule 1: authority is a token',
   2: 'Rule 2: the wallet\'s parts are the wallet\'s business',
   3: 'Rule 3: the token leads to the position',
+  names: 'The names it gives tokens',
 };
 
 /** What the wallet can say about a template: verified, not verified, or a violation found. */

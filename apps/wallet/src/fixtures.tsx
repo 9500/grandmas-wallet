@@ -48,6 +48,8 @@ const open: HeldToken = {
   capability: 'minting',
   amount: 0n,
   place: 'address',
+  outpoint: `${'c53e3c4bc0de782ba4791fa3c0b80fad8c650b525160d4ff1b475e5129cea3b1'}:5`,
+  satoshis: 1_000n,
   meaning: 'position',
   template: { identifier: template.identifier, name: template.name },
   authority: 'key',
@@ -77,8 +79,8 @@ const open: HeldToken = {
     { action: 'close', role: 'borrower', name: 'Repay and close', description: 'Repay the whole debt; the collateral comes back.' },
   ],
 };
-const closed: HeldToken = { ...open, category: '2d3f21018a219ed7a0665be8db173d774fa74448b07ec1c12bf459a97f8acd10', position: { status: 'closed', satoshis: 0n, coins: 0, note: 'It holds nothing now.' }, actions: [] };
-const unknown: HeldToken = { category: UNITS, commitment: '', amount: 10_000n, place: 'address', meaning: 'unknown' };
+const closed: HeldToken = { ...open, category: '2d3f21018a219ed7a0665be8db173d774fa74448b07ec1c12bf459a97f8acd10', outpoint: `${'95db0d661610df2b244bca03c663a486a4a6a61ac37e6e509fd9f65b502209b0'}:4`, position: { status: 'closed', satoshis: 0n, coins: 0, note: 'It holds nothing now.' }, actions: [] };
+const unknown: HeldToken = { category: UNITS, commitment: '', amount: 10_000n, place: 'address', outpoint: `${'c53e3c4bc0de782ba4791fa3c0b80fad8c650b525160d4ff1b475e5129cea3b1'}:6`, satoshis: 1_000n, meaning: 'unknown' };
 
 const borrowing: ActionPreview = {
   template,

@@ -41,6 +41,7 @@ import type { ReservedAddress, Sent, TokenCoin, WalletParts } from './owner-wall
 import { type FoundPosition, type PositionStatus, type TokenOnChain, coinsAt, findPosition, valuesFrom } from './positions.js';
 import { type RecoveryArrangement, type StoreAt, writeRecord } from './recovery-flow.js';
 import { type PresentedTexts, type TemplateNames, type Verdict, checkTemplate, readPresented } from './template-check.js';
+import { type NameClaim, type TokenNaming, TokenNames } from './token-names.js';
 
 /**
  * Applications (proposal sections 12 to 14): carrying out an action of a template the wallet has never
@@ -180,6 +181,11 @@ export interface TemplateSummary extends TemplateNames {
   verdict: Verdict;
   /** Whether the user has trusted it on this device. */
   trusted: boolean;
+  /**
+   * The user trusts this template on this device with another recovery declaration than the one presented now.
+   * Approving takes the presented one in its place, on the user's word, as for a template met for the first time.
+   */
+  replacesDeclaration?: boolean;
 }
 
 export interface MovedOutput {
@@ -268,6 +274,12 @@ export interface HeldToken {
   capability?: 'none' | 'mutable' | 'minting';
   amount: bigint;
   place: TokenCoin['place'];
+  /** The coin, as `<transaction id>:<output index>`. */
+  outpoint: string;
+  /** The satoshis the coin holds under its token. */
+  satoshis: bigint;
+  /** What trusted templates call the coin's tokens: its fungible amount, and its NFT. */
+  names?: { fungible?: TokenNaming; nft?: TokenNaming };
   /**
    * - `position`: a trusted template says what the token controls.
    * - `incomplete`: something says what made the token, and the wallet cannot work the rest out; the reason is given.
@@ -469,11 +481,15 @@ export class Applications {
   }
 
   /** The template of a request: the wallet's own copy of one it trusts, or what the request presents, checked against its names. */
-  private templateOf(request: Pick<ApplicationAction, 'template' | 'presented'>): { template: ReadTemplate; declaration?: ReadDeclaration; kept?: KeptTemplate; texts?: PresentedTexts } {
+  private templateOf(request: Pick<ApplicationAction, 'template' | 'presented'>): { template: ReadTemplate; declaration?: ReadDeclaration; kept?: KeptTemplate; texts?: PresentedTexts; replaces?: KeptTemplate } {
     const kept = this.keptTemplate(request.template);
     if (kept !== undefined) {
       if (kept.declaration?.contentHash !== request.template.declaration && request.template.declaration !== undefined) {
-        return refuse('The request names another recovery declaration than the one this wallet trusted with the template.');
+        // Another declaration for a template the user trusts: it is shown as a template is the first time, and
+        // taken in only on the user's word. Until then the wallet keeps working with the one it has.
+        if (request.presented === undefined) return refuse('The request names another recovery declaration than the one this wallet trusted with the template. Send the template with the request.');
+        const presented = readPresented(request.template, request.presented);
+        return { template: presented.template, ...(presented.declaration === undefined ? {} : { declaration: presented.declaration }), texts: request.presented, replaces: kept };
       }
       return { ...this.read(kept), kept };
     }
@@ -482,7 +498,7 @@ export class Applications {
     return { template: presented.template, ...(presented.declaration === undefined ? {} : { declaration: presented.declaration }), texts: request.presented };
   }
 
-  private summary(template: ReadTemplate, declaration: ReadDeclaration | undefined, kept: KeptTemplate | undefined): TemplateSummary {
+  private summary(template: ReadTemplate, declaration: ReadDeclaration | undefined, kept: KeptTemplate | undefined, replaces?: KeptTemplate): TemplateSummary {
     const { definition } = template;
     return {
       identifier: template.identifier,
@@ -493,6 +509,7 @@ export class Applications {
       actions: Object.entries(definition.actions ?? {}).map(([action, { name, description }]) => ({ action, name: name ?? action, description: description ?? '' })),
       verdict: checkTemplate(template, declaration, kept?.positionFound === true ? { positionFound: true } : {}),
       trusted: kept !== undefined,
+      ...(replaces === undefined ? {} : { replacesDeclaration: true }),
     };
   }
 
@@ -501,8 +518,8 @@ export class Applications {
    * @throws PresentationError if it is not what the names say; UnknownProfileError for a declaration this wallet cannot read
    */
   describe(names: TemplateNames, presented?: PresentedTexts): TemplateSummary {
-    const { template, declaration, kept } = this.templateOf({ template: names, ...(presented === undefined ? {} : { presented }) });
-    return this.summary(template, declaration, kept);
+    const { template, declaration, kept, replaces } = this.templateOf({ template: names, ...(presented === undefined ? {} : { presented }) });
+    return this.summary(template, declaration, kept, replaces);
   }
 
   /**
@@ -511,13 +528,27 @@ export class Applications {
    */
   async trust(names: TemplateNames, presented: PresentedTexts | undefined, application?: string): Promise<KeptTemplate> {
     let kept = this.keptTemplate(names);
+    if (kept !== undefined && names.declaration !== undefined && kept.declaration?.contentHash !== names.declaration && presented !== undefined) {
+      // Another declaration for a template the user trusts, approved by the user: it takes the earlier one's
+      // place, and is stored in the backup before the next action.
+      const read = readPresented(names, presented);
+      const verdict = checkTemplate(read.template, read.declaration, kept.positionFound === true ? { positionFound: true } : {});
+      if (verdict.statement === 'violation') {
+        return refuse(`This wallet does not take the new recovery declaration in: ${verdict.violations.map((violation) => `${violation.rule === 'names' ? 'the names it gives tokens' : `rule ${violation.rule}`}: ${violation.what} ${violation.consequence}`).join(' ')}`);
+      }
+      kept = this.updateTemplate(kept.identifier, {
+        ...(read.declaration === undefined ? {} : { declaration: { contentHash: read.declaration.contentHash, text: read.declaration.text } }),
+        references: read.references,
+        stored: false,
+      });
+    }
     if (kept === undefined) {
       const texts = presented ?? this.suggestions.find((suggested) => suggested.identifier === names.identifier && suggested.contentHash === names.contentHash)?.texts;
       if (texts === undefined) return refuse('This wallet does not have that template.');
       const read = readPresented(names, texts);
       const verdict = checkTemplate(read.template, read.declaration);
       if (verdict.statement === 'violation') {
-        return refuse(`This wallet does not take the template in: ${verdict.violations.map((violation) => `rule ${violation.rule}: ${violation.what} ${violation.consequence}`).join(' ')}`);
+        return refuse(`This wallet does not take the template in: ${verdict.violations.map((violation) => `${violation.rule === 'names' ? 'the names it gives tokens' : `rule ${violation.rule}`}: ${violation.what} ${violation.consequence}`).join(' ')}`);
       }
       kept = {
         identifier: read.template.identifier,
@@ -1016,8 +1047,8 @@ export class Applications {
    */
   async preview(request: ApplicationAction): Promise<ActionPreview> {
     this.wallet.requireUsable();
-    const { template, declaration, kept } = this.templateOf(request);
-    const summary = this.summary(template, declaration, kept);
+    const { template, declaration, kept, replaces } = this.templateOf(request);
+    const summary = this.summary(template, declaration, kept, replaces);
     const plan = await this.plan(request);
     const { definition } = template;
     const action = definition.actions?.[request.action];
@@ -1083,6 +1114,24 @@ export class Applications {
       },
       firstUse: kept?.stored !== true,
     };
+  }
+
+  /**
+   * The names the templates the user trusts give the tokens they deal in (section 13.3). Nothing else names a
+   * token: no registry, no application, no request.
+   */
+  names(): TokenNames {
+    const claims: NameClaim[] = [];
+    for (const kept of this.state.templates) {
+      if (kept.declaration === undefined) continue;
+      try {
+        const { declaration } = readDeclaration(kept.declaration.text);
+        for (const description of Object.values(declaration.tokens ?? {})) claims.push({ description, template: { identifier: kept.identifier, name: kept.name } });
+      } catch {
+        // A declaration this wallet once took in and cannot read now names nothing.
+      }
+    }
+    return new TokenNames(claims);
   }
 
   // ------------------------------------------------------------------ carrying an action out
@@ -1245,7 +1294,15 @@ export class Applications {
     for (const { coin, place } of await this.wallet.tokenCoins()) {
       const token = coin.utxo.output.token as NonNullable<Output['token']>;
       const category = hex(token.category);
-      const base = { category, commitment: hex(token.nft?.commitment ?? new Uint8Array()), ...(token.nft === undefined ? {} : { capability: token.nft.capability }), amount: token.amount, place };
+      const base = {
+        category,
+        commitment: hex(token.nft?.commitment ?? new Uint8Array()),
+        ...(token.nft === undefined ? {} : { capability: token.nft.capability }),
+        amount: token.amount,
+        place,
+        outpoint: outpointOf(coin.utxo),
+        satoshis: coin.utxo.output.valueSatoshis,
+      };
       const onChain = tokenOf(coin);
       const note = this.state.notes.find((candidate) => candidate.category === category);
       const candidates = note === undefined ? kept : kept.filter((template) => template.kept.identifier === note.templateIdentifier);
@@ -1314,7 +1371,16 @@ export class Applications {
       const match = (await look(candidates, note)) ?? (note === undefined ? undefined : await look(kept, undefined));
       held.push(match === undefined ? { ...base, meaning: 'unknown', ...(refusedNote === undefined ? {} : { reason: refusedNote }) } : { ...match, ...(refusedNote === undefined ? {} : { noteRefused: refusedNote }) });
     }
-    return held;
+    // What the trusted templates call each token: an NFT also by the authority entry it was found to be.
+    const names = this.names();
+    return held.map((token) => {
+      const fungible = token.amount > 0n ? names.fungible(token.category) : undefined;
+      const nft =
+        token.capability === undefined
+          ? undefined
+          : names.nft(token.category, token.meaning === 'position' && token.template !== undefined && token.authority !== undefined ? { template: token.template.identifier, entry: token.authority } : undefined);
+      return fungible === undefined && nft === undefined ? token : { ...token, names: { ...(fungible === undefined ? {} : { fungible }), ...(nft === undefined ? {} : { nft }) } };
+    });
   }
 
   /**

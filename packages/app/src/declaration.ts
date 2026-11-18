@@ -117,6 +117,26 @@ export interface ActionEntry {
   variables?: Record<string, ValueSource>;
 }
 
+/**
+ * What the template calls the tokens it deals in, so that the wallet can show a name and an amount in the
+ * token's own decimals instead of a category and raw units. It is a claim of the template's: the wallet shows it
+ * only for templates the user trusts, says whose claim it is, and uses no name another trusted template
+ * contradicts (section 13.3). Exactly one of `category` and `authority` says which tokens it is about.
+ */
+export interface TokenDescription {
+  /** `fungible`: the amounts of the category; `nft`: its NFTs. */
+  kind: 'fungible' | 'nft';
+  /** A category the template names literally, as hex in the order explorers show. */
+  category?: string;
+  /** An authority entry of this declaration: the NFTs it describes, whatever category each was made with. */
+  authority?: string;
+  name: string;
+  /** A short form for amounts, such as a currency's code. Required for fungible tokens. */
+  symbol?: string;
+  /** For fungible tokens: how many of the raw units' digits are after the decimal point. */
+  decimals?: number;
+}
+
 export interface RecoveryDeclaration {
   profile: string;
   version: number;
@@ -125,6 +145,11 @@ export interface RecoveryDeclaration {
   references?: string[];
   authority: Record<string, AuthorityEntry>;
   actions: Record<string, ActionEntry>;
+  /**
+   * Optional: the template's names for the tokens it deals in. A wallet that does not read it ignores it, as it
+   * ignores any field it does not know, so it does not change the profile's version.
+   */
+  tokens?: Record<string, TokenDescription>;
 }
 
 export interface ReadDeclaration {
@@ -237,6 +262,37 @@ const actionEntry = (value: unknown, action: string): ActionEntry => {
   };
 };
 
+/** Characters that do not show, or that turn the text around it: a name with one could pass for another. */
+const HIDDEN = (code: number): boolean => code < 0x20 || (code >= 0x7f && code <= 0x9f) || (code >= 0x200b && code <= 0x200f) || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069) || code === 0xfeff;
+
+/** Text a person reads: nothing hidden, no surrounding spaces, not too long. */
+const shownText = (value: unknown, longest: number): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= longest && value.trim() === value && ![...value].some((character) => HIDDEN(character.codePointAt(0) ?? 0));
+
+const tokenDescription = (value: unknown, entry: string): TokenDescription => {
+  if (!isObject(value)) return fail(`The token description "${entry}" cannot be read.`);
+  const { kind, category, authority, name: called, symbol, decimals } = value;
+  if (kind !== 'fungible' && kind !== 'nft') return fail(`The token description "${entry}" says neither "fungible" nor "nft".`);
+  if ((category === undefined) === (authority === undefined)) return fail(`The token description "${entry}" must name either a category or an authority entry, and not both.`);
+  if (category !== undefined && !isHash(category)) return fail(`The token description "${entry}" does not name its category as 64 hexadecimal digits.`);
+  if (!shownText(called, 40)) return fail(`The token description "${entry}" has no name a wallet can show: up to 40 characters of plain text.`);
+  if (symbol !== undefined && !(typeof symbol === 'string' && /^[A-Za-z0-9][A-Za-z0-9.\-_$]{0,11}$/.test(symbol))) return fail(`The symbol of the token description "${entry}" is not up to 12 letters, digits and the signs . - _ $.`);
+  if (kind === 'fungible') {
+    if (symbol === undefined) return fail(`The token description "${entry}" gives fungible tokens no symbol.`);
+    if (typeof decimals !== 'number' || !Number.isInteger(decimals) || decimals < 0 || decimals > 18) return fail(`The token description "${entry}" does not give the number of decimals as a whole number from 0 to 18.`);
+  } else if (decimals !== undefined) {
+    return fail(`The token description "${entry}" gives decimals to NFTs, which have no amount.`);
+  }
+  return {
+    kind,
+    ...(category === undefined ? {} : { category: category as string }),
+    ...(authority === undefined ? {} : { authority: name(authority, `authority entry of the token description "${entry}"`) }),
+    name: called,
+    ...(symbol === undefined ? {} : { symbol: symbol as string }),
+    ...(kind === 'fungible' ? { decimals: decimals as number } : {}),
+  };
+};
+
 /**
  * Read a recovery declaration from its text.
  *
@@ -252,7 +308,7 @@ export const readDeclaration = (text: string): ReadDeclaration => {
   }
   if (!isObject(parsed)) return fail('The recovery declaration is not readable.');
   if (parsed['profile'] !== RECOVERY_PROFILE || parsed['version'] !== RECOVERY_PROFILE_VERSION) throw new UnknownProfileError(parsed['profile'], parsed['version']);
-  const { template, references, authority, actions } = parsed;
+  const { template, references, authority, actions, tokens } = parsed;
   if (!isObject(template) || !isHash(template['identifier']) || !isHash(template['contentHash'])) return fail('The recovery declaration does not name its template by identifier and content hash.');
   if (references !== undefined && (!Array.isArray(references) || !references.every(isHash))) return fail('The recovery declaration\'s references are not content hashes.');
   if (!isObject(authority)) return fail('The recovery declaration names no authority tokens.');
@@ -272,6 +328,11 @@ export const readDeclaration = (text: string): ReadDeclaration => {
     if (!isObject(actions)) return fail('The recovery declaration\'s actions cannot be read.');
     for (const [action, value] of Object.entries(actions)) actionEntries[name(action, 'action')] = actionEntry(value, action);
   }
+  const descriptions: Record<string, TokenDescription> = {};
+  if (tokens !== undefined) {
+    if (!isObject(tokens)) return fail('The recovery declaration\'s token descriptions cannot be read.');
+    for (const [entry, value] of Object.entries(tokens)) descriptions[name(entry, 'token description')] = tokenDescription(value, entry);
+  }
   return {
     text,
     contentHash: textHash(text),
@@ -282,6 +343,7 @@ export const readDeclaration = (text: string): ReadDeclaration => {
       ...(references === undefined ? {} : { references: references as string[] }),
       authority: entries,
       actions: actionEntries,
+      ...(tokens === undefined ? {} : { tokens: descriptions }),
     },
   };
 };
