@@ -6,7 +6,9 @@ import { Button, Card, Frame, Loading, type NavItem, Notice, plainError, useEver
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
+import { Apps } from './Apps.js';
 import { Arrival } from './Arrival.js';
+import { type ApplicationsPart, useApplications } from './connections.js';
 import { Details } from './Details.js';
 import { Home } from './Home.js';
 import { BRAND } from './brand.js';
@@ -17,7 +19,7 @@ import { Send } from './Send.js';
 import { type Session, deviceWords, keep, kept, noteActivity, openWallet, seedOf } from './session.js';
 import { type Watch, useWatch } from './watch.js';
 
-const ROUTES = ['home', 'receive', 'send', 'recovery', 'details'] as const;
+const ROUTES = ['home', 'receive', 'send', 'apps', 'recovery', 'details'] as const;
 export type Route = (typeof ROUTES)[number];
 
 /** Where a change announced to the recoverer stands (section 9.7). */
@@ -44,6 +46,8 @@ export interface Owner {
   toast: (text: string) => void;
   /** Record a transaction this phone sent, and read the wallet again. */
   sent: (what: string, sent: Sent, amount?: bigint) => void;
+  /** Applications: connections, requests, and the tokens with what they control. */
+  apps: ApplicationsPart;
 }
 
 export const OwnerApp = ({ session, opened }: { session: Session; opened?: OwnerWallet | undefined }) => {
@@ -84,6 +88,15 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
   const [toastElement, toast] = useToast();
   const [dismissed, setDismissed] = useState(false);
   const watch = useWatch(session, wallet, seed.controllerKey.keyHash, canCancel ?? true);
+  const apps = useApplications({
+    session,
+    wallet,
+    seed,
+    onSent: (what, outcome) => {
+      noteActivity({ what, transactionId: outcome.sent.transactionId, bytes: outcome.sent.bytes, fee: String(outcome.sent.feeSatoshis), remainder: String(outcome.sent.remainderSatoshis) });
+      void refresh();
+    },
+  });
 
   const refresh = async () => {
     setBalance(await wallet.balance());
@@ -163,6 +176,7 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
       noteActivity({ what, transactionId: sent.transactionId, bytes: sent.bytes, fee: String(sent.feeSatoshis), remainder: String(sent.remainderSatoshis), ...(amount === undefined ? {} : { amount: String(amount) }) });
       void refresh();
     },
+    apps,
   };
 
   const moved = kept('arrangement')?.movedTo;
@@ -176,6 +190,7 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
     { route: 'home', label: 'Home', icon: 'home' },
     { route: 'receive', label: 'Receive', icon: 'receive' },
     { route: 'send', label: 'Send', icon: 'send' },
+    { route: 'apps', label: 'Apps', icon: 'apps', flag: apps.proposals.length > 0 },
     { route: 'recovery', label: 'Recovery', icon: 'shield', flag: alarm || (watch.protection !== undefined && watch.protection.gaps.some((gap) => !isChainGap(gap))) },
     { route: 'details', label: 'Details', icon: 'details', sideOnly: true },
   ];
@@ -189,14 +204,42 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
       home: () => <Home owner={owner} />,
       receive: () => <Receive owner={owner} />,
       send: () => <Send owner={owner} />,
+      apps: () => <Apps owner={owner} />,
       recovery: () => <Recovery owner={owner} />,
       details: () => <Details owner={owner} />,
     };
     screen = screens[route]();
   }
   const incoming = kept('incoming');
-  const offer =
-    dismissed || plain_(moved, elsewhere, arrival) || incoming === undefined || route === 'recovery' ? null : incoming.kind === 'recoverer' || incoming.kind === 'prepare' ? (
+  const asked = apps.proposals.length;
+  const offer = plain_(moved, elsewhere, arrival) ? null : asked > 0 && route !== 'apps' ? (
+    <div class="incoming">
+      <Notice tone="wait">
+        <div class="row spread">
+          <span>{asked === 1 ? 'An application asks for your decision.' : `${asked} requests from applications wait for your decision.`}</span>
+          <Button small onClick={() => navigate('apps')}>
+            Show
+          </Button>
+        </div>
+      </Notice>
+    </div>
+  ) : dismissed || incoming === undefined ? null : incoming.kind === 'connect' && route !== 'apps' ? (
+    <div class="incoming">
+      <Notice tone="wait">
+        <div class="row spread">
+          <span>You opened an application's connection link. Connect this wallet to it?</span>
+          <span class="row">
+            <Button small onClick={() => navigate('apps')}>
+              Show
+            </Button>
+            <Button small kind="quiet" onClick={() => { keep('incoming', undefined); setDismissed(true); }}>
+              Not now
+            </Button>
+          </span>
+        </div>
+      </Notice>
+    </div>
+  ) : route === 'recovery' ? null : incoming.kind === 'recoverer' || incoming.kind === 'prepare' ? (
       <div class="incoming">
         <Notice tone="wait">
           <div class="row spread">

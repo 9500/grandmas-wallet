@@ -409,13 +409,10 @@ try {
     const jarAt = savingsJarScript(hexToBin(key.category), unlockTime).lockingBytecode;
     note(`The wallet finds the jar from its key: ${key.position?.status}, ${key.position?.satoshis} satoshis, at the address the application's own code gives for that key (${key.position?.lockingBytecode === hex(jarAt)}).`, 'the jar is found');
     await once('emptying before the date is refused', async () => {
-      let early = '';
-      try {
-        await applications.carryOut(applications.actionOn(key, 'withdraw'));
-        early = 'UNEXPECTED: accepted';
-      } catch (error) {
-        early = String((error as Error).message);
-      }
+      const early = await applications.carryOut(applications.actionOn(key, 'withdraw')).then(
+        () => 'UNEXPECTED: accepted',
+        (error: unknown) => String((error as Error).message),
+      );
       note(`Emptying the jar before its date was refused by the network: ${/non-final/i.test(early) ? '"non-final"' : early.slice(0, 100)}.`);
       return undefined;
     });

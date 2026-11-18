@@ -19,6 +19,7 @@ const ICONS = {
   wallets: 'M4 7h16v12H4zM4 7l2-3h12l2 3M15 13h2',
   inbox: 'M4 13l2-8h12l2 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5',
   key: 'M14 10a4 4 0 1 0-3.5 4L9 15.5V18H6.5v2.5H4V18l6.5-6.5M15.5 7.5h.01',
+  apps: 'M4 4h6.5v6.5H4zM13.5 4H20v6.5h-6.5zM4 13.5h6.5V20H4zM13.5 13.5H20V20h-6.5z',
 } as const;
 
 export type IconName = keyof typeof ICONS;

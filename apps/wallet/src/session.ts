@@ -15,6 +15,7 @@ import {
 } from '@grandmas-wallet/app';
 import { linkKind, readLink } from '@grandmas-wallet/app/links';
 import { HttpStore } from '@grandmas-wallet/archive';
+import type { LedgerEntry } from '@grandmas-wallet/connect';
 import { type ChainReader, type ChallengeDelay, type SeedKeys, deriveSeedKeys } from '@grandmas-wallet/core';
 import { recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
 import { type Environment, Vault, connectChain, keyNetwork, loadEnvironment, openAccount } from '@grandmas-wallet/ui';
@@ -105,6 +106,24 @@ export interface Kept {
   autoCancel: boolean;
   /** A link the page was opened with, until something has dealt with it. */
   incoming: { kind: LinkField | 'enroll'; text: string };
+  /** The applications this device is connected to, so that the page connects again when it is opened. */
+  connections: Connection[];
+  /** Every request an application made, with its outcome: what makes a request carried out at most once. */
+  ledger: LedgerEntry[];
+}
+
+/** A connection to an application over WizardConnect. */
+export interface Connection {
+  /** The `wiz://` address the application showed. */
+  uri: string;
+  /** This device's key for this connection alone, hex. */
+  privateKey: string;
+  /** The name of the pairing: which application a request came from. */
+  pairing: string;
+  /** The application's own name for itself, as it last gave it. Not verified. */
+  name?: string;
+  /** Unix seconds. */
+  addedAt: number;
 }
 
 export const kept = <Name extends keyof Kept>(name: Name): Kept[Name] | undefined => vault.get<Kept[Name]>(name);

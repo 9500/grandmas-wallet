@@ -83,6 +83,19 @@ export const Home = ({ owner }: { owner: Owner }) => {
             </div>
           </Card>
           <KitCard owner={owner} />
+          <Card cls="o4">
+            <LinkRow
+              label="Applications"
+              hint={
+                owner.apps.proposals.length > 0
+                  ? `${owner.apps.proposals.length === 1 ? 'A request waits' : `${owner.apps.proposals.length} requests wait`} for your decision.`
+                  : owner.apps.connections.length > 0
+                    ? `${owner.apps.connections.length === 1 ? 'One application' : `${owner.apps.connections.length} applications`} connected. Your tokens and what they control.`
+                    : 'Connect to an application. Your tokens and what they control.'
+              }
+              onClick={() => owner.navigate('apps')}
+            />
+          </Card>
           <div class="center small muted o6">
             <button type="button" class="link" onClick={() => owner.navigate('details')}>
               Technical details

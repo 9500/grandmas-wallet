@@ -1,0 +1,96 @@
+/*
+ * The Applications screen. Built on the shared visual system; only what the screen adds is here: a request
+ * in parts (the template, its words, the wallet's figures), connections and the list of tokens.
+ */
+
+/* On a phone: requests, then connections, then tokens, then earlier requests. On a desktop: two columns. */
+@media (max-width: 959.98px) {
+  .apps-layout > .stack { display: contents; }
+  .apps-layout .request-card { order: 1; }
+  .apps-layout > .stack:last-child > :first-child { order: 2; }
+  .apps-layout > .stack:first-child > :last-child { order: 3; }
+  .apps-layout > .stack:last-child > :nth-child(2) { order: 4; }
+}
+
+.card-lead { margin-top: -4px; }
+
+/* A long hexadecimal value: shortened, whole on a tap. */
+button.hex {
+  display: inline; min-height: 0; padding: 0; border: 0; border-radius: 3px; background: none;
+  font-family: var(--mono); font-size: 0.875em; font-weight: 400; line-height: inherit; color: inherit;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 3px;
+  text-align: left; cursor: pointer;
+}
+button.hex:hover:not(:disabled) { background: none; color: var(--accent); }
+button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
+
+/* Parts of a request */
+.part { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+.request-card .part:first-of-type, .request-card .asker + .part { border-top: 0; padding-top: 0; }
+.part-title { font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.part-note { margin: -4px 0 0; }
+
+.asker { margin-top: -4px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.request-card > .card-head, .request-card > h2 { margin-bottom: 8px; }
+
+.template-name { font-weight: 650; font-size: 17px; }
+.template-description { color: var(--ink); margin: 2px 0 0; }
+
+.status-body p { margin-bottom: 0; }
+.violations { list-style: none; padding: 0; margin: 4px 0 0; }
+.violations > li { padding: 8px 0 0; margin: 0; color: var(--ink); }
+.violations > li + li { border-top: 1px solid var(--line); margin-top: 8px; }
+.violation-rule { font-weight: 650; color: var(--bad); font-size: 14px; }
+.violation-what { margin: 2px 0; }
+
+/* The template's words, set apart as someone else's. */
+.quote { border-left: 3px solid var(--line); padding: 2px 0 2px 14px; }
+.quote-title { font-weight: 650; }
+.quote p { margin: 4px 0 0; }
+.quote .kv { margin-top: 8px; }
+.word-value { overflow-wrap: anywhere; }
+
+.own-figures .kv dd strong { font-weight: 700; }
+.moved-group { margin-top: 4px; }
+.moved-title { font-weight: 600; font-size: 15px; margin: 8px 0 4px; }
+.moved-group .list > li { padding: 8px 0; }
+.moved-group .list > li:first-child { padding-top: 0; }
+.moved-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 16px; }
+.moved-head > :first-child { min-width: 0; }
+.moved-head > .amount { margin-left: auto; }
+
+.decide { margin-top: 0; }
+.failure { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+
+/* Connections */
+.connections { margin-bottom: 16px; }
+.connection { align-items: flex-start; flex-wrap: wrap; row-gap: 6px; }
+.connection > :first-child { flex: 1 1 14em; }
+.connection-name { font-weight: 600; overflow-wrap: break-word; }
+.connection .pill { flex: none; }
+.connection-reason { margin: 6px 0 0; }
+.connection-actions { margin-top: 8px; }
+.connect-form { border-top: 1px solid var(--line); padding-top: 16px; }
+.connect-form > .notice { margin-bottom: 12px; }
+.connect-form .field { margin-bottom: 12px; }
+.connect-form textarea { min-height: 64px; }
+.connect-form > p { margin-top: 12px; }
+.earlier-error { margin: 6px 0 0; overflow-wrap: anywhere; }
+
+/* Tokens */
+.tokens-loading { display: flex; gap: 10px; align-items: center; color: var(--muted); padding: 8px 0; }
+.token { display: flex; flex-direction: column; gap: 10px; }
+.token-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.token-head > :first-child { min-width: 0; }
+.token-head .pill { flex: none; }
+.token-title { font-weight: 650; }
+.token-id { overflow-wrap: anywhere; }
+.token-body { display: flex; flex-direction: column; gap: 6px; }
+.token-body p { margin: 0; }
+.token-actions { list-style: none; margin: 4px 0 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-s); }
+.token-actions > li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; padding: 10px 12px; margin: 0; }
+.token-actions > li + li { border-top: 1px solid var(--line); }
+.token-actions > li > :first-child { min-width: 0; flex: 1 1 14em; }
+.token-actions button { flex: none; }
+
+.token-aside p { margin: 0; }
