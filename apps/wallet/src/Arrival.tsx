@@ -104,7 +104,7 @@ export const Arrival = ({ owner, onDone }: { owner: Owner; onDone: () => void })
     {
       title: 'Moving the coins to this phone',
       state: stateOf('sweep'),
-      detail: 'Coins at the earlier phone\'s addresses go to this phone\'s, through the wallet\'s controller. Tokens move unchanged. A coin for cancelling is put aside.',
+      detail: 'Coins at the earlier phone\'s addresses go to this phone\'s, through the wallet\'s controller. Tokens move unchanged.',
     },
     {
       title: 'Full search',

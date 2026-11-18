@@ -4,6 +4,8 @@ import {
   type Allocation,
   type ChainReader,
   type ChallengeDelay,
+  type CoinChoice,
+  type CoinChoiceRequest,
   type ControllerState,
   type ControllerUpdate,
   type KeyedAddressKind,
@@ -11,6 +13,7 @@ import {
   type SeedKeys,
   type SpendableCoin,
   type TransactionRequest,
+  type Utxo,
   type ViewingKey,
   type WalletSearch,
   type SeedView,
@@ -45,8 +48,8 @@ import {
 import type { ApplicationsState } from './applications.js';
 
 /**
- * The owner's wallet (proposal sections 7.7, 7.9 and 8): creating it, giving out addresses, paying, the
- * coin kept for cancelling, sending everything, and closing.
+ * The owner's wallet (proposal sections 7.7, 7.9 and 8): creating it, giving out addresses, paying,
+ * cancelling a request, sending everything, and closing.
  *
  * The wallet's logic decides which coins a transaction spends and what its outputs are; a backend holds
  * the keys and builds exactly that. What the wallet has to remember is plain data, stored by the device
@@ -88,7 +91,10 @@ export interface OwnerWalletState {
    */
   voided?: VoidedIdentity[];
   allocation: Allocation;
-  /** The change address the coin for cancelling was put at. */
+  /**
+   * Stored by wallets created while a coin was kept apart for cancelling: the change address of that coin.
+   * Nothing reads it any more. The coin there is an ordinary coin of the wallet, counted and spent as any other.
+   */
   cancelCoinNumber?: number;
   /** The change address the rest of the wallet's first coins went to. */
   firstCoinNumber?: number;
@@ -145,7 +151,7 @@ export interface WalletParts {
   feeRate: number;
   /** @throws when the wallet takes on no action: it is not created yet, or another key owns it */
   requireUsable(): void;
-  /** Coins without a token at this seed's addresses, without the coin kept for cancelling. */
+  /** Coins without a token at this seed's addresses. */
   ownCoins(): Promise<AccountCoin[]>;
   tokenCoins(): Promise<TokenCoin[]>;
   /**
@@ -210,10 +216,8 @@ export interface CreateOptions {
 }
 
 export interface Balance {
-  /** At the wallet's recoverable addresses, without the coin for cancelling. */
+  /** At the wallet's recoverable addresses. */
   recoverable: bigint;
-  /** The coin kept to pay for a cancellation. */
-  cancelling: bigint;
   /** At vault addresses. */
   vault: bigint;
   /**
@@ -270,12 +274,22 @@ export interface EverythingQuote {
 
 const controllerSized: Output = { lockingBytecode: new Uint8Array(35), valueSatoshis: CONTROLLER_SATOSHIS, token: { amount: 0n, category: new Uint8Array(32), nft: { capability: 'mutable', commitment: new Uint8Array(69) } } };
 
-/** What a cancellation costs when the coin kept for it pays and nothing is left over: what that coin holds. */
+/**
+ * The least a cancellation costs: the fee when the controller and one coin of the wallet are its inputs and
+ * nothing is left over. A wallet whose coins hold less than this cannot pay for one.
+ */
 export const cancellationCost = (feeRate = 1): bigint => requiredFee(transactionBytes([INPUT_BYTES.controller, INPUT_BYTES.byKey], [controllerSized]), feeRate);
+
+/** The least the wallet's first coin may hold: what an output may hold, and enough to pay for refusing a request. */
+const leastFirstCoin = (feeRate: number): bigint => {
+  const least = smallestOutputValue({ lockingBytecode: new Uint8Array(35), valueSatoshis: 0n });
+  const cancelling = cancellationCost(feeRate);
+  return cancelling > least ? cancelling : least;
+};
 
 /**
  * What the funding address must receive for a wallet to be created (proposal section 7.9): the controller,
- * the coin for cancelling, the allowance if one is given, the smallest first coin of the wallet, and the
+ * the allowance if one is given, a first coin of the wallet that pays for one cancellation, and the
  * fees of the creating transaction and of the payment to itself that comes before it when the funding coin
  * is not the first output of its transaction.
  */
@@ -283,10 +297,10 @@ export const creationFunding = (options: { allowanceSatoshis?: bigint; feeRate?:
   const feeRate = options.feeRate ?? 1;
   const keyed: Output = { lockingBytecode: new Uint8Array(25), valueSatoshis: 0n };
   const own: Output = { lockingBytecode: new Uint8Array(35), valueSatoshis: 0n };
-  const outputs = [controllerSized, { ...own, valueSatoshis: cancellationCost(feeRate) }, ...(options.allowanceSatoshis === undefined ? [] : [{ ...keyed, valueSatoshis: options.allowanceSatoshis }]), own];
+  const outputs = [controllerSized, ...(options.allowanceSatoshis === undefined ? [] : [{ ...keyed, valueSatoshis: options.allowanceSatoshis }]), own];
   const creating = requiredFee(transactionBytes([INPUT_BYTES.p2pkh], outputs), feeRate);
   const toItself = requiredFee(transactionBytes([INPUT_BYTES.p2pkh], [keyed]), feeRate);
-  return outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n) + smallestOutputValue(own) + creating + toItself;
+  return outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n) + leastFirstCoin(feeRate) + creating + toItself;
 };
 
 export class CannotCloseError extends Error {
@@ -300,6 +314,29 @@ const tokenFree = (coin: AccountCoin): boolean => coin.utxo.output.token === und
 const sameCoin = (a: AccountCoin, b: AccountCoin): boolean => hex(a.utxo.transactionHash) === hex(b.utxo.transactionHash) && a.utxo.index === b.utxo.index;
 const spendable = (coin: AccountCoin, inputBytes: number): SpendableCoin & { coin: AccountCoin } => ({ utxo: coin.utxo, inputBytes, coin });
 const valueOf = (coins: AccountCoin[]): bigint => coins.reduce((sum, coin) => sum + coin.utxo.output.valueSatoshis, 0n);
+type Payer = ReturnType<typeof spendable>;
+
+/**
+ * Choose the coins that pay for a controller transaction. Those coins and their change are in a transaction
+ * with the identity for anyone to see (proposal section 16), so the smallest coin that pays alone is taken,
+ * and several only when no single coin does.
+ *
+ * @throws InsufficientFundsError when the coins together do not cover the fee
+ */
+const choosePayers = (available: Payer[], request: Omit<CoinChoiceRequest, 'available'>): CoinChoice => {
+  const smallestFirst = [...available].sort((a, b) => (a.utxo.output.valueSatoshis < b.utxo.output.valueSatoshis ? -1 : a.utxo.output.valueSatoshis > b.utxo.output.valueSatoshis ? 1 : 0));
+  for (const single of smallestFirst) {
+    try {
+      return chooseCoins({ ...request, available: [single] });
+    } catch (error) {
+      if (!(error instanceof InsufficientFundsError)) throw error;
+    }
+  }
+  return chooseCoins({ ...request, available });
+};
+
+/** What a node says when a transaction spends a coin that is already spent. */
+const DOUBLE_SPEND = /missingorspent|mempool-conflict|missing.?inputs|inputs.?missing|already.?spent|double.?spen|conflict/i;
 
 export class OwnerWallet {
   /**
@@ -396,7 +433,12 @@ export class OwnerWallet {
 
   /** Send a prepared transaction and remember which coins it spent. */
   private async sendPrepared(prepared: PreparedTransaction): Promise<void> {
-    await this.backend.send(prepared);
+    try {
+      await this.backend.send(prepared);
+    } catch (error) {
+      this.preparedInputs.delete(prepared.invitationIdentifier);
+      throw error;
+    }
     for (const place of this.preparedInputs.get(prepared.invitationIdentifier) ?? []) this.spent.add(place);
     this.preparedInputs.delete(prepared.invitationIdentifier);
   }
@@ -535,7 +577,7 @@ export class OwnerWallet {
 
   /**
    * The identity is void: the transaction that defined it is gone. Everything built on it is gone with it:
-   * the controller, the coin for cancelling, and payments made from the wallet's first coins. What others
+   * the controller and payments made from the wallet's first coins. What others
    * paid to the addresses given out under it is still there and still the wallet's, by key. Those addresses
    * keep their numbers; the next identity's numbers start after them.
    */
@@ -656,30 +698,24 @@ export class OwnerWallet {
     const first: ControllerState = { version: 1, status: 'active', ownerEpoch: 0, ownerKeyHash: owner.keyHash, recovererKeyHash: options.recovererKeyHash, challengeDelay: options.challengeDelay };
     const controller = this.controllerOutput(first);
 
-    // The coin for cancelling and the rest go to change addresses, which exist as soon as the identity does.
-    // A device that stopped after taking the two numbers uses the same ones again.
-    if (this.state.cancelCoinNumber === undefined || this.state.firstCoinNumber === undefined) {
-      let allocation = this.state.allocation;
-      const taken: number[] = [];
-      for (let count = 0; count < 2; count++) {
-        const next = takeNumber(allocation, ADDRESS_KIND.change);
-        if (!('number' in next)) throw new Error('No change address is free for the wallet\'s first coins.');
-        allocation = keepNumber(next.allocation, ADDRESS_KIND.change, next.number);
-        taken.push(next.number);
-      }
-      this.store({ allocation, cancelCoinNumber: taken[0] as number, firstCoinNumber: taken[1] as number });
+    // The rest goes to a change address, which exists as soon as the identity does. A device that stopped
+    // after taking the number uses the same one again.
+    if (this.state.firstCoinNumber === undefined) {
+      const next = takeNumber(this.state.allocation, ADDRESS_KIND.change);
+      if (!('number' in next)) throw new Error('No change address is free for the wallet\'s first coins.');
+      this.store({ allocation: keepNumber(next.allocation, ADDRESS_KIND.change, next.number), firstCoinNumber: next.number });
     }
-    const cancelNumber = this.state.cancelCoinNumber as number;
     const restNumber = this.state.firstCoinNumber as number;
     await this.makeAddresses(ADDRESS_KIND.change, this.state.allocation[ADDRESS_KIND.change].next);
-    const cancelling = { lockingBytecode: this.address(ADDRESS_KIND.change, cancelNumber).lockingBytecode, valueSatoshis: this.cancellationCost() };
     const allowance = options.allowance === undefined ? [] : [{ lockingBytecode: options.allowance.feeLockingBytecode, valueSatoshis: options.allowance.satoshis }];
     const rest = { lockingBytecode: this.address(ADDRESS_KIND.change, restNumber).lockingBytecode, valueSatoshis: 0n };
-    const outputs = [controller, cancelling, ...allowance, rest];
+    const outputs = [controller, ...allowance, rest];
     const fee = requiredFee(transactionBytes([INPUT_BYTES.p2pkh], outputs), this.feeRate);
     const left = coin.utxo.output.valueSatoshis - outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n) - fee;
-    if (left < smallestOutputValue(rest)) {
-      throw new InsufficientFundsError(coin.utxo.output.valueSatoshis, fee, coin.utxo.output.valueSatoshis - left + smallestOutputValue(rest), 'the funding coin does not cover the controller, the coin for cancelling, the allowance and the fee.');
+    // A wallet that is created can refuse a request at once: its first coin pays for that.
+    const least = leastFirstCoin(this.feeRate);
+    if (left < least) {
+      throw new InsufficientFundsError(coin.utxo.output.valueSatoshis, fee, coin.utxo.output.valueSatoshis - left + least, 'the funding coin does not cover the controller, the allowance, the fee and a first coin that pays for refusing a request.');
     }
     const prepared = await this.prepareTransaction({
       template: 'controller',
@@ -687,7 +723,7 @@ export class OwnerWallet {
       role: 'owner',
       variables: { identity: hex(identity), nextState: hex(encodeControllerState(first)) },
       inputs: [{ coin }],
-      outputs: [{ outputIdentifier: 'controllerOutput' }, cancelling, ...allowance, { ...rest, valueSatoshis: left }],
+      outputs: [{ outputIdentifier: 'controllerOutput' }, ...allowance, { ...rest, valueSatoshis: left }],
     });
     // The creation is checked as any client would check it, before it is sent and before the identity is used.
     const transaction = decodeTransactionBch(hexToBin(prepared.transactionHex));
@@ -720,10 +756,6 @@ export class OwnerWallet {
     };
   }
 
-  private cancellationCost(): bigint {
-    return cancellationCost(this.feeRate);
-  }
-
   // ---------------------------------------------------------------- what the wallet shows
 
   /** Whether the wallet is in use: the network has its creating transaction, in a block or not. */
@@ -752,22 +784,18 @@ export class OwnerWallet {
   }
 
   /** The wallet's coins by where they are. */
-  private async sorted(): Promise<{ own: AccountCoin[]; cancelling: AccountCoin[]; vault: AccountCoin[]; earlier: AccountCoin[]; funding: AccountCoin[]; tokens: AccountCoin[]; voided: AccountCoin[] }> {
+  private async sorted(): Promise<{ own: AccountCoin[]; vault: AccountCoin[]; earlier: AccountCoin[]; funding: AccountCoin[]; tokens: AccountCoin[]; voided: AccountCoin[] }> {
     const all = await this.coins();
     // Coins at addresses of a voided identity are the wallet's by key, and are kept apart: no recovery reaches them.
     const voided = all.filter((coin) => (coin.template === 'givenOut' || coin.template === 'change') && this.voidedAt.has(hex(coin.utxo.output.lockingBytecode)));
     const coins = all.filter((coin) => !voided.includes(coin));
-    const cancelAt = this.state.cancelCoinNumber === undefined || this.state.identity === undefined ? undefined : hex(this.address(ADDRESS_KIND.change, this.state.cancelCoinNumber).lockingBytecode);
     const controllerAt = this.state.identity === undefined ? undefined : hex(controllerScript(this.identity).lockingBytecode);
     // Coins at the wallet's own addresses. A key holder may also follow scripts of other templates, for an
     // action that spends from them; what is there is not the wallet's.
     const atAddress = coins.filter((coin) => hex(coin.utxo.output.lockingBytecode) !== controllerAt && (coin.template === 'givenOut' || coin.template === 'change' || coin.template === 'actions'));
     const keyed = atAddress.filter((coin) => coin.template === 'givenOut' || coin.template === 'change');
-    // The coin for cancelling is the one the wallet put aside; anything else that arrives at its address is an ordinary coin.
-    const cancelling = keyed.filter((coin) => tokenFree(coin) && hex(coin.utxo.output.lockingBytecode) === cancelAt && coin.utxo.output.valueSatoshis === this.cancellationCost()).slice(0, 1);
     return {
-      own: keyed.filter((coin) => tokenFree(coin) && !cancelling.includes(coin)),
-      cancelling,
+      own: keyed.filter(tokenFree),
       vault: atAddress.filter((coin) => coin.template === 'actions' && tokenFree(coin) && !this.earlier.has(hex(coin.utxo.output.lockingBytecode))),
       // At an earlier seed's addresses, with or without tokens: what a sweep is for.
       earlier: atAddress.filter((coin) => this.earlier.has(hex(coin.utxo.output.lockingBytecode))),
@@ -778,10 +806,9 @@ export class OwnerWallet {
   }
 
   async balance(): Promise<Balance> {
-    const { own, cancelling, vault, earlier, funding, tokens, voided } = await this.sorted();
+    const { own, vault, earlier, funding, tokens, voided } = await this.sorted();
     return {
       recoverable: valueOf(own),
-      cancelling: valueOf(cancelling),
       vault: valueOf(vault),
       // Before the wallet is created, what is at the funding address is what it is being created from.
       notRecoverable: this.created ? valueOf(funding) : 0n,
@@ -791,9 +818,42 @@ export class OwnerWallet {
     };
   }
 
-  /** Whether the wallet can cancel a request now: it holds the coin kept for that. */
+  /**
+   * Whether the wallet's coins pay for a cancellation now. Only a wallet that holds less than
+   * `cancellationCost()` without tokens, at its own, vault and earlier addresses together, cannot.
+   */
   async canCancel(): Promise<boolean> {
-    return (await this.sorted()).cancelling.length > 0;
+    if (this.state.identity === undefined) return false;
+    const controller: Utxo = { transactionHash: new Uint8Array(32), index: 0, output: controllerSized };
+    try {
+      await this.cancelPayment(controller, controllerSized, new Uint8Array(35));
+      return true;
+    } catch (error) {
+      if (error instanceof InsufficientFundsError) return false;
+      throw error;
+    }
+  }
+
+  /**
+   * The coins that pay for a cancellation. Ordinary coins pay when they can. When they hold less than the fee,
+   * a coin at a vault address or at an earlier seed's address pays: the controller releases it in the same
+   * transaction, and the change goes to a change address of this seed.
+   *
+   * @throws InsufficientFundsError when all of them together do not cover the fee
+   */
+  private async cancelPayment(controller: Utxo, next: Output, changeLockingBytecode: Uint8Array): Promise<{ choice: CoinChoice; payers: AccountCoin[] }> {
+    const { own, vault, earlier } = await this.sorted();
+    const request = { fixedInputs: [{ utxo: controller, inputBytes: INPUT_BYTES.controller }], outputs: [next], changeLockingBytecode, feeRate: this.feeRate };
+    const ordinary = own.map((coin) => spendable(coin, INPUT_BYTES.byKey));
+    let choice: CoinChoice;
+    try {
+      choice = choosePayers(ordinary, request);
+    } catch (error) {
+      if (!(error instanceof InsufficientFundsError)) throw error;
+      const bound = [...vault.map((coin) => spendable(coin, INPUT_BYTES.vault)), ...earlier.filter(tokenFree).map((coin) => spendable(coin, this.earlierInputBytes(coin)))];
+      choice = choosePayers([...ordinary, ...bound], request);
+    }
+    return { choice, payers: choice.coins.map((entry) => (entry as Payer).coin) };
   }
 
   // ---------------------------------------------------------------- for actions of other templates
@@ -910,7 +970,7 @@ export class OwnerWallet {
 
   /**
    * Pay the given outputs from the wallet's coins. Coins are chosen so that no change is needed where that
-   * is possible; change goes to a fresh change address. The coin kept for cancelling is left alone.
+   * is possible; change goes to a fresh change address.
    *
    * @param moving - coins that carry tokens which the outputs move; a fee never comes from one
    */
@@ -977,39 +1037,65 @@ export class OwnerWallet {
     return this.pay([{ ...output, valueSatoshis: smallestOutputValue(output) }], [coin]);
   }
 
-  /** Put a coin aside that pays for one cancellation, when the wallet holds none. */
-  async setAsideCancellingCoin(): Promise<Sent | undefined> {
-    this.requireCreated();
-    if (await this.canCancel()) return undefined;
-    const number = this.state.cancelCoinNumber ?? (await this.giveOut(ADDRESS_KIND.change)).address.number;
-    this.store({ cancelCoinNumber: number });
-    return this.pay([{ lockingBytecode: this.address(ADDRESS_KIND.change, number).lockingBytecode, valueSatoshis: this.cancellationCost() }]);
-  }
-
-  /** Cancel a pending request: the owner approves, and the coin kept for this pays the fee. */
+  /**
+   * Cancel a pending request: the owner approves, and the wallet's coins pay the fee as they pay for a
+   * payment, with change to a fresh change address (proposal section 8). The smallest coin that pays alone is
+   * taken. A coin that the key holder still listed may have been spent a moment before by another payment of
+   * this wallet; when the network refuses the cancellation for that, the coins are chosen again once.
+   *
+   * @throws InsufficientFundsError when the wallet holds less than the fee, at its own, vault and earlier addresses together
+   */
   async cancel(): Promise<Sent> {
     this.requireCreated();
-    const { coin, state } = await this.controllerCoin();
-    const { cancelling } = await this.sorted();
-    const [payer] = cancelling;
-    if (payer === undefined) throw new Error('The wallet holds no coin for cancelling. It cannot cancel until that coin is restored.');
-    const next = afterOwnerAuthorize(state);
-    const prepared = await this.prepareTransaction({
-      template: 'controller',
-      action: 'approve',
-      role: 'owner',
-      variables: { identity: hex(this.identity), nextState: hex(encodeControllerState(next)) },
-      inputs: [{ coin, inputIdentifier: 'approveInput' }, { coin: payer }],
-      outputs: [{ outputIdentifier: 'controllerOutput' }],
-    });
-    await this.sendPrepared(prepared);
-    return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: prepared.feeSatoshis - requiredFee(prepared.bytes, this.feeRate) };
+    for (let attempt = 1; ; attempt++) {
+      const { coin, state } = await this.controllerCoin();
+      const next = afterOwnerAuthorize(state);
+      const taken = takeNumber(this.state.allocation, ADDRESS_KIND.change);
+      const changeNumber = 'number' in taken ? taken.number : taken.refused.offer;
+      const changeAddress = this.address(ADDRESS_KIND.change, changeNumber);
+      let planned: { choice: CoinChoice; payers: AccountCoin[] };
+      try {
+        planned = await this.cancelPayment(coin.utxo, this.controllerOutput(next), changeAddress.lockingBytecode);
+      } catch (error) {
+        if (!(error instanceof InsufficientFundsError)) throw error;
+        throw new InsufficientFundsError(error.totalSatoshis, error.feeSatoshis, error.neededSatoshis, 'the wallet holds less than the fee of a cancellation; a little Bitcoin Cash has to arrive first.');
+      }
+      const { choice, payers } = planned;
+      if (choice.changeSatoshis !== undefined && 'number' in taken) this.store({ allocation: keepNumber(taken.allocation, ADDRESS_KIND.change, taken.number) });
+      if (choice.changeSatoshis !== undefined) await this.makeAddresses(ADDRESS_KIND.change, changeNumber + 1);
+      const prepared = await this.prepareTransaction({
+        template: 'controller',
+        action: 'approve',
+        role: 'owner',
+        variables: { identity: hex(this.identity), nextState: hex(encodeControllerState(next)) },
+        inputs: [{ coin, inputIdentifier: 'approveInput' }, ...payers.map((payer) => ({ coin: payer }))],
+        outputs: [{ outputIdentifier: 'controllerOutput' }, ...(choice.changeSatoshis === undefined ? [] : [{ lockingBytecode: changeAddress.lockingBytecode, valueSatoshis: choice.changeSatoshis }])],
+      });
+      try {
+        await this.sendPrepared(prepared);
+      } catch (error) {
+        if (attempt > 1 || !DOUBLE_SPEND.test((error as Error).message)) throw error;
+        // The coins the chain no longer lists as unspent are not chosen again.
+        await this.noteSpentElsewhere(payers);
+        continue;
+      }
+      return { transactionId: prepared.transactionId, bytes: prepared.bytes, feeSatoshis: prepared.feeSatoshis, remainderSatoshis: choice.remainderSatoshis };
+    }
+  }
+
+  /** Of these coins, set aside those that the chain shows are spent: they are not offered again. */
+  private async noteSpentElsewhere(coins: AccountCoin[]): Promise<void> {
+    for (const coin of coins) {
+      const unspent = await this.chain.listUnspent(coin.utxo.output.lockingBytecode);
+      const place = `${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`;
+      if (!unspent.some((entry) => `${entry.transactionId}:${entry.index}` === place)) this.spent.add(place);
+    }
   }
 
   /**
    * Change the wallet's settings (proposal section 5.6): the owner key, the recoverer or the waiting period,
-   * with the owner's signature alone and at once. Any pending request is cleared. A coin of the wallet pays
-   * the fee, and its change returns to a change address.
+   * with the owner's signature alone and at once. Any pending request is cleared. The smallest coin of the
+   * wallet that pays alone pays the fee, and its change returns to a change address.
    *
    * The preparation around a change (the recoverer's receipt before a new seed or a new recoverer takes
    * effect, section 9.7) is the caller's: the contract cannot require it.
@@ -1023,8 +1109,7 @@ export class OwnerWallet {
     const taken = takeNumber(this.state.allocation, ADDRESS_KIND.change);
     const changeNumber = 'number' in taken ? taken.number : taken.refused.offer;
     const changeAddress = this.address(ADDRESS_KIND.change, changeNumber);
-    const choice = chooseCoins({
-      available: own.map((other) => spendable(other, INPUT_BYTES.byKey)),
+    const choice = choosePayers(own.map((other) => spendable(other, INPUT_BYTES.byKey)), {
       fixedInputs: [{ utxo: coin.utxo, inputBytes: INPUT_BYTES.controllerUpdate }],
       outputs: [this.controllerOutput(next)],
       changeLockingBytecode: changeAddress.lockingBytecode,
@@ -1033,7 +1118,7 @@ export class OwnerWallet {
     if (choice.changeSatoshis !== undefined && 'number' in taken) this.store({ allocation: keepNumber(taken.allocation, ADDRESS_KIND.change, taken.number) });
     else if ('number' in taken) this.store({ allocation: returnNumber(taken.allocation, ADDRESS_KIND.change, taken.number) });
     if (choice.changeSatoshis !== undefined) await this.makeAddresses(ADDRESS_KIND.change, changeNumber + 1);
-    const payers = choice.coins.map(({ utxo }) => own.find((other) => other.utxo === utxo) as AccountCoin);
+    const payers = choice.coins.map((entry) => (entry as Payer).coin);
     const prepared = await this.prepareTransaction({
       template: 'controller',
       action: 'changeSettings',
@@ -1103,16 +1188,6 @@ export class OwnerWallet {
     }
     // A full pass that has finished for every seed stays finished; a later quick pass does not undo it.
     this.store({ allocation, earlierFound, fullySearched: result.status === 'fully-found' || (this.state.fullySearched && result.status !== 'incomplete') });
-    // A device that opens the wallet again from its words does not remember which coin was put aside for
-    // cancelling. A coin of exactly that value at one of this seed's change addresses is that coin.
-    if (this.state.cancelCoinNumber === undefined) {
-      const cost = this.cancellationCost();
-      const current = result.seeds.find((entry) => entry.label === 'the current seed');
-      const kept = [...(current?.quick?.found ?? []), ...(current?.full?.found ?? [])].find(
-        (found) => found.address.kind === ADDRESS_KIND.change && found.coins.some((coin) => coin.utxo.output.valueSatoshis === cost && coin.utxo.output.token === undefined),
-      );
-      if (kept !== undefined) this.store({ cancelCoinNumber: kept.address.number });
-    }
     await this.makeKnown();
     return result;
   }
@@ -1132,16 +1207,8 @@ export class OwnerWallet {
     this.requireCreated();
     const swept: Swept = { transactions: [], coins: 0, tokens: [] };
     for (;;) {
-      const { own, earlier, cancelling } = await this.sorted();
+      const { own, earlier } = await this.sorted();
       if (earlier.length === 0) return swept;
-      // A device that has just taken the wallet over holds no coin for cancelling. The sweep puts one aside
-      // (section 11.1, step 9) as one more output, when what it carries pays for it.
-      let aside: Output | undefined;
-      if (cancelling.length === 0) {
-        const asideNumber = this.state.cancelCoinNumber ?? (await this.giveOut(ADDRESS_KIND.change)).address.number;
-        if (this.state.cancelCoinNumber === undefined) this.store({ cancelCoinNumber: asideNumber });
-        aside = { lockingBytecode: this.address(ADDRESS_KIND.change, asideNumber).lockingBytecode, valueSatoshis: this.cancellationCost() };
-      }
       const ordered = [...earlier].sort((a, b) => {
         if (tokenFree(a) !== tokenFree(b)) return tokenFree(a) ? 1 : -1;
         return a.utxo.output.valueSatoshis > b.utxo.output.valueSatoshis ? -1 : 1;
@@ -1155,14 +1222,14 @@ export class OwnerWallet {
       const destination = this.address(ADDRESS_KIND.change, number).lockingBytecode;
 
       // As many coins as one transaction holds.
-      const inputBytesOf = (coin: AccountCoin): number => (this.earlier.get(hex(coin.utxo.output.lockingBytecode))?.kind === ADDRESS_KIND.vault ? INPUT_BYTES.vault : INPUT_BYTES.swept);
+      const inputBytesOf = (coin: AccountCoin): number => this.earlierInputBytes(coin);
       const tokenOutput = (coin: AccountCoin): Output => {
         const output = { lockingBytecode: destination, valueSatoshis: 0n, token: coin.utxo.output.token as NonNullable<Output['token']> };
         const smallest = smallestOutputValue(output);
         return { ...output, valueSatoshis: coin.utxo.output.valueSatoshis > smallest ? coin.utxo.output.valueSatoshis : smallest };
       };
       const part: AccountCoin[] = [];
-      const outputsFor = (coins: AccountCoin[]): Output[] => [this.controllerOutput(next), ...coins.filter((coin) => !tokenFree(coin)).map(tokenOutput), ...(aside === undefined ? [] : [aside])];
+      const outputsFor = (coins: AccountCoin[]): Output[] => [this.controllerOutput(next), ...coins.filter((coin) => !tokenFree(coin)).map(tokenOutput)];
       for (const coin of ordered) {
         const candidate = [...part, coin];
         const bytes = transactionBytes([INPUT_BYTES.controller, ...candidate.map(inputBytesOf)], [...outputsFor(candidate), { lockingBytecode: destination, valueSatoshis: 0n }]);
@@ -1183,12 +1250,10 @@ export class OwnerWallet {
         try {
           choice = choose();
         } catch (error) {
-          // Coins with tokens alone cannot pay: the largest swept coin without a token joins them. When
-          // nothing more can join, the coin for cancelling is left for later.
+          // Coins with tokens alone cannot pay: the largest swept coin without a token joins them.
           const payer = ordered.find((coin) => tokenFree(coin) && !part.includes(coin));
-          if (!(error instanceof InsufficientFundsError) || (payer === undefined && aside === undefined)) throw error;
-          if (payer === undefined) aside = undefined;
-          else part.push(payer);
+          if (!(error instanceof InsufficientFundsError) || payer === undefined) throw error;
+          part.push(payer);
         }
       }
       const payers = choice.coins.map(({ utxo }) => own.find((coin) => coin.utxo === utxo) as AccountCoin);
@@ -1206,6 +1271,11 @@ export class OwnerWallet {
       for (const coin of part) if (coin.utxo.output.token !== undefined) swept.tokens.push({ category: hex(coin.utxo.output.token.category), meaning: 'unknown' });
       if (options.maximumTransactions !== undefined && swept.transactions.length >= options.maximumTransactions) return swept;
     }
+  }
+
+  /** The size of the input that releases a coin at an earlier seed's address through the controller. */
+  private earlierInputBytes(coin: AccountCoin): number {
+    return this.earlier.get(hex(coin.utxo.output.lockingBytecode))?.kind === ADDRESS_KIND.vault ? INPUT_BYTES.vault : INPUT_BYTES.swept;
   }
 
   /**
@@ -1290,9 +1360,9 @@ export class OwnerWallet {
    * at vault addresses cannot be moved this way, and nothing is offered for them.
    */
   async moveOut(toLockingBytecode: Uint8Array): Promise<SentEverything> {
-    const { own, cancelling } = await this.sorted();
+    const { own } = await this.sorted();
     const destination = { lockingBytecode: toLockingBytecode, valueSatoshis: 0n };
-    const plan = planSendEverything({ coins: [...own, ...cancelling].map((coin) => spendable(coin, INPUT_BYTES.byKey)), destination, feeRate: this.feeRate });
+    const plan = planSendEverything({ coins: own.map((coin) => spendable(coin, INPUT_BYTES.byKey)), destination, feeRate: this.feeRate });
     const transactions: Sent[] = [];
     for (const part of plan.parts) {
       const prepared = await this.prepareTransaction({ template: 'actions', action: 'pay', role: 'owner', inputs: part.coins.map((entry) => ({ coin: (entry as ReturnType<typeof spendable>).coin })), outputs: [{ ...destination, valueSatoshis: part.sentSatoshis }] });
@@ -1305,9 +1375,9 @@ export class OwnerWallet {
   // ---------------------------------------------------------------- sending everything, closing
 
   /**
-   * Send every coin without a token to one address: no change, the exact fee, the coin for cancelling
-   * included. Coins that only the controller can move go with the controller, which keeps its value.
-   * Coins with tokens stay where they are. Afterwards the wallet cannot cancel until it holds a coin again.
+   * Send every coin without a token to one address: no change, the exact fee. Coins that only the controller
+   * can move go with the controller, which keeps its value. Coins with tokens stay where they are. Afterwards
+   * the wallet cannot pay for a cancellation until it holds a coin again.
    *
    * @throws InsufficientFundsError, with the figures, when what is left after the fee is below what the receiving output must hold
    */
@@ -1329,13 +1399,13 @@ export class OwnerWallet {
   private async everything(toLockingBytecode: Uint8Array, carryOut: boolean): Promise<SentEverything> {
     this.requireCreated();
     const sorted = await this.sorted();
-    const { own, cancelling } = sorted;
+    const { own } = sorted;
     // Coins that only the controller releases: at vault addresses, and at earlier seeds' addresses not yet swept.
     const unswept = sorted.earlier.filter(tokenFree);
     const vault = [...sorted.vault, ...unswept];
     const boundBytes = (coin: AccountCoin): number => (unswept.includes(coin) && this.earlier.get(hex(coin.utxo.output.lockingBytecode))?.kind !== ADDRESS_KIND.vault ? INPUT_BYTES.swept : INPUT_BYTES.vault);
     const destination = { lockingBytecode: toLockingBytecode, valueSatoshis: 0n };
-    const byKey = [...own, ...cancelling].map((coin) => spendable(coin, INPUT_BYTES.byKey));
+    const byKey = own.map((coin) => spendable(coin, INPUT_BYTES.byKey));
     const transactions: Sent[] = [];
     const leftOut: AccountCoin[] = [];
     let sentSatoshis = 0n;
@@ -1417,10 +1487,10 @@ export class OwnerWallet {
     this.requireCreated();
     const reasons = await this.closingObstacles();
     if (reasons.length > 0) throw new CannotCloseError(reasons);
-    const { own, cancelling } = await this.sorted();
+    const { own } = await this.sorted();
     const { coin: controller } = await this.controllerCoin();
     const destination = { lockingBytecode: toLockingBytecode, valueSatoshis: 0n };
-    const coins = [...own, ...cancelling].map((coin) => spendable(coin, INPUT_BYTES.byKey));
+    const coins = own.map((coin) => spendable(coin, INPUT_BYTES.byKey));
     const plan = planSendEverything({ coins, destination, fixedInputs: [{ utxo: controller.utxo, inputBytes: INPUT_BYTES.controller }], feeRate: this.feeRate });
     if (plan.parts.length !== 1) {
       // More coins than one transaction holds: the others go first, and the wallet is closed with what is left.

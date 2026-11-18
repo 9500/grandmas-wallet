@@ -346,7 +346,7 @@ try {
     }
     for (const [step, transactionId, about] of [
       ['prepare', wallet.stored.creation.prepareTransactionId, 'the wallet pays itself, to have a coin that is output 0; this transaction is the identity'],
-      ['create', wallet.stored.creation.createTransactionId, 'the controller, the coin for cancelling, an allowance for the recoverer, and the rest'],
+      ['create', wallet.stored.creation.createTransactionId, 'the controller, an allowance for the recoverer, and the rest'],
     ] as const) {
       if (transactionId === undefined) continue;
       const bytes = ((await until('the transaction', async () => server.getTransaction(transactionId))) as string).length / 2;
@@ -355,7 +355,7 @@ try {
     note(`Recovery is shown as "${wallet.recovery}" while no receipt of the recoverer exists.`);
     // What the wallet holds at its own addresses is followed exactly, so that no step works from a list the engine has not yet brought up to date.
     const created = await once('the wallet holds its first coin', async () => {
-      const first = await until('the wallet\'s first coin', async () => { const now = await wallet.balance(); return now.recoverable > 0n && now.cancelling > 0n ? now : undefined; });
+      const first = await until('the wallet\'s first coin', async () => { const now = await wallet.balance(); return now.recoverable > 0n ? now : undefined; });
       return { data: { recoverable: String(first.recoverable) } };
     });
     const arrived = BigInt(created['recoverable'] as string) + 60_000n;
@@ -411,7 +411,7 @@ try {
       return undefined;
     });
     const balance = await until('the wallet after opening the jar', async () => { const now = await wallet.balance(); return now.tokens.length === 1 && now.recoverable > 0n ? now : undefined; });
-    facts.held = String(balance.recoverable + balance.cancelling + balance.tokens.reduce((sum, coin) => sum + coin.utxo.output.valueSatoshis, 0n));
+    facts.held = String(balance.recoverable + balance.tokens.reduce((sum, coin) => sum + coin.utxo.output.valueSatoshis, 0n));
     keep();
     note(`The old device holds ${facts.held} satoshis at its addresses, the jar's key among them, and 30,000 satoshis are in the jar. Then the device is lost.`, 'what the old device holds');
   }

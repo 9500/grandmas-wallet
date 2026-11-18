@@ -96,8 +96,8 @@ try {
   say(`  identity ${hex(identity)}; creation was "${before}", is "${afterCreate}"`);
   // The wallet is in use as soon as the network has its creation; no block is waited for.
   const created = await server.getTransaction(wallet.stored.creation.createTransactionId as string);
-  record('create', { transactionId: wallet.stored.creation.createTransactionId as string, bytes: (created as string).length / 2, feeSatoshis: BigInt((created as string).length / 2) }, 'with the coin for cancelling and an allowance of 6,000 for the recoverer');
-  say(`  recovery is shown as "${wallet.recovery}"; the wallet can cancel: ${await wallet.canCancel()}`);
+  record('create', { transactionId: wallet.stored.creation.createTransactionId as string, bytes: (created as string).length / 2, feeSatoshis: BigInt((created as string).length / 2) }, 'with an allowance of 6,000 for the recoverer');
+  say(`  recovery is shown as "${wallet.recovery}"; the wallet's coins pay for a cancellation: ${await wallet.canCancel()}`);
 
   say('Receiving and paying');
   const first = await wallet.receiveAddress();
@@ -139,9 +139,9 @@ try {
   const balance = await wallet.balance();
   const everything = await wallet.sendEverything(payee);
   for (const sent of everything.transactions) record('send everything', sent, 'the vault coin goes with the controller');
-  if (everything.sentSatoshis !== balance.recoverable + balance.cancelling + balance.vault - everything.feeSatoshis) throw new Error('what arrived is not the total less the fees');
+  if (everything.sentSatoshis !== balance.recoverable + balance.vault - everything.feeSatoshis) throw new Error('what arrived is not the total less the fees');
   await settle();
-  say(`  left: ${JSON.stringify(await wallet.balance(), (_key, value) => (typeof value === 'bigint' ? Number(value) : value))}; the wallet can cancel: ${await wallet.canCancel()}`);
+  say(`  left: ${JSON.stringify(await wallet.balance(), (_key, value) => (typeof value === 'bigint' ? Number(value) : value))}; the wallet's coins pay for a cancellation: ${await wallet.canCancel()}`);
 
   say('Closing');
   let refused = '';

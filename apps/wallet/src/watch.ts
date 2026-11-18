@@ -34,11 +34,9 @@ export interface Watch {
 
 const now = (): number => Math.floor(Date.now() / 1000);
 
-export const useWatch = (session: Session, wallet: OwnerWallet, ownerKeyHash: Uint8Array, canCancel: boolean): Watch & { check: () => Promise<void> } => {
+export const useWatch = (session: Session, wallet: OwnerWallet, ownerKeyHash: Uint8Array): Watch & { check: () => Promise<void> } => {
   const [watch, setWatch] = useState<Watch>({});
   const monitor = useRef<Monitor | undefined>(undefined);
-  const canCancelRef = useRef(canCancel);
-  canCancelRef.current = canCancel;
   const identity = wallet.stored.identity as string;
 
   const assessNow = async (status: WatchStatus, history: ControllerHistory): Promise<Partial<Watch>> => {
@@ -54,7 +52,6 @@ export const useWatch = (session: Session, wallet: OwnerWallet, ownerKeyHash: Ui
     }
     const protection = assessProtection({
       recovery: wallet.recovery,
-      canCancel: canCancelRef.current,
       watch: status,
       ...(wait === undefined ? {} : { wait }),
       log,

@@ -3,11 +3,13 @@ import type { WatchStatus } from './monitor.js';
 /**
  * What the wallet may say about how well it is protected (proposal sections 17 and 19).
  *
- * Refusing a recovery request takes three things: the device has to be running to see the request, it has
- * to hold a coin that pays for the cancellation, and the recoverer has to hold what a recovery needs for
- * recovery to be worth protecting at all. The wallet does not show full protection when one of them is
- * missing, and it says which. In particular it says when it was not running for part of a waiting period:
- * it could not watch then, and it does not pretend otherwise.
+ * Protection takes two things: the device has to be running to see a recovery request, and the recoverer
+ * has to hold what a recovery needs for recovery to be worth protecting at all. The wallet does not show
+ * full protection when one of them is missing, and it says which. In particular it says when it was not
+ * running for part of a waiting period: it could not watch then, and it does not pretend otherwise.
+ *
+ * The fee of a refusal comes from the wallet's coins, as a payment's does. A wallet that holds less than
+ * that says so where a request is refused, when there is one; it is not a standing condition here.
  */
 
 /** When this device was running and watching, as it recorded it itself. Unix seconds, oldest first. */
@@ -49,8 +51,6 @@ export const unwatched = (log: WatchLog, from: number, to: number): { from: numb
 export interface ProtectionInput {
   /** Whether the recoverer's receipt makes recovery on. */
   recovery: 'on' | 'off';
-  /** Whether the wallet holds the coin that pays for one cancellation. */
-  canCancel: boolean;
   /** What the chain shows of the controller, for this device's keys. */
   watch: WatchStatus;
   /** A request that is pending: when it was made and when its waiting period ends, by the chain's clock. Unix seconds. */
@@ -65,7 +65,7 @@ export interface ProtectionInput {
 export interface Protection {
   /** Whether the wallet may show full protection. */
   full: boolean;
-  /** Whether the wallet can refuse a request right now. */
+  /** Whether this device can still refuse a request: the wallet is neither closed nor owned by another key. */
   canRefuse: boolean;
   /** What is missing, in the words shown to the user. Empty when protection is full. */
   gaps: string[];
@@ -84,7 +84,6 @@ export const assessProtection = (input: ProtectionInput): Protection => {
   if (watch.kind === 'owned-elsewhere') {
     return { full: false, canRefuse: false, gaps: ['Another key owns this wallet. This device can no longer refuse anything; it can still move out coins that have not been swept.'], notWatched: [] };
   }
-  if (!input.canCancel) gaps.push('The wallet holds no coin for cancelling. It cannot refuse a recovery request until one is put aside.');
   if (input.recovery === 'off') gaps.push('Recovery is not on: no receipt of the recoverer matches what this wallet sent. If this device is lost, the wallet may not be recoverable.');
   if (!input.chainVerified) gaps.push('What the servers say could not be checked against each other. Nothing is treated as final until it can.');
   let notWatched: { from: number; to: number }[] = [];
@@ -101,5 +100,5 @@ export const assessProtection = (input: ProtectionInput): Protection => {
     const left = input.wait.until - input.now;
     gaps.push(left > 0 ? `A recovery request is waiting. It can be refused for about ${lasting(left)} more.` : 'A recovery request is waiting and its waiting period has passed. It can be completed at any moment; refuse it now if it is not yours.');
   }
-  return { full: gaps.length === 0, canRefuse: input.canCancel, gaps, notWatched };
+  return { full: gaps.length === 0, canRefuse: true, gaps, notWatched };
 };

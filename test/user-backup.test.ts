@@ -80,7 +80,7 @@ describe('a backup the user keeps', () => {
     expect(notCovered).toHaveLength(1);
     expect(notCovered[0]).toMatch(/does not say where the backup stores are/);
     await wallet.search({ passes: ['quick'] });
-    expect(await wallet.balance()).toMatchObject({ recoverable: held.recoverable, cancelling: held.cancelling, vault: held.vault });
+    expect(await wallet.balance()).toMatchObject({ recoverable: held.recoverable, vault: held.vault });
     // It pays by key and releases the vault coin through the controller, at once.
     await wallet.sendEverything(payee);
     expect(await wallet.balance()).toMatchObject({ recoverable: 0n, vault: 0n });
@@ -124,7 +124,7 @@ describe('a backup the user keeps', () => {
     const whole = await restore(complete);
     expect(whole.notCovered).toEqual([]);
     await whole.wallet.search({ passes: ['quick'] });
-    expect((await whole.wallet.balance()).toSweep).toBe(held.recoverable + held.cancelling + held.vault);
+    expect((await whole.wallet.balance()).toSweep).toBe(held.recoverable + held.vault);
     const read = readUserBackup(complete);
     expect(read.archives).toHaveLength(2);
     expect(read.earlierViewingKeyRecords).toHaveLength(1);

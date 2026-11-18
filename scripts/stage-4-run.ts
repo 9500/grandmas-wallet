@@ -129,9 +129,9 @@ try {
     } else {
       const state = await controllerState();
       say(`  the owner's device starts again and sees a request for ${state.proposedOwnerKeyHash === undefined ? 'nothing' : hex(state.proposedOwnerKeyHash)}`);
-      record('cancel', await wallet.cancel(), 'paid by the coin kept for cancelling, exactly');
+      record('cancel', await wallet.cancel(), 'the fee paid by the smallest coin of the wallet that pays alone, with change if there is enough');
       await mine(1, BURN);
-      say(`  the wallet can cancel again: ${await wallet.canCancel()}`);
+      say(`  the wallet's coins pay for another cancellation: ${await wallet.canCancel()}`);
     }
   } else {
     account = await openAccount(facts.credentialWords);

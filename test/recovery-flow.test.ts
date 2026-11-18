@@ -148,7 +148,7 @@ describe('a takeover, from the first message to the sweep', () => {
     chain.fund((await owner.receiveAddress()).address.lockingBytecode, 10_000n);
     chain.fund((await owner.vaultAddress()).address.lockingBytecode, 5_000n);
     const before = await owner.balance();
-    const held = before.recoverable + before.cancelling + before.vault;
+    const held = before.recoverable + before.vault;
 
     const taken = await recover(1, kept, recoveryKey);
     if (!('wallet' in taken)) throw new Error('the takeover was to finish');
@@ -255,7 +255,7 @@ describe('a device lost right after a recovery', () => {
     await third.wallet.search({ passes: ['quick'] });
     const balance = await third.wallet.balance();
     const first = await owner.balance();
-    expect(balance.toSweep).toBe(first.recoverable + first.cancelling + 8_000n);
+    expect(balance.toSweep).toBe(first.recoverable + 8_000n);
     expect(third.wallet.recovery).toBe('on');
   });
 
@@ -334,7 +334,7 @@ describe('a move to a new seed with the old device still working', () => {
     await moved.wallet.sweepEarlier();
     expect((await moved.wallet.balance()).toSweep).toBe(0n);
     // The earlier seed can move nothing that was swept.
-    expect(await owner.balance()).toMatchObject({ recoverable: 0n, cancelling: 0n });
+    expect(await owner.balance()).toMatchObject({ recoverable: 0n });
   });
 
   it('MG01: the move goes on as soon as the network has the change; if it disappears, the old device owns the wallet again and makes it again, the new device follows the chain, and no coin is lost', async () => {
@@ -356,7 +356,7 @@ describe('a move to a new seed with the old device still working', () => {
     chain.fund(given.lockingBytecode, 3_000n);
     const total = async () => {
       const [a, b] = [await owner.balance(), await moved.wallet.balance()];
-      return a.recoverable + a.cancelling + a.vault + b.recoverable + b.cancelling + b.vault + b.toSweep;
+      return a.recoverable + a.vault + b.recoverable + b.vault + b.toSweep;
     };
     const before = await total();
 
@@ -380,7 +380,7 @@ describe('a move to a new seed with the old device still working', () => {
     expect((await moved.wallet.receiveAddress()).address.number).toBe(given.number + 1);
     await moved.wallet.search({ passes: ['quick'] });
     await moved.wallet.sweepEarlier();
-    expect(await owner.balance()).toMatchObject({ recoverable: 0n, cancelling: 0n });
+    expect(await owner.balance()).toMatchObject({ recoverable: 0n });
     expect((await moved.wallet.balance()).recoverable).toBeGreaterThan(3_000n);
     expect(moved.wallet.recovery).toBe('on');
 
@@ -405,7 +405,7 @@ describe('a move to a new seed with the old device still working', () => {
     expect(third.arrangement.earlierArchives).toHaveLength(2);
     await third.wallet.search({ passes: ['quick'] });
     const old = await owner.balance();
-    expect((await third.wallet.balance()).toSweep).toBe(old.recoverable + old.cancelling);
+    expect((await third.wallet.balance()).toSweep).toBe(old.recoverable);
   });
 
   it('MG08: every step of the move can stop and be repeated; nothing is done twice and no viewing-key record is lost', async () => {

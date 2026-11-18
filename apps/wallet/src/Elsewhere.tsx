@@ -18,7 +18,7 @@ export const OwnedElsewhere = ({ owner }: { owner: Owner }) => {
   const since = history?.owners.at(-1)?.sinceTransactionId;
   const inBlock = history?.transactions.find((entry) => entry.transactionId === since)?.confirmed === true;
   const { balance } = owner;
-  const spendable = (balance?.recoverable ?? 0n) + (balance?.cancelling ?? 0n);
+  const spendable = balance?.recoverable ?? 0n;
   const moveOut = () =>
     task.run('out', async (progress) => {
       let locking: Uint8Array;

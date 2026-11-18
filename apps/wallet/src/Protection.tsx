@@ -1,10 +1,12 @@
 import { cancellationCost, describeDelay } from '@grandmas-wallet/app';
+import { ADDRESS_KIND } from '@grandmas-wallet/core';
 import { keyFingerprint } from '@grandmas-wallet/enrollment';
-import { Amount, Button, Card, HandOff, Notice, Sat, Status, TaskStatus, useTask } from '@grandmas-wallet/ui';
+import { Button, Card, HandOff, Loading, Notice, Sat, Status, TaskStatus, useTask } from '@grandmas-wallet/ui';
+import { useEffect, useState } from 'preact/hooks';
 
 import { type Owner, isChainGap } from './OwnerApp.js';
 import { WaitEnds, Waiting } from './parts.js';
-import { kept } from './session.js';
+import { keep, kept } from './session.js';
 
 const recovererName = (): string => kept('recipient')?.name || 'your recoverer';
 
@@ -25,9 +27,7 @@ export const ProtectionStatus = ({ owner, compact }: { owner: Owner; compact?: b
       ? 'Protected'
       : owner.wallet.recovery === 'off'
         ? 'Recovery is not on yet'
-        : owner.canCancel === false
-          ? 'This phone cannot refuse a request'
-          : 'Protection is incomplete';
+        : 'Protection is incomplete';
   return (
     <Status tone={alarm ? 'bad' : main.length === 0 ? 'good' : 'warn'} title={title}>
       {main.length === 0 ? (
@@ -107,7 +107,7 @@ export const Alarm = ({ owner }: { owner: Owner }) => {
         </p>
         {missed !== undefined && <Notice tone="warn">{missed}</Notice>}
         {owner.canCancel === false ? (
-          <Notice tone="bad">This phone holds no coin for cancelling, so it cannot refuse. Receive some coins and put one aside under Recovery, or ask someone to send a little to this wallet now.</Notice>
+          <FeeNeeded owner={owner} />
         ) : (
           <>
             <div class="actions">
@@ -116,7 +116,7 @@ export const Alarm = ({ owner }: { owner: Owner }) => {
               </Button>
             </div>
             <p class="small muted">
-              Refusing costs <Sat satoshis={cancellationCost()} /> in fees, paid by the coin kept for that. Afterwards, consider replacing your recoverer: their key may be in other hands.
+              Refusing costs about <Sat satoshis={cancellationCost()} /> in network fees, paid from the wallet's coins. Afterwards, consider replacing your recoverer: their key may be in other hands.
             </p>
           </>
         )}
@@ -126,41 +126,31 @@ export const Alarm = ({ owner }: { owner: Owner }) => {
   );
 };
 
-/** The coin kept for cancelling, and putting one aside when it is missing. */
-export const CancelCoin = ({ owner, bare }: { owner: Owner; bare?: boolean }) => {
-  const task = useTask();
-  const { balance, canCancel } = owner;
-  if (balance === undefined || canCancel === undefined) return null;
+/**
+ * Only on the alarm, and only when the wallet's coins do not cover the fee of refusing (it holds tokens and
+ * next to no Bitcoin Cash): how much is needed, and an address to receive it at. The button to refuse
+ * appears as soon as it has arrived.
+ */
+const FeeNeeded = ({ owner }: { owner: Owner }) => {
+  const [entry, setEntry] = useState(() => kept('receive'));
+  useEffect(() => {
+    if (entry !== undefined) return;
+    owner.wallet.receiveAddress().then(
+      ({ address, again }) => {
+        const next = { number: address.number, again };
+        keep('receive', next);
+        setEntry(next);
+      },
+      () => undefined,
+    );
+  }, []);
+  const address = entry === undefined ? undefined : owner.wallet.address(ADDRESS_KIND.givenOut, entry.number).address;
   return (
-    <div class="stack-s">
-      {bare === true ? null : canCancel ? (
-        <Status tone="good" title="Coin for cancelling: kept">
-          <Amount satoshis={balance.cancelling} exact /> is kept apart to pay for refusing a request. Payments leave it alone.
-        </Status>
-      ) : (
-        <Status tone="warn" title="No coin for cancelling">
-          Without it this phone cannot refuse a recovery request. Putting one aside moves <Sat satoshis={cancellationCost()} /> to an address of its own, plus the fee of that payment.
-        </Status>
-      )}
-      {!canCancel && (
-        <div>
-          <Button
-            task={task}
-            name="aside"
-            disabled={balance.recoverable < cancellationCost() + 1_000n}
-            onClick={() =>
-              void task.run('aside', async () => {
-                const sent = await owner.wallet.setAsideCancellingCoin();
-                if (sent !== undefined) owner.sent('Put a coin aside for cancelling', sent);
-              })
-            }
-          >
-            Put a coin aside
-          </Button>
-          {balance.recoverable < cancellationCost() + 1_000n && <p class="small muted">The wallet holds too little for this. Receive some coins first.</p>}
-        </div>
-      )}
-      <TaskStatus task={task} name="aside" />
+    <div class="stack-s" data-testid="fee-needed">
+      <Notice tone="bad">
+        Refusing needs a little Bitcoin Cash for the network fee, at least <Sat satoshis={cancellationCost()} />, and this wallet holds less than that. Have some sent to this address; the button to refuse appears as soon as it arrives.
+      </Notice>
+      {address === undefined ? <Loading>Making an address…</Loading> : <HandOff text={address} qrLabel="QR code of the address" copyLabel="Copy address" testId="fee-address" />}
     </div>
   );
 };

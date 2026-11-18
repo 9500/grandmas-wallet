@@ -215,7 +215,7 @@ const Creating = ({ session, setup, onCreated, onAgain }: { session: Session; se
       state: at >= 3 ? 'done' : at === 1 || at === 2 ? 'current' : 'later',
       detail: (
         <>
-          One transaction creates the wallet's controller, which names {name} and a waiting period of {describeDelay(setup.delay)}; it puts a coin aside for cancelling{setup.allowance ? ', gives the allowance' : ''}, and moves the rest into the wallet.
+          One transaction creates the wallet's controller, which names {name} and a waiting period of {describeDelay(setup.delay)}; it {setup.allowance ? 'gives the allowance and ' : ''}moves the rest into the wallet.
           {(at === 1 || at === 2) && (
             <div class="actions">
               <Button task={task} name="create" disabled={short} onClick={() => void task.run('create', async (progress) => {

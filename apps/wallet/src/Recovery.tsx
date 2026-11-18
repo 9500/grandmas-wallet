@@ -8,7 +8,7 @@ import { useEffect, useState } from 'preact/hooks';
 
 import type { Owner } from './OwnerApp.js';
 import { DELAYS, DelayPicker, RecipientCheck, RecipientEntry, Waiting, sameDelay } from './parts.js';
-import { CancelCoin, KitCard, ProtectionStatus } from './Protection.js';
+import { KitCard, ProtectionStatus } from './Protection.js';
 import { type StoredRecipient, deviceWords, keep, kept, recipientFingerprint, recipientOf, sealedContent } from './session.js';
 
 type View = 'main' | 'move' | 'recoverer' | 'delay' | 'backup';
@@ -60,8 +60,6 @@ export const Recovery = ({ owner }: { owner: Owner }) => {
             </Card>
           )}
           <Card>
-            <CancelCoin owner={owner} />
-            <div class="actions" />
             <Choice type="checkbox" checked={auto} onChange={(value) => { setAuto(value); owner.toast(value ? 'Requests are refused without asking while this page is open.' : 'You are asked before a request is refused.'); }} title="Refuse requests without asking">
               While this page is open, a request to a key this phone does not hold is refused at once. Takes effect when the page is opened again.
             </Choice>

@@ -141,9 +141,7 @@ export const Send = ({ owner }: { owner: Owner }) => {
                   [<>Network fee<small>{stage.quote.transactions === 1 ? 'one transaction' : `${stage.quote.transactions} transactions`}</small></>, <Sat satoshis={stage.quote.feeSatoshis} />],
                 ]}
               />
-              <Notice tone="warn">
-                The coin kept for cancelling goes too. Until the wallet holds a coin again, this phone cannot refuse a recovery request. Tokens stay where they are.
-              </Notice>
+              {(owner.balance?.tokens.length ?? 0) > 0 && <Notice>Tokens stay where they are.</Notice>}
               {stage.quote.leftOut > 0 && <Notice>{stage.quote.leftOut} coin(s) hold less than it costs to send them and stay in the wallet.</Notice>}
               <TaskStatus task={task} name="send" />
               <div class="actions">
@@ -211,7 +209,7 @@ export const Send = ({ owner }: { owner: Owner }) => {
             <div class="stack-s">
               <h3>Available</h3>
               {owner.balance === undefined ? <p class="muted">…</p> : <p><Amount satoshis={owner.balance.recoverable} exact /></p>}
-              <p class="small muted">The coin kept for cancelling is not used for payments. The fee is one satoshi per byte of the transaction, which is what the network asks.</p>
+              <p class="small muted">The fee is one satoshi per byte of the transaction, which is what the network asks.</p>
             </div>
           </Card>
           <Tokens owner={owner} />

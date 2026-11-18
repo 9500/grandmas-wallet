@@ -1,6 +1,7 @@
 import { type Output, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
 import { CannotCloseError, OwnerWallet, type OwnerWalletState, cancellationCost, creationFunding, suggestedAllowance, walletTemplateNumbers } from '@grandmas-wallet/app';
 import {
+  type AccountCoin,
   type ChainReader,
   type PreparedTransaction,
   type WalletBackend,
@@ -11,9 +12,11 @@ import {
   decodeControllerState,
   deriveCredentialKeys,
   deriveSeedKeys,
+  keepNumber,
   p2pkhInput,
   p2pkhLockingBytecode,
   readControllerHistory,
+  takeNumber,
   validateGenesis,
 } from '@grandmas-wallet/core';
 import { KeyBackend, SimulatedChain, testKey } from '@grandmas-wallet/testing';
@@ -117,15 +120,16 @@ describe('creating a wallet', () => {
       const { wallet, funding } = await device(chain);
       chain.fund(funding, needed, position);
       expect(await wallet.create(options)).toBe('created');
-      expect((await wallet.balance()).cancelling).toBe(cancellationCost());
+      // The wallet's first coin pays for refusing a request.
+      expect(await wallet.canCancel()).toBe(true);
     }
-    // The controller, the coin for cancelling, the smallest first coin, and the two fees.
-    expect(creationFunding()).toBe(1_000n + 1_091n + 546n + 602n);
+    // The controller, a first coin that pays for one cancellation, and the two fees.
+    expect(creationFunding()).toBe(1_000n + 1_091n + 528n);
     expect(creationFunding({ allowanceSatoshis: 4_900n }) - creationFunding()).toBe(4_900n + 34n);
     // Less than the least the creation needs is refused with the figures, and nothing is created.
     const chain = new SimulatedChain();
     const { wallet, funding } = await device(chain);
-    chain.fund(funding, 3_000n);
+    chain.fund(funding, 2_000n);
     await expect(wallet.create(createOptions)).rejects.toThrow(InsufficientFundsError);
   });
 
@@ -170,7 +174,7 @@ describe('creating a wallet', () => {
     expect(chain.knows(paidOut.transactionId)).toBe(false);
     expect(await wallet.creationStep()).toBe('funded');
     expect(state().identity).toBeUndefined();
-    expect(wallet.voided).toEqual([{ identity: first, givenOut: [0, 2], change: [0, 3] }]);
+    expect(wallet.voided).toEqual([{ identity: first, givenOut: [0, 2], change: [0, 2] }]);
     expect(wallet.recovery).toBe('off');
     await expect(wallet.receiveAddress()).rejects.toThrow(/not created yet/);
     // What others paid to the addresses given out is still the wallet's, by key, and counted as not recoverable.
@@ -184,7 +188,7 @@ describe('creating a wallet', () => {
     expect(second).not.toBe(first);
     expect(state().creation.prepareTransactionId).toBe(second);
     // Its numbers come after those the first identity gave out, so that every address stays the wallet's.
-    expect([state().cancelCoinNumber, state().firstCoinNumber]).toEqual([3, 4]);
+    expect(state().firstCoinNumber).toBe(2);
     expect((await wallet.receiveAddress()).address.number).toBe(2);
     // The token is collected by key, unchanged, to an address of the new identity.
     const collected = await wallet.collectVoided();
@@ -280,9 +284,9 @@ describe('creating a wallet', () => {
     // One self-payment and one creation: the funding, the payment to itself, and the creation touched the funding address.
     expect(await chain.getHistory(again.funding)).toHaveLength(3);
     expect(chain.outputsAt(controllerScript(identity).lockingBytecode)).toHaveLength(1);
-    // The same two change addresses were used, not a second pair.
-    expect(again.state().cancelCoinNumber).toBe(0);
-    expect(again.state().firstCoinNumber).toBe(1);
+    // The same change address was used, not a second one.
+    expect(again.state().firstCoinNumber).toBe(0);
+    expect(again.state().allocation[change].next).toBe(1);
     expect(await again.wallet.canCancel()).toBe(true);
   });
 
@@ -303,9 +307,9 @@ describe('creating a wallet', () => {
     expect(await wallet.creationStep()).not.toBe('created');
     expect(state().identity).toBeUndefined();
     expect(state().creation).toEqual({ confirmed: false });
-    expect(state().cancelCoinNumber).toBeUndefined();
-    // Only the two change addresses of the creation were taken; they are kept, and the next identity's numbers follow them.
-    expect(wallet.voided).toEqual([{ identity, givenOut: [0, 0], change: [0, 2] }]);
+    expect(state().firstCoinNumber).toBeUndefined();
+    // Only the change address of the creation was taken; it is kept, and the next identity's numbers follow it.
+    expect(wallet.voided).toEqual([{ identity, givenOut: [0, 0], change: [0, 1] }]);
   });
 
   it.each([
@@ -327,20 +331,19 @@ describe('creating a wallet', () => {
     const genesis = validateGenesis(transaction, hexToBin(createdIn), identity);
     expect(genesis.state).toMatchObject({ status: 'active', ownerEpoch: 0, ownerKeyHash: seed.controllerKey.keyHash, recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: DELAY });
 
-    // The outputs: the controller, the coin for cancelling, the allowance if one was given, the rest.
-    const [controller, cancelling, ...others] = transaction.outputs;
+    // The outputs: the controller, the allowance if one was given, the rest. No coin is kept apart.
+    const [controller, ...others] = transaction.outputs;
     const rest = others.at(-1);
-    expect(transaction.outputs).toHaveLength(allowance === undefined ? 3 : 4);
+    expect(transaction.outputs).toHaveLength(allowance === undefined ? 2 : 3);
     expect(controller?.valueSatoshis).toBe(1_000n);
-    expect(cancelling).toEqual({ lockingBytecode: wallet.address(change, 0).lockingBytecode, valueSatoshis: 1_091n });
-    expect(rest?.lockingBytecode).toEqual(wallet.address(change, 1).lockingBytecode);
+    expect(rest?.lockingBytecode).toEqual(wallet.address(change, 0).lockingBytecode);
     if (allowance === undefined) expect(chain.balanceOf(feeAddress)).toBe(0n);
     else expect(others[0]).toEqual({ lockingBytecode: feeAddress, valueSatoshis: allowance });
 
     // Every satoshi: what went in is what came out and the fee, and the fee is the size.
     const out = transaction.outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n);
     expect(50_000n - out).toBe(BigInt(encoded.length));
-    expect(await wallet.balance()).toMatchObject({ recoverable: rest?.valueSatoshis, cancelling: 1_091n, vault: 0n, notRecoverable: 0n });
+    expect(await wallet.balance()).toMatchObject({ recoverable: rest?.valueSatoshis, vault: 0n, notRecoverable: 0n });
     expect(await wallet.canCancel()).toBe(true);
     expect(decodeControllerState(controller?.token?.nft?.commitment as Uint8Array).recovererKeyHash).toEqual(credential.recoveryKey.keyHash);
   });
@@ -363,7 +366,7 @@ describe('creating a wallet', () => {
 });
 
 describe('paying', () => {
-  /** A wallet whose only coins besides the one for cancelling are the given ones. */
+  /** A wallet whose only coins are the given ones. */
   const exactly = async (...values: bigint[]) => {
     const made = await walletWith();
     // The rest of the first coins goes out, so that the test's own coins are all there is.
@@ -379,7 +382,7 @@ describe('paying', () => {
     expect(sent).toMatchObject({ bytes: 340, feeSatoshis: 340n, remainderSatoshis: 0n });
     // The other coins are untouched, and no change address was used up.
     expect((await wallet.balance()).recoverable).toBe(13_000n);
-    expect(wallet.stored.allocation[change]).toMatchObject({ held: [], free: [2] });
+    expect(wallet.stored.allocation[change]).toMatchObject({ held: [], free: [1] });
   });
 
   it('FE04: otherwise the rest returns to a fresh change address', async () => {
@@ -387,7 +390,7 @@ describe('paying', () => {
     const sent = await wallet.pay([{ lockingBytecode: payee, valueSatoshis: 12_000n }]);
     const outputs = await outputsOf(chain, sent.transactionId);
     expect(outputs).toHaveLength(2);
-    expect(outputs[1]).toEqual({ lockingBytecode: wallet.address(change, 2).lockingBytecode, valueSatoshis: 30_000n - 12_000n - 384n });
+    expect(outputs[1]).toEqual({ lockingBytecode: wallet.address(change, 1).lockingBytecode, valueSatoshis: 30_000n - 12_000n - 384n });
     expect(sent).toMatchObject({ bytes: 384, feeSatoshis: 384n, remainderSatoshis: 0n });
     expect((await wallet.balance()).recoverable).toBe(17_616n);
   });
@@ -431,7 +434,7 @@ describe('paying', () => {
     await expect(wallet.pay([{ lockingBytecode: payee, valueSatoshis: 100n }])).rejects.toThrow(/smallest amount/);
   });
 
-  it('a token is sent on unchanged, with the fee from another coin; the coin for cancelling is left alone', async () => {
+  it('a token is sent on unchanged, with the fee from another coin', async () => {
     const { chain, wallet } = await walletWith(10_000n);
     const { address } = await wallet.receiveAddress();
     payToken(chain, address.lockingBytecode);
@@ -441,21 +444,94 @@ describe('paying', () => {
     const [moved] = await outputsOf(chain, sent.transactionId);
     expect(moved?.token).toEqual(holding.utxo.output.token);
     expect((await wallet.balance()).tokens).toEqual([]);
+  });
+
+});
+
+describe('cancelling', () => {
+  /** A wallet whose ordinary coins have all been paid out. */
+  const emptied = async () => {
+    const made = await walletWith();
+    await made.wallet.pay([{ lockingBytecode: payee, valueSatoshis: (await made.wallet.balance()).recoverable - 340n }]);
+    expect((await made.wallet.balance()).recoverable).toBe(0n);
+    return made;
+  };
+  const kinds = async (chain: SimulatedChain, wallet: OwnerWallet) => (await readControllerHistory(chain, hexToBin(wallet.stored.identity as string))).transitions.map((step) => step.kind);
+
+  it('the smallest coin that pays alone pays for a cancellation, with change to a fresh change address', async () => {
+    const { chain, wallet } = await walletWith(800n, 3_000n, 10_000n);
+    const before = await wallet.balance();
+    expect(await wallet.canCancel()).toBe(true);
+    const sent = await wallet.cancel();
+    expect(await kinds(chain, wallet)).toEqual(['ownerAuthorize']);
+    // The controller and one coin by its key in, the controller and the change out.
+    expect(sent).toMatchObject({ bytes: 1_135, feeSatoshis: 1_135n, remainderSatoshis: 0n });
+    const outputs = await outputsOf(chain, sent.transactionId);
+    expect(outputs[1]).toEqual({ lockingBytecode: wallet.address(change, 1).lockingBytecode, valueSatoshis: 3_000n - 1_135n });
+    // 800 does not pay alone; the coin of 3,000 paid, and the others are untouched.
+    expect([0, 1, 2].map((number) => chain.balanceOf(wallet.address(givenOut, number).lockingBytecode))).toEqual([800n, 0n, 10_000n]);
+    expect((await wallet.balance()).recoverable).toBe(before.recoverable - 1_135n);
+    // Nothing was kept apart, and the wallet can pay for the next one as well.
     expect(await wallet.canCancel()).toBe(true);
   });
 
-  it('the coin for cancelling pays for a cancellation exactly, and the wallet then says that it cannot cancel', async () => {
-    const { chain, wallet } = await walletWith(10_000n);
-    const identity = hexToBin(wallet.stored.identity as string);
-    const sent = await wallet.cancel();
-    expect(sent).toMatchObject({ bytes: 1_091, feeSatoshis: 1_091n, remainderSatoshis: 0n });
-    expect((await readControllerHistory(chain, identity)).transitions.map((step) => step.kind)).toEqual(['ownerAuthorize']);
-    expect(await wallet.canCancel()).toBe(false);
-    await expect(wallet.cancel()).rejects.toThrow(/cannot cancel until that coin is restored/);
-    // The coin is restored from the wallet's other coins.
-    await wallet.setAsideCancellingCoin();
+  it('with less than the fee in ordinary coins, a coin at a vault address pays, through the controller', async () => {
+    const { chain, wallet } = await emptied();
+    chain.fund((await wallet.receiveAddress()).address.lockingBytecode, 600n);
+    const vaultAddress = (await wallet.vaultAddress()).address;
+    chain.fund(vaultAddress.lockingBytecode, 5_000n);
     expect(await wallet.canCancel()).toBe(true);
-    expect((await wallet.balance()).cancelling).toBe(1_091n);
+    const sent = await wallet.cancel();
+    expect(await kinds(chain, wallet)).toEqual(['ownerAuthorize']);
+    expect(chain.balanceOf(vaultAddress.lockingBytecode)).toBe(0n);
+    // The ordinary coin of 600 is untouched; the vault coin's change is now an ordinary coin.
+    expect(await wallet.balance()).toMatchObject({ recoverable: 600n + 5_000n - sent.feeSatoshis, vault: 0n });
+  });
+
+  it('a wallet that holds only a token cannot pay for a cancellation, and can once a little Bitcoin Cash arrives', async () => {
+    const { chain, wallet } = await emptied();
+    payToken(chain, (await wallet.receiveAddress()).address.lockingBytecode);
+    expect(await wallet.canCancel()).toBe(false);
+    await expect(wallet.cancel()).rejects.toThrow(/a little Bitcoin Cash has to arrive first/);
+    expect(await kinds(chain, wallet)).toEqual([]);
+    // What arrives need be no more than the least a cancellation costs.
+    chain.fund((await wallet.receiveAddress()).address.lockingBytecode, cancellationCost());
+    expect(await wallet.canCancel()).toBe(true);
+    expect(await wallet.cancel()).toMatchObject({ bytes: 1_091, feeSatoshis: 1_091n, remainderSatoshis: 0n });
+    expect(await kinds(chain, wallet)).toEqual(['ownerAuthorize']);
+    expect((await wallet.balance()).tokens).toHaveLength(1);
+  });
+
+  it('a coin spent a moment before by another payment of the wallet is not chosen again: the cancellation is retried once', async () => {
+    const chain = new SimulatedChain();
+    const listing: { stale?: AccountCoin[] } = {};
+    let sends = 0;
+    let backend: WalletBackend | undefined;
+    // A key holder that goes on listing the coins it had, as one can for a moment after a coin is spent.
+    const lagging = (inner: KeyBackend): WalletBackend =>
+      (backend = new Proxy(inner, {
+        get: (target, name) => {
+          if (name === 'coins') return async () => listing.stale ?? (await target.coins());
+          if (name === 'send') return async (prepared: PreparedTransaction) => ((sends += 1), target.send(prepared));
+          return Reflect.get(target, name) as unknown;
+        },
+      }));
+    const made = await device(chain, { backend: lagging });
+    chain.fund(made.funding, 20_000n);
+    await made.wallet.create(createOptions);
+    const small = (await made.wallet.receiveAddress()).address;
+    chain.fund(small.lockingBytecode, 3_000n);
+    // Another payment of the wallet, which this wallet object did not make, spends the coin of 3,000.
+    const other = await device(chain, { state: made.state() });
+    listing.stale = await (backend as WalletBackend).coins();
+    await other.wallet.pay([{ lockingBytecode: payee, valueSatoshis: 2_660n }]);
+    expect(chain.balanceOf(small.lockingBytecode)).toBe(0n);
+
+    sends = 0;
+    const sent = await made.wallet.cancel();
+    expect(sends).toBe(2);
+    expect(await kinds(chain, made.wallet)).toEqual(['ownerAuthorize']);
+    expect((await outputsOf(chain, sent.transactionId))[0]?.token).toBeDefined();
   });
 });
 
@@ -470,8 +546,6 @@ describe('changing settings', () => {
     const history = await readControllerHistory(chain, identity);
     expect(history.transitions.map((step) => step.kind)).toEqual(['ownerUpdate']);
     expect(history.current.state).toMatchObject({ recovererKeyHash: other, challengeDelay: { unit: 'time512', value: 3 }, ownerEpoch: 0, status: 'active' });
-    // The coin for cancelling was left alone.
-    expect(await wallet.canCancel()).toBe(true);
   });
 });
 
@@ -487,7 +561,7 @@ describe('sending everything', () => {
     expect(chain.outputsAt(busy.lockingBytecode)).toHaveLength(400);
 
     const before = await wallet.balance();
-    const total = before.recoverable + before.cancelling + before.vault;
+    const total = before.recoverable + before.vault;
     // What will arrive and what it costs is known before it is approved, and nothing moves by asking.
     const quote = await wallet.quoteSendEverything(payee);
     expect(chain.balanceOf(payee)).toBe(0n);
@@ -505,12 +579,12 @@ describe('sending everything', () => {
 
     // No coin without a token is left besides the controller; the coin with a token is untouched.
     const after = await wallet.balance();
-    expect(after).toMatchObject({ recoverable: 0n, cancelling: 0n, vault: 0n });
+    expect(after).toMatchObject({ recoverable: 0n, vault: 0n });
     expect(after.tokens).toHaveLength(1);
     expect(chain.outputsAt(tokenAddress.lockingBytecode)).toHaveLength(1);
     const identity = hexToBin(wallet.stored.identity as string);
     expect(chain.outputsAt(controllerScript(identity).lockingBytecode)[0]?.output.valueSatoshis).toBe(1_000n);
-    // The wallet stays usable, and says that it cannot cancel until it holds a coin again.
+    // The wallet stays usable, and says that it cannot pay for a cancellation until it holds a coin again.
     expect(await wallet.canCancel()).toBe(false);
     expect(await wallet.closed()).toBe(false);
   }, 60_000);
@@ -544,7 +618,7 @@ describe('closing', () => {
     const { chain, wallet } = await walletWith(10_000n, 4_000n);
     wallet.noteFullySearched(true);
     const before = await wallet.balance();
-    const total = before.recoverable + before.cancelling + 1_000n;
+    const total = before.recoverable + 1_000n;
     const identity = hexToBin(wallet.stored.identity as string);
     const result = await wallet.close(payee);
     expect(result.transactions).toHaveLength(1);
@@ -555,7 +629,7 @@ describe('closing', () => {
     // Nothing of the identity is left on chain.
     expect(chain.outputsAt(controllerScript(identity).lockingBytecode)).toEqual([]);
     expect(await wallet.closed()).toBe(true);
-    expect(await wallet.balance()).toMatchObject({ recoverable: 0n, cancelling: 0n, vault: 0n });
+    expect(await wallet.balance()).toMatchObject({ recoverable: 0n, vault: 0n });
   });
 
   it('FE08: closing after everything else was sent takes the controller\'s value with a coin received later', async () => {
@@ -611,5 +685,45 @@ describe('a device that starts again', () => {
     expect(again.wallet.address(givenOut, given.number).address).toBe(given.address);
     expect(again.wallet.address(vault, 0).address).toBe(vaultAddress.address);
     await again.wallet.pay([{ lockingBytecode: payee, valueSatoshis: 9_000n }]);
+  });
+
+  /**
+   * A device that stored its state while the wallet kept a coin apart for cancelling: a change number kept
+   * for that coin, the coin of 1,091 satoshis there, and the number under `cancelCoinNumber`. The state is
+   * read back as a device reads it, from text.
+   */
+  const storedBefore = async () => {
+    const first = await walletWith(10_000n);
+    const taken = takeNumber(first.state().allocation, change);
+    if (!('number' in taken)) throw new Error('no change number free');
+    const stored = { ...first.state(), allocation: keepNumber(taken.allocation, change, taken.number), cancelCoinNumber: taken.number };
+    const coinAt = first.wallet.address(change, taken.number).lockingBytecode;
+    first.chain.fund(coinAt, 1_091n);
+    const again = await device(first.chain, { state: JSON.parse(JSON.stringify(stored)) as OwnerWalletState });
+    return { ...again, chain: first.chain, coinAt, before: await first.wallet.balance() };
+  };
+
+  it('reads a state stored while a coin was kept apart for cancelling: that coin is an ordinary coin, counted and spent', async () => {
+    const { wallet, chain, coinAt, before } = await storedBefore();
+    const balance = await wallet.balance();
+    expect(balance).not.toHaveProperty('cancelling');
+    expect(balance.recoverable).toBe(before.recoverable + 1_091n);
+    // A cancellation takes it first: it is the smallest coin that pays alone, and it pays exactly.
+    expect(await wallet.canCancel()).toBe(true);
+    expect(await wallet.cancel()).toMatchObject({ bytes: 1_091, feeSatoshis: 1_091n, remainderSatoshis: 0n });
+    expect(chain.balanceOf(coinAt)).toBe(0n);
+    expect((await wallet.balance()).recoverable).toBe(before.recoverable);
+  });
+
+  it('an ordinary payment spends that coin too, and sending everything takes it', async () => {
+    const { wallet, chain, coinAt, before } = await storedBefore();
+    const total = before.recoverable + 1_091n;
+    // A payment that only all the coins together cover.
+    await wallet.pay([{ lockingBytecode: payee, valueSatoshis: total - 1_200n }]);
+    expect(chain.balanceOf(coinAt)).toBe(0n);
+    const rest = await storedBefore();
+    const everything = await rest.wallet.sendEverything(payee);
+    expect(everything.sentSatoshis).toBe(total - everything.feeSatoshis);
+    expect(rest.chain.balanceOf(rest.coinAt)).toBe(0n);
   });
 });
