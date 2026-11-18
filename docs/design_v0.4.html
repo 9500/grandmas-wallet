@@ -543,6 +543,14 @@ contract VaultAddress(bytes32 tag) {
     <li><strong>It cannot be done</strong> only when the total less the fee is below the smallest output. A single coin of 546 satoshis leaves 361, which cannot be sent. The wallet then shows the total, the fee and the smallest output.</li>
     <li><strong>What is left:</strong> the controller, coins with tokens, and whatever the recoverer holds. The wallet stays usable and recoverable. Until it holds Bitcoin Cash again it cannot pay for a cancellation.</li>
   </ul>
+  <h3>Receiving and sending tokens</h3>
+  <ul>
+    <li><strong>Every address can hold tokens.</strong> Its token-aware form (<code>z…</code> or <code>r…</code> after the prefix) pays the same script; it is the receiver's word that its wallet knows tokens. The Receive screen shows it when "Receiving a token?" is ticked.</li>
+    <li><strong>An amount, or one NFT.</strong> A fungible token is one balance per category; the wallet gathers its coins, the largest first, and the rest comes back to a fresh change address. An NFT goes whole, commitment and capability unchanged, with any amount on its coin.</li>
+    <li><strong>The fee from ordinary coins.</strong> Each token output holds the smallest value it may; what the token coins held beyond that comes back with the change in Bitcoin Cash.</li>
+    <li><strong>Only to a token-aware address.</strong> A plain address is refused before anything is built: a wallet that does not know tokens can destroy them.</li>
+    <li><strong>A token that gives more than itself</strong> (a key to a position, an NFT that can mint or be changed) is sent only after the review says what it gives and the user ticks that they understand.</li>
+  </ul>
   <h3>Closing</h3>
   <p>Sending everything with <code>ownerClose</code> in the last transaction also takes the controller's value and ends the identity. Measured at one satoshi per byte:</p>
   <div class="scroll">
@@ -764,7 +772,16 @@ contract VaultAddress(bytes32 tag) {
 }</pre>
   <p>ParyonUSD keeps a small sidecar coin next to each loan, carrying the loan key's category. The wallet finds the unspent sidecar with that category; the loan is the output before it in the same transaction. Category and place alone are not enough where someone could make a look-alike, so the declaration also has to say what makes a sidecar genuine, and the wallet checks it. That part of the declaration is still to be designed. This reading comes from Paryon's borrowing and manage contracts and has not been run.</p>
 
-  <h3>4. The wallet's own templates</h3>
+  <h3>4. What the template calls its tokens</h3>
+<pre class="code">"tokens": {
+  "pusd":    { "kind": "fungible", "category": "…",       <span class="c">// a category the template names</span>
+               "name": "ParyonUSD", "symbol": "PUSD", "decimals": 2 },
+  "loanKey": { "kind": "nft", "authority": "loanKey",      <span class="c">// whatever category each key has</span>
+               "name": "Loan key" }
+}</pre>
+  <p>Optional, and ignored by a wallet that does not read it. A description of tokens the template does not deal in is a violation. The wallet shows a name and an amount in the token's decimals only from templates the user trusts, says which one, and uses no name when two trusted templates disagree. No registry is asked: it would be a source the user has not chosen, fetched over the network, and no better checked.</p>
+
+  <h3>5. The wallet's own templates</h3>
   <p>The wallet is itself described by XO templates. The engine derives a template's keys from the template's content, so the controller, the addresses given out and the change addresses are three small templates that never change. A fourth, which holds no key and may change, has the wallet's actions, the address of an earlier seed (which can only be swept) and the vault address. One transaction can take inputs and outputs of several templates; that is how a sweep carries the controller and the coins, and how an application's transaction takes the wallet's coins.</p>
   <p>Trials ran this through the unmodified engine on a local node: one script per address with the wallet's tag, a payment by key, a sweep of several coins each with its own secret, and a new seed taking over an identity that another account created.</p>
 
