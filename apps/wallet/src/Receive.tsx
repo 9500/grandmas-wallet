@@ -87,7 +87,7 @@ export const Receive = ({ owner }: { owner: Owner }) => {
           ) : (
             <>
               <div class="receive-code">
-                <QrCode text={address.toUpperCase()} label={tokens ? 'QR code of the token address' : 'QR code of the address'} />
+                <QrCode text={address} label={tokens ? 'QR code of the token address' : 'QR code of the address'} />
               </div>
               <div class="receive-side">
                 <div class="address-big" data-testid="receive-address" data-value={address} data-form={tokens ? 'tokens' : 'plain'}>

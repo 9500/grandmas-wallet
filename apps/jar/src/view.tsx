@@ -288,7 +288,7 @@ const PayIn = ({ jar, facts, state, onDeposit, onClose }: { jar: JarView; facts:
       <More summary="Pay in from any wallet">
         <p class="small muted">An ordinary payment to this address goes into the jar. Anyone can make it.</p>
         <div class="qr-small">
-          <QrCode text={address.toUpperCase()} label="QR code of the jar's address" />
+          <QrCode text={address} label="QR code of the jar's address" />
         </div>
         <Value text={address} copyLabel="Copy address" />
       </More>
