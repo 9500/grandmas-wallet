@@ -801,25 +801,42 @@ export class Applications {
     // Coins and the exact fee (section 8).
     const fixedInputs = [...applicationInputs, ...tokenInput, ...tokenInputs];
     const paying = [...templateOutputs, ...changeOutputs].map(({ output }) => output);
+    // A template may leave a place among its outputs to the wallet (a loan key's contract wants the maker's own
+    // coin at output 0). When nothing else of the wallet's fills it, something has to be left over to go there.
+    const placedAt = new Set(templateOutputs.flatMap(({ index }) => (index === undefined ? [] : [index])));
+    const holes = Math.max(-1, ...placedAt) + 1 - placedAt.size;
+    const mustLeave = holes > templateOutputs.filter(({ index }) => index === undefined).length + changeOutputs.length;
+    const smallest = smallestOutputValue({ lockingBytecode: leftOver.address.lockingBytecode, valueSatoshis: 0n });
+    const leastLeftOver: Output = { lockingBytecode: leftOver.address.lockingBytecode, valueSatoshis: smallest };
     let payItself: bigint | undefined;
     if (virtual) {
       // The wallet will first pay itself, exactly what the action then takes from that one coin.
-      const bytes = transactionBytes([...fixedInputs.map((input) => input.bytes), INPUT_BYTES.byKey], paying);
-      const needed = sum(paying.map((output) => output.valueSatoshis)) + requiredFee(bytes, this.wallet.feeRate) - sum(fixedInputs.map((input) => input.coin.utxo.output.valueSatoshis));
-      const smallest = smallestOutputValue({ lockingBytecode: leftOver.address.lockingBytecode, valueSatoshis: 0n });
+      const outputs = mustLeave ? [...paying, leastLeftOver] : paying;
+      const bytes = transactionBytes([...fixedInputs.map((input) => input.bytes), INPUT_BYTES.byKey], outputs);
+      const needed = sum(outputs.map((output) => output.valueSatoshis)) + requiredFee(bytes, this.wallet.feeRate) - sum(fixedInputs.map((input) => input.coin.utxo.output.valueSatoshis));
       payItself = needed > smallest ? needed : smallest;
       defining = { utxo: { transactionHash: new Uint8Array(32), index: 0, output: { lockingBytecode: leftOver.address.lockingBytecode, valueSatoshis: payItself } }, template: 'change', height: 0 };
     }
     const definingInput: PlannedInput[] = defining === undefined ? [] : [{ coin: defining, bytes: INPUT_BYTES.byKey, kind: 'defining' }];
     const fixed = new Set([...fixedInputs, ...definingInput].map((input) => outpointOf(input.coin.utxo)));
     const available = virtual ? [] : own.filter((coin) => !fixed.has(outpointOf(coin.utxo)));
-    const choice = chooseCoins({
+    const choosing = {
       available: available.map((coin) => ({ utxo: coin.utxo, inputBytes: INPUT_BYTES.byKey })),
       fixedInputs: [...fixedInputs, ...definingInput].map((input) => ({ utxo: input.coin.utxo, inputBytes: input.bytes })),
-      outputs: paying,
       changeLockingBytecode: leftOver.address.lockingBytecode,
       feeRate: this.wallet.feeRate,
-    });
+    };
+    let choice = chooseCoins({ ...choosing, outputs: paying });
+    if (mustLeave && choice.changeSatoshis === undefined) {
+      // The coins come out without anything left over: they are chosen again so that the least an output may
+      // hold is left, and whatever more there is goes to that one output, at the exact fee.
+      const again = chooseCoins({ ...choosing, outputs: [...paying, leastLeftOver] });
+      const spending = [...choosing.fixedInputs, ...again.coins];
+      const bytes = transactionBytes(spending.map((coin) => coin.inputBytes), [...paying, leastLeftOver]);
+      const feeSatoshis = requiredFee(bytes, this.wallet.feeRate);
+      const changeSatoshis = sum(spending.map((coin) => coin.utxo.output.valueSatoshis)) - sum(paying.map((output) => output.valueSatoshis)) - feeSatoshis;
+      choice = { coins: again.coins, changeSatoshis, feeSatoshis, remainderSatoshis: 0n, bytes };
+    }
     const chosen: PlannedInput[] = choice.coins.map(({ utxo }) => ({ coin: available.find((coin) => coin.utxo === utxo) as AccountCoin, bytes: INPUT_BYTES.byKey, kind: 'own' }));
     const leftOverOutput: PlannedOutput[] = choice.changeSatoshis === undefined ? [] : [{ output: { lockingBytecode: leftOver.address.lockingBytecode, valueSatoshis: choice.changeSatoshis }, wallet: 'left over' }];
 

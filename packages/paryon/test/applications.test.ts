@@ -200,6 +200,19 @@ describe('a ParyonUSD loan through the wallet, from the template (PY02)', () => 
     expect(device.applications.describe(presented.names).verdict.statement).toBe('verified');
   });
 
+  it('PY02: a wallet without a coin that can define the key pays itself first, and the key is made with what is left over at output 0', async () => {
+    const device = await deviceWith([10_000_000n], { outputIndex: 1 });
+    device.chain.adopt([...recorded.borrowing, ...recorded.price, ...recorded.loanKeyFactory, ...recorded.manage].map((entry) => ({ transactionId: entry.transactionId, index: entry.index, output: outputOf(entry) })));
+    const request = asked(createKeyRequest(presented));
+    const preview = await device.applications.preview(request);
+    expect(preview.figures.payingItself?.feeSatoshis).toBeGreaterThan(0n);
+    const made = await device.applications.carryOut(request);
+    const created = await decoded(device, made.transactionId);
+    // Output 0 is the wallet's: Paryon's contract leaves that place to whoever makes the key.
+    expect(created.outputs[0]?.token).toBeUndefined();
+    expect(created.outputs).toHaveLength(4);
+  });
+
   it('PY02: the wallet\'s own figures for the loan: what leaves the wallet, what goes into the loan, the fee to Paryon, the tokens it gets', async () => {
     const device = await loanDevice(COLLATERAL + 10_000_000n);
     const made = await device.applications.carryOut(asked(createKeyRequest(presented)));
