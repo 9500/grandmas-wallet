@@ -77,6 +77,14 @@ export const relayOf = (uri: string): string => {
   }
 };
 
+/** An application that asked about the tokens of a template the user trusts, but not in a session with it. */
+export interface PositionsAsk {
+  application: string;
+  template: { identifier: string; name: string };
+  /** Unix seconds, when it first asked while the page was open. */
+  askedAt: number;
+}
+
 export interface ApplicationsPart {
   applications: PageApplications;
   connector: WalletConnector;
@@ -84,6 +92,10 @@ export interface ApplicationsPart {
   statuses: Record<string, LinkStatus>;
   /** Requests waiting for the user's decision. */
   proposals: Proposal[];
+  /** Applications that asked to see the tokens of a template the user trusts without them, waiting for the user's word. */
+  asks: PositionsAsk[];
+  /** Let the application see the template's tokens, or not for as long as the page is open. */
+  answerAsk(ask: PositionsAsk, allow: boolean): void;
   /** Connect to the application whose address this is. @throws if the address cannot be used */
   connect(uri: string, name?: string): Connection;
   /** Close a connection and forget it. Requests it made, and their outcomes, are kept. */
@@ -97,6 +109,9 @@ export interface ApplicationsPart {
 
 export const useApplications = ({ session, wallet, seed, onSent }: { session: Session; wallet: OwnerWallet; seed: SeedKeys; onSent: (what: string, outcome: ActionOutcome) => void }): ApplicationsPart => {
   const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [asks, setAsks] = useState<PositionsAsk[]>([]);
+  /** Asks the user answered with "not now": the application asks again and again, and the user is not asked again while the page is open. */
+  const notNow = useRef(new Set<string>());
   const [connections, setConnections] = useState<Connection[]>(() => kept('connections') ?? []);
   const [statuses, setStatuses] = useState<Record<string, LinkStatus>>({});
   const [version, setVersion] = useState(0);
@@ -128,6 +143,11 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
         onProposals: (open) => {
           setProposals(open);
           changed();
+        },
+        onPositionsAsked: (identifier, application) => {
+          const template = applications.templates.find((kept) => kept.identifier === identifier);
+          if (template === undefined || notNow.current.has(`${application}/${identifier}`)) return;
+          setAsks((known) => (known.some((ask) => ask.application === application && ask.template.identifier === identifier) ? known : [...known, { application, template: { identifier, name: template.name }, askedAt: Math.floor(Date.now() / 1000) }]));
         },
       }),
     [],
@@ -188,6 +208,13 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
     connections,
     statuses,
     proposals,
+    asks,
+    answerAsk: (ask, allow) => {
+      if (allow) applications.allow(ask.template.identifier, ask.application);
+      else notNow.current.add(`${ask.application}/${ask.template.identifier}`);
+      setAsks((known) => known.filter((candidate) => candidate !== ask));
+      changed();
+    },
     connect: (text, name) => {
       const uri = normalAddress(text);
       const pairing = pairingOf(uri);
@@ -201,6 +228,7 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
     },
     end: (pairing) => {
       close(pairing);
+      setAsks((known) => known.filter((ask) => ask.application !== pairing));
       save((kept('connections') ?? []).filter((connection) => connection.pairing !== pairing));
       setStatuses(({ [pairing]: _gone, ...rest }) => rest);
     },

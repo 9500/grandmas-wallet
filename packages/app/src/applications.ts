@@ -951,6 +951,25 @@ export class Applications {
   }
 
   /**
+   * Whether an application that asks about a template's tokens is one the user could let see them: the template
+   * is trusted on this device, and not yet in a session with that application. Its answer is the user's to give.
+   */
+  mayAllow(templateIdentifier: string, application: string): boolean {
+    const kept = this.state.templates.find((template) => template.identifier === templateIdentifier);
+    return kept !== undefined && !kept.applications.includes(application);
+  }
+
+  /**
+   * Let an application see the tokens of a template the user trusts, as if the template had been trusted in a
+   * session with it. On the user's word only.
+   */
+  allow(templateIdentifier: string, application: string): KeptTemplate {
+    const kept = this.state.templates.find((template) => template.identifier === templateIdentifier);
+    if (kept === undefined) return refuse('This wallet does not trust that template.');
+    return kept.applications.includes(application) ? kept : this.updateTemplate(kept.identifier, { applications: [...kept.applications, application] });
+  }
+
+  /**
    * An action on a position, as the user asks for it from the wallet itself, with the application's site not
    * consulted: everything comes from the token, the template and the chain.
    */

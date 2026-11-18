@@ -223,4 +223,38 @@ describe('a session with an application', () => {
     expect(await second.dapp.positions(bond.names.identifier)).toEqual({ trusted: false, positions: [] });
     expect(proposals()).toEqual([]);
   });
+
+  it('AP06: a template trusted without this application is answered for only once the user allows it', async () => {
+    const device = await deviceWith([100_000n, 60_000n]);
+    const asked: [string, string][] = [];
+    let proposals: Proposal[] = [];
+    const connector = applicationConnector(device.applications, { onProposals: (open) => (proposals = open), onPositionsAsked: (template, application) => void asked.push([template, application]) });
+    const connect = (pairing: string) => {
+      const wires = link();
+      connector.attach(pairing, wires.wallet);
+      const dapp = new DappRequests();
+      dapp.attach(wires.dappEnd);
+      return dapp;
+    };
+    // A token made in a session with one application; then the template is known to the device without the other.
+    const first = connect('first application');
+    const opened = first.request(open(strongbox), strongbox.texts);
+    await settle();
+    await proposals[0]?.approve();
+    const { tokens } = (await opened) as { tokens: { category: string }[] };
+    const later = connect('a later session');
+
+    // Not trusted at all: refused, and the user is not asked, so that nothing hints at it.
+    expect(await later.positions(bond.names.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(asked).toEqual([]);
+    // Trusted, but not with this application: refused, and the user is asked.
+    expect(await later.positions(strongbox.names.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(asked).toEqual([[strongbox.names.identifier, 'a later session']]);
+    // Only the user's word lets it see the tokens.
+    expect(() => device.applications.allow(bond.names.identifier, 'a later session')).toThrow(/does not trust/);
+    device.applications.allow(strongbox.names.identifier, 'a later session');
+    expect(await later.positions(strongbox.names.identifier)).toMatchObject({ trusted: true, positions: [{ category: tokens[0]?.category, status: 'open', satoshis: '30000' }] });
+    expect(device.applications.mayAllow(strongbox.names.identifier, 'a later session')).toBe(false);
+    expect(asked).toHaveLength(1);
+  });
 });

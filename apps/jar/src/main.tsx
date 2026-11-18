@@ -66,18 +66,21 @@ const Jars = ({ environment, source, peerName, chain, onDisconnect }: { environm
     if (running.current) return;
     running.current = true;
     setState({ running: { name, title } });
+    let ended: ActionState;
     try {
       const outcome = await work((progress) => setState({ running: { name, title, progress } }));
-      setState({ done: { name, text: doneText, ...(outcome.transactionId === undefined ? {} : { transactionId: outcome.transactionId }) } });
+      ended = { done: { name, text: doneText, ...(outcome.transactionId === undefined ? {} : { transactionId: outcome.transactionId }) } };
       after?.();
     } catch (error) {
-      setState({ error: { name, message: plainError(error) } });
-    } finally {
-      running.current = false;
-      await refresh();
-      // A server may list a transaction a moment after it took it.
-      setTimeout(() => void refresh(), 4_000);
+      ended = { error: { name, message: plainError(error) } };
     }
+    // The jars are read again before the outcome is shown, so that the list beside it already agrees with it:
+    // otherwise a jar just emptied is shown for a moment with its old amount and its button.
+    await refresh();
+    running.current = false;
+    setState(ended);
+    // A server may list a transaction a moment after it took it.
+    setTimeout(() => void refresh(), 4_000);
   };
 
   useEffect(() => {

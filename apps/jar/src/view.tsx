@@ -380,7 +380,7 @@ export const JarList = ({
           <Spinner /> Looking for your jars…
         </p>
       ) : jars.length === 0 ? (
-        <p class="muted">{trusted ? 'No jars yet. A jar you open here is listed here, and in any other browser your wallet connects to.' : 'No jars yet. Jars you open with this wallet are listed here.'}</p>
+        <p class="muted">{trusted ? 'No jars yet. A jar you open here is listed here, and in any other browser your wallet connects to.' : 'No jars to show. Your wallet tells this page about its jars once you open one here, or once you allow it in the wallet.'}</p>
       ) : (
         <ul class="jars">
           {jars.map((jar) => (
@@ -471,8 +471,11 @@ export const OpenJarForm = ({ kind, facts, state, onOpen }: { kind: 'xo' | 'plai
         block
         disabled={busy}
         onClick={() => {
-          setTried(true);
-          if (amountError === undefined && dateError === undefined && typeof parsed === 'bigint' && unlockTime !== undefined) onOpen(parsed, unlockTime);
+          // Problems are shown once opening was tried and refused here; a request that went ahead leaves none
+          // behind, or the date it used would be marked as past once it is.
+          const ready = amountError === undefined && dateError === undefined && typeof parsed === 'bigint' && unlockTime !== undefined;
+          setTried(!ready);
+          if (ready) onOpen(parsed, unlockTime);
         }}
       >
         {state.running?.name === openName && <Spinner />}

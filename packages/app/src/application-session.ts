@@ -47,7 +47,17 @@ const reported = (token: HeldToken): ReportedPosition => ({
 /** The part of the wallet that answers applications, on the wallet's own handling of templates and actions. */
 export const applicationConnector = (
   applications: Applications,
-  options: { storage?: LedgerStorage; onProposals: (proposals: Proposal[]) => void; now?: () => number },
+  options: {
+    storage?: LedgerStorage;
+    onProposals: (proposals: Proposal[]) => void;
+    /**
+     * An application asked about the tokens of a template the user trusts on this device, but not in a session
+     * with that application. It was answered as for any other template, with nothing. The user may let it see
+     * them (`Applications.allow`); its next request is then answered.
+     */
+    onPositionsAsked?: (templateIdentifier: string, application: string) => void;
+    now?: () => number;
+  },
 ): WalletConnector =>
   new WalletConnector({
     has: (template) => applications.has(template),
@@ -57,7 +67,11 @@ export const applicationConnector = (
       const outcome = await applications.carryOut(actionOf(entry), stage);
       return { transactionId: outcome.transactionId, tokens: outcome.tokens };
     },
-    positions: async (templateIdentifier, application) => (await applications.positions(templateIdentifier, application))?.map(reported),
+    positions: async (templateIdentifier, application) => {
+      const held = await applications.positions(templateIdentifier, application);
+      if (held === undefined && applications.mayAllow(templateIdentifier, application)) options.onPositionsAsked?.(templateIdentifier, application);
+      return held?.map(reported);
+    },
     onProposals: options.onProposals,
     ...(options.storage === undefined ? {} : { storage: options.storage }),
     ...(options.now === undefined ? {} : { now: options.now }),

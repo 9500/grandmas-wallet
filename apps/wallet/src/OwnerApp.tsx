@@ -1,6 +1,6 @@
 import { binToHex } from '@bitauth/libauth';
 import type { RecoveryStatus } from '@grandmas-wallet/archive';
-import { type Balance, type OwnerWallet, type Sent, checkRecovery, makeChange } from '@grandmas-wallet/app';
+import { type Balance, type OwnerWallet, type Sent, checkRecovery, copyEarlierArchives, makeChange } from '@grandmas-wallet/app';
 import type { SeedKeys } from '@grandmas-wallet/core';
 import { Button, Card, Frame, Loading, type NavItem, Notice, plainError, useEvery, useRoute, useToast } from '@grandmas-wallet/ui';
 import type { JSX } from 'preact';
@@ -159,6 +159,26 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
     }
   });
 
+  // After a takeover or a move to a new seed, what the earlier archives hold about applications (templates and
+  // token notes) is copied into the archive in use, which the earlier phone cannot read (section 10.6), and then
+  // read: a template an earlier owner stored is offered, and a note is a hint.
+  useEvery(20_000, async () => {
+    const arrangement = kept('arrangement');
+    if (arrangement === undefined || arrangement.movedTo !== undefined) return;
+    const done = new Set(arrangement.copiedArchives ?? []);
+    if (arrangement.earlierArchives.every((earlier) => done.has(earlier.archiveId))) return;
+    const copied = await copyEarlierArchives({ arrangement, storeAt: session.storeAt });
+    // Only what was copied is taken over: the arrangement may have changed meanwhile.
+    const current = kept('arrangement');
+    if (current !== undefined) keep('arrangement', { ...current, copiedArchives: [...new Set([...(current.copiedArchives ?? []), ...(copied.arrangement.copiedArchives ?? [])])] });
+    if (copied.copied > 0) {
+      await apps.applications.readBackup();
+      apps.changed();
+    }
+    // An unfinished copy is continued at the next turn.
+    if (copied.unfinished.length > 0) console.warn(copied.unfinished.join(' '));
+  });
+
   const owner: Owner = {
     session,
     wallet,
@@ -190,7 +210,7 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
     { route: 'home', label: 'Home', icon: 'home' },
     { route: 'receive', label: 'Receive', icon: 'receive' },
     { route: 'send', label: 'Send', icon: 'send' },
-    { route: 'apps', label: 'Apps', icon: 'apps', flag: apps.proposals.length > 0 },
+    { route: 'apps', label: 'Apps', icon: 'apps', flag: apps.proposals.length + apps.asks.length > 0 },
     { route: 'recovery', label: 'Recovery', icon: 'shield', flag: alarm || (watch.protection !== undefined && watch.protection.gaps.some((gap) => !isChainGap(gap))) },
     { route: 'details', label: 'Details', icon: 'details', sideOnly: true },
   ];
@@ -211,7 +231,7 @@ const OwnerScreens = ({ session, wallet }: { session: Session; wallet: OwnerWall
     screen = screens[route]();
   }
   const incoming = kept('incoming');
-  const asked = apps.proposals.length;
+  const asked = apps.proposals.length + apps.asks.length;
   const offer = plain_(moved, elsewhere, arrival) ? null : asked > 0 && route !== 'apps' ? (
     <div class="incoming">
       <Notice tone="wait">

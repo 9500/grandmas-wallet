@@ -260,11 +260,26 @@ export const FirstUse = ({ summary, firstUse }: { summary: TemplateSummary; firs
   );
 };
 
+/**
+ * A refusal by the network, in plain words where it is one a person can act on, with the network's own words
+ * after them. Otherwise the message as it is.
+ */
+export const plainRefusal = (message: string): string => {
+  const said = (/rejected by network rules\.?\s*([^]+)$/i.exec(message)?.[1] ?? message).replace(/\s*\(code \d+\)[^]*$/, '').replace(/[\s."]+$/, '');
+  if (/non-?BIP68-?final/i.test(message)) {
+    return `The network does not take this transaction yet: a coin it spends has not waited as long as its script asks since it was confirmed. Nothing was spent. (The network said: ${said}.)`;
+  }
+  if (/non-?final/i.test(message)) {
+    return `The network does not take this transaction yet: the time it names has not come by the chain's clock, which goes by the median time of the last eleven blocks and runs some minutes behind the real one. Nothing was spent; try again later. (The network said: ${said}.)`;
+  }
+  return message;
+};
+
 /** Why an action cannot be carried out, in full. */
 export const refusalOf = (error: unknown): string => {
   if (error instanceof InsufficientFundsError) {
     return `The wallet's coins do not cover this. It can spend ${formatSatoshis(error.totalSatoshis)} satoshis; the action and its fee of ${formatSatoshis(error.feeSatoshis)} need ${formatSatoshis(error.neededSatoshis)}.`;
   }
   const message = error instanceof Error ? error.message : String(error);
-  return /Failed to fetch|NetworkError|Load failed/i.test(message) ? plainError(error) : message;
+  return /Failed to fetch|NetworkError|Load failed/i.test(message) ? plainError(error) : plainRefusal(message);
 };

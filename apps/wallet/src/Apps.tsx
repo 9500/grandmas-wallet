@@ -7,8 +7,8 @@ import { Amount, Button, Card, Field, Loading, Notice, PageHead, Pill, Spinner, 
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
-import { ActionReview, Hex, Part, TemplateView, refusalOf } from './ActionReview.js';
-import { type ApplicationsPart, relayOf } from './connections.js';
+import { ActionReview, Hex, Part, TemplateView, plainRefusal, refusalOf } from './ActionReview.js';
+import { type ApplicationsPart, type PositionsAsk, relayOf } from './connections.js';
 import type { Owner } from './OwnerApp.js';
 import { type Connection, keep, kept } from './session.js';
 import './apps.css';
@@ -34,8 +34,12 @@ export const Apps = ({ owner }: { owner: Owner }) => {
   useEffect(() => {
     if (backupRead) return;
     backupRead = true;
-    // A backup that cannot be read now is no reason for alarm here: the tokens are listed all the same.
-    apps.applications.readBackup().then(apps.changed, (error: unknown) => console.warn(error));
+    // A backup that cannot be read now is no reason for alarm here: the tokens are listed all the same, and it is
+    // read again the next time this screen is opened.
+    apps.applications.readBackup().then(apps.changed, (error: unknown) => {
+      backupRead = false;
+      console.warn(error);
+    });
   }, []);
   const back = () => {
     setView({ at: 'main' });
@@ -68,6 +72,9 @@ const Main = ({ owner, onView }: { owner: Owner; onView: (view: View) => void })
                 setDismissed((count) => count + 1);
               }}
             />
+          ))}
+          {apps.asks.map((ask) => (
+            <AskCard key={`${ask.application}/${ask.template.identifier}`} owner={owner} ask={ask} />
           ))}
           <Tokens owner={owner} onView={onView} />
         </div>
@@ -297,7 +304,7 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
           )}
           {entry.status === 'failed' && (
             <>
-              <p class="failure">{entry.error ?? 'The wallet did not say why.'}</p>
+              <p class="failure">{entry.error === undefined ? 'The wallet did not say why.' : plainRefusal(entry.error)}</p>
               {notStored && <NoBackup owner={owner}>A template is stored in your backup before its first action, and this wallet has no backup store it could reach. Set up recovery, then ask the application again.</NoBackup>}
               <p class="small muted">The application was told. Nothing was signed unless a transaction is named above.</p>
             </>
@@ -357,6 +364,32 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
   );
 };
 
+/** An application asks about the tokens of a template the user trusts, but not in a session with it. */
+const AskCard = ({ owner, ask }: { owner: Owner; ask: PositionsAsk }) => {
+  const { apps } = owner;
+  const name = nameOf(apps, ask.application);
+  return (
+    <Card title={`${name ?? 'An application'} asks to see your tokens`} cls="request-card">
+      <div class="stack">
+        <div class="asker">
+          {name !== undefined && <Pill>Its own name, not verified</Pill>}
+          <span class="small muted">Asked {formatTime(ask.askedAt)}</span>
+        </div>
+        <p>
+          It asks which tokens of the template <strong>{ask.template.name}</strong> this wallet holds, and what they control. You trust this template on this phone, but not in a session with this application, so it was told nothing.
+        </p>
+        <p class="small muted">If you allow it, the application is told this whenever it asks: the tokens of this template and where their positions stand on chain. It learns nothing else about the wallet, and it can ask for actions only with your approval, as before.</p>
+        <div class="actions decide">
+          <Button onClick={() => apps.answerAsk(ask, true)}>Allow</Button>
+          <Button kind="quiet" onClick={() => apps.answerAsk(ask, false)}>
+            Not now
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+};
+
 /** Requests answered before, most recent first. */
 const EarlierRequests = ({ owner }: { owner: Owner }) => {
   const { apps } = owner;
@@ -393,7 +426,7 @@ const EarlierRequests = ({ owner }: { owner: Owner }) => {
                 </div>
                 <Pill {...(entry.status === 'done' ? { tone: 'good' as const } : entry.status === 'failed' ? { tone: 'bad' as const } : {})}>{entry.status === 'done' ? 'Done' : entry.status === 'failed' ? 'Failed' : 'Declined'}</Pill>
               </div>
-              {entry.status === 'failed' && entry.error !== undefined && <p class="small muted earlier-error">{entry.error}</p>}
+              {entry.status === 'failed' && entry.error !== undefined && <p class="small muted earlier-error">{plainRefusal(entry.error)}</p>}
             </li>
           );
         })}
