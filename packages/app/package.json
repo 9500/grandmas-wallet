@@ -12,6 +12,7 @@
     "@bitauth/libauth": "3.1.0-next.8",
     "@grandmas-wallet/archive": "0.0.0",
     "@grandmas-wallet/chipnet": "0.0.0",
+    "@grandmas-wallet/connect": "0.0.0",
     "@grandmas-wallet/core": "0.0.0",
     "@grandmas-wallet/enrollment": "0.0.0",
     "@xo-cash/engine": "0.1.1-next.18029697917",

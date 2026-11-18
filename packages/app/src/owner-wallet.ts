@@ -42,6 +42,8 @@ import {
   walletAddress,
 } from '@grandmas-wallet/core';
 
+import type { ApplicationsState } from './applications.js';
+
 /**
  * The owner's wallet (proposal sections 7.7, 7.9 and 8): creating it, giving out addresses, paying, the
  * coin kept for cancelling, sending everything, and closing.
@@ -89,6 +91,56 @@ export interface OwnerWalletState {
   ownedElsewhere?: boolean;
   /** The identity the user moved on to (section 18.3). This one is kept: payments can still arrive at its addresses. */
   movedToIdentity?: string;
+  /** The templates of applications the user trusted on this device, and notes on the tokens made with them. */
+  applications?: ApplicationsState;
+}
+
+/** An address the wallet sets aside for something that is about to happen. */
+export interface ReservedAddress {
+  address: WalletAddress;
+  /** Whether the number was taken now. Otherwise the window is full and an address given out before is used again. */
+  fresh: boolean;
+}
+
+/** A coin that carries a token, with where it is. */
+export interface TokenCoin {
+  coin: AccountCoin;
+  /** `address`: at an address of this seed, spent by its key. `vault`: at a vault address. `earlier`: at an address of an earlier seed, to be swept. */
+  place: 'address' | 'vault' | 'earlier';
+}
+
+/**
+ * What the code that carries out actions of other templates works with (`applications.ts`). It is the
+ * wallet's own coins, addresses and key holder, with nothing about any template.
+ */
+export interface WalletParts {
+  backend: WalletBackend;
+  chain: ChainReader;
+  feeRate: number;
+  /** @throws when the wallet takes on no action: it is not created yet, or another key owns it */
+  requireUsable(): void;
+  /** Coins without a token at this seed's addresses, without the coin kept for cancelling. */
+  ownCoins(): Promise<AccountCoin[]>;
+  tokenCoins(): Promise<TokenCoin[]>;
+  /**
+   * Set addresses aside, in order, without recording anything: the same call gives the same addresses until
+   * one of them is held.
+   */
+  reserve(kinds: (1 | 2)[]): ReservedAddress[];
+  /** Record the addresses as held for an action and make them known to the key holder. */
+  hold(reserved: ReservedAddress[]): Promise<void>;
+  /** A signature that names the addresses has left the wallet: they stay taken. */
+  keep(reserved: ReservedAddress[]): void;
+  /** The action did not happen and nothing was signed: the numbers may be handed out again. */
+  giveBack(reserved: ReservedAddress[]): void;
+  prepare(request: TransactionRequest): Promise<PreparedTransaction>;
+  send(prepared: PreparedTransaction): Promise<void>;
+  /** Pay the wallet itself, so that it has a coin that is output 0 of its transaction. Returns that coin. */
+  payItself(satoshis: bigint): Promise<{ coin: AccountCoin; sent: Sent }>;
+  /** What paying itself that amount costs. */
+  quotePayItself(satoshis: bigint): Promise<bigint>;
+  kept(): ApplicationsState | undefined;
+  store(applications: ApplicationsState): void;
 }
 
 /** A viewing key as a device stores it. */
@@ -597,6 +649,75 @@ export class OwnerWallet {
   /** Whether the wallet can cancel a request now: it holds the coin kept for that. */
   async canCancel(): Promise<boolean> {
     return (await this.sorted()).cancelling.length > 0;
+  }
+
+  // ---------------------------------------------------------------- for actions of other templates
+
+  /** The wallet's parts, for the code that carries out actions of other templates. */
+  get parts(): WalletParts {
+    const numbersOf = (reserved: ReservedAddress[], change: (allocation: Allocation, kind: 1 | 2, number: number) => Allocation): void => {
+      let allocation = this.state.allocation;
+      for (const { address, fresh } of reserved) if (fresh && allocation[address.kind].held.includes(address.number)) allocation = change(allocation, address.kind as 1 | 2, address.number);
+      this.store({ allocation });
+    };
+    const reserve = (kinds: (1 | 2)[]): { reserved: ReservedAddress[]; allocation: Allocation } => {
+      let allocation = this.state.allocation;
+      const reserved = kinds.map((kind) => {
+        const taken = takeNumber(allocation, kind);
+        allocation = taken.allocation;
+        return { address: this.address(kind, 'number' in taken ? taken.number : taken.refused.offer), fresh: 'number' in taken };
+      });
+      return { reserved, allocation };
+    };
+    const selfPayment = async (satoshis: bigint): Promise<Output> => {
+      const [{ address } = { address: undefined }] = reserve([ADDRESS_KIND.change]).reserved;
+      if (address === undefined) throw new Error('No address is free.');
+      return { lockingBytecode: address.lockingBytecode, valueSatoshis: satoshis };
+    };
+    return {
+      backend: this.backend,
+      chain: this.chain,
+      feeRate: this.feeRate,
+      requireUsable: () => this.requireCreated(),
+      ownCoins: async () => (await this.sorted()).own,
+      tokenCoins: async () => {
+        const { tokens, earlier } = await this.sorted();
+        return [
+          ...tokens.map((coin) => ({ coin, place: coin.template === 'actions' ? ('vault' as const) : ('address' as const) })),
+          ...earlier.filter((coin) => !tokenFree(coin)).map((coin) => ({ coin, place: 'earlier' as const })),
+        ];
+      },
+      reserve: (kinds) => reserve(kinds).reserved,
+      hold: async (reserved) => {
+        // The numbers are recorded as held before anything is built with them.
+        const again = reserve(reserved.map(({ address }) => address.kind as 1 | 2));
+        if (again.reserved.some((entry, index) => entry.address.number !== reserved[index]?.address.number)) throw new Error('The wallet\'s addresses changed while the action was being worked out. Try again.');
+        this.store({ allocation: again.allocation });
+        for (const { address } of reserved) {
+          if (address.kind === ADDRESS_KIND.vault) await this.backend.knowVaultAddress(this.identity, address);
+          else await this.makeAddresses(address.kind, address.number + 1);
+        }
+      },
+      keep: (reserved) => numbersOf(reserved, keepNumber),
+      giveBack: (reserved) => numbersOf(reserved, returnNumber),
+      prepare: (request) => this.prepareTransaction(request),
+      send: (prepared) => this.sendPrepared(prepared),
+      payItself: async (satoshis) => {
+        // The address is held before the payment is built, so that the payment's own change takes the next one.
+        const made = reserve([ADDRESS_KIND.change]);
+        const [first] = made.reserved;
+        if (first === undefined) throw new Error('No address is free.');
+        this.store({ allocation: made.allocation });
+        await this.makeAddresses(ADDRESS_KIND.change, first.address.number + 1);
+        const sent = await this.pay([{ lockingBytecode: first.address.lockingBytecode, valueSatoshis: satoshis }]);
+        numbersOf(made.reserved, keepNumber);
+        const coin = await this.waitForCoin(async () => (await this.coins()).find((candidate) => hex(candidate.utxo.transactionHash) === sent.transactionId && candidate.utxo.index === 0));
+        return { coin, sent };
+      },
+      quotePayItself: async (satoshis) => (await this.quotePay([await selfPayment(satoshis)])).feeSatoshis,
+      kept: () => this.state.applications,
+      store: (applications) => this.store({ applications }),
+    };
   }
 
   // ---------------------------------------------------------------- addresses

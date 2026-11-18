@@ -5,27 +5,38 @@ import {
   type Channel,
   type LedgerEntry,
   type Proposal,
+  type ReportedPosition,
+  type TemplateName,
+  type TemplateTexts,
   type XoMessage,
   ACTION_REQUEST,
   DappRequests,
+  NO_PLAIN_SIGNING,
   ProtocolError,
   RequestRefusedError,
   WalletConnector,
   WalletSilentError,
   XO_EXTENSION,
   readAdvertisement,
+  refusalOfStandardRequest,
   temporaryLedger,
 } from '../src/index.js';
+import { pairingOf } from '../src/wizard.js';
 
-/** A template as an application would present it. The wallet in these tests names a template by two of its fields. */
-const DEFINITION = { name: 'Sample application', identifier: 'sample-template', contentHash: 'aa'.repeat(32) };
-const TEMPLATE = { identifier: DEFINITION.identifier, contentHash: DEFINITION.contentHash };
-const OTHER = { name: 'Another application', identifier: 'other-template', contentHash: 'bb'.repeat(32) };
+/**
+ * The messages between an application and a wallet, and the wallet's rule that a request is carried out at
+ * most once. The wallet in these tests names a template by the first line of its text; what a real wallet
+ * checks about a template is tested with the wallet (`test/applications-session.test.ts`).
+ */
+const hash = (seed: string): string => seed.repeat(32);
+const TEXTS: TemplateTexts = { template: `${hash('aa')}\nSample application`, declaration: 'how its tokens lead to positions' };
+const TEMPLATE: TemplateName = { identifier: hash('a1'), contentHash: hash('aa'), declaration: hash('ad') };
+const OTHER: TemplateName = { identifier: hash('b1'), contentHash: hash('bb') };
+const POSITION: ReportedPosition = { category: hash('c1'), commitment: '01', authority: 'key', status: 'open', satoshis: '5000', actions: ['withdraw'] };
 
-/** What the application asks for, with its template sent along as it would be the first time. */
+/** What the application asks for. */
 const ask = (variables: ActionDetails['variables'] = { amount: '5000' }, more: Partial<ActionDetails> = {}): ActionDetails => ({
   template: TEMPLATE,
-  definition: DEFINITION,
   templateAction: 'deposit',
   role: 'saver',
   variables,
@@ -59,26 +70,25 @@ const settle = () => new Promise((done) => setTimeout(done, 0));
 const setup = (options: { fail?: boolean; storage?: ReturnType<typeof temporaryLedger>; now?: () => number; trusted?: boolean; unreadable?: boolean } = {}) => {
   const wires = link();
   const executed: LedgerEntry[] = [];
-  const trusted = options.trusted === true ? [TEMPLATE] : [];
+  const trusted: TemplateName[] = options.trusted === true ? [TEMPLATE] : [];
   let proposals: Proposal[] = [];
   const connector = new WalletConnector({
-    trusted: () => trusted,
-    identify: (definition) => {
-      const { identifier, contentHash } = definition as Partial<typeof DEFINITION>;
-      if (typeof identifier !== 'string' || typeof contentHash !== 'string') throw new Error('not a template');
-      return { identifier, contentHash };
+    has: (template) => trusted.some((known) => known.identifier === template.identifier && known.contentHash === template.contentHash),
+    check: (template, texts) => {
+      if (!texts.template.startsWith(template.contentHash)) throw new Error('The template sent with the request is not the one the request names.');
     },
-    positions: async (template) => {
+    positions: async (template, application) => {
+      if (!trusted.some((known) => known.identifier === template) || application !== 'application') return undefined;
       if (options.unreadable === true) throw new Error('The network could not be reached.');
-      return [{ position: 'p-1', label: 'First', output: 'kept', variables: { template }, satoshis: '5000' }];
+      return [POSITION];
     },
     ...(options.storage === undefined ? {} : { storage: options.storage }),
     ...(options.now === undefined ? {} : { now: options.now }),
     execute: async (entry, stage) => {
       executed.push({ ...entry });
       if (options.fail === true) throw new Error('Not enough funds.');
-      // Approving a request for a template not yet trusted is what trusts it.
-      if (!entry.templateTrusted) trusted.push(entry.template);
+      // Approving a request for a template the wallet did not have is what trusts it.
+      if (!entry.templateKnown) trusted.push(entry.template);
       stage('recorded');
       stage('sent');
       return { transactionId: `tx-${executed.length}` };
@@ -93,22 +103,39 @@ const setup = (options: { fail?: boolean; storage?: ReturnType<typeof temporaryL
   return { ...wires, connector, dapp, executed, trusted, proposals: () => proposals };
 };
 
-describe('advertising XO requests (X02)', () => {
-  const offered = { version: 2, network: 'chipnet', interfaceVersion: 2, bindings: ['identity'], templates: [TEMPLATE] };
+describe('announcing the extension', () => {
+  const offered = { version: 1, network: 'chipnet', profiles: ['recoverable-app-v1'], bindings: ['receive', 'change', 'return', 'lasting'] };
 
-  it('reads what a wallet offers', () => {
-    expect(readAdvertisement({ chunk: {}, [XO_EXTENSION]: offered })).toEqual(offered);
+  it('reads what a wallet offers: the profiles and the kinds of output, and no list of templates', () => {
+    expect(readAdvertisement({ chunk: {}, [XO_EXTENSION]: { ...offered, templates: [TEMPLATE] } })).toEqual(offered);
   });
 
-  it('finds nothing in a wallet that does not offer them', () => {
+  it('finds nothing in a wallet that does not offer the extension', () => {
     expect(readAdvertisement({ chunk: {} })).toBeUndefined();
     expect(readAdvertisement(undefined)).toBeUndefined();
   });
 
   it('refuses a version it does not know rather than guessing', () => {
-    expect(() => readAdvertisement({ [XO_EXTENSION]: { ...offered, version: 1 } })).toThrow(ProtocolError);
-    expect(() => readAdvertisement({ [XO_EXTENSION]: { ...offered, version: 3 } })).toThrow(ProtocolError);
+    expect(() => readAdvertisement({ [XO_EXTENSION]: { ...offered, version: 2 } })).toThrow(ProtocolError);
     expect(() => readAdvertisement({ [XO_EXTENSION]: 'yes' })).toThrow(ProtocolError);
+  });
+});
+
+describe('a standard request for signatures', () => {
+  it('AP13: is refused with a reason', () => {
+    const refusal = refusalOfStandardRequest({ action: 'sign_transaction_request', time: 1, sequence: 14, transaction: {}, inputPaths: [] }, 1_795_000_000);
+    expect(refusal).toEqual({ action: 'sign_transaction_response', time: 1_795_000_000, sequence: 14, signedTransaction: '', error: NO_PLAIN_SIGNING });
+    expect(NO_PLAIN_SIGNING).toContain('does not sign a transaction that an application built');
+    // Nothing else is answered that way.
+    expect(refusalOfStandardRequest({ action: ACTION_REQUEST, sequence: 2 }, 1)).toBeUndefined();
+  });
+});
+
+describe('the name of a pairing', () => {
+  it('is the same whenever an application comes back with its address, and differs between applications', () => {
+    expect(pairingOf('wiz://one')).toBe(pairingOf('wiz://one'));
+    expect(pairingOf('wiz://one')).not.toBe(pairingOf('wiz://two'));
+    expect(pairingOf('wiz://one')).not.toContain('one');
   });
 });
 
@@ -116,11 +143,11 @@ describe('a request from an application', () => {
   it('is carried out after the user approves, with progress reported', async () => {
     const { dapp, executed, proposals } = setup({ trusted: true });
     const stages: string[] = [];
-    const result = dapp.request(ask({ amount: '5000', unlockTime: 1_900_000_000 }, { bindings: { identity: 'identity' }, label: 'Holiday' }), (stage) => stages.push(stage));
+    const result = dapp.request(ask({ amount: '5000', unlockTime: 1_900_000_000 }, { bindings: { holder: 'receive' }, creates: 'key', spends: [hash('c1')] }), TEXTS, (stage) => stages.push(stage));
     await settle();
     expect(executed).toHaveLength(0);
-    expect(proposals().map(({ entry }) => [entry.templateAction, entry.role, entry.variables, entry.bindings, entry.label])).toEqual([
-      ['deposit', 'saver', { amount: '5000', unlockTime: 1_900_000_000 }, { identity: 'identity' }, 'Holiday'],
+    expect(proposals().map(({ entry }) => [entry.application, entry.templateAction, entry.role, entry.variables, entry.bindings, entry.creates, entry.spends])).toEqual([
+      ['application', 'deposit', 'saver', { amount: '5000', unlockTime: 1_900_000_000 }, { holder: 'receive' }, 'key', [hash('c1')]],
     ]);
     await proposals()[0]?.approve();
     expect(await result).toEqual({ transactionId: 'tx-1' });
@@ -145,73 +172,79 @@ describe('a request from an application', () => {
     await expect(result).rejects.toThrow('Not enough funds.');
   });
 
-  it('is refused when a value is of a kind the wallet does not accept', async () => {
+  it('is refused when it is not in a form the wallet accepts', async () => {
     const { dapp, proposals } = setup({ trusted: true });
     await expect(dapp.request(ask({ nested: { a: 1 } as unknown as string }))).rejects.toThrow('does not accept');
     await expect(dapp.request({ ...ask(), role: '' })).rejects.toThrow('missing something');
+    await expect(dapp.request({ ...ask(), template: { identifier: 'sample', contentHash: hash('aa') } })).rejects.toThrow('does not name its template');
+    await expect(dapp.request(ask(undefined, { spends: ['the key'] }))).rejects.toThrow('tokens it spends');
     expect(proposals()).toEqual([]);
   });
 });
 
-describe('a template the wallet has not seen', () => {
-  it('comes with the request, and is trusted only by the user approving', async () => {
-    const { dapp, executed, trusted, proposals } = setup();
-    const result = dapp.request(ask());
+describe('a template the wallet does not have', () => {
+  it('is asked for, sent whole, and trusted only by the user approving', async () => {
+    const { dapp, executed, trusted, proposals, sentToWallet, sentToDapp } = setup();
+    const result = dapp.request(ask(), TEXTS);
     await settle();
+    // The first request names the template; the wallet answers that it does not have it; the texts follow.
+    expect((sentToWallet[0] as ActionDetails).definition).toBeUndefined();
+    expect(sentToDapp[0]).toMatchObject({ accepted: false, templateNeeded: true });
+    expect((sentToWallet[1] as ActionDetails).definition).toEqual(TEXTS);
+    expect((sentToWallet[1] as { id?: string }).id).toBe((sentToWallet[0] as { id?: string }).id);
     // The user is shown the request together with the template it would trust.
-    expect(proposals()[0]?.entry.templateTrusted).toBe(false);
-    expect(proposals()[0]?.entry.definition).toEqual(DEFINITION);
+    expect(proposals()[0]?.entry.templateKnown).toBe(false);
+    expect(proposals()[0]?.entry.definition).toEqual(TEXTS);
     expect(trusted).toEqual([]);
     await proposals()[0]?.approve();
     await result;
     expect(trusted).toEqual([TEMPLATE]);
-    expect(executed[0]?.definition).toEqual(DEFINITION);
+    expect(executed[0]?.definition).toEqual(TEXTS);
   });
 
   it('is not trusted when the user declines', async () => {
     const { dapp, trusted, proposals } = setup();
-    const result = dapp.request(ask());
+    const result = dapp.request(ask(), TEXTS);
     await settle();
     await proposals()[0]?.decline();
     await expect(result).rejects.toBeInstanceOf(RequestRefusedError);
     expect(trusted).toEqual([]);
   });
 
-  it('is not asked about again once trusted, and need not be sent again', async () => {
-    const { dapp, proposals } = setup();
-    const first = dapp.request(ask());
+  it('is not asked for again once trusted', async () => {
+    const { dapp, proposals, sentToWallet } = setup();
+    const first = dapp.request(ask(), TEXTS);
     await settle();
     await proposals()[0]?.approve();
     await first;
-    const { definition: _definition, ...withoutTemplate } = ask({ amount: '700' });
-    const second = dapp.request(withoutTemplate);
+    const before = sentToWallet.length;
+    const second = dapp.request(ask({ amount: '700' }), TEXTS);
     await settle();
-    expect(proposals()[0]?.entry.templateTrusted).toBe(true);
+    expect(sentToWallet.length).toBe(before + 1);
+    expect(proposals()[0]?.entry.templateKnown).toBe(true);
     expect(proposals()[0]?.entry.definition).toBeUndefined();
     await proposals()[0]?.approve();
     expect(await second).toEqual({ transactionId: 'tx-2' });
   });
 
-  it('is refused without the template itself', async () => {
+  it('is refused when the application has no template to send', async () => {
     const { dapp, proposals } = setup();
-    const { definition: _definition, ...withoutTemplate } = ask();
-    await expect(dapp.request(withoutTemplate)).rejects.toThrow('does not know that template');
+    await expect(dapp.request(ask())).rejects.toThrow('does not have that template');
     expect(proposals()).toEqual([]);
   });
 
-  it('is refused when the template sent is not the one the request names, or is not a template', async () => {
+  it('is refused when what was sent is not what the request names', async () => {
     const { dapp, proposals } = setup();
-    await expect(dapp.request({ ...ask(), definition: OTHER })).rejects.toThrow('not the one the request names');
-    await expect(dapp.request({ ...ask(), definition: { name: 'Something else' } })).rejects.toThrow('cannot be used');
+    await expect(dapp.request(ask(), { template: `${hash('bb')}\nAnother application` })).rejects.toThrow('not the one the request names');
     expect(proposals()).toEqual([]);
   });
 
-  it('does not keep the template that came with a request once the request is decided', async () => {
+  it('does not keep the texts that came with a request once the request is decided', async () => {
     const storage = temporaryLedger();
     const { dapp, proposals } = setup({ storage });
-    const result = dapp.request(ask());
+    const result = dapp.request(ask(), TEXTS);
     await settle();
-    expect(storage.load()[0]?.definition).toEqual(DEFINITION);
+    expect(storage.load()[0]?.definition).toEqual(TEXTS);
     await proposals()[0]?.approve();
     await result;
     expect(storage.load()[0]?.definition).toBeUndefined();
@@ -219,9 +252,9 @@ describe('a template the wallet has not seen', () => {
 });
 
 describe('positions', () => {
-  it('are reported for a template the wallet trusts, without asking the user', async () => {
+  it('are reported for a template the user trusted with this application, without asking the user', async () => {
     const { dapp, proposals } = setup({ trusted: true });
-    expect(await dapp.positions(TEMPLATE.identifier)).toEqual([{ position: 'p-1', label: 'First', output: 'kept', variables: { template: TEMPLATE.identifier }, satoshis: '5000' }]);
+    expect(await dapp.positions(TEMPLATE.identifier)).toEqual({ trusted: true, positions: [POSITION] });
     expect(proposals()).toEqual([]);
   });
 
@@ -253,19 +286,26 @@ describe('positions', () => {
       await send(message);
     };
     void connector;
-    expect(await dapp.positions(TEMPLATE.identifier, 3, 5)).toHaveLength(1);
+    expect((await dapp.positions(TEMPLATE.identifier, 3, 5)).positions).toHaveLength(1);
     expect(lost).toBe(1);
   });
 
-  it('are not reported to an application whose template the wallet does not trust', async () => {
+  it('are not reported for a template the wallet does not trust, or trusts with another application', async () => {
     const { dapp } = setup();
-    expect(await dapp.positions(TEMPLATE.identifier)).toEqual([]);
-    expect(await dapp.positions(OTHER.identifier)).toEqual([]);
+    expect(await dapp.positions(TEMPLATE.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await dapp.positions(OTHER.identifier)).toEqual({ trusted: false, positions: [] });
+    const second = setup({ trusted: true });
+    const wires = link();
+    second.connector.attach('another application', wires.wallet);
+    const other = new DappRequests();
+    other.attach(wires.dapp);
+    expect(await other.positions(TEMPLATE.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await second.dapp.positions(TEMPLATE.identifier)).toEqual({ trusted: true, positions: [POSITION] });
   });
 });
 
-describe('requests delivered more than once (X03)', () => {
-  it('carries out a request once however often it arrives', async () => {
+describe('requests delivered more than once', () => {
+  it('AP03: a request is carried out once however often it arrives', async () => {
     const { dapp, executed, proposals, sentToWallet, deliverToWallet } = setup({ trusted: true });
     const result = dapp.request(ask());
     await settle();
@@ -284,38 +324,39 @@ describe('requests delivered more than once (X03)', () => {
     expect(proposals()).toEqual([]);
   });
 
-  it('gives the outcome again to an application that asks again', async () => {
+  it('AP03: an application that reconnects and asks again is given the stored outcome', async () => {
     const { dapp, executed, proposals, sentToDapp } = setup({ trusted: true });
-    const first = dapp.request(ask(), undefined, 'request-1');
+    const first = dapp.request(ask(), undefined, undefined, 'request-1');
     await settle();
     await proposals()[0]?.approve();
     await first;
     const before = sentToDapp.length;
     // The application lost its state and asks with the identifier it had saved.
-    expect(await dapp.request(ask(), undefined, 'request-1')).toEqual({ transactionId: 'tx-1' });
+    expect(await dapp.request(ask(), undefined, undefined, 'request-1')).toEqual({ transactionId: 'tx-1' });
     expect(executed).toHaveLength(1);
     expect(sentToDapp.length).toBeGreaterThan(before);
   });
 
-  it('refuses a different request under an identifier already used', async () => {
+  it('AP03: the same identifier with other content is refused', async () => {
     const { dapp, executed, proposals } = setup({ trusted: true });
-    const first = dapp.request(ask(), undefined, 'request-1');
+    const first = dapp.request(ask(), undefined, undefined, 'request-1');
     await settle();
     await proposals()[0]?.approve();
     await first;
-    await expect(dapp.request(ask({ amount: '900000' }), undefined, 'request-1')).rejects.toThrow('different request');
-    await expect(dapp.request(ask(undefined, { position: 'p-1' }), undefined, 'request-1')).rejects.toThrow('different request');
-    await expect(dapp.request(ask(undefined, { bindings: { owner: 'identity' } }), undefined, 'request-1')).rejects.toThrow('different request');
+    await expect(dapp.request(ask({ amount: '900000' }), undefined, undefined, 'request-1')).rejects.toThrow('different request');
+    await expect(dapp.request(ask(undefined, { spends: [hash('c1')] }), undefined, undefined, 'request-1')).rejects.toThrow('different request');
+    await expect(dapp.request(ask(undefined, { bindings: { holder: 'lasting' } }), undefined, undefined, 'request-1')).rejects.toThrow('different request');
+    await expect(dapp.request(ask(undefined, { creates: 'key' }), undefined, undefined, 'request-1')).rejects.toThrow('different request');
     expect(executed).toHaveLength(1);
   });
 
   it('keeps a decline final', async () => {
     const { dapp, executed, proposals } = setup({ trusted: true });
-    const first = dapp.request(ask(), undefined, 'request-1');
+    const first = dapp.request(ask(), undefined, undefined, 'request-1');
     await settle();
     await proposals()[0]?.decline();
     await expect(first).rejects.toBeInstanceOf(RequestRefusedError);
-    await expect(dapp.request(ask(), undefined, 'request-1')).rejects.toBeInstanceOf(RequestRefusedError);
+    await expect(dapp.request(ask(), undefined, undefined, 'request-1')).rejects.toBeInstanceOf(RequestRefusedError);
     expect(proposals()).toEqual([]);
     expect(executed).toHaveLength(0);
   });
@@ -330,10 +371,9 @@ describe('requests delivered more than once (X03)', () => {
 
   it('does not run again a request that was under way when the wallet closed', async () => {
     const storage = temporaryLedger();
-    const { definition: _definition, ...details } = ask();
-    storage.save([{ id: 'request-1', ...details, templateTrusted: true, receivedAt: Math.floor(Date.now() / 1000), status: 'working' }]);
+    storage.save([{ id: 'request-1', application: 'application', ...ask(), templateKnown: true, receivedAt: Math.floor(Date.now() / 1000), status: 'working' }]);
     const { dapp, executed } = setup({ trusted: true, storage });
-    await expect(dapp.request(ask(), undefined, 'request-1')).rejects.toThrow('was closed while');
+    await expect(dapp.request(ask(), undefined, undefined, 'request-1')).rejects.toThrow('was closed while');
     expect(executed).toHaveLength(0);
   });
 
@@ -347,8 +387,8 @@ describe('requests delivered more than once (X03)', () => {
     const second = link();
     const executed: string[] = [];
     const connector = new WalletConnector({
-      trusted: () => [TEMPLATE],
-      identify: () => TEMPLATE,
+      has: () => true,
+      check: () => undefined,
       positions: async () => [],
       execute: async (entry) => {
         executed.push(entry.id);
@@ -361,5 +401,23 @@ describe('requests delivered more than once (X03)', () => {
     expect(await result).toEqual({ done: true });
     expect(executed).toHaveLength(1);
     expect((first.sentToWallet[0] as { id?: string }).id).toBe((second.sentToWallet[0] as { id?: string }).id);
+  });
+
+  it('two applications that choose the same identifier do not meet', async () => {
+    const { dapp, connector, executed, proposals } = setup({ trusted: true });
+    const first = dapp.request(ask(), undefined, undefined, 'request-1');
+    await settle();
+    await proposals()[0]?.approve();
+    await first;
+    const wires = link();
+    connector.attach('another application', wires.wallet);
+    const other = new DappRequests();
+    other.attach(wires.dapp);
+    const second = other.request(ask({ amount: '900000' }), undefined, undefined, 'request-1');
+    await settle();
+    expect(proposals()[0]?.entry).toMatchObject({ application: 'another application', variables: { amount: '900000' } });
+    await proposals()[0]?.approve();
+    expect(await second).toEqual({ transactionId: 'tx-2' });
+    expect(executed).toHaveLength(2);
   });
 });

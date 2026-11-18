@@ -1,4 +1,4 @@
-import { binToHex, hexToBin } from '@bitauth/libauth';
+import { binToHex, hexToBin, sha256, utf8ToBin } from '@bitauth/libauth';
 import {
   type RelayClient,
   PROTOCOL_NAME,
@@ -9,7 +9,7 @@ import {
   peerSupportsChunk,
 } from '@wizardconnect/core';
 
-import { type Channel, type XoAdvertisement, type XoMessage, ProtocolError, XO_EXTENSION, isXoMessage, readAdvertisement } from './protocol.js';
+import { type Channel, type XoAdvertisement, type XoMessage, ProtocolError, XO_EXTENSION, isXoMessage, readAdvertisement, refusalOfStandardRequest } from './protocol.js';
 
 /**
  * WizardConnect sessions: an encrypted connection between an application
@@ -259,8 +259,16 @@ export interface WalletLinkOptions {
 
 export interface WalletLink {
   channel: Channel;
+  /**
+   * A name for the pairing with this application: the same whenever the application comes back with the
+   * address it showed, and different for every other application. Requests are told apart by it.
+   */
+  pairing: string;
   close(): void;
 }
+
+/** The name of the pairing an application's address stands for. It says nothing about the address to anyone who sees the name. */
+export const pairingOf = (uri: string): string => binToHex(sha256.hash(utf8ToBin(`grandmas-wallet/pairing/${uri}`))).slice(0, 32);
 
 export const newLinkKey = (): string => binToHex(crypto.getRandomValues(new Uint8Array(32)));
 
@@ -306,6 +314,10 @@ export const openWalletLink = (options: WalletLinkOptions): WalletLink => {
       void client?.relay({ action: RelayMsgAction.Pong, time: seconds() }).catch(() => undefined);
     } else if (message.action === RelayMsgAction.Disconnect) {
       status('disconnected', 'The application ended the connection.');
+    } else if (message.action === RelayMsgAction.SignTransactionRequest) {
+      // This wallet offers no key paths and signs no transaction an application builds. It says so, with the reason.
+      const refusal = refusalOfStandardRequest(message, seconds());
+      if (refusal !== undefined) void client?.relay(refusal as Parameters<RelayClient['relay']>[0]).catch(() => undefined);
     } else {
       deliver(message);
     }
@@ -334,6 +346,7 @@ export const openWalletLink = (options: WalletLinkOptions): WalletLink => {
 
   return {
     channel,
+    pairing: pairingOf(options.uri),
     close: () => {
       closed = true;
       const ending = client?.relay({ action: RelayMsgAction.Disconnect, reason: 'user_disconnect', time: seconds() } as Parameters<RelayClient['relay']>[0]);

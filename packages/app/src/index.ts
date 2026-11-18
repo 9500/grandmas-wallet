@@ -11,3 +11,8 @@ export * from './recoverer-view.js';
 export * from './recovery-flow.js';
 export * from './user-backup.js';
 export * from './protection.js';
+export * from './declaration.js';
+export * from './positions.js';
+export * from './template-check.js';
+export * from './applications.js';
+export * from './application-session.js';

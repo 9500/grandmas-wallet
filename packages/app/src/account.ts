@@ -1,6 +1,7 @@
 import { binToHex, decodeTransactionBch, hash160, hexToBin } from '@bitauth/libauth';
 import {
   type AccountCoin,
+  type FollowedScript,
   type KeyedAddressKind,
   type PreparedTransaction,
   type RecoverableWalletAddress,
@@ -11,8 +12,10 @@ import {
   type WalletTemplateName,
   ADDRESS_KIND,
   checkBeforeSending,
+  typedValues,
 } from '@grandmas-wallet/core';
 import type { Engine } from '@xo-cash/engine';
+import type { XOTemplate } from '@xo-cash/types';
 
 import { WALLET_TEMPLATES } from './templates.js';
 
@@ -33,8 +36,9 @@ interface IntentLike {
 }
 
 /** The intent a role acts on: the template's start entry, or a follow-up offered by one of its scripts. */
-const intentFor = (template: WalletTemplateName, action: string, role: Role): IntentLike => {
-  const definition = WALLET_TEMPLATES[template] as unknown as {
+const intentFor = (template: XOTemplate, action: string, role: string): IntentLike => {
+  const definition = template as unknown as {
+    name?: string;
     start?: IntentLike[];
     lockingScripts?: Record<string, { roles?: Record<string, { actions?: IntentLike[] }> }>;
   };
@@ -44,8 +48,11 @@ const intentFor = (template: WalletTemplateName, action: string, role: Role): In
     const followUp = script.roles?.[role]?.actions?.find((intent) => intent.action === action);
     if (followUp !== undefined) return followUp;
   }
-  throw new Error(`The ${template} template offers no action "${action}" to the ${role}.`);
+  throw new Error(`The template "${definition.name ?? ''}" offers no action "${action}" to the role "${role}".`);
 };
+
+const isWalletTemplate = (name: string): name is WalletTemplateName => Object.hasOwn(WALLET_TEMPLATES, name);
+const isRole = (role: string): role is Role => role === 'owner' || role === 'recoverer';
 
 const KEY_OF_ROLE: Record<Role, { secret: string; action: string }> = {
   owner: { secret: 'controllerKey', action: 'create' },
@@ -59,6 +66,8 @@ export class Account implements WalletBackend {
   /** The invitation the controller key was made for: the handle by which the engine finds that key again. */
   private keyInvitation: Partial<Record<Role, string>> = {};
   private ordinary: Uint8Array | undefined;
+  /** Templates that are not the wallet's own, by the identifier the engine gave each. */
+  private readonly imported = new Map<string, XOTemplate>();
 
   private constructor(
     private readonly engine: Engine,
@@ -132,7 +141,7 @@ export class Account implements WalletBackend {
         (await this.engine.createInvitation({
           templateIdentifier: this.templates.controller,
           actionIdentifier: action,
-          intent: intentFor('controller', action, role),
+          intent: intentFor(WALLET_TEMPLATES.controller, action, role),
         } as Parameters<Engine['createInvitation']>[0]));
       this.keyInvitation[role] = stored.invitation.invitationIdentifier;
     }
@@ -258,17 +267,19 @@ export class Account implements WalletBackend {
     // The engine unlocks a script with the key of the invitation that first made the script known. The
     // action that makes the controller key must therefore be carried out in the invitation the key was made
     // for: a new invitation for it would make a second key, and the controller would later be signed with that.
-    const makesKey = request.template === 'controller' && request.action === KEY_OF_ROLE[request.role].action;
+    const walletRole = isRole(request.role) ? request.role : undefined;
+    const makesKey = request.template === 'controller' && walletRole !== undefined && request.action === KEY_OF_ROLE[walletRole].action;
     let invitationIdentifier: string;
-    if (makesKey) {
-      await this.controllerKey(request.role);
-      invitationIdentifier = this.keyInvitation[request.role] as string;
+    if (makesKey && walletRole !== undefined) {
+      await this.controllerKey(walletRole);
+      invitationIdentifier = this.keyInvitation[walletRole] as string;
       await this.engine.appendInvitation(invitationIdentifier, { variables, inputs } as unknown as Parameters<Engine['appendInvitation']>[1]);
     } else {
+      const { identifier, definition } = this.templateOf(request.template);
       const stored = await this.engine.createInvitation({
-        templateIdentifier: this.templates[request.template],
+        templateIdentifier: identifier,
         actionIdentifier: request.action,
-        intent: intentFor(request.template, request.action, request.role),
+        intent: intentFor(definition, request.action, request.role),
         variables,
         inputs,
       } as Parameters<Engine['createInvitation']>[0]);
@@ -323,6 +334,61 @@ export class Account implements WalletBackend {
   /** Put aside a transaction that will not be sent, so that the coins it named can be used again. */
   async discard(invitationIdentifier: string): Promise<void> {
     await this.engine.archiveInvitation(invitationIdentifier).catch(() => undefined);
+  }
+
+  /** A template by the wallet's name for it, or an imported one by its identifier. */
+  private templateOf(template: string): { identifier: string; definition: XOTemplate } {
+    if (isWalletTemplate(template)) return { identifier: this.templates[template], definition: WALLET_TEMPLATES[template] };
+    const definition = this.imported.get(template);
+    if (definition === undefined) throw new Error('This account does not hold that template.');
+    return { identifier: template, definition };
+  }
+
+  /**
+   * Take in a template an application brought, from its text. The engine checks it against the template
+   * schema and keeps it; its identifier is the hash of the template as the engine's parser writes it out.
+   */
+  async importTemplate(text: string): Promise<string> {
+    const { templateIdentifier } = await this.engine.importTemplate(text);
+    const definition = await this.engine.getTemplate(templateIdentifier);
+    if (definition === undefined) throw new Error('The engine did not keep the template.');
+    this.imported.set(templateIdentifier, definition);
+    return templateIdentifier;
+  }
+
+  /**
+   * Make a script of an imported template known, so that the engine follows the coins there and unlocks
+   * them in an action of that template.
+   *
+   * The engine follows a script once an output with it has been added to an invitation, and goes on
+   * following it after the invitation is put aside. So an invitation is made for an action of the template
+   * that has such an output, the output is added, and the invitation is put aside; nothing is built or sent.
+   */
+  async followScript(script: FollowedScript): Promise<Uint8Array> {
+    const { identifier, definition } = this.templateOf(script.template);
+    const outputs = Object.entries(definition.outputs ?? {}).filter(([, output]) => output.lockingScript === script.lockingScript).map(([name]) => name);
+    const actions = Object.entries(definition.actions ?? {}).filter(([, action]) => action.roles?.[script.role] !== undefined);
+    for (const [action, { transaction }] of actions) {
+      const outputIdentifier = (definition.transactions?.[transaction ?? '']?.outputs ?? []).map(({ output }) => output).find((output) => outputs.includes(output));
+      if (outputIdentifier === undefined) continue;
+      const variables = Object.entries(typedValues(definition, script.variables)).map(([variableIdentifier, value]) => ({ variableIdentifier, roleIdentifier: script.role, value }));
+      const stored = await this.engine.createInvitation({
+        templateIdentifier: identifier,
+        actionIdentifier: action,
+        intent: intentFor(definition, action, script.role),
+        variables,
+      } as Parameters<Engine['createInvitation']>[0]);
+      const { invitationIdentifier } = stored.invitation;
+      try {
+        return hexToBin(await this.engine.resolveInvitationOutputLockingBytecode(invitationIdentifier, outputIdentifier, script.role).then(async (lockingBytecode) => {
+          await this.engine.appendInvitation(invitationIdentifier, { outputs: [{ outputIdentifier }] } as unknown as Parameters<Engine['appendInvitation']>[1]);
+          return lockingBytecode;
+        }));
+      } finally {
+        await this.discard(invitationIdentifier);
+      }
+    }
+    throw new Error(`No action of the template pays to its script "${script.lockingScript}" in the role "${script.role}"; the engine cannot be told to follow it.`);
   }
 
   /** Stop the engine. */

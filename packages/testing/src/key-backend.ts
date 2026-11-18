@@ -1,10 +1,12 @@
 import { type Output, binToHex, hash160, hexToBin } from '@bitauth/libauth';
 import {
   type AccountCoin,
+  type FollowedScript,
   type InputSpec,
   type KeyPair,
   type KeyedAddressKind,
   type PreparedTransaction,
+  type ReadTemplate,
   type RecoverableWalletAddress,
   type Role,
   type SeedKeys,
@@ -18,9 +20,16 @@ import {
   controllerScript,
   p2pkhInput,
   p2pkhLockingBytecode,
+  readTemplate,
   recoverableAddressScript,
   recoverableInput,
   sweptInput,
+  templateLockingBytecode,
+  templateOutput,
+  templateSequenceNumber,
+  templateTransaction,
+  templateUnlockingBytecode,
+  typedValues,
   vaultInput,
 } from '@grandmas-wallet/core';
 
@@ -42,7 +51,9 @@ type Known =
   | { template: 'controller'; identity: Uint8Array }
   | { template: 'givenOut' | 'change'; kind: KeyedAddressKind; number: number; tag: Uint8Array }
   | { template: 'actions'; identity: Uint8Array; earlier: RecoverableWalletAddress }
-  | { template: 'actions'; identity: Uint8Array; vault: VaultWalletAddress };
+  | { template: 'actions'; identity: Uint8Array; vault: VaultWalletAddress }
+  /** A script of a template that is not the wallet's own. */
+  | { template: string; imported: FollowedScript };
 
 const hex = binToHex;
 const bytesOf = (value: string | number | bigint | undefined, name: string): Uint8Array => {
@@ -57,6 +68,8 @@ export class KeyBackend implements WalletBackend {
   private readonly held = new Set<string>();
   private readonly counters: Record<KeyedAddressKind, number> = { [ADDRESS_KIND.givenOut]: 0, [ADDRESS_KIND.change]: 0 };
   private nextHandle = 0;
+  /** Templates that are not the wallet's own, by identifier. */
+  private readonly imported = new Map<string, ReadTemplate>();
 
   /**
    * @param keys - the seed's keys. For a recoverer, the credential's: the recovery key in the place of the
@@ -122,19 +135,31 @@ export class KeyBackend implements WalletBackend {
     const known = this.known.get(hex(coin.utxo.output.lockingBytecode));
     if (known === undefined) throw new Error('The transaction names a coin at a script this account does not follow.');
     const variables = request.variables ?? {};
-    switch (known.template) {
+    if ('imported' in known) {
+      // A coin of an application's template is unlocked the way the template says, with no key of the account.
+      const template = this.imported.get(known.template);
+      if (template === undefined || request.template !== known.template) throw new Error('A coin of another template is spent by an action of its own template.');
+      const values = typedValues(template.definition, { ...known.imported.variables, ...variables });
+      const unlocking = templateUnlockingBytecode(template.definition, known.imported.lockingScript, inputIdentifier, values);
+      const sequence = inputIdentifier === undefined ? undefined : templateSequenceNumber(template.definition, inputIdentifier, values);
+      return { utxo: coin.utxo, ...(sequence === undefined ? {} : { sequence }), unlock: () => unlocking };
+    }
+    switch (known.template as WalletTemplateName) {
       case 'coins':
         return p2pkhInput(coin.utxo, this.keys.fundingKey);
       case 'givenOut':
       case 'change': {
+        if (!('kind' in known)) throw new Error('unreachable');
         const key = this.keys.addressKey(known.kind, known.number);
         return recoverableInput(coin.utxo, recoverableAddressScript(known.tag, key.keyHash), key);
       }
       case 'actions':
+        if (!('identity' in known) || known.template !== 'actions') throw new Error('unreachable');
         return 'earlier' in known
           ? sweptInput(coin.utxo, known.earlier.script, known.identity, known.earlier.secret)
           : vaultInput(coin.utxo, known.vault.script, known.identity, known.vault.secret);
       case 'controller': {
+        if (!('identity' in known)) throw new Error('unreachable');
         if (request.template !== 'controller') throw new Error('The controller is spent by an action of its own template.');
         const script = controllerScript(known.identity);
         const key: KeyPair = this.keys.controllerKey;
@@ -167,6 +192,8 @@ export class KeyBackend implements WalletBackend {
 
   private outputFor(output: { outputIdentifier: string } | Output, request: TransactionRequest): Output {
     if (!('outputIdentifier' in output)) return output;
+    const imported = this.imported.get(request.template);
+    if (imported !== undefined) return templateOutput(imported.definition, output.outputIdentifier, typedValues(imported.definition, request.variables ?? {}));
     if (request.template !== 'controller' || output.outputIdentifier !== 'controllerOutput') {
       throw new Error(`The ${request.template} template has no output "${output.outputIdentifier}".`);
     }
@@ -179,9 +206,12 @@ export class KeyBackend implements WalletBackend {
   }
 
   async prepare(request: TransactionRequest): Promise<PreparedTransaction> {
+    const imported = this.imported.get(request.template);
     const built = buildTransaction({
       inputs: request.inputs.map(({ coin, inputIdentifier }) => this.inputFor(coin, request, inputIdentifier)),
       outputs: request.outputs.map((output) => this.outputFor(output, request)),
+      // An action of an application's template has the lock time its template gives it.
+      ...(imported === undefined ? {} : { locktime: templateTransaction(imported.definition, request.action, typedValues(imported.definition, request.variables ?? {})).locktime }),
       signingType: ENGINE_SIGNING_TYPE,
       // Closing destroys the identity token on purpose; nothing else may drop a token.
       allowTokenBurn: request.template === 'controller' && request.action === 'close',
@@ -212,5 +242,18 @@ export class KeyBackend implements WalletBackend {
   async discard(invitationIdentifier: string): Promise<void> {
     for (const input of this.prepared.get(invitationIdentifier)?.inputs ?? []) this.held.delete(input);
     this.prepared.delete(invitationIdentifier);
+  }
+
+  async importTemplate(text: string): Promise<string> {
+    const template = readTemplate(text);
+    this.imported.set(template.identifier, template);
+    return template.identifier;
+  }
+
+  async followScript(script: FollowedScript): Promise<Uint8Array> {
+    const template = this.imported.get(script.template);
+    if (template === undefined) throw new Error('This account does not hold that template.');
+    const lockingBytecode = templateLockingBytecode(template.definition, script.lockingScript, typedValues(template.definition, script.variables));
+    return this.remember(lockingBytecode, { template: script.template, imported: script });
   }
 }

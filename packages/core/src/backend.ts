@@ -2,6 +2,7 @@ import type { Output } from '@bitauth/libauth';
 
 import type { Utxo } from './builder.js';
 import type { KeyedAddressKind } from './keys.js';
+import type { TemplateValues } from './template.js';
 import type { RecoverableWalletAddress, VaultWalletAddress } from './wallet-addresses.js';
 
 /**
@@ -29,10 +30,15 @@ export interface AccountCoin {
 
 /** What a transaction is to be, as the wallet's code decides it. */
 export interface TransactionRequest {
-  /** The template whose action the transaction is. Inputs and outputs of the other templates can be part of it. */
-  template: WalletTemplateName;
+  /**
+   * The template whose action the transaction is: one of the wallet's own by its name, or a template that
+   * was brought to the backend with `importTemplate`, by its identifier. Inputs and outputs of other
+   * templates can be part of it.
+   */
+  template: WalletTemplateName | string;
   action: string;
-  role: Role;
+  /** The role the account takes: `owner` or `recoverer` in the wallet's templates, a role of its own in another template. */
+  role: Role | string;
   /** Values for the template's variables: bytes as hex, amounts as whole numbers. */
   variables?: Record<string, string | number | bigint>;
   /**
@@ -76,4 +82,24 @@ export interface WalletBackend {
   send(prepared: PreparedTransaction): Promise<string>;
   /** Put aside a transaction that will not be sent, so that the coins it named can be used again. */
   discard(invitationIdentifier: string): Promise<void>;
+  /**
+   * Take in a template that is not the wallet's own, from its text. Returns the template's identifier.
+   * Taking in the same template again changes nothing.
+   */
+  importTemplate(text: string): Promise<string>;
+  /**
+   * Make a script of an imported template known, so that the coins there are followed and can be spent in
+   * an action of that template. Such a script holds no key of the account.
+   */
+  followScript(script: FollowedScript): Promise<Uint8Array>;
+}
+
+/** A script of an imported template, for the given values. */
+export interface FollowedScript {
+  /** The template's identifier. */
+  template: string;
+  lockingScript: string;
+  /** The role the account has on the script. */
+  role: string;
+  variables: TemplateValues;
 }
