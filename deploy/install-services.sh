@@ -5,7 +5,8 @@
 #   deploy/install-services.sh 192.168.88.112 deploy/config/production.json 2
 #
 # Each service listens on plain HTTP; a reverse proxy in front provides HTTPS. Ports:
-#   8101 wallet, 8102 recoverer, 8103 savings jar application, 8104 loan page, 8111 and up backup stores.
+#   8101 wallet, 8102 recoverer, 8103 savings jar application, 8104 loan page, 8105 landing page, 8111 and up
+#   backup stores. The landing page (deploy/landing) introduces the demonstration and links to the others.
 # The loan page is an independent demonstration with Paryon's public contracts on chipnet; it is served when
 # the configuration names an address for it (loanUrl) and it is built.
 # The pages must have been built first: deploy/preview.sh build
@@ -69,6 +70,7 @@ cp -r "$ROOT/apps/wallet/dist" "$RELEASE.new/wallet"
 cp -r "$ROOT/apps/recoverer/dist" "$RELEASE.new/recoverer"
 cp -r "$ROOT/$JAR_ROOT" "$RELEASE.new/jar"
 if [ "$LOAN" = yes ]; then cp -r "$ROOT/apps/loan/dist" "$RELEASE.new/loan"; fi
+cp -r "$ROOT/deploy/landing" "$RELEASE.new/landing"
 cp "$ROOT/deploy/serve.mjs" "$RELEASE.new/serve.mjs"
 cp "$CONFIG" "$RELEASE.new/config.json"
 (
@@ -88,7 +90,8 @@ page() { # name, description, port, further arguments of the server...
 page wallet "wallet page" 8101
 page recoverer "recoverer page" 8102
 page jar "savings jar application" 8103
-NAMES=(wallet recoverer jar)
+page landing "landing page" 8105
+NAMES=(wallet recoverer jar landing)
 # The loan page reads the price General Protocols' oracle signs; that server is named for it alone.
 if [ "$LOAN" = yes ]; then page loan "loan page" 8104 --connect https://oracles.generalprotocols.com; NAMES+=(loan); fi
 for number in $(seq 1 "$STORES"); do
