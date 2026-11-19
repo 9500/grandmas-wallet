@@ -65,7 +65,7 @@ const Opening = () => {
           </span>
         )}
       </Loading>
-      {seconds >= 30 && (
+      {seconds >= 15 && (
         <Notice tone="warn">
           <div class="stack-s">
             <span>This is taking longer than it should. The page can check the chain again from the start; your balance and the wallets you look after are not touched.</span>

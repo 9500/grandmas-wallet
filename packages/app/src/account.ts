@@ -63,9 +63,10 @@ const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => s
 const hex = binToHex;
 
 /**
- * The engine's check of block headers did not reach the chain's tip in time. `moved` says whether it went on
- * at all while the account waited: one that did not move may be stuck on a block that a reorganization of the
- * chain took away, which the engine does not undo by itself (docs/xo-feedback-notes.md, 18 November).
+ * The engine's check of block headers did not reach the chain's tip in time, or stood still for a while. `moved`
+ * says whether it was still going on when the account stopped waiting: one that stands still may be stuck on a
+ * block that a reorganization of the chain took away, which the engine does not undo by itself
+ * (docs/xo-feedback-notes.md, 18 November).
  */
 export class HeaderCheckBehind extends Error {
   constructor(
@@ -97,16 +98,25 @@ export class Account implements WalletBackend {
    * What the engine hears about a transaction before its header check has reached the tip is dropped and
    * not asked for again, so nothing is made known to it before then.
    */
-  static async open(engine: Engine, options: { headerCheckTimeoutMs?: number; pollMs?: number; onProgress?: (checked: { verifiedHeight: number; currentHeight: number }) => void } = {}): Promise<Account> {
+  static async open(
+    engine: Engine,
+    options: { headerCheckTimeoutMs?: number; headerCheckStillMs?: number; pollMs?: number; onProgress?: (checked: { verifiedHeight: number; currentHeight: number }) => void } = {},
+  ): Promise<Account> {
     const deadline = Date.now() + (options.headerCheckTimeoutMs ?? 120_000);
+    // A check that stands still this long while behind the tip is taken as stuck; a moving one gets until the deadline.
+    const still = options.headerCheckStillMs ?? 30_000;
     let first: number | undefined;
+    let last: { height: number; since: number } | undefined;
     for (;;) {
       const status = await engine.getChainStatus();
       // How far the header check has come, for a page that shows it while it waits.
       options.onProgress?.({ verifiedHeight: status.verifiedHeight, currentHeight: status.currentHeight });
       if (status.verifiedHeight >= status.currentHeight) break;
+      const now = Date.now();
       first ??= status.verifiedHeight;
-      if (Date.now() > deadline) throw new HeaderCheckBehind(status.verifiedHeight, status.currentHeight, status.verifiedHeight !== first);
+      if (last?.height !== status.verifiedHeight) last = { height: status.verifiedHeight, since: now };
+      const standing = now - last.since >= still;
+      if (standing || now > deadline) throw new HeaderCheckBehind(status.verifiedHeight, status.currentHeight, !standing && status.verifiedHeight !== first);
       await wait(options.pollMs ?? 500);
     }
     const templates = {} as Record<WalletTemplateName, string>;

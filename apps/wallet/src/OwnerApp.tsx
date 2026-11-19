@@ -2,7 +2,7 @@ import { binToHex } from '@bitauth/libauth';
 import type { RecoveryStatus } from '@grandmas-wallet/archive';
 import { type Balance, type OwnerWallet, type Sent, checkRecovery, copyEarlierArchives, makeChange } from '@grandmas-wallet/app';
 import type { SeedKeys } from '@grandmas-wallet/core';
-import { Button, Card, Frame, Loading, More, type NavItem, Notice, plainError, recheckChain, useEvery, useRoute, useToast } from '@grandmas-wallet/ui';
+import { Button, Card, Frame, Info, Loading, More, type NavItem, Notice, plainError, recheckChain, useEvery, useRoute, useToast } from '@grandmas-wallet/ui';
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
@@ -16,7 +16,7 @@ import { MovedAway, OwnedElsewhere } from './Elsewhere.js';
 import { Receive } from './Receive.js';
 import { Recovery } from './Recovery.js';
 import { Send } from './Send.js';
-import { type Session, deviceWords, keep, kept, noteActivity, openWallet, seedOf, setUpAgain } from './session.js';
+import { type Session, deviceWords, keep, kept, noteActivity, openWallet, openingProgress, seedOf, setUpAgain } from './session.js';
 import { type Watch, useWatch } from './watch.js';
 
 const ROUTES = ['home', 'receive', 'send', 'apps', 'recovery', 'details'] as const;
@@ -61,7 +61,7 @@ export const OwnerApp = ({ session, opened, onLost }: { session: Session; opened
     return (
       <Frame brand={BRAND} role="Your wallet" environment={session.environment}>
         {problem === undefined ? (
-          <Loading>Opening your wallet. The page checks the chain's block headers first; this takes a moment.</Loading>
+          <Opening />
         ) : (
           <Card title="The wallet could not be opened" tone="bad">
             <p>{problem}</p>
@@ -82,6 +82,51 @@ export const OwnerApp = ({ session, opened, onLost }: { session: Session; opened
     );
   }
   return <OwnerScreens session={session} wallet={wallet} onLost={onLost} />;
+};
+
+/** How long the wallet opens before the page offers to check the chain again. */
+const SLOW_OPENING_MS = 15_000;
+
+/**
+ * While the wallet opens: how far the check of block headers has come, and, when it takes long, a way to make
+ * that check afresh. A block the page's engine kept can be replaced on the chain; its check then stands still
+ * until the copy of the headers is made afresh (see engine-headers.ts in the ui package).
+ */
+const Opening = () => {
+  const [started] = useState(() => Date.now());
+  const [, setTick] = useState(0);
+  useEvery(1_000, () => setTick((count) => count + 1), []);
+  const checked = openingProgress();
+  return (
+    <div class="stack">
+      <Loading>
+        Opening your wallet. The page checks the chain's block headers first; this takes a moment.
+        {checked !== undefined && checked.verifiedHeight < checked.currentHeight && (
+          <span class="small opening-progress" data-testid="opening-progress">
+            {' '}
+            {checked.verifiedHeight.toLocaleString('en-US')} of {checked.currentHeight.toLocaleString('en-US')} checked.
+          </span>
+        )}
+      </Loading>
+      {Date.now() - started >= SLOW_OPENING_MS && (
+        <Notice tone="warn">
+          <div class="stack-s">
+            <span>
+              This is taking longer than it should.{' '}
+              <Info label="Why the wallet does not open">
+                The page keeps a copy of the chain's block headers. When the chain replaces a block the copy holds, the copy no longer matches and the wallet waits. Checking again makes the copy afresh. Your keys and coins are not touched.
+              </Info>
+            </span>
+            <div>
+              <Button small kind="secondary" onClick={recheckChain}>
+                Check the chain again
+              </Button>
+            </div>
+          </div>
+        </Notice>
+      )}
+    </div>
+  );
 };
 
 const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: OwnerWallet; onLost: () => void }) => {

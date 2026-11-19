@@ -95,7 +95,7 @@ export const openAccount = async (words: string, environment: Environment, onPro
     clearHeaderResetMark(sessionStorage);
     return account;
   } catch (error) {
-    // A header check that did not move at all: the store is made afresh at the next load, once in a row.
+    // A header check that stood still: the store is made afresh at the next load, once in a row.
     if (error instanceof HeaderCheckBehind && !error.moved && markHeadersForReset(sessionStorage)) {
       await engine.stop().catch(() => undefined);
       location.reload();

@@ -5,8 +5,8 @@
  * takes away a block it had stored as its last, every later check fails and the engine stays where it was: the
  * page never gets past opening its account (docs/xo-feedback-notes.md, 18 November). That store is a cache of
  * what the servers give (headers, proofs, histories); the keys and everything else the page keeps are elsewhere.
- * So a page whose header check did not move at all while it waited marks the store for deletion and loads
- * again; the next load deletes it before the engine opens it, and the engine checks the headers again from its
+ * So a page whose header check stood still while it waited (packages/app/src/account.ts) marks the store for
+ * deletion and loads again, and the opening screen offers the same to the user; the next load deletes it before the engine opens it, and the engine checks the headers again from its
  * own starting point. It is done once in a row: if the check is stuck again right after, the page says so.
  */
 

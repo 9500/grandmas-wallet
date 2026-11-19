@@ -209,9 +209,12 @@ export const deviceWords = (): string => {
 export const seedOf = (session: Session, words: string): SeedKeys => deriveSeedKeys(words, session.network, walletTemplateNumbers());
 
 let account: Promise<Account> | undefined;
+let opening: { verifiedHeight: number; currentHeight: number } | undefined;
+/** How far the engine's check of block headers has come while the account opens, once it has begun. */
+export const openingProgress = (): { verifiedHeight: number; currentHeight: number } | undefined => opening;
 /** The XO engine account of this device's words. Only one engine can be open in a page; it is opened once. */
 export const deviceAccount = (session: Session): Promise<Account> => {
-  account ??= openAccount(deviceWords(), session.environment).catch((error: unknown) => {
+  account ??= openAccount(deviceWords(), session.environment, (checked) => (opening = checked)).catch((error: unknown) => {
     account = undefined;
     throw error;
   });
