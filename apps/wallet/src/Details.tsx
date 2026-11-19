@@ -2,12 +2,12 @@ import { binToHex } from '@bitauth/libauth';
 import { describeDelay } from '@grandmas-wallet/app';
 import { ADDRESS_SCHEME_VERSION } from '@grandmas-wallet/core';
 import { keyFingerprint } from '@grandmas-wallet/enrollment';
-import { Button, Card, Choice, KeyValues, PageHead, Value, eraseDevice, formatTime, shorten, useTask } from '@grandmas-wallet/ui';
+import { Button, Card, Choice, Developer, KeyValues, PageHead, Value, eraseDevice, formatTime, shorten, useTask } from '@grandmas-wallet/ui';
 import { useState } from 'preact/hooks';
 
 import type { Owner } from './OwnerApp.js';
 import { ActivityList } from './parts.js';
-import { kept, openedAccount } from './session.js';
+import { keep, kept, openedAccount } from './session.js';
 
 /** What a developer or a careful user may want to see, and erasing this phone. */
 export const Details = ({ owner }: { owner: Owner }) => {
@@ -17,6 +17,7 @@ export const Details = ({ owner }: { owner: Owner }) => {
   const arrangement = kept('arrangement');
   const log = kept('watchLog');
   const lastSpan = log?.spans.at(-1);
+  const [developer, setDeveloper] = useState(() => kept('developer') === true);
   return (
     <div class="stack">
       <PageHead title="Technical details">For troubleshooting. Nothing here needs to be understood to use the wallet.</PageHead>
@@ -62,6 +63,16 @@ export const Details = ({ owner }: { owner: Owner }) => {
           <ActivityList items={kept('activity') ?? []} explorer={session.environment.explorer} />
         </Card>
       </div>
+      <Developer
+        on={developer}
+        onChange={(on) => {
+          keep('developer', on ? true : undefined);
+          setDeveloper(on);
+        }}
+        invitations={kept('invitations') ?? []}
+        read={async (identifier) => (await openedAccount())?.invitationText(identifier)}
+        device="phone"
+      />
       <Erase />
       <p class="small muted center">Owner key hash {binToHex(owner.seed.controllerKey.keyHash)}</p>
     </div>

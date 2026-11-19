@@ -16,6 +16,7 @@ import {
 } from '@grandmas-wallet/core';
 import type { Engine } from '@xo-cash/engine';
 import type { XOTemplate } from '@xo-cash/types';
+import { serializeInvitation } from '@xo-cash/utils';
 
 import { WALLET_TEMPLATES } from './templates.js';
 
@@ -79,12 +80,32 @@ export class HeaderCheckBehind extends Error {
   }
 }
 
+/**
+ * A transaction the account sent, with the XO invitation it was built from: the invitation as participants
+ * share it, in the engine's own serialization. It holds no key.
+ */
+export interface SentInvitation {
+  transactionId: string;
+  /** The engine's handle to the invitation, by which `invitationText` reads it again later. */
+  invitationIdentifier: string;
+  /** The identifier the engine gave the template, and the template's own name. */
+  templateIdentifier: string;
+  templateName: string;
+  action: string;
+  role: string;
+  text: string;
+}
+
 export class Account implements WalletBackend {
   /** The invitation the controller key was made for: the handle by which the engine finds that key again. */
   private keyInvitation: Partial<Record<Role, string>> = {};
   private ordinary: Uint8Array | undefined;
   /** Templates that are not the wallet's own, by the identifier the engine gave each. */
   private readonly imported = new Map<string, XOTemplate>();
+  /** What each transaction that is prepared and not yet sent is an action of, by its invitation. */
+  private readonly preparedAs = new Map<string, { templateIdentifier: string; templateName: string; action: string; role: string }>();
+  /** Told of every transaction the account sends, with its invitation. */
+  private onSent: ((sent: SentInvitation) => void | Promise<void>) | undefined;
 
   private constructor(
     private readonly engine: Engine,
@@ -100,7 +121,14 @@ export class Account implements WalletBackend {
    */
   static async open(
     engine: Engine,
-    options: { headerCheckTimeoutMs?: number; headerCheckStillMs?: number; pollMs?: number; onProgress?: (checked: { verifiedHeight: number; currentHeight: number }) => void } = {},
+    options: {
+      headerCheckTimeoutMs?: number;
+      headerCheckStillMs?: number;
+      pollMs?: number;
+      onProgress?: (checked: { verifiedHeight: number; currentHeight: number }) => void;
+      /** Told of every transaction the account sends, with the invitation it was built from. */
+      onSent?: (sent: SentInvitation) => void | Promise<void>;
+    } = {},
   ): Promise<Account> {
     const deadline = Date.now() + (options.headerCheckTimeoutMs ?? 120_000);
     // A check that stands still this long while behind the tip is taken as stuck; a moving one gets until the deadline.
@@ -124,6 +152,7 @@ export class Account implements WalletBackend {
       templates[name] = (await engine.importTemplate(WALLET_TEMPLATES[name])).templateIdentifier;
     }
     const account = new Account(engine, templates);
+    account.onSent = options.onSent;
     await engine.setDefaultPolicies(account.coinPolicies);
     return account;
   }
@@ -307,17 +336,17 @@ export class Account implements WalletBackend {
     // for: a new invitation for it would make a second key, and the controller would later be signed with that.
     const walletRole = isRole(request.role) ? request.role : undefined;
     const makesKey = request.template === 'controller' && walletRole !== undefined && request.action === KEY_OF_ROLE[walletRole].action;
+    const { identifier: templateIdentifier, definition: templateDefinition } = this.templateOf(request.template);
     let invitationIdentifier: string;
     if (makesKey && walletRole !== undefined) {
       await this.controllerKey(walletRole);
       invitationIdentifier = this.keyInvitation[walletRole] as string;
       await this.engine.appendInvitation(invitationIdentifier, { variables, inputs } as unknown as Parameters<Engine['appendInvitation']>[1]);
     } else {
-      const { identifier, definition } = this.templateOf(request.template);
       const stored = await this.engine.createInvitation({
-        templateIdentifier: identifier,
+        templateIdentifier,
         actionIdentifier: request.action,
-        intent: intentFor(definition, request.action, request.role),
+        intent: intentFor(templateDefinition, request.action, request.role),
         variables,
         inputs,
       } as Parameters<Engine['createInvitation']>[0]);
@@ -339,6 +368,7 @@ export class Account implements WalletBackend {
       if (check !== true) {
         throw new Error(`The transaction fails the check before sending: ${check}`, { cause: { transactionHex: builtTransaction.serializedTransaction, sourceOutputs } });
       }
+      this.preparedAs.set(invitationIdentifier, { templateIdentifier, templateName: (templateDefinition as { name?: string }).name ?? '', action: request.action, role: request.role });
       const inputTotal = sourceOutputs.reduce((sum, output) => sum + output.valueSatoshis, 0n);
       const outputTotal = transaction.outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n);
       return {
@@ -366,11 +396,35 @@ export class Account implements WalletBackend {
         throw error;
       }
     }
+    await this.tellSent(prepared);
     return prepared.transactionId;
+  }
+
+  /** The transaction has gone out; a listener that fails does not change that. */
+  private async tellSent(prepared: PreparedTransaction): Promise<void> {
+    const as = this.preparedAs.get(prepared.invitationIdentifier);
+    this.preparedAs.delete(prepared.invitationIdentifier);
+    if (this.onSent === undefined || as === undefined) return;
+    try {
+      const text = await this.invitationText(prepared.invitationIdentifier);
+      if (text !== undefined) await this.onSent({ transactionId: prepared.transactionId, invitationIdentifier: prepared.invitationIdentifier, ...as, text });
+    } catch (error) {
+      console.warn('The invitation of a sent transaction could not be handed on.', error);
+    }
+  }
+
+  /**
+   * An invitation this account holds, as text: the invitation as participants share it, in the engine's own
+   * serialization, which the engine reads back and XO's tools open. It holds no key.
+   */
+  async invitationText(invitationIdentifier: string): Promise<string | undefined> {
+    const stored = await this.engine.getInvitation(invitationIdentifier);
+    return stored === undefined ? undefined : serializeInvitation(stored.invitation);
   }
 
   /** Put aside a transaction that will not be sent, so that the coins it named can be used again. */
   async discard(invitationIdentifier: string): Promise<void> {
+    this.preparedAs.delete(invitationIdentifier);
     await this.engine.archiveInvitation(invitationIdentifier).catch(() => undefined);
   }
 

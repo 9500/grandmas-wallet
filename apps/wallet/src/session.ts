@@ -19,7 +19,7 @@ import { HttpStore } from '@grandmas-wallet/archive';
 import type { LedgerEntry } from '@grandmas-wallet/connect';
 import { type ChainReader, type ChallengeDelay, type SeedKeys, deriveSeedKeys } from '@grandmas-wallet/core';
 import { recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
-import { type Environment, Vault, connectChain, keyNetwork, loadEnvironment, openAccount } from '@grandmas-wallet/ui';
+import { type Environment, type KeptInvitation, Vault, connectChain, keyNetwork, loadEnvironment, openAccount, withInvitation } from '@grandmas-wallet/ui';
 
 import type { Handing, HandingSlot } from './hand-to-recoverer.js';
 
@@ -117,6 +117,9 @@ export interface Kept {
   arrival: { from: 'takeover' | 'move' | 'restore'; missing: string[]; searched?: 'quick' | 'full'; swept?: boolean };
   watchLog: WatchLog;
   activity: Activity[];
+  /** Developer mode: whether it is on, and the transactions this phone sent with the engine's handle to each one's invitation. */
+  developer: boolean;
+  invitations: KeptInvitation[];
   /** The address shown on the receive screen, so that it stays the same until another is asked for. */
   receive: { number: number; again: boolean };
   /** The vault address shown, likewise. */
@@ -214,7 +217,7 @@ let opening: { verifiedHeight: number; currentHeight: number } | undefined;
 export const openingProgress = (): { verifiedHeight: number; currentHeight: number } | undefined => opening;
 /** The XO engine account of this device's words. Only one engine can be open in a page; it is opened once. */
 export const deviceAccount = (session: Session): Promise<Account> => {
-  account ??= openAccount(deviceWords(), session.environment, (checked) => (opening = checked)).catch((error: unknown) => {
+  account ??= openAccount(deviceWords(), session.environment, (checked) => (opening = checked), (sent) => keep('invitations', withInvitation(kept('invitations'), sent))).catch((error: unknown) => {
     account = undefined;
     throw error;
   });

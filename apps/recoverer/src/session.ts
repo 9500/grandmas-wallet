@@ -4,7 +4,7 @@ import { linkKind, makeLink, readLink } from '@grandmas-wallet/app/links';
 import { HttpStore } from '@grandmas-wallet/archive';
 import type { ChainReader, ChallengeDelay } from '@grandmas-wallet/core';
 import { type KeptKit, generateRecipientKeyPair, recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
-import { type Environment, Vault, connectChain, keyNetwork, loadEnvironment, openAccount } from '@grandmas-wallet/ui';
+import { type Environment, type KeptInvitation, Vault, connectChain, keyNetwork, loadEnvironment, openAccount, withInvitation } from '@grandmas-wallet/ui';
 
 /**
  * What the recoverer's page holds while it is open, and what it keeps in this browser: its encryption key,
@@ -63,6 +63,9 @@ export interface Kept {
   settings: Settings;
   /** The twelve words of the recoverer's own coins: its one balance, from which it creates wallets and pays every fee. */
   fundsWords: string;
+  /** Developer mode: whether it is on, and the transactions this page sent with the engine's handle to each one's invitation. */
+  developer: boolean;
+  invitations: KeptInvitation[];
   /** Phones' requests to have a wallet set up, by request. */
   setUps: Record<string, SetUpRecord>;
   /** The session the page's code offers, kept so that the page offers the same one after a reload. */
@@ -164,6 +167,8 @@ export const openingProgress = (): { verifiedHeight: number; currentHeight: numb
 export const closeAccount = async (): Promise<void> => {
   await account?.close();
 };
+/** An invitation the page's engine holds, as text; nothing while the engine is not open. */
+export const invitationText = async (invitationIdentifier: string): Promise<string | undefined> => account?.invitationText(invitationIdentifier);
 /** The words of the recoverer's balance, if it has ever been opened: for keeping them before the page is erased. */
 export const balanceWords = (): string | undefined => kept('fundsWords');
 /** For the fixtures page, which has no chain: the recoverer's coins as given, or an account that never opens. */
@@ -176,7 +181,7 @@ export const useFixedFunds = (fixed: RecovererFunds | Promise<RecovererFunds>): 
  * wallet's credential and is used by the page's own code, so no wallet needs an engine of its own.
  */
 export const fundsOf = (session: Session): Promise<RecovererFunds> => {
-  funds ??= openAccount(fundsWords(), session.environment, (checked) => (opening = checked))
+  funds ??= openAccount(fundsWords(), session.environment, (checked) => (opening = checked), (sent) => keep('invitations', withInvitation(kept('invitations'), sent)))
     .then((opened) => {
       account = opened;
       return RecovererFunds.open({ backend: opened, chain: session.chain });

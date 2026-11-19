@@ -42,6 +42,7 @@ import {
 import { Engine, XO_SUPPORTED_NETWORKS, resolveElectrumServersForNetwork } from '@xo-cash/engine';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
+import { clearInvitationFiles, invitationDirectory, invitationFiles, writeInvitationFiles } from './invitation-files.js';
 import {
   type ApplicationAction,
   type HeldToken,
@@ -79,6 +80,8 @@ mkdirSync(`${root}.chipnet`, { recursive: true });
 const stateFile = `${root}.chipnet/run-d-${chainName}.json`;
 const storeDirectory = `${root}.chipnet/run-d-${chainName}-stores`;
 const logFile = `${root}docs/runs/stage-8-${local ? 'local-node' : 'chipnet'}.md`;
+/** The XO invitation behind every transaction an account of the run sends, a file each (scripts/invitation-files.ts). */
+const invitations = invitationDirectory(`stage-8-${local ? 'local-node' : 'chipnet'}`, local);
 
 interface Entry { step: string; transactionId: string; bytes: number; fee: string; note: string }
 interface Facts {
@@ -110,6 +113,7 @@ if (phase === undefined) {
     console.error('The local chain is long and its block rewards are small. Start a new one: deploy/regtest/regtest.sh reset');
     process.exit(1);
   }
+  if (!existsSync(stateFile)) clearInvitationFiles(invitations);
   const finished = existsSync(stateFile) ? (JSON.parse(readFileSync(stateFile, 'utf8')) as Facts).finished : [];
   for (const next of PHASES) {
     if (finished.includes(next)) {
@@ -128,6 +132,12 @@ if (phase === undefined) {
     }
   }
   const facts = JSON.parse(readFileSync(stateFile, 'utf8')) as Facts;
+  // The file of each transaction's invitation, where an account of the run sent it; the funder's payments have none.
+  const written = invitationFiles(invitations);
+  const invitationOf = (transactionId: string): string => {
+    const found = written.find((entry) => entry.transactionId === transactionId);
+    return found === undefined ? '' : local ? `\`${found.file}\`` : `[${found.action}](invitations/stage-8-chipnet/${found.file})`;
+  };
   const revision = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   writeFileSync(
     logFile,
@@ -141,14 +151,15 @@ if (phase === undefined) {
       `- Template "Savings Jar" \`${readTemplate(savingsJarTemplateText).identifier}\`; compiled contract \`contracts/artifacts/savingsJar.json\``,
       `- Repository at commit \`${revision}\``,
       `- Started ${facts.startedAt}`,
+      `- The XO invitation behind each transaction an account of the run sent, as the engine serializes it for sharing: \`${invitations.slice(root.length)}\`, with \`index.json\` naming the template, action and role of each.`,
       ...(local ? [] : [
-        '- The engine ran with the local fix for chipnet\'s block timing (`docs/xo-chipnet-header-verification.md`); without it its header check stops below the tip.',
+        '- The engine ran as published, with no local change.',
         '- The engine was given one server.',
       ]),
       '',
-      '| Step | Transaction | Bytes | Fee (sat) | Note |',
-      '| --- | --- | --- | --- | --- |',
-      ...facts.log.map((entry) => `| ${entry.step} | \`${entry.transactionId}\` | ${entry.bytes} | ${entry.fee} | ${entry.note} |`),
+      '| Step | Transaction | Invitation | Bytes | Fee (sat) | Note |',
+      '| --- | --- | --- | --- | --- | --- |',
+      ...facts.log.map((entry) => `| ${entry.step} | \`${entry.transactionId}\` | ${invitationOf(entry.transactionId)} | ${entry.bytes} | ${entry.fee} | ${entry.note} |`),
       '',
       'Also observed:',
       '',
@@ -265,7 +276,7 @@ const funderPays = async (outputs: Output[], options: { inputs?: Utxo[]; burn?: 
   return built.transactionId;
 };
 
-const openAccount = async (words: string): Promise<Account> => {
+const openAccount = async (words: string, who: string): Promise<Account> => {
   const electrumServers = local
     ? await regtestServers()
     : (() => {
@@ -275,7 +286,7 @@ const openAccount = async (words: string): Promise<Account> => {
         // block's header, and a server that has not seen the block yet answers first, with nothing: the process ends.
         return [{ host: 'chipnet.9500.cash', version: first.version, transports: { wss: 443 }, blockchain: first.blockchain }];
       })();
-  return Account.open(await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers }));
+  return Account.open(await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers }), { onSent: writeInvitationFiles(invitations, who) });
 };
 let account: Account | undefined;
 
@@ -335,7 +346,7 @@ try {
       keep();
       if (BigInt(facts.funderAtStart) < 150_000n) throw new Error(`The funding address holds ${facts.funderAtStart} satoshis; the run needs 150,000.`);
     }
-    account = await openAccount(facts.words.owner);
+    account = await openAccount(facts.words.owner, "the owner's device");
     const wallet = await OwnerWallet.open({ backend: account, chain, seed: ownerSeed, ...(facts.ownerState === undefined ? {} : { state: facts.ownerState }), save: (state) => { facts.ownerState = state; keep(); } });
 
     const funding = await wallet.fundingAddress();
@@ -424,7 +435,7 @@ try {
 
   if (phase === 'the recoverer recovers') {
     const identity = hexToBin(facts.identity as string);
-    account = await openAccount(facts.words.credential);
+    account = await openAccount(facts.words.credential, 'the recoverer');
     const funds = await RecovererFunds.open({ backend: account, chain });
     const recoverer = await RecovererWallet.open({ funds, chain, identity, recoveryKey: credential.recoveryKey });
     const fees = recoveryFees();
@@ -487,7 +498,7 @@ try {
 
   if (phase === 'the new device finds the jar') {
     const identity = hexToBin(facts.identity as string);
-    account = await openAccount(facts.words.next);
+    account = await openAccount(facts.words.next, 'the new device');
     const save = (state: OwnerWalletState): void => { facts.newState = state; keep(); };
     // The recoverer hands over the identity, the earlier seed's viewing key and the access to the earlier archive.
     const wallet = facts.newState === undefined
@@ -597,7 +608,7 @@ try {
 
   if (phase === 'the recoverer returns its balance') {
     await once('the recoverer returns its balance', async () => {
-      account = await openAccount(facts.words.credential);
+      account = await openAccount(facts.words.credential, 'the recoverer');
       const funds = await RecovererFunds.open({ backend: account, chain });
       await until('the recoverer\'s balance', async () => (await funds.balance()) > 0n);
       const [sent] = (await funds.sendEverything(funderLocking)).transactions;

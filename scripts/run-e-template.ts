@@ -25,7 +25,7 @@
 //
 // usage (from packages/app):
 //   npx tsx ../../scripts/run-e-template.ts local
-//   npx tsx ../../scripts/run-e-template.ts chipnet        with the engine's header fix: node patches/chipnet-faster-blocks.mjs
+//   npx tsx ../../scripts/run-e-template.ts chipnet
 //   npx tsx ../../scripts/run-e-template.ts <chain> --emergency-close [earlier|new]
 //   npx tsx ../../scripts/run-e-template.ts <chain> --emergency-close [earlier|new] --prove
 //                       the same closing, built, checked and tried with testmempoolaccept, and not sent
@@ -119,6 +119,7 @@ import {
   walletTemplateNumbers,
 } from '../packages/app/src/index.js';
 import { Electrum } from '../packages/chipnet/src/electrum.js';
+import { clearInvitationFiles, invitationDirectory, invitationFiles, writeInvitationFiles } from './invitation-files.js';
 import { type NodeRpc, type NodeRpcSettings, nodeRpc, testMempoolAccept } from '../packages/chipnet/src/node-rpc.js';
 // @ts-expect-error a plain script: the engine's settings for the local chain, and the node's RPC
 import { BURN, mine, regtestServers, rpc as localRpc } from '../spikes/xo-engine/regtest.mjs';
@@ -147,6 +148,8 @@ mkdirSync(`${root}.chipnet`, { recursive: true });
 const stateFile = otherState ?? `${root}.chipnet/run-e-template-${chainName}.json`;
 const storeDirectory = `${root}.chipnet/run-e-template-${chainName}-stores`;
 const logFile = `${root}docs/runs/stage-9-template-${local ? 'local-node' : 'chipnet'}.md`;
+/** The XO invitation behind every transaction an account of the run sends, a file each (scripts/invitation-files.ts). */
+const invitations = invitationDirectory(`stage-9-template-${local ? 'local-node' : 'chipnet'}`, local);
 
 // ------------------------------------------------------------------ amounts and safety
 
@@ -202,6 +205,7 @@ if (phase === undefined && !emergency && !checkCourseOnly) {
     console.error('The local chain is long and its block rewards are small. Start a new one: deploy/regtest/regtest.sh reset');
     process.exit(1);
   }
+  if (!existsSync(stateFile)) clearInvitationFiles(invitations);
   const finished = existsSync(stateFile) ? (JSON.parse(readFileSync(stateFile, 'utf8')) as Facts).finished : [];
   for (const next of PHASES) {
     if (finished.includes(next)) {
@@ -219,6 +223,12 @@ if (phase === undefined && !emergency && !checkCourseOnly) {
     }
   }
   const facts = JSON.parse(readFileSync(stateFile, 'utf8')) as Facts;
+  // The file of each transaction's invitation, where an account of the run sent it; the funder's payments have none.
+  const written = invitationFiles(invitations);
+  const invitationOf = (transactionId: string): string => {
+    const found = written.find((entry) => entry.transactionId === transactionId);
+    return found === undefined ? '' : local ? `\`${found.file}\`` : `[${found.action}](invitations/stage-9-template-chipnet/${found.file})`;
+  };
   const revision = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const contracts = paryonContracts(facts.deployment ?? CHIPNET_FAST_PERIODS_6);
   const presented = paryonTemplateTexts(contracts);
@@ -234,11 +244,12 @@ if (phase === undefined && !emergency && !checkCourseOnly) {
       `- Template "${JSON.parse(presented.template).name as string}" \`${presented.names.identifier}\`, content \`${presented.names.contentHash}\`; declaration \`${presented.names.declaration}\``,
       `- Repository at commit \`${revision}\`, with the uncommitted work of stage 9 steps 2 and 3`,
       `- Started ${facts.startedAt}`,
-      ...(local ? [] : ['- The engine ran with the local fix for chipnet\'s block timing (`docs/xo-chipnet-header-verification.md`), given one server.']),
+      `- The XO invitation behind each transaction an account of the run sent, as the engine serializes it for sharing: \`${invitations.slice(root.length)}\`, with \`index.json\` naming the template, action and role of each.`,
+      ...(local ? [] : ['- The engine ran as published, with no local change, given one server.']),
       '',
-      '| Step | Transaction | Bytes | Fee (sat) | Note |',
-      '| --- | --- | --- | --- | --- |',
-      ...facts.log.map((entry) => `| ${entry.step} | \`${entry.transactionId}\` | ${entry.bytes} | ${entry.fee} | ${entry.note} |`),
+      '| Step | Transaction | Invitation | Bytes | Fee (sat) | Note |',
+      '| --- | --- | --- | --- | --- | --- |',
+      ...facts.log.map((entry) => `| ${entry.step} | \`${entry.transactionId}\` | ${invitationOf(entry.transactionId)} | ${entry.bytes} | ${entry.fee} | ${entry.note} |`),
       '',
       'Amounts:',
       '',
@@ -430,7 +441,7 @@ const lockHeight = async (): Promise<number> => {
 
 // ------------------------------------------------------------------ the engine, with a check before each send
 
-const openAccount = async (mnemonic: string): Promise<Account> => {
+const openAccount = async (mnemonic: string, who: string): Promise<Account> => {
   const electrumServers = local
     ? await regtestServers()
     : (() => {
@@ -438,7 +449,7 @@ const openAccount = async (mnemonic: string): Promise<Account> => {
         if (first === undefined) throw new Error('the engine names no chipnet server');
         return [{ host: 'chipnet.9500.cash', version: first.version, transports: { wss: 443 }, blockchain: first.blockchain }];
       })();
-  return Account.open(await Engine.create(mnemonic, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers }));
+  return Account.open(await Engine.create(mnemonic, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers }), { onSent: writeInvitationFiles(invitations, who) });
 };
 
 /** A transaction the run had built and checked, and not sent: the way out, proven. */
@@ -785,7 +796,7 @@ try {
       }))['pay'] as string,
     );
 
-    const backend = (backendInUse = new CheckedBackend((account = await openAccount(facts.words.owner))));
+    const backend = (backendInUse = new CheckedBackend((account = await openAccount(facts.words.owner, "the owner's device"))));
     const wallet = await OwnerWallet.open({ backend, chain, seed: ownerSeed, ...(facts.ownerState === undefined ? {} : { state: facts.ownerState }), save: (state) => { facts.ownerState = state; keep(); } });
     const funding = await wallet.fundingAddress();
     await once('the wallet is funded', async () => {
@@ -918,7 +929,7 @@ try {
 
   if (phase === 'the recoverer recovers') {
     const identity = hexToBin(facts.identity as string);
-    account = await openAccount(facts.words.credential);
+    account = await openAccount(facts.words.credential, 'the recoverer');
     const funds = await RecovererFunds.open({ backend: account, chain });
     const recoverer = await RecovererWallet.open({ funds, chain, identity, recoveryKey: credential.recoveryKey });
     const fees = recoveryFees();
@@ -974,7 +985,7 @@ try {
 
   if (phase === 'the new device closes the loan') {
     const identity = hexToBin(facts.identity as string);
-    const backend = (backendInUse = new CheckedBackend((account = await openAccount(facts.words.next))));
+    const backend = (backendInUse = new CheckedBackend((account = await openAccount(facts.words.next, 'the new device'))));
     const save = (state: OwnerWalletState): void => { facts.newState = state; keep(); };
     const wallet = facts.newState === undefined
       ? await OwnerWallet.takeOver({ backend, chain, seed: newSeed, identity, earlierViewingKeys: [ownerSeed.viewingKey], save })
@@ -1051,7 +1062,7 @@ try {
 
   if (phase === 'the recoverer returns its balance') {
     await once('the recoverer returns its balance', async () => {
-      account = await openAccount(facts.words.credential);
+      account = await openAccount(facts.words.credential, 'the recoverer');
       const funds = await RecovererFunds.open({ backend: account, chain });
       await until('the recoverer\'s balance', async () => (await funds.balance()) > 0n);
       const [sent] = (await funds.sendEverything(funderLocking)).transactions;

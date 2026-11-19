@@ -1,11 +1,11 @@
 import { describeDelay, leastStartingBalance } from '@grandmas-wallet/app';
 import type { ChallengeDelay } from '@grandmas-wallet/core';
-import { Amount, Button, Card, Choice, Field, Notice, PageHead, Segmented, TextInput, download, eraseDevice, formatSatoshis, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Choice, Developer, Field, Notice, PageHead, Segmented, TextInput, download, eraseDevice, formatSatoshis, useTask } from '@grandmas-wallet/ui';
 import { useState } from 'preact/hooks';
 
 import { useBalance, useFunds } from './Funds.js';
 import { MODES } from './Start.js';
-import { type Mode, type Session, balanceWords, closeAccount, keep, kept, modeOf, settingsOf, wallets } from './session.js';
+import { type Mode, type Session, balanceWords, closeAccount, invitationText, keep, kept, modeOf, settingsOf, wallets } from './session.js';
 
 /** Waiting periods to choose from, counted by the chain's clock in steps of 512 seconds. */
 export const DELAYS: { delay: ChallengeDelay; hint: string }[] = [
@@ -26,6 +26,7 @@ export const Settings = ({ session, onSaved }: { session: Session; onSaved: () =
   const [name, setName] = useState(() => kept('name') ?? '');
   const [starting, setStarting] = useState(settings.startingSatoshis);
   const [delay, setDelay] = useState<ChallengeDelay>(settings.challengeDelay);
+  const [developer, setDeveloper] = useState(() => kept('developer') === true);
   const least = leastStartingBalance();
   const amount = /^\d{1,15}$/.test(starting.trim()) ? BigInt(starting.trim()) : undefined;
   const error = amount === undefined ? 'A whole number of satoshis.' : amount < least ? `At least ${formatSatoshis(least)} satoshis, so that the new wallet can refuse a request at once.` : undefined;
@@ -72,6 +73,16 @@ export const Settings = ({ session, onSaved }: { session: Session; onSaved: () =
           Save
         </Button>
       </div>
+      <Developer
+        on={developer}
+        onChange={(on) => {
+          keep('developer', on ? true : undefined);
+          setDeveloper(on);
+        }}
+        invitations={kept('invitations') ?? []}
+        read={invitationText}
+        device="page"
+      />
       <StartAfresh session={session} />
     </div>
   );

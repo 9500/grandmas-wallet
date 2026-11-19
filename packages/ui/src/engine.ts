@@ -1,4 +1,4 @@
-import { Account, HeaderCheckBehind } from '@grandmas-wallet/app';
+import { type SentInvitation, Account, HeaderCheckBehind } from '@grandmas-wallet/app';
 import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { ElectrumWebSocket } from '@electrum-cash/web-socket';
 import { Engine, XO_SUPPORTED_NETWORKS, resolveElectrumServersForNetwork } from '@xo-cash/engine';
@@ -84,14 +84,20 @@ const engineServers = async (environment: Environment): Promise<unknown[]> => {
 /**
  * Open the account of a set of twelve words. The engine keeps its state in this browser's database, apart
  * for each set of words. The account is ready when the engine's check of block headers has reached the tip.
+ * `onSent` is told of every transaction the account sends, with the invitation it was built from.
  */
-export const openAccount = async (words: string, environment: Environment, onProgress?: (checked: { verifiedHeight: number; currentHeight: number }) => void): Promise<Account> => {
+export const openAccount = async (
+  words: string,
+  environment: Environment,
+  onProgress?: (checked: { verifiedHeight: number; currentHeight: number }) => void,
+  onSent?: (sent: SentInvitation) => void,
+): Promise<Account> => {
   const electrumServers = (await engineServers(environment)) as NonNullable<Parameters<typeof Engine.create>[1]>['electrumServers'];
   // A header store the last load found stuck is deleted before the engine opens it (see engine-headers.ts).
   await resetMarkedHeaders(sessionStorage, indexedDB);
   const engine = await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, ...(electrumServers === undefined ? {} : { electrumServers }) });
   try {
-    const account = await Account.open(engine, onProgress === undefined ? {} : { onProgress });
+    const account = await Account.open(engine, { ...(onProgress === undefined ? {} : { onProgress }), ...(onSent === undefined ? {} : { onSent }) });
     clearHeaderResetMark(sessionStorage);
     return account;
   } catch (error) {
