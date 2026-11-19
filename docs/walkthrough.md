@@ -5,7 +5,7 @@ This walks through the wallet's basic course in a browser: a helper sets up a wa
 - Wallet: <https://wallet.9500.cash/>
 - Recoverer: <https://recoverer.9500.cash/>
 
-This text describes the pages of this checkout, in which the recoverer sets the wallet up (since 18 November 2026). The public pages show this once they are released from it; until then they show the earlier set-up, in which the phone created the wallet from coins sent to it. The same pages run on your own machine (at the end).
+The public pages are released from this repository; `version.json` at each address names the commit. The same pages run on your own machine (at the end).
 
 The same course runs unattended in `scripts/browser-run.ts`; its last run on the local node is recorded in [runs/wallet-set-up-local-node.md](runs/wallet-set-up-local-node.md), and pictures of the screens are in [screens/](screens/).
 
@@ -72,6 +72,7 @@ Under **Recovery** on the wallet page:
 - **Your own backup:** twelve words and the wallet's identity. On another profile, "I have my own backup" opens the same wallet at once, with no waiting period and without the recoverer.
 - **Refuse requests without asking** is on unless you turn it off: while the page is open, a request nobody asked for is refused by the phone itself, and the wallet's activity shows it.
 - **Technical details** shows the identity, the keys' fingerprints, the servers and what this phone sent, and erases the phone.
+- **Developer mode**, on the Technical details screen and in the recoverer's settings, lists every transaction that browser sent and saves the XO invitation behind each as a file. [xo-invitations.md](xo-invitations.md) says what to do with one.
 
 On the recoverer's page, **Your balance** pays for everything: setting a wallet up, and a request and its completion for any wallet. Nothing is kept with a wallet. **Send all** sends the whole balance to another address.
 
