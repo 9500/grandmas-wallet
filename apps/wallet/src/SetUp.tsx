@@ -15,7 +15,7 @@ import { type Session, type StoredRecipient, type StoredSetUp, deviceAccount, de
  * checks the creation and opens its wallet. Three screens: the scan, "Setting up…", and "Your wallet is ready".
  * Everything is kept on the phone as it happens, so that a reload goes on where it stopped with the same request.
  */
-export const SetUp = ({ session, kind, onBack, onDone }: { session: Session; kind: 'bank' | 'friend'; onBack: () => void; onDone: (wallet: OwnerWallet) => void }) => {
+export const SetUp = ({ session, kind, onBack, onDone }: { session: Session; kind: 'bank' | 'friend'; onBack: () => void; onDone: (wallet?: OwnerWallet) => void }) => {
   const [setUp, setSetUp] = useState<StoredSetUp>(() => kept('setUp') ?? { kind });
   const store = (next: StoredSetUp) => {
     keep('setUp', next);
@@ -36,7 +36,8 @@ export const SetUp = ({ session, kind, onBack, onDone }: { session: Session; kin
   }
   if (setUp.done !== undefined) {
     // After a reload on this screen the wallet is opened from what the phone kept.
-    const open = () => (wallet.current === undefined ? void openWallet(session).then(onDone) : onDone(wallet.current));
+    // A wallet that does not open here is opened by the wallet's own screen, which says what is wrong.
+    const open = () => (wallet.current === undefined ? void openWallet(session).then(onDone, () => onDone()) : onDone(wallet.current));
     return <Ready name={setUp.recipient.name} startingSatoshis={BigInt(setUp.done.startingSatoshis)} onOpen={open} />;
   }
   return (
@@ -52,12 +53,13 @@ export const SetUp = ({ session, kind, onBack, onDone }: { session: Session; kin
         leaveRecoverer();
         store({ kind: setUp.kind });
       }}
+      onBack={onBack}
     />
   );
 };
 
 /** "Setting up…": meeting the recoverer's page, asking, and opening the wallet that comes back. */
-const SettingUp = ({ session, setUp, store, onOpened, onAgain }: { session: Session; setUp: StoredSetUp; store: (next: StoredSetUp) => void; onOpened: (wallet: OwnerWallet, startingSatoshis: bigint) => void; onAgain: () => void }) => {
+const SettingUp = ({ session, setUp, store, onOpened, onAgain, onBack }: { session: Session; setUp: StoredSetUp; store: (next: StoredSetUp) => void; onOpened: (wallet: OwnerWallet, startingSatoshis: bigint) => void; onAgain: () => void; onBack: () => void }) => {
   const recipient = setUp.recipient as StoredRecipient;
   const name = recipient.name || (setUp.kind === 'bank' ? 'Your bank' : 'Your helper');
   const [stage, setStage] = useState<'meeting' | 'asking' | 'waiting' | 'opening'>('meeting');
@@ -106,7 +108,7 @@ const SettingUp = ({ session, setUp, store, onOpened, onAgain }: { session: Sess
       stopped = true;
     };
   }, [attempt]);
-  return <SettingUpView name={name} kind={setUp.kind} stage={stage} challengeDelay={setUp.offer?.challengeDelay} problem={problem} onRetry={() => setAttempt(attempt + 1)} onAgain={onAgain} />;
+  return <SettingUpView name={name} kind={setUp.kind} stage={stage} challengeDelay={setUp.offer?.challengeDelay} problem={problem} onRetry={() => setAttempt(attempt + 1)} onAgain={onAgain} onBack={onBack} />;
 };
 
 /** What "Setting up…" shows, and a refusal or a page that did not answer, with the way on. */
@@ -118,6 +120,7 @@ export const SettingUpView = ({
   problem,
   onRetry,
   onAgain,
+  onBack,
 }: {
   name: string;
   kind: 'bank' | 'friend';
@@ -126,6 +129,8 @@ export const SettingUpView = ({
   problem?: string | undefined;
   onRetry: () => void;
   onAgain: () => void;
+  /** The way back to the first screen. The request is kept: the recoverer may already be making the wallet for it. */
+  onBack?: (() => void) | undefined;
 }) => {
   if (problem !== undefined) {
     return (
@@ -147,6 +152,11 @@ export const SettingUpView = ({
   }
   return (
     <div class="stack set-up" data-testid="setting-up" data-stage={stage}>
+      {onBack !== undefined && (
+        <button type="button" class="link" onClick={onBack}>
+          ‹ Back
+        </button>
+      )}
       <div class="set-up-head">
         <div class="set-up-spinner">
           <Spinner />

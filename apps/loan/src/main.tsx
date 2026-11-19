@@ -4,7 +4,7 @@ import './loan.css';
 import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { DappRequests, type RequestStage } from '@grandmas-wallet/connect';
 import { type DappCredentials, type DappLink, type LinkStatus, openDappLink } from '@grandmas-wallet/connect/wizard';
-import { type Environment, Card, Frame, Loading, Vault, formatBch, loadEnvironment, plainError, useEvery } from '@grandmas-wallet/ui';
+import { type Environment, Button, Card, Frame, Loading, Vault, formatBch, loadEnvironment, plainError, useEvery } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
@@ -227,12 +227,17 @@ const App = ({ environment }: { environment: Environment }) => {
     setAddress(opened.uri);
   };
 
+  const reachChain = () => {
+    setChainProblem(undefined);
+    connectServer(environment.chain).then(setChain, (error: unknown) => setChainProblem(plainError(error)));
+  };
+
   useEffect(() => {
     if (environment.network !== 'chipnet') return;
     const saved = vault.get<DappCredentials>('credentials');
     // A session with a wallet is resumed; without one, a fresh address is shown.
     start(saved?.walletPublicKey === undefined ? undefined : saved);
-    connectServer(environment.chain).then(setChain, (error: unknown) => setChainProblem(plainError(error)));
+    reachChain();
     return () => link.current?.close();
   }, []);
 
@@ -266,6 +271,12 @@ const App = ({ environment }: { environment: Environment }) => {
       return (
         <Card title="The network cannot be reached" tone="bad">
           <p>{chainProblem}</p>
+          <div class="actions">
+            <Button onClick={reachChain}>Try again</Button>
+            <Button kind="quiet" onClick={forget}>
+              Disconnect
+            </Button>
+          </div>
         </Card>
       );
     }
@@ -278,7 +289,7 @@ const App = ({ environment }: { environment: Environment }) => {
       <Intro />
       <Independent />
       <div class="columns">
-        <ConnectCard uri={address} state={words} problem={problem} onForget={resuming || problem !== undefined ? forget : undefined} />
+        <ConnectCard uri={address} state={words} problem={problem} onForget={resuming || problem !== undefined || vault.get<DappCredentials>('credentials')?.walletPublicKey !== undefined ? forget : undefined} />
         <HowItWorks />
       </div>
     </div>

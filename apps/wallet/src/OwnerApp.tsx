@@ -2,14 +2,14 @@ import { binToHex } from '@bitauth/libauth';
 import type { RecoveryStatus } from '@grandmas-wallet/archive';
 import { type Balance, type OwnerWallet, type Sent, checkRecovery, copyEarlierArchives, makeChange } from '@grandmas-wallet/app';
 import type { SeedKeys } from '@grandmas-wallet/core';
-import { Button, Card, Frame, Loading, type NavItem, Notice, plainError, useEvery, useRoute, useToast } from '@grandmas-wallet/ui';
+import { Button, Card, Frame, Loading, More, type NavItem, Notice, plainError, recheckChain, useEvery, useRoute, useToast } from '@grandmas-wallet/ui';
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
 import { Apps } from './Apps.js';
 import { Arrival } from './Arrival.js';
 import { type ApplicationsPart, useApplications } from './connections.js';
-import { Details } from './Details.js';
+import { Details, Erase } from './Details.js';
 import { Home } from './Home.js';
 import { BRAND } from './brand.js';
 import { MovedAway, OwnedElsewhere } from './Elsewhere.js';
@@ -69,7 +69,13 @@ export const OwnerApp = ({ session, opened, onLost }: { session: Session; opened
               <button type="button" onClick={() => window.location.reload()}>
                 Try again
               </button>
+              <Button kind="quiet" onClick={recheckChain}>
+                Check the chain again
+              </Button>
             </div>
+            <More summary="If nothing helps">
+              <Erase />
+            </More>
           </Card>
         )}
       </Frame>

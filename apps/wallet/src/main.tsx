@@ -2,7 +2,7 @@ import '@grandmas-wallet/ui/styles.css';
 import './set-up.css';
 
 import type { OwnerWallet, OwnerWalletState } from '@grandmas-wallet/app';
-import { Card, Frame, Loading, Notice, plainError } from '@grandmas-wallet/ui';
+import { Card, Frame, Loading, plainError } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
@@ -63,7 +63,8 @@ const Root = () => {
   };
   const begin = (beginning: Beginning) => {
     if (beginning === 'bank' || beginning === 'friend') {
-      keep('setUp', { kind: beginning });
+      // A set-up of this kind that was left goes on with its request: the recoverer may already have made the wallet for it.
+      if (kept('setUp')?.kind !== beginning) keep('setUp', { kind: beginning });
       choose('setup');
     } else choose(beginning);
   };
@@ -113,7 +114,16 @@ const Root = () => {
     case 'owner':
       return <OwnerApp session={session} opened={wallet} onLost={() => choose(undefined)} />;
     default:
-      return frame(<Notice tone="bad">This device keeps something this page does not know. Erase the device under details to start again.</Notice>);
+      return frame(
+        <Card title="This page does not know where this phone stood" tone="bad">
+          <p>Nothing is erased by starting again: the phone keeps its keys, and its wallet if it has one.</p>
+          <div class="actions">
+            <button type="button" onClick={() => choose((kept('state') as OwnerWalletState | undefined)?.identity !== undefined ? 'owner' : undefined)}>
+              Start again
+            </button>
+          </div>
+        </Card>,
+      );
   }
 };
 

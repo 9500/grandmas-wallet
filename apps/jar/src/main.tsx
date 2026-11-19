@@ -3,7 +3,7 @@ import './jar.css';
 
 import { DappRequests } from '@grandmas-wallet/connect';
 import { type DappCredentials, type DappLink, type LinkStatus, openDappLink } from '@grandmas-wallet/connect/wizard';
-import { type ChainConnection, type Environment, Card, Frame, Loading, Vault, connectChain, formatBch, formatTime, loadEnvironment, plainError, useEvery } from '@grandmas-wallet/ui';
+import { type ChainConnection, type Environment, Button, Card, Frame, Loading, Vault, connectChain, formatBch, formatTime, loadEnvironment, plainError, useEvery } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
@@ -197,11 +197,16 @@ const App = ({ environment }: { environment: Environment }) => {
     setAddress({ uri: opened.uri, qrUri: opened.qrUri });
   };
 
+  const reachChain = () => {
+    setChainProblem(undefined);
+    connectChain(environment.chain, environment.secondsPerBlock).then(setChain, (error: unknown) => setChainProblem(plainError(error)));
+  };
+
   useEffect(() => {
     const saved = vault.get<DappCredentials>('credentials');
     // A session with a wallet is resumed; without one, a fresh address is shown.
     start(saved?.walletPublicKey === undefined ? undefined : saved);
-    connectChain(environment.chain, environment.secondsPerBlock).then(setChain, (error: unknown) => setChainProblem(plainError(error)));
+    reachChain();
     return () => link.current?.close();
   }, []);
 
@@ -230,6 +235,12 @@ const App = ({ environment }: { environment: Environment }) => {
         <Card title="The network cannot be reached" tone="bad">
           <p>{chainProblem}</p>
           <p class="muted">With an ordinary wallet this page reads the chain itself, to find your coins and your jars.</p>
+          <div class="actions">
+            <Button onClick={reachChain}>Try again</Button>
+            <Button kind="quiet" onClick={forget}>
+              Disconnect
+            </Button>
+          </div>
         </Card>
       );
     }
@@ -238,11 +249,13 @@ const App = ({ environment }: { environment: Environment }) => {
 
   const words: LinkWords = resuming ? 'resuming' : status.state === 'waiting' ? 'waiting' : address === undefined ? 'preparing' : 'connecting';
   const problem = kind?.kind === 'unusable' ? kind.reason : ended;
+  // A session a wallet joined answers that wallet only: if it does not come back, another can be connected.
+  const paired = vault.get<DappCredentials>('credentials')?.walletPublicKey !== undefined;
   return (
     <div class="stack">
       <Intro />
       <div class="columns">
-        <ConnectCard uri={address?.uri} qrUri={address?.qrUri} state={words} problem={problem} onForget={resuming || problem !== undefined ? forget : undefined} />
+        <ConnectCard uri={address?.uri} qrUri={address?.qrUri} state={words} problem={problem} onForget={resuming || problem !== undefined || paired ? forget : undefined} />
         <HowItWorks />
       </div>
     </div>
