@@ -38,7 +38,7 @@ export const Takeover = ({ session, onBack, onDone }: { session: Session; onBack
       </>
     );
   }
-  return <Waiting session={session} onDone={onDone} onAgain={() => {
+  return <Waiting session={session} onDone={onDone} onBack={onBack} onAgain={() => {
     leaveRecoverer();
     keep('takeover', undefined);
     setAsked(undefined);
@@ -46,7 +46,7 @@ export const Takeover = ({ session, onBack, onDone }: { session: Session; onBack
 };
 
 /** After the request: the recoverer asks the network, the waiting period runs, the hand-over comes. */
-const Waiting = ({ session, onDone, onAgain }: { session: Session; onDone: (wallet: OwnerWallet) => void; onAgain: () => void }) => {
+const Waiting = ({ session, onDone, onBack, onAgain }: { session: Session; onDone: (wallet: OwnerWallet) => void; onBack: () => void; onAgain: () => void }) => {
   const asked = kept('takeover') as NonNullable<ReturnType<typeof kept<'takeover'>>>;
   const handing = useHanding('takeover');
   const [pasted, setPasted] = useState('');
@@ -74,6 +74,9 @@ const Waiting = ({ session, onDone, onAgain }: { session: Session; onDone: (wall
 
   // The hand-over over the session, when the recoverer's page sends it there; a link the page was opened with likewise.
   useEffect(() => {
+    // A request cut off by a reload is sent again: it is the same request to the recoverer's page, which answers it
+    // as before. One the page already has is left alone: the recoverer's page may be closed by now.
+    if (kept('handing')?.takeover?.status === 'sending') void sealedOf(asked.link, 'takeover').then((sealed) => sealed !== undefined && handToRecoverer(asked.recipient, 'takeover', sealed));
     const incoming = kept('incoming');
     if (incoming?.kind === 'handover') void task.run('link', () => takeLink(incoming.text));
     return followHandOver(asked.recipient, async (sealed) => {
@@ -89,6 +92,10 @@ const Waiting = ({ session, onDone, onAgain }: { session: Session; onDone: (wall
   const failed = handing?.status === 'refused' || handing?.status === 'unreached';
   return (
     <div class="stack set-up" data-testid="takeover-waiting" data-status={handing?.status ?? ''}>
+      {/* The way back keeps the request: the recoverer may already have asked the network with it. */}
+      <button type="button" class="link" onClick={onBack}>
+        ‹ Back
+      </button>
       <div class="set-up-head">
         {!failed && (
           <div class="set-up-spinner">

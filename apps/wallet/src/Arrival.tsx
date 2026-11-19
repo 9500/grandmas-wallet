@@ -25,7 +25,7 @@ const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resol
  * sections 11.1, step 7, and 11.2). The quick search comes first so that moving can start; the full search
  * then covers every address of every earlier seed. A reload continues from the step reached.
  */
-export const Arrival = ({ owner, onDone }: { owner: Owner; onDone: () => void }) => {
+export const Arrival = ({ owner, onDone, onLater }: { owner: Owner; onDone: () => void; onLater: () => void }) => {
   const [arrival, setArrival] = useState(() => kept('arrival'));
   const [found, setFound] = useState<{ quick?: bigint; full?: bigint; moved?: bigint; status?: WalletSearch['status']; reasons?: string[] }>({});
   const task = useTask();
@@ -130,6 +130,10 @@ export const Arrival = ({ owner, onDone }: { owner: Owner; onDone: () => void })
         {task.error !== undefined && (
           <div class="actions">
             <Button onClick={() => void run()}>Try again</Button>
+            {/* Nothing is marked as done: the next time the page opens, the search goes on from here. */}
+            <Button kind="quiet" onClick={onLater}>
+              Open the wallet
+            </Button>
           </div>
         )}
         {searched === 'full' && (

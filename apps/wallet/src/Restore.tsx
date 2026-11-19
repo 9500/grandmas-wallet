@@ -2,17 +2,20 @@ import { type OwnerWallet, readUserBackup, restoreFromBackup } from '@grandmas-w
 import { Button, Card, Field, Notice, PageHead, TextArea, useTask } from '@grandmas-wallet/ui';
 import { useState } from 'preact/hooks';
 
+import { Erase } from './Details.js';
 import { type Session, deviceAccount, keep, kept, saveState } from './session.js';
 
 /** Open the wallet again from the backup the user kept (proposal section 18.1). */
 export const Restore = ({ session, onBack, onDone }: { session: Session; onBack: () => void; onDone: (wallet: OwnerWallet) => void }) => {
   const [text, setText] = useState('');
+  const [holdsKeys, setHoldsKeys] = useState(false);
   const task = useTask();
   const restore = () =>
     task.run('restore', async (progress) => {
       const backup = readUserBackup(text);
       const earlier = kept('words');
       if (earlier !== undefined && earlier !== backup.words) {
+        setHoldsKeys(true);
         throw new Error('This phone already holds keys of its own from an earlier start. Restore on a phone that keeps nothing, or erase this one first.');
       }
       if ((backup.network === 'mainnet') !== (session.network === 'mainnet')) throw new Error(`This backup is for ${backup.network}; this page runs on ${session.environment.network}.`);
@@ -48,6 +51,7 @@ export const Restore = ({ session, onBack, onDone }: { session: Session; onBack:
         </div>
         <p class="small muted">The words alone restore nothing, here or in another wallet. A backup made before the wallet moved to a new phone is out of date; the page says so.</p>
       </Card>
+      {holdsKeys && <Erase />}
     </div>
   );
 };

@@ -41,6 +41,10 @@ const Root = () => {
           keep('mode', 'move');
           setMode('move');
         }
+        if (storedMode() === undefined && kept('incoming')?.kind === 'handover' && kept('takeover') !== undefined) {
+          keep('mode', 'takeover');
+          setMode('takeover');
+        }
         setSession(booted);
       },
       (error: unknown) => setProblem(plainError(error)),

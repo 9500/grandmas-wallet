@@ -252,7 +252,7 @@ const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: O
   let screen: JSX.Element;
   if (moved !== undefined) screen = <MovedAway owner={owner} />;
   else if (elsewhere) screen = <OwnedElsewhere owner={owner} />;
-  else if (arrival !== undefined && arrival.swept !== true) screen = <Arrival owner={owner} onDone={() => setArrival(kept('arrival'))} />;
+  else if (arrival !== undefined && arrival.swept !== true) screen = <Arrival owner={owner} onDone={() => setArrival(kept('arrival'))} onLater={() => setArrival({ ...arrival, swept: true })} />;
   else {
     const screens: Record<Route, () => JSX.Element> = {
       home: () => <Home owner={owner} />,

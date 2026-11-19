@@ -4,7 +4,7 @@ import { useEffect, useState } from 'preact/hooks';
 
 import { FundsCard, useFunds } from './Funds.js';
 import { type DeskState, setNextLabel, setUpDesk, setUpRecords, useChanges, useDesk } from './offered-session.js';
-import { type Session, modeOf, recovererLink, settingsOf } from './session.js';
+import { type Session, kept, modeOf, recovererLink, settingsOf } from './session.js';
 
 /** How long the page waits for its session before it says that the code cannot reach a phone just now. */
 const SESSION_WITHIN_MS = 8_000;
@@ -63,6 +63,10 @@ const CodeScreen = ({ session, bank, label, onDone }: { session: Session; bank: 
   useEffect(() => setNextLabel(customer), [customer]);
   const record = desk.setUp === undefined ? undefined : setUpRecords.get(desk.setUp);
   const reachable = desk.status.state === 'waiting' || desk.status.state === 'connected';
+  const served = record !== undefined && (record.answer !== undefined || record.refused !== undefined);
+  // A code a phone joined answers that phone only. If the phone left without asking, or its set-up failed, the
+  // recoverer makes a new code; a set-up under way keeps its code. The request's record stays either way.
+  const joinedOnly = record === undefined ? kept('deskSession')?.walletPublicKey !== undefined : record.problem !== undefined;
   return (
     <div class="stack">
       <PageHead title={bank ? 'New customer' : label === '' ? 'Set up their wallet' : `Set up ${label}'s wallet`}>
@@ -97,7 +101,8 @@ const CodeScreen = ({ session, bank, label, onDone }: { session: Session; bank: 
             New wallets get <Amount satoshis={BigInt(settings.startingSatoshis)} exact /> and a waiting period of {describeDelay(settings.challengeDelay)}. Change these in the settings.
           </p>
           <div class="actions">
-            {record !== undefined && (record.answer !== undefined || record.refused !== undefined) && <Button kind="secondary" onClick={() => desk.renew()}>Next {bank ? 'customer' : 'phone'}</Button>}
+            {served && <Button kind="secondary" onClick={() => desk.renew()}>Next {bank ? 'customer' : 'phone'}</Button>}
+            {!served && joinedOnly && <Button kind="secondary" onClick={() => desk.renew()}>New code</Button>}
             <Button kind="quiet" onClick={onDone}>
               Done
             </Button>
@@ -114,7 +119,7 @@ const SessionLine = ({ desk, reachable, late }: { desk: DeskState; reachable: bo
   if (!reachable && late) {
     return (
       <Status tone="warn" title="The code cannot reach a phone just now">
-        This page cannot open a connection. Check the network and reload the page.
+        This page cannot open a connection. Check the network.
       </Status>
     );
   }
