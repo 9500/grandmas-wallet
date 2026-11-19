@@ -34,7 +34,17 @@ const Root = () => {
   const [wallet, setWallet] = useState<OwnerWallet | undefined>();
 
   useEffect(() => {
-    boot().then(setSession, (error: unknown) => setProblem(plainError(error)));
+    boot().then(
+      (booted) => {
+        // The old phone's link for a move this phone prepared goes on with the move, also after the user went back to the first screen.
+        if (storedMode() === undefined && kept('incoming')?.kind === 'move' && kept('preparation') !== undefined) {
+          keep('mode', 'move');
+          setMode('move');
+        }
+        setSession(booted);
+      },
+      (error: unknown) => setProblem(plainError(error)),
+    );
     // A link opened in a tab that already shows the page changes only the part after `#`: start again from it.
     const onHash = () => window.location.reload();
     window.addEventListener('hashchange', onHash);

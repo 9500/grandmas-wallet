@@ -150,6 +150,12 @@ export const MoveIn = ({ session, onBack, onDone }: { session: Session; onBack: 
   ];
   return (
     <div class="stack">
+      {/* The way back keeps what was prepared: the old phone may already count on it, and coming back goes on here. */}
+      <div>
+        <button type="button" class="link" onClick={onBack} data-testid="move-back">
+          ‹ Back
+        </button>
+      </div>
       <PageHead title="Move from your other phone">This phone has its own keys now. Keep this page; you can close it and come back.</PageHead>
       <Card>
         <Steps steps={steps} />
