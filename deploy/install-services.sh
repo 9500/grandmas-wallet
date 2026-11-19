@@ -6,7 +6,8 @@
 #
 # Each service listens on plain HTTP; a reverse proxy in front provides HTTPS. Ports:
 #   8101 wallet, 8102 recoverer, 8103 savings jar application, 8104 loan page, 8105 landing page, 8111 and up
-#   backup stores. The landing page (deploy/landing) introduces the demonstration and links to the others.
+#   backup stores. The landing page (deploy/landing) introduces the demonstration and links to the others; the
+#   design overview (docs) is served beside it as design.html.
 # The loan page is an independent demonstration with Paryon's public contracts on chipnet; it is served when
 # the configuration names an address for it (loanUrl) and it is built.
 # The pages must have been built first: deploy/preview.sh build
@@ -71,6 +72,7 @@ cp -r "$ROOT/apps/recoverer/dist" "$RELEASE.new/recoverer"
 cp -r "$ROOT/$JAR_ROOT" "$RELEASE.new/jar"
 if [ "$LOAN" = yes ]; then cp -r "$ROOT/apps/loan/dist" "$RELEASE.new/loan"; fi
 cp -r "$ROOT/deploy/landing" "$RELEASE.new/landing"
+cp "$ROOT/docs/design_v0.5.html" "$RELEASE.new/landing/design.html"
 cp "$ROOT/deploy/serve.mjs" "$RELEASE.new/serve.mjs"
 cp "$CONFIG" "$RELEASE.new/config.json"
 (
@@ -90,7 +92,8 @@ page() { # name, description, port, further arguments of the server...
 page wallet "wallet page" 8101
 page recoverer "recoverer page" 8102
 page jar "savings jar application" 8103
-page landing "landing page" 8105
+# The design overview carries its styles and scripts in the page; the server is told that it is such a document.
+page landing "landing page" 8105 --document design.html
 NAMES=(wallet recoverer jar landing)
 # The loan page reads the price General Protocols' oracle signs; that server is named for it alone.
 if [ "$LOAN" = yes ]; then page loan "loan page" 8104 --connect https://oracles.generalprotocols.com; NAMES+=(loan); fi

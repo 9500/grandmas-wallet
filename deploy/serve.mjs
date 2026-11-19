@@ -5,6 +5,8 @@
 //        [--version <file>]   a record of what was released, shown at /version.json
 //        [--connect <origin>] another server this page alone may talk to (repeatable): the loan page reads the
 //                             oracle's prices this way, and the other pages are not given it
+//        [--document <file>]  a file of the root that is a document complete in itself, its styles and scripts
+//                             written in the page (repeatable): the design overview beside the landing page
 import { execFileSync } from 'node:child_process';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -59,6 +61,24 @@ const contentSecurityPolicy = [
   "frame-ancestors 'none'",
 ].join('; ');
 
+/** Files named as documents complete in themselves. */
+const documents = new Set(process.argv.flatMap((word, index) => (word === '--document' && process.argv[index + 1] !== undefined ? [resolve(root, process.argv[index + 1])] : [])));
+
+/**
+ * A document may run and show what is written in it, and take its fonts from where it names them. It talks to
+ * no server, and no other page is served with this policy.
+ */
+const documentPolicy = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline' https://fonts.googleapis.com",
+  'font-src https://fonts.gstatic.com',
+  "img-src 'self' data:",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
+
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -97,6 +117,7 @@ const server = createServer((request, response) => {
   const hashed = inside && path.startsWith('/assets/');
   response.writeHead(200, {
     ...headers,
+    ...(documents.has(file) ? { 'content-security-policy': documentPolicy } : {}),
     'content-type': TYPES[extname(file)] ?? 'application/octet-stream',
     'cache-control': hashed ? 'public, max-age=31536000, immutable' : 'no-cache',
   });
