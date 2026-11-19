@@ -91,7 +91,50 @@ q { quotes: '“' '”'; font-weight: 600; }
 /* ------------------------------------------------------------------ hero */
 
 .hero { padding: 56px 0 48px; border-bottom: 1px solid var(--line); background: var(--surface); }
-.hero-grid { display: grid; gap: 40px; grid-template-columns: 1.25fr 1fr; align-items: center; }
+.hero-grid {
+  display: grid;
+  gap: 24px 40px;
+  grid-template-columns: 1.25fr 1fr;
+  grid-template-areas: "text portrait" "text promise";
+  align-items: center;
+}
+.hero-text { grid-area: text; }
+.promise { grid-area: promise; }
+
+/* Grandma stands at the bottom edge of a soft panel, so the picture's cut-off at the waist reads as the panel's edge. */
+.portrait {
+  grid-area: portrait;
+  margin: 0;
+  justify-self: center;
+  align-self: end;
+  width: 100%;
+  max-width: 300px;
+  padding: 18px 28px 0;
+  border-radius: 20px;
+  background: radial-gradient(120% 90% at 50% 100%, color-mix(in srgb, var(--owner) 22%, var(--owner-soft)), var(--owner-soft) 70%);
+  border: 1px solid color-mix(in srgb, var(--owner) 18%, var(--line));
+  overflow: hidden;
+}
+.portrait img { display: block; width: 100%; height: auto; }
+
+.hero-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.button:hover { border-color: var(--owner); }
+.button.primary { background: var(--owner); border-color: var(--owner); color: var(--surface); }
+.button.primary:hover { background: color-mix(in srgb, var(--owner) 86%, var(--ink)); }
 .eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--owner); margin-bottom: 12px; }
 h1 { font-size: 40px; letter-spacing: -0.02em; margin-bottom: 18px; max-width: 18ch; }
 .lead { font-size: 19px; color: var(--muted); margin-bottom: 12px; max-width: 56ch; }
@@ -228,6 +271,12 @@ h3 { font-size: 19px; }
 
 /* ------------------------------------------------------------------ waiting period */
 
+.network + .network { margin-top: 28px; }
+.network-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 10px; font-size: 16px; }
+.network-head strong { font-size: 17px; }
+.network-detail { color: var(--muted); font-size: 14px; }
+.network-detail::before { content: '·'; margin-right: 10px; }
+
 .timeline { display: grid; grid-template-columns: 1.3fr 1fr 3fr 1.3fr; gap: 4px; }
 .seg { padding: 12px 14px; display: grid; gap: 2px; background: var(--sunken); }
 .seg:first-child { border-radius: 10px 0 0 10px; }
@@ -270,11 +319,16 @@ h3 { font-size: 19px; }
 
 @media (max-width: 1000px) {
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .hero-grid { grid-template-columns: 1fr; }
+  .hero-grid { grid-template-columns: 1fr 220px; grid-template-areas: "text portrait" "promise promise"; }
+  .portrait { align-self: center; padding: 14px 20px 0; }
 }
 
 @media (max-width: 720px) {
   .top-nav { display: none; }
+  .hero-grid { grid-template-columns: 1fr; grid-template-areas: "portrait" "text" "promise"; }
+  .portrait { justify-self: start; max-width: 170px; padding: 10px 16px 0; border-radius: 16px; }
+  .network-detail { flex-basis: 100%; }
+  .network-detail::before { content: none; }
   .hero { padding: 36px 0 32px; }
   h1 { font-size: 30px; }
   .lead { font-size: 17px; }
