@@ -188,6 +188,8 @@ interface Facts {
   ownerArrangement?: RecoveryArrangement;
   newArrangement?: RecoveryArrangement;
   keyCategory?: string;
+  /** The Borrowing thread that was in the current period already, so that none was moved on. */
+  threadWasCurrent?: string;
   steps: Record<string, { transactionIds: string[]; data?: Record<string, number | string> }>;
   /** A transaction about to be sent, written down first, by step. */
   pending: Record<string, { transactionId: string; hex: string }>;
@@ -713,8 +715,10 @@ const checkCourse = (state: ParyonState, price: Prices, coin: Utxo, seed: SeedKe
   const made = createLoanKey({ contracts: contracts(), factory: pick(state.loanKeyFactory, 'factory'), defining: spendByKey(seed, coin), changeTo: to });
   verified(made.built, 'creating a loan key (planned)');
   const thread = state.borrowing.slice().sort((a, b) => Number(b.supply - a.supply))[0] as ParyonState['borrowing'][number];
-  const moved = updateBorrowingPeriod({ contracts: contracts(), borrowing: thread, wallet: [spend(made.change)], height, changeTo: to });
-  verified(moved.built, 'moving the Borrowing thread on (planned)');
+  // A thread that is in the height's period already is borrowed from as it is: there is nothing to move on.
+  const behind = thread.period < periodAt(contracts().deployment, height);
+  const moved = behind ? updateBorrowingPeriod({ contracts: contracts(), borrowing: thread, wallet: [spend(made.change)], height, changeTo: to }) : { borrowing: thread, change: made.change };
+  if ('built' in moved) verified(moved.built, 'moving the Borrowing thread on (planned)');
   const fee = borrowingFee(DEBT, priceThread(state).state.price);
   const room = moved.change.output.valueSatoshis - fee - MANAGE_ADD - MARGIN;
   const collateral = collateralAtRatio(DEBT, price.lower, TARGET_PERCENT) < room ? collateralAtRatio(DEBT, price.lower, TARGET_PERCENT) : room;
@@ -848,8 +852,10 @@ try {
       const price = await prices(state);
       const [coin] = (await wallet.parts.ownCoins()).filter((candidate) => candidate.utxo.index === 0).sort((a, b) => (a.utxo.output.valueSatoshis > b.utxo.output.valueSatoshis ? -1 : 1));
       if (coin === undefined) throw new Error('the wallet holds no coin that is output 0');
-      checkCourse(state, price, coin.utxo, ownerSeed, await lockHeight());
-      note('Before anything of the loan was sent, the whole course (5 transactions: create a loan key, move the Borrowing thread on, borrow, manage, close) was built by step 1\'s builders against Paryon\'s outputs as they were and the wallet\'s actual coin, chained, and every input of every transaction passed the virtual machine (2026 and 2025 rules, standard). The wallet then worked each transaction out again from the template, and evaluated it in the virtual machine before it was signed.');
+      const height = await lockHeight();
+      checkCourse(state, price, coin.utxo, ownerSeed, height);
+      const toMove = (state.borrowing.slice().sort((a, b) => Number(b.supply - a.supply))[0] as ParyonState['borrowing'][number]).period < periodAt(contracts().deployment, height);
+      note(`Before anything of the loan was sent, the whole course (${toMove ? '5 transactions: create a loan key, move the Borrowing thread on, borrow, manage, close' : '4 transactions: create a loan key, borrow, manage, close; the Borrowing thread was in the current period already'}) was built by step 1's builders against Paryon's outputs as they were and the wallet's actual coin, chained, and every input of every transaction passed the virtual machine (2026 and 2025 rules, standard). The wallet then worked each transaction out again from the template, and evaluated it in the virtual machine before it was signed.`);
       return undefined;
     });
 
@@ -868,22 +874,40 @@ try {
     }
     await walletSees(wallet, created);
 
-    const moved = await act(applications, 'move the Borrowing thread on', () => 'an action of the template: `updatePeriodState`, the lock time the highest height the node takes as final; the thread named by the page', async () => {
+    // The Borrowing thread is moved on to the current period, unless it is there already: then the loan is
+    // opened from it as it is, and its interest starts in that period all the same.
+    if (facts.steps['move the Borrowing thread on'] === undefined && facts.threadWasCurrent === undefined) {
       const state = await readParyon();
       const thread = state.borrowing.slice().sort((a, b) => Number(b.supply - a.supply))[0] as ParyonState['borrowing'][number];
       const height = await lockHeight();
-      amount('Borrowing thread', `period ${thread.period} moved to ${periodAt(contracts().deployment, height)} (lock time ${height}); the loan's interest starts there`);
-      return asked(movePeriodRequest(presented(), contracts(), { borrowing: thread, lockHeight: height }));
-    });
-    await walletSees(wallet, moved);
+      if (thread.period >= periodAt(contracts().deployment, height)) {
+        facts.threadWasCurrent = `${hex(thread.transactionHash)}:${thread.index}`;
+        amount('Borrowing thread', `in period ${thread.period} already, the period of the highest height the node takes as final (${height}); the loan's interest starts there`);
+        note(`The Borrowing thread was not moved on: the thread the run takes, the one with the largest supply of the deployment's ${state.borrowing.length}, was in period ${thread.period} already, the current one. The template's action "Bring Paryon up to date" (\`movePeriod\`) was therefore not needed in this run.`, 'thread current');
+        keep();
+      }
+    }
+    let moved: string | undefined;
+    if (facts.threadWasCurrent === undefined) {
+      moved = await act(applications, 'move the Borrowing thread on', () => 'an action of the template: `updatePeriodState`, the lock time the highest height the node takes as final; the thread named by the page', async () => {
+        const state = await readParyon();
+        const thread = state.borrowing.slice().sort((a, b) => Number(b.supply - a.supply))[0] as ParyonState['borrowing'][number];
+        const height = await lockHeight();
+        amount('Borrowing thread', `period ${thread.period} moved to ${periodAt(contracts().deployment, height)} (lock time ${height}); the loan's interest starts there`);
+        return asked(movePeriodRequest(presented(), contracts(), { borrowing: thread, lockHeight: height }));
+      });
+      await walletSees(wallet, moved);
+    }
 
     let borrowedNote = '';
     const opened = await act(applications, 'borrow', () => borrowedNote, async () => {
       const state = await readParyon();
       const price = await prices(state);
       const thread = priceThread(state);
-      const borrowing = state.borrowing.find((entry) => hex(entry.transactionHash) === moved && entry.index === 0);
-      if (borrowing === undefined) throw new Error('the Borrowing thread the run moved on was spent by someone else; the run stops before borrowing');
+      // The thread the run moved on; or, when none needed moving, one that is in the current period now.
+      const current = periodAt(contracts().deployment, await lockHeight());
+      const borrowing = moved !== undefined ? state.borrowing.find((entry) => hex(entry.transactionHash) === moved && entry.index === 0) : state.borrowing.filter((entry) => entry.period >= current).sort((a, b) => Number(b.supply - a.supply))[0];
+      if (borrowing === undefined) throw new Error(moved !== undefined ? 'the Borrowing thread the run moved on was spent by someone else; the run stops before borrowing' : 'no Borrowing thread is in the current period any more; the run stops before borrowing, and the same command continues it');
       const fee = borrowingFee(DEBT, thread.state.price);
       const own = (await wallet.parts.ownCoins()).reduce((sum, coin) => sum + coin.utxo.output.valueSatoshis, 0n);
       const target = collateralAtRatio(DEBT, price.lower, TARGET_PERCENT);
@@ -1108,7 +1132,7 @@ try {
     const borrowFee = BigInt(facts.amounts?.['borrowing fee (sat)'] ?? '0');
     amount('Funder', `${sat(BigInt(facts.funderAtStart as string))} before the run, ${sat(total)} after it`);
     const lost = local ? 0n : borrowFee;
-    amount('Cost of the run', `${sat(spent)}: ${local ? `no borrowing fee (the ${sat(borrowFee)} went to the run's own fee address on the local chain and came back)` : `the borrowing fee ${sat(borrowFee)}`}, network fees ${sat(networkFees)} for the ${facts.log.length} transactions above, interest 0, and ${sat(spent - lost - networkFees)} otherwise${facts.log.some((entry) => entry.step.endsWith(', not used')) ? ' (the satoshis a loan key that was not used left in Paryon\'s contracts with its waiting key and proof of origin; anything another run paid from the same key meanwhile would be here too)' : ''}`);
+    amount('Cost of the run', `${sat(spent)}: ${local ? `no borrowing fee (the ${sat(borrowFee)} went to the run's own fee address on the local chain and came back)` : `the borrowing fee ${sat(borrowFee)}`}, network fees ${sat(networkFees)} for the ${facts.log.length} transactions above, interest 0, and ${sat(spent - lost - networkFees)} otherwise (the fee of the payment that gave the recoverer its balance, which is not among the transactions above, and what an interest payment by someone else took from the loan while it was open)${facts.log.some((entry) => entry.step.endsWith(', not used')) ? ' (the satoshis a loan key that was not used left in Paryon\'s contracts with its waiting key and proof of origin; anything another run paid from the same key meanwhile would be here too)' : ''}`);
     note(`The funding address held ${facts.funderAtStart} satoshis before the run and holds ${total} after it. ${left.length === 0 ? 'Nothing is left anywhere else: no PUSD (all of it was burned at the closing), no loan key (destroyed by the funder), no coin at the wallet\'s or the recoverer\'s addresses, and no loan.' : `LEFT BEHIND: ${left.join('; ')}.`}`);
     if (left.length > 0) throw new Error(`coins were left behind: ${left.join('; ')}`);
   }

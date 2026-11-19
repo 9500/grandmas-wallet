@@ -73,7 +73,8 @@ describe('a ParyonUSD loan by script on chipnet, as recorded', () => {
 
 const TEMPLATE_NAME = 'stage-9-template-chipnet.md';
 const templateRecorded = existsSync(new URL(`../docs/runs/${TEMPLATE_NAME}`, import.meta.url));
-const TEMPLATE_STEPS = ['fund the wallet', 'create', 'pay the wallet', 'create a loan key', 'move the Borrowing thread on', 'borrow', 'manage, adding collateral', 'request', 'complete', 'sweep', 'close', 'send the key on', 'close the wallet', 'return the allowance', 'destroy the key'];
+const MOVE = 'move the Borrowing thread on';
+const TEMPLATE_STEPS = ['fund the wallet', 'create', 'pay the wallet', 'create a loan key', 'borrow', 'manage, adding collateral', 'request', 'complete', 'sweep', 'close', 'send the key on', 'close the wallet', 'return the recoverer\'s balance', 'destroy the key'];
 
 const readTemplateRun = () => {
   const record = readFileSync(new URL(`../docs/runs/${TEMPLATE_NAME}`, import.meta.url), 'utf8');
@@ -94,15 +95,18 @@ describe('a ParyonUSD loan through the wallet from the template on chipnet, as r
   it.runIf(templateRecorded)('PY02: the loan\'s actions were actions of the Paryon template, carried out by the wallet on the engine, accepted by Paryon\'s contracts on chipnet', () => {
     const { record, rows } = readTemplateRun();
     expect(record).toMatch(/^# Stage 9 run on chipnet \(run E, steps 2 and 3\)/);
-    expect([...new Set(rows.map((row) => row.step).filter((step) => step !== 'prepare' && !step.endsWith(', not used')))]).toEqual(TEMPLATE_STEPS);
+    expect([...new Set(rows.map((row) => row.step).filter((step) => step !== 'prepare' && !step.endsWith(', not used') && step !== MOVE))]).toEqual(TEMPLATE_STEPS);
     for (const row of rows) {
       expect(row.transactionId).toMatch(/^[0-9a-f]{64}$/);
       expect(row.fee).toBe(row.bytes);
     }
     expect(new Set(rows.map((row) => row.transactionId)).size).toBe(rows.length);
-    for (const step of ['create a loan key', 'move the Borrowing thread on', 'borrow', 'manage, adding collateral', 'close']) expect(rows.find((row) => row.step === step)?.note).toMatch(/^an action of the template/);
+    // The Borrowing thread is moved on only when it is behind the current period; a run that found it there says so.
+    const moved = rows.some((row) => row.step === MOVE);
+    if (!moved) expect(record).toMatch(/The Borrowing thread was not moved on: .* was in period \d+ already, the current one\./);
+    for (const step of ['create a loan key', ...(moved ? [MOVE] : []), 'borrow', 'manage, adding collateral', 'close']) expect(rows.find((row) => row.step === step)?.note).toMatch(/^an action of the template/);
     expect(record).toMatch(/built by the unmodified engine, which signed the wallet's own inputs/);
-    expect(record).toMatch(/the whole course \(5 transactions: .*\) was built by step 1's builders against Paryon's outputs/);
+    expect(record).toMatch(/the whole course \([45] transactions: .*\) was built by step 1's builders against Paryon's outputs/);
     expect(record).toMatch(/The way out was proven right after the loan was opened, twice: the closing through the template .* and the closing by plain script .* passed the virtual machine and testmempoolaccept on the owner's node/);
     expect(record).toMatch(/After managing, the key is at the same address as before \(true\)/);
     expect(record).toMatch(/^Outcome: passed\./m);
