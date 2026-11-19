@@ -190,7 +190,7 @@ const MoveOut = ({ owner, onBack }: { owner: Owner; onBack: () => void }) => {
       <Card>
         {preparation === undefined ? (
           <div class="stack-s">
-            <p>On the new phone, open this wallet's page and choose "Move from my other phone". It shows a link. Open that link on this phone, or paste it here.</p>
+            <p>On the new phone, open this wallet's page and choose "I still have my old phone". It shows a link. Open that link on this phone, or paste it here.</p>
             <Field label="The new phone's link" id="prepare" error={task.error?.name === 'read' ? task.error.message : undefined}>
               <WithScan filter={PREPARE_LINK} onScan={setPasted}>
                 <TextArea id="prepare" value={pasted} onInput={setPasted} placeholder="https://…#prepare=…" />

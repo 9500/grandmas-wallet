@@ -6,8 +6,8 @@ import { type Session, kept } from './session.js';
 export type Beginning = 'bank' | 'friend' | 'takeover' | 'move' | 'restore';
 
 /**
- * The first screen of a phone that keeps no wallet: a wallet set up by the user's bank, or by someone they trust;
- * and, smaller, the ways back to a wallet the user had.
+ * The first screen of a phone that keeps no wallet, in two groups the user can tell apart by their own situation: a new
+ * wallet set up by the user's bank or by someone they trust; and, quieter, the ways back to a wallet the user had.
  */
 export const Welcome = ({ session, onChoose }: { session: Session; onChoose: (beginning: Beginning) => void }) => {
   const lost = kept('lostSetUp');
@@ -25,25 +25,31 @@ export const Welcome = ({ session, onChoose }: { session: Session; onChoose: (be
           </Info>
         </Notice>
       )}
-      <div class="choices">
-        <button type="button" class="choice-card primary" onClick={() => onChoose('bank')} data-testid="begin-bank">
-          I have a code from my bank
-        </button>
-        <button type="button" class="choice-card primary" onClick={() => onChoose('friend')} data-testid="begin-friend">
-          Someone I trust is helping me
-        </button>
-      </div>
-      <div class="welcome-more">
-        <button type="button" class="link" onClick={() => onChoose('takeover')} data-testid="begin-takeover">
-          I lost my phone
-        </button>
-        <button type="button" class="link" onClick={() => onChoose('move')}>
-          Move from my other phone
-        </button>
-        <button type="button" class="link" onClick={() => onChoose('restore')}>
-          Restore from my own backup
-        </button>
-      </div>
+      <section class="welcome-group" aria-labelledby="welcome-new">
+        <h2 id="welcome-new">New wallet</h2>
+        <div class="choices">
+          <button type="button" class="choice-card primary" onClick={() => onChoose('bank')} data-testid="begin-bank">
+            I have a code from my bank
+          </button>
+          <button type="button" class="choice-card primary" onClick={() => onChoose('friend')} data-testid="begin-friend">
+            Someone I trust is setting it up
+          </button>
+        </div>
+      </section>
+      <section class="welcome-group" aria-labelledby="welcome-back">
+        <h2 id="welcome-back">I had a wallet before</h2>
+        <div class="welcome-list">
+          <button type="button" onClick={() => onChoose('takeover')} data-testid="begin-takeover">
+            I lost my phone
+          </button>
+          <button type="button" onClick={() => onChoose('move')}>
+            I still have my old phone
+          </button>
+          <button type="button" onClick={() => onChoose('restore')}>
+            I have my own backup
+          </button>
+        </div>
+      </section>
       {test && <p class="small muted center">Test network ({session.environment.network}). Its coins have no value.</p>}
     </div>
   );

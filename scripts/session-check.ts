@@ -145,7 +145,7 @@ try {
   const welcome = await open([], PHONE);
   await welcome.goto(walletPage('welcome'));
   await welcome.getByText('I have a code from my bank').waitFor();
-  check(await welcome.getByText('Someone I trust is helping me').isVisible(), 'the wallet\'s first screen offers the bank and the helper, and the ways back to a wallet');
+  check(await welcome.getByText('Someone I trust is setting it up').isVisible(), 'the wallet\'s first screen offers the bank and the helper, and the ways back to a wallet');
   await shoot(welcome, 'wallet-welcome');
   await welcome.goto(walletPage('ready'));
   await welcome.getByText('Your wallet is ready').waitFor();

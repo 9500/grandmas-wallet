@@ -25,7 +25,7 @@ On the recoverer's page, choose **I'm helping someone I know** (a bank chooses *
 ## 2. Anna sets up Grandma's wallet
 
 1. On the recoverer's page press **Help someone set up**, enter whose wallet it is (Grandma) and press **Show the code**.
-2. On the old phone, open the wallet and choose **Someone I trust is helping me**. The scanner opens: point it at the code. The phone shows **Setting up…**, then **Waiting for Anna to say yes**.
+2. On the old phone, open the wallet and choose **Someone I trust is setting it up**. The scanner opens: point it at the code. The phone shows **Setting up…**, then **Waiting for Anna to say yes**.
 3. On the recoverer's page: **Set up Grandma's wallet with …?** Press **Set it up**.
 4. The phone shows **Your wallet is ready**, with the starting balance and **Protected by Anna**. Press **Open my wallet**. The wallet does not wait for a block: the starting balance can be spent at once.
 
@@ -67,9 +67,9 @@ If you now open the old phone's profile again, it says **This wallet now belongs
 
 Under **Recovery** on the wallet page:
 
-- **Move to a new phone** while the old one still works: no waiting period. The new phone starts with "Move from my other phone"; the old one makes one link for the recoverer and one for the new phone.
+- **Move to a new phone** while the old one still works: no waiting period. The new phone starts with "I still have my old phone"; the old one makes one link for the recoverer and one for the new phone.
 - **Change your recoverer.** A second recoverer page (another profile) shows its code under its set-up screen; the wallet takes it, sends it a complete kit over the connection, the new recoverer keeps it "as the new recoverer", and the wallet then names them. The first recoverer's key stops working on the wallet.
-- **Your own backup:** twelve words and the wallet's identity. On another profile, "Restore from my own backup" opens the same wallet at once, with no waiting period and without the recoverer.
+- **Your own backup:** twelve words and the wallet's identity. On another profile, "I have my own backup" opens the same wallet at once, with no waiting period and without the recoverer.
 - **Refuse requests without asking** is on unless you turn it off: while the page is open, a request nobody asked for is refused by the phone itself, and the wallet's activity shows it.
 - **Technical details** shows the identity, the keys' fingerprints, the servers and what this phone sent, and erases the phone.
 

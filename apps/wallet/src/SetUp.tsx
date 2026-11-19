@@ -26,6 +26,7 @@ export const SetUp = ({ session, kind, onBack, onDone }: { session: Session; kin
     return (
       <ScanCode
         title={setUp.kind === 'bank' ? 'Scan your bank\'s code' : 'Scan the code on their screen'}
+        hint={<TryItHint environment={session.environment} kind={setUp.kind} />}
         onBack={() => {
           keep('setUp', undefined);
           onBack();
@@ -55,6 +56,23 @@ export const SetUp = ({ session, kind, onBack, onDone }: { session: Session; kin
       }}
       onBack={onBack}
     />
+  );
+};
+
+/**
+ * On a test network only, a line for someone trying the wallet out without a bank or a helper: this deployment's own
+ * recoverer page, where they can play that part themselves. A wallet on the main network names no recoverer.
+ */
+export const TryItHint = ({ environment, kind }: { environment: Session['environment']; kind: 'bank' | 'friend' }) => {
+  if (environment.network === 'mainnet' || environment.recovererUrl === '') return null;
+  return (
+    <>
+      Trying it out? Open{' '}
+      <a href={environment.recovererUrl} target="_blank" rel="noopener">
+        {new URL(environment.recovererUrl).host}
+      </a>{' '}
+      on another screen and act as {kind === 'bank' ? 'the bank' : 'the trusted person'}.
+    </>
   );
 };
 

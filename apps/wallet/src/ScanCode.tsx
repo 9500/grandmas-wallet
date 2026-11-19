@@ -1,4 +1,5 @@
 import { Button, Field, More, TextArea, useTask } from '@grandmas-wallet/ui';
+import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
 import { RECOVERER_LINK } from './scan.js';
@@ -7,9 +8,9 @@ import { type StoredRecipient, keep, kept, readRecipientLink } from './session.j
 
 /**
  * Scanning the recoverer's code: the scanner opens at once. A phone without a camera, or a test, can paste the code's
- * text instead. A code the page was opened with is taken as if scanned.
+ * text instead. A code the page was opened with is taken as if scanned. A hint, if given, is shown under the actions.
  */
-export const ScanCode = ({ title, onRead, onBack }: { title: string; onRead: (recipient: StoredRecipient) => void; onBack: () => void }) => {
+export const ScanCode = ({ title, hint, onRead, onBack }: { title: string; hint?: ComponentChildren; onRead: (recipient: StoredRecipient) => void; onBack: () => void }) => {
   const [open, setOpen] = useState(() => kept('incoming')?.kind !== 'recoverer');
   const [text, setText] = useState('');
   const task = useTask();
@@ -34,6 +35,7 @@ export const ScanCode = ({ title, onRead, onBack }: { title: string; onRead: (re
         </Button>
       </div>
       {task.error !== undefined && <p class="small set-up-problem">{task.error.message}</p>}
+      {hint !== undefined && <p class="small set-up-hint">{hint}</p>}
       <More summary="No camera?">
         <Field label="The code's text" id="code-text">
           <TextArea id="code-text" value={text} onInput={setText} placeholder="https://…#recoverer=…" />

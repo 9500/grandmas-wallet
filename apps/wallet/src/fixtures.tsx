@@ -6,7 +6,7 @@ import { type Output, binToHex, encodeLockingBytecodeP2sh32 as p2sh32, generateB
 import { type ActionPreview, type HeldToken, type TemplateSummary, type TokenNaming, TokenNames, type TokenSendQuote, type TokenSendRequest, type UserBackup, userBackupText, walletTemplateNumbers } from '@grandmas-wallet/app';
 import { type ChallengeDelay, INPUT_BYTES, InsufficientFundsError, deriveSeedKeys, smallestOutputValue, transactionBytes } from '@grandmas-wallet/core';
 import { sealPackage, signEnrollmentRequest } from '@grandmas-wallet/enrollment';
-import { Button, Card, Field, Frame, PageHead, Pill, TextArea, TextInput, formatTime } from '@grandmas-wallet/ui';
+import { type Environment, Button, Card, Field, Frame, PageHead, Pill, TextArea, TextInput, formatTime } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
@@ -22,7 +22,7 @@ import { RECOVERER_LINK, paymentAddress } from './scan.js';
 import { ScanDialog, WithScan } from './Scanner.js';
 import { ScanCode } from './ScanCode.js';
 import { type Session, type StoredRecipient, keep } from './session.js';
-import { Ready, SettingUpView } from './SetUp.js';
+import { Ready, SettingUpView, TryItHint } from './SetUp.js';
 import { TokenNamesContext } from './token-words.js';
 import { Welcome } from './Welcome.js';
 
@@ -319,6 +319,8 @@ const ScanFields = () => {
  * not answered. The fixtures have no backup stores and no engine: the request is made without writing the viewing
  * key to a store, and a wallet that comes back is not opened.
  */
+const FIXTURE_ENVIRONMENT: Environment = { network: 'chipnet', walletUrl: '', recovererUrl: '', stores: [], chain: [], relays: [], explorer: '', secondsPerBlock: 60 };
+
 const SetUpFixture = ({ kind }: { kind: 'bank' | 'friend' }) => {
   const [recipient, setRecipient] = useState<StoredRecipient | undefined>();
   const [stage, setStage] = useState('meeting');
@@ -342,7 +344,7 @@ const SetUpFixture = ({ kind }: { kind: 'bank' | 'friend' }) => {
     };
     run().catch((error: unknown) => setProblem((error as Error).message));
   }, [recipient]);
-  if (recipient === undefined) return <ScanCode title={kind === 'bank' ? 'Scan your bank\'s code' : 'Scan the code on their screen'} onRead={setRecipient} onBack={() => undefined} />;
+  if (recipient === undefined) return <ScanCode title={kind === 'bank' ? 'Scan your bank\'s code' : 'Scan the code on their screen'} hint={<TryItHint environment={{ ...FIXTURE_ENVIRONMENT, recovererUrl: 'https://recoverer.example/' }} kind={kind} />} onRead={setRecipient} onBack={() => undefined} />;
   if (created) return <Ready name={recipient.name} startingSatoshis={20_000n} onOpen={() => undefined} />;
   return <SettingUpView name={recipient.name || 'your helper'} kind={kind} stage={stage} challengeDelay={delay} problem={problem} onRetry={() => setProblem(undefined)} onAgain={() => setRecipient(undefined)} />;
 };
@@ -539,7 +541,7 @@ const navigation =
       };
 
 render(
-  <Frame brand="Grandma's Wallet" role="Fixtures" environment={{ network: 'chipnet', walletUrl: '', recovererUrl: '', stores: [], chain: [], relays: [], explorer: '', secondsPerBlock: 60 }} {...navigation}>
+  <Frame brand="Grandma's Wallet" role="Fixtures" environment={FIXTURE_ENVIRONMENT} {...navigation}>
     <div class="stack">
       {show === 'send-token' ? (
         <>

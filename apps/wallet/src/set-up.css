@@ -15,5 +15,17 @@
 
 .welcome .set-up-head { margin: 24px 0 8px; }
 .welcome .choice-card { min-height: 64px; justify-content: center; align-items: center; text-align: center; font-size: 18px; }
-.welcome-more { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 20px; padding-top: 8px; }
-.welcome-more .link { font-size: 15px; }
+.welcome-group { display: grid; gap: 10px; }
+.welcome-group h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.welcome-group + .welcome-group { margin-top: 12px; }
+.welcome-list { display: grid; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--surface); overflow: hidden; }
+.welcome-list button {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 52px; padding: 0 18px;
+  background: none; border: 0; border-radius: 0; box-shadow: none; color: var(--ink); font: inherit; font-size: 16px; font-weight: 500; text-align: left; cursor: pointer;
+}
+.welcome-list button + button { border-top: 1px solid var(--line); }
+.welcome-list button::after { content: '›'; color: var(--muted); font-size: 22px; line-height: 1; }
+.welcome-list button:hover:not(:disabled) { background: var(--sunken); }
+.welcome-list button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.set-up-hint { text-align: center; color: var(--muted); margin: 0; }
+.set-up-hint a { color: var(--accent); font-weight: 600; }

@@ -197,7 +197,7 @@ const toStepNine = async (): Promise<{ recoverer: Device; newer: Device } | unde
   if (!begin('The wallet moves to a newer phone, the new phone still working')) return;
   const newer = await device('newer-phone');
   await newer.page.goto(WALLET);
-  await click(newer.page, /Move from my other phone/);
+  await click(newer.page, /I still have my old phone/);
   await click(newer.page, 'Start');
   const prepareLink = await valueOf(newer.page, 'prepare-link');
   await theCourse.keepStorage(newer);
@@ -300,7 +300,7 @@ const lastSteps = async (recoverer: Device, newer: Device): Promise<void> => {
   await shot(newer.page, 'wallet-details');
   const restored = await device('restored-phone');
   await restored.page.goto(WALLET);
-  await click(restored.page, /Restore from my own backup/);
+  await click(restored.page, /I have my own backup/);
   await restored.page.getByLabel('Your backup').fill(backup);
   await click(restored.page, /^Restore$/);
   await see(restored.page, 'Bringing your coins over');

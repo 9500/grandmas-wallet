@@ -70,7 +70,7 @@ const CodeScreen = ({ session, bank, label, onDone }: { session: Session; bank: 
   return (
     <div class="stack">
       <PageHead title={bank ? 'New customer' : label === '' ? 'Set up their wallet' : `Set up ${label}'s wallet`}>
-        {bank ? 'The customer opens the wallet, taps "I have a code from my bank" and scans this code. Their wallet is set up at once.' : 'On their phone they open the wallet, tap "Someone I trust is helping me" and scan this code.'}
+        {bank ? 'The customer opens the wallet, taps "I have a code from my bank" and scans this code. Their wallet is set up at once.' : 'On their phone they open the wallet, tap "Someone I trust is setting it up" and scan this code.'}
       </PageHead>
       <div class="grid two">
         <Card>

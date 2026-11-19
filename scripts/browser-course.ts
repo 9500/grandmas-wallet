@@ -651,9 +651,9 @@ export const firstSteps = async (
   log(`   Anna's code carries her name, her key and a session, ${code.length} characters`);
   const old = await device('old-phone');
   await old.page.goto(WALLET);
-  await see(old.page, 'Someone I trust is helping me');
+  await see(old.page, 'Someone I trust is setting it up');
   await shoot(old.page, 'wallet-welcome');
-  await click(old.page, 'Someone I trust is helping me');
+  await click(old.page, 'Someone I trust is setting it up');
   await pasteCode(old.page, code);
   await beforeFunding(old);
   await see(recoverer.page, 'Set up Grandma\'s wallet with', 120_000);
