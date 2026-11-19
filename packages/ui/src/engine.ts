@@ -69,7 +69,7 @@ const engineServers = async (environment: Environment): Promise<unknown[]> => {
             asertAnchoredTarget: REGTEST_TARGET,
             asertAnchoredParentTimestamp: 1296688602,
             asertHalfLifeInSeconds: 3600,
-            asertIdealBlockTimeInSeconds: 600,
+            asertIdealBlockTimeSchedule: [{ fromHeight: 0, idealBlockTimeInSeconds: 600 }],
           },
         },
       },

@@ -147,6 +147,10 @@ The change was applied to the installed builds (`dist/index.mjs` of both package
 
 The script that applies or reverts the change is `spikes/xo-engine/patches/chipnet-faster-blocks.mjs` in this repository.
 
+## Fixed upstream
+
+Engine `0.1.1-next.18170561234` (19 Nov 2026) depends on `@electrum-cash/application` `0.5.3-development.18109001223` and `@electrum-cash/checkpoint` `0.8.0`, which carry chipnet's change of block time at height 332451. With that release and no local change, the header check reached the tip (338566) within ten seconds of starting. This repository uses that release, and the script above is no longer applied anywhere; it matches the earlier packages only.
+
 ## A related observation
 
 With the fix applied, the same "Could not validate a block header … ahead of the current checkpoint" errors still appear if transaction updates arrive during the first seconds after start, before header verification has caught up with the tip. Whether those updates are processed again later was not checked.

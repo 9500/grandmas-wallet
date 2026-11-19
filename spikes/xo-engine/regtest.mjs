@@ -57,7 +57,7 @@ export const regtestServers = async () => {
       difficultyParameters: {
         minimumDifficultyTarget: REGTEST_TARGET, allowMinimumDifficultyBlocks: true, difficultyAlgorithm: 'aserti3-2d',
         asertActivationHeight: 1, asertAnchoredBlockHeight: 0, asertAnchoredTarget: REGTEST_TARGET,
-        asertAnchoredParentTimestamp: 1296688602, asertHalfLifeInSeconds: 3600, asertIdealBlockTimeInSeconds: 600,
+        asertAnchoredParentTimestamp: 1296688602, asertHalfLifeInSeconds: 3600, asertIdealBlockTimeSchedule: [{ fromHeight: 0, idealBlockTimeInSeconds: 600 }],
       },
     },
   }];

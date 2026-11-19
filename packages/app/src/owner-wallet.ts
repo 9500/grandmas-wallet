@@ -809,6 +809,9 @@ export class OwnerWallet {
     // A server took it: the network has it, and the wallet is in use from here on.
     this.store({ creation: { ...this.state.creation, createSeen: true } });
     await this.backend.knowController(identity, 'owner');
+    // The key holder lists what the creation left a moment after it was sent. The wallet is in use from here
+    // on, so that moment is waited for; a wallet whose coin is slow to appear is created all the same.
+    await this.waitForCoin(async () => (await this.coins()).find((candidate) => hex(candidate.utxo.transactionHash) === prepared.transactionId && candidate.utxo.index === 1)).catch(() => undefined);
     return this.creationStep();
   }
 

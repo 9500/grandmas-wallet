@@ -5,8 +5,7 @@
 # of their own.
 #
 # usage: deploy/preview.sh <command>
-#   build           build the four pages (with the local fix for the engine's header check on chipnet applied
-#                   while building, and taken out again afterwards)
+#   build           build the four pages
 #   start local     serve the pages for the local node (regtest); a block is made every 15 seconds
 #   start chipnet   serve the pages for chipnet
 #   stop            stop everything the preview started
@@ -42,8 +41,6 @@ launch() { # name, command...
 
 case "${1:-}" in
   build)
-    "$NODE" spikes/xo-engine/patches/chipnet-faster-blocks.mjs
-    trap '"$NODE" spikes/xo-engine/patches/chipnet-faster-blocks.mjs --revert' EXIT
     for app in wallet recoverer jar loan; do (cd "apps/$app" && npx vite build); done
     ;;
   start)

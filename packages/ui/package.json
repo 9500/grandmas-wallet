@@ -17,7 +17,7 @@
     "@grandmas-wallet/chipnet": "0.0.0",
     "@grandmas-wallet/core": "0.0.0",
     "@grandmas-wallet/enrollment": "0.0.0",
-    "@xo-cash/engine": "0.1.1-next.18029697917",
+    "@xo-cash/engine": "0.1.1-next.18170561234",
     "preact": "^11.2.0",
     "qrcode-generator": "^2.0.4",
     "vite": "^8.3.8",

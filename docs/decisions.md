@@ -45,7 +45,7 @@ Use the versions the XO web dev wallet pins, so invitations produced here load i
 | Package | Version |
 | --- | --- |
 | `@bitauth/libauth` | 3.1.0-next.8 |
-| `@xo-cash/engine` | 0.1.1-next.18029697917 |
+| `@xo-cash/engine` | 0.1.1-next.18170561234 (from 19 Nov 2026; 0.1.1-next.18029697917 before) |
 | `@xo-cash/state` | 0.0.5 |
 | `@xo-cash/templates` | 0.0.12 |
 | `@xo-cash/types` | 0.0.8 |
