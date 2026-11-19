@@ -130,7 +130,7 @@ if (phase === undefined) {
       `- The XO invitation behind each transaction an account of the run sent, as the engine serializes it for sharing: \`${invitations.slice(root.length)}\`, with \`index.json\` naming the template, action and role of each.`,
       ...(local ? [] : [
         '- The engine ran as published, with no local change.',
-        '- The engine was given one server. With three, the first start of this run ended while waiting for a block: the engine\'s network package asks every server for a new block\'s header and takes the first answer, and a server that had not seen the block yet answered first, with nothing. The run was continued with the same command.',
+        '- The engine was given one server. With three, the first start of the run of 17 November ended while waiting for a block: the engine\'s network package asks every server for a new block\'s header and takes the first answer, and a server that had not seen the block yet answered first, with nothing.',
       ]),
       '',
       '| Step | Transaction | Invitation | Bytes | Fee (sat) | Note |',

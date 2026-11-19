@@ -1,0 +1,27 @@
+[
+  {
+    "file": "grandmas-wallet-controller.json",
+    "name": "Grandma's Wallet controller",
+    "templateIdentifier": "a6998934ebc12728630ccd54e4d28f879484f6c4432f855eb14499c16bf59fc8"
+  },
+  {
+    "file": "grandmas-wallet-givenOut.json",
+    "name": "Grandma's Wallet addresses",
+    "templateIdentifier": "a67fcc2d0b479552a03669b3ac5a95da53b1490489364127898b01199b2f475c"
+  },
+  {
+    "file": "grandmas-wallet-change.json",
+    "name": "Grandma's Wallet change",
+    "templateIdentifier": "c7419f58e404da2a9847df27cebd6e38cf3240f66e46e4e94a36d0958f72acd1"
+  },
+  {
+    "file": "grandmas-wallet-actions.json",
+    "name": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e"
+  },
+  {
+    "file": "grandmas-wallet-coins.json",
+    "name": "Wallet (P2PKH)",
+    "templateIdentifier": "a31eb85891dbf248f1709a92b0fa7e3e6fdc518e6b34e376b197ed7f12dbc672"
+  }
+]

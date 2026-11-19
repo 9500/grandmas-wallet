@@ -242,7 +242,7 @@ if (phase === undefined && !emergency && !checkCourseOnly) {
       `- Wallet identity: \`${facts.identity}\``,
       `- Loan key (token category): \`${facts.keyCategory}\``,
       `- Template "${JSON.parse(presented.template).name as string}" \`${presented.names.identifier}\`, content \`${presented.names.contentHash}\`; declaration \`${presented.names.declaration}\``,
-      `- Repository at commit \`${revision}\`, with the uncommitted work of stage 9 steps 2 and 3`,
+      `- Repository at commit \`${revision}\``,
       `- Started ${facts.startedAt}`,
       `- The XO invitation behind each transaction an account of the run sent, as the engine serializes it for sharing: \`${invitations.slice(root.length)}\`, with \`index.json\` naming the template, action and role of each.`,
       ...(local ? [] : ['- The engine ran as published, with no local change, given one server.']),

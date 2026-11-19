@@ -1,0 +1,86 @@
+{
+  "$schema": "https://libauth.org/schemas/wallet-template-v0.schema.json",
+  "name": "Grandma's Wallet addresses",
+  "description": "Addresses the wallet gives out to be paid.",
+  "version": "1",
+  "supported": [
+    "BCH_2026_05"
+  ],
+  "defaults": {
+    "address": {
+      "lockingScript": "addressLockingScript",
+      "role": "owner",
+      "generate": [
+        "addressKey"
+      ],
+      "variables": [
+        {
+          "tag": null
+        }
+      ]
+    }
+  },
+  "roles": {
+    "owner": {
+      "name": "Owner",
+      "description": "Holds the wallet's seed and spends from it."
+    }
+  },
+  "start": [],
+  "actions": {},
+  "transactions": {},
+  "inputs": {
+    "spendInput": {
+      "name": "Coin",
+      "description": "A coin of the wallet, spent by the key of its address.",
+      "unlockingScript": "unlockSpend"
+    }
+  },
+  "outputs": {},
+  "lockingScripts": {
+    "addressLockingScript": {
+      "name": "Recoverable address",
+      "description": "Spent by its own key; the wallet's current owner can also move it through the controller.",
+      "lockingType": "p2sh",
+      "lockingBytecode": "addressBytecode",
+      "unlockingBytecode": "unlockSpend",
+      "state": {
+        "variables": [
+          "tag"
+        ]
+      },
+      "roles": {
+        "owner": {
+          "state": {
+            "secrets": [
+              "addressKey"
+            ]
+          },
+          "balance": {
+            "satoshis": true,
+            "fungibleTokens": true,
+            "nonfungibleTokens": true
+          },
+          "selectable": true,
+          "actions": []
+        }
+      }
+    }
+  },
+  "scripts": {
+    "addressBytecode": "<$(<addressKey.public_key> OP_HASH160)> <tag> 0x5279009c635379a97b8872ac7777677b519d7b82012088537a820120887800ce78517e8800cf8201459d76517f75518800d17b517e8800d20201007b01317f75527f777e1400000000000000000000000000000000000000007e887eaa877768",
+    "unlockSpend": "<addressKey.schnorr_signature.all_outputs> <addressKey.public_key> <0>"
+  },
+  "variables": {
+    "addressKey": {
+      "name": "Address key",
+      "description": "The key of one address.",
+      "type": "private_key"
+    },
+    "tag": {
+      "name": "Address tag",
+      "description": "Ties the address to the wallet without showing which.",
+      "type": "bytes"
+    }
+  }
+}

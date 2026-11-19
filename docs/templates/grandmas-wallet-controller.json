@@ -1,0 +1,568 @@
+{
+  "$schema": "https://libauth.org/schemas/wallet-template-v0.schema.json",
+  "name": "Grandma's Wallet controller",
+  "description": "The recovery controller of a wallet: its identity, its owner, its recoverer and the waiting period.",
+  "version": "1",
+  "supported": [
+    "BCH_2026_05"
+  ],
+  "defaults": {
+    "address": {
+      "lockingScript": "controllerLockingScript",
+      "role": "owner",
+      "variables": [
+        {
+          "identity": null
+        }
+      ]
+    },
+    "receive": {
+      "output": "recovererControllerOutput",
+      "role": "recoverer",
+      "variables": [
+        {
+          "identity": null
+        },
+        {
+          "nextState": null
+        }
+      ]
+    }
+  },
+  "roles": {
+    "owner": {
+      "name": "Owner",
+      "description": "Holds the wallet's seed and spends from it."
+    },
+    "recoverer": {
+      "name": "Recoverer",
+      "description": "Can ask for the wallet to go to a new key and, after the waiting period, complete that."
+    }
+  },
+  "start": [
+    {
+      "action": "create",
+      "role": "owner",
+      "generate": [
+        "controllerKey"
+      ]
+    },
+    {
+      "action": "takeUp",
+      "role": "recoverer",
+      "generate": [
+        "recovererKey"
+      ]
+    }
+  ],
+  "actions": {
+    "create": {
+      "name": "Create the wallet",
+      "description": "Create the wallet's identity and its controller.",
+      "roles": {
+        "owner": {
+          "generate": [
+            "controllerKey"
+          ],
+          "requirements": {
+            "variables": [
+              "identity",
+              "nextState"
+            ],
+            "secrets": [
+              "controllerKey"
+            ]
+          }
+        }
+      },
+      "requirements": {
+        "participants": [
+          {
+            "role": "owner",
+            "slots": {
+              "min": 1,
+              "max": 1
+            }
+          }
+        ]
+      },
+      "transaction": "createTransaction"
+    },
+    "takeUp": {
+      "name": "Take up the recoverer's key",
+      "description": "Make the recoverer's key known to this account. Nothing is sent.",
+      "roles": {
+        "recoverer": {
+          "generate": [
+            "recovererKey"
+          ],
+          "requirements": {
+            "secrets": [
+              "recovererKey"
+            ]
+          }
+        }
+      },
+      "requirements": {
+        "participants": [
+          {
+            "role": "recoverer",
+            "slots": {
+              "min": 1,
+              "max": 1
+            }
+          }
+        ]
+      },
+      "transaction": "takeUpTransaction"
+    },
+    "approve": {
+      "name": "Approve",
+      "description": "The owner approves a transaction: a cancellation, a sweep, a spend from a vault address.",
+      "roles": {
+        "owner": {
+          "requirements": {
+            "variables": [
+              "identity",
+              "nextState"
+            ],
+            "secrets": [
+              "controllerKey"
+            ]
+          }
+        }
+      },
+      "requirements": {
+        "participants": [
+          {
+            "role": "owner",
+            "slots": {
+              "min": 1,
+              "max": 1
+            }
+          }
+        ]
+      },
+      "transaction": "approveTransaction"
+    },
+    "changeSettings": {
+      "name": "Change settings",
+      "description": "The owner replaces the owner key, the recoverer or the waiting period.",
+      "roles": {
+        "owner": {
+          "requirements": {
+            "variables": [
+              "identity",
+              "nextState",
+              "newOwnerKeyHash",
+              "newRecovererKeyHash",
+              "newDelay"
+            ],
+            "secrets": [
+              "controllerKey"
+            ]
+          }
+        }
+      },
+      "requirements": {
+        "participants": [
+          {
+            "role": "owner",
+            "slots": {
+              "min": 1,
+              "max": 1
+            }
+          }
+        ]
+      },
+      "transaction": "changeSettingsTransaction"
+    },
+    "close": {
+      "name": "Close the wallet",
+      "description": "The owner ends the wallet's identity and takes the controller's value. Vault addresses cannot be spent from afterwards.",
+      "roles": {
+        "owner": {
+          "requirements": {
+            "variables": [
+              "identity"
+            ],
+            "secrets": [
+              "controllerKey"
+            ]
+          }
+        }
+      },
+      "requirements": {
+        "participants": [
+          {
+            "role": "owner",
+            "slots": {
+              "min": 1,
+              "max": 1
+            }
+          }
+        ]
+      },
+      "transaction": "closeTransaction"
+    },
+    "requestRecovery": {
+      "name": "Request recovery",
+      "description": "The recoverer asks for the wallet to go to a new key. The waiting period starts.",
+      "roles": {
+        "recoverer": {
+          "requirements": {
+            "variables": [
+              "identity",
+              "nextState",
+              "proposedOwnerKeyHash"
+            ],
+            "secrets": [
+              "recovererKey"
+            ]
+          }
+        }
+      },
+      "requirements": {
+        "participants": [
+          {
+            "role": "recoverer",
+            "slots": {
+              "min": 1,
+              "max": 1
+            }
+          }
+        ]
+      },
+      "transaction": "requestRecoveryTransaction"
+    },
+    "completeRecovery": {
+      "name": "Complete recovery",
+      "description": "After the waiting period the recoverer completes: the key named in the request is the owner.",
+      "roles": {
+        "recoverer": {
+          "requirements": {
+            "variables": [
+              "identity",
+              "nextState",
+              "waitingSequence"
+            ],
+            "secrets": [
+              "recovererKey"
+            ]
+          }
+        }
+      },
+      "requirements": {
+        "participants": [
+          {
+            "role": "recoverer",
+            "slots": {
+              "min": 1,
+              "max": 1
+            }
+          }
+        ]
+      },
+      "transaction": "completeRecoveryTransaction"
+    }
+  },
+  "transactions": {
+    "createTransaction": {
+      "name": "Wallet created",
+      "description": "Wallet created",
+      "inputs": [],
+      "outputs": [
+        {
+          "output": "controllerOutput",
+          "outputIndex": 0
+        }
+      ],
+      "version": 2,
+      "locktime": 0
+    },
+    "takeUpTransaction": {
+      "name": "Recoverer's key taken up",
+      "description": "Recoverer's key taken up",
+      "inputs": [],
+      "outputs": [],
+      "version": 2,
+      "locktime": 0
+    },
+    "approveTransaction": {
+      "name": "Approved",
+      "description": "Approved",
+      "inputs": [
+        {
+          "input": "approveInput",
+          "inputIndex": 0
+        }
+      ],
+      "outputs": [
+        {
+          "output": "controllerOutput",
+          "outputIndex": 0
+        }
+      ],
+      "version": 2,
+      "locktime": 0
+    },
+    "changeSettingsTransaction": {
+      "name": "Settings changed",
+      "description": "Settings changed",
+      "inputs": [
+        {
+          "input": "changeSettingsInput",
+          "inputIndex": 0
+        }
+      ],
+      "outputs": [
+        {
+          "output": "controllerOutput",
+          "outputIndex": 0
+        }
+      ],
+      "version": 2,
+      "locktime": 0
+    },
+    "closeTransaction": {
+      "name": "Wallet closed",
+      "description": "Wallet closed",
+      "inputs": [
+        {
+          "input": "closeInput",
+          "inputIndex": 0
+        }
+      ],
+      "outputs": [],
+      "version": 2,
+      "locktime": 0
+    },
+    "requestRecoveryTransaction": {
+      "name": "Recovery requested",
+      "description": "Recovery requested",
+      "inputs": [
+        {
+          "input": "requestInput",
+          "inputIndex": 0
+        }
+      ],
+      "outputs": [
+        {
+          "output": "controllerOutput",
+          "outputIndex": 0
+        }
+      ],
+      "version": 2,
+      "locktime": 0
+    },
+    "completeRecoveryTransaction": {
+      "name": "Recovery completed",
+      "description": "Recovery completed",
+      "inputs": [
+        {
+          "input": "completeInput",
+          "inputIndex": 0
+        }
+      ],
+      "outputs": [
+        {
+          "output": "controllerOutput",
+          "outputIndex": 0
+        }
+      ],
+      "version": 2,
+      "locktime": 0
+    }
+  },
+  "inputs": {
+    "approveInput": {
+      "name": "Controller",
+      "description": "Controller",
+      "unlockingScript": "unlockApprove"
+    },
+    "changeSettingsInput": {
+      "name": "Controller",
+      "description": "Controller",
+      "unlockingScript": "unlockChangeSettings"
+    },
+    "closeInput": {
+      "name": "Controller",
+      "description": "Controller",
+      "unlockingScript": "unlockClose"
+    },
+    "requestInput": {
+      "name": "Controller",
+      "description": "Controller",
+      "unlockingScript": "unlockRequest"
+    },
+    "completeInput": {
+      "name": "Controller",
+      "description": "Controller",
+      "unlockingScript": "unlockComplete",
+      "sequenceNumber": "$(<waitingSequence>)"
+    }
+  },
+  "outputs": {
+    "controllerOutput": {
+      "name": "Controller",
+      "description": "Controller",
+      "lockingScript": "controllerLockingScript",
+      "valueSatoshis": "1000",
+      "token": {
+        "category": "$(<identity>)",
+        "amount": null,
+        "nft": {
+          "capability": "mutable",
+          "commitment": "$(<nextState>)"
+        }
+      }
+    },
+    "recovererControllerOutput": {
+      "name": "Controller",
+      "description": "Controller",
+      "lockingScript": "controllerLockingScript",
+      "valueSatoshis": "1000",
+      "token": {
+        "category": "$(<identity>)",
+        "amount": null,
+        "nft": {
+          "capability": "mutable",
+          "commitment": "$(<nextState>)"
+        }
+      }
+    }
+  },
+  "lockingScripts": {
+    "controllerLockingScript": {
+      "name": "Recovery controller",
+      "description": "Recovery controller",
+      "lockingType": "p2sh",
+      "lockingBytecode": "controllerBytecode",
+      "state": {
+        "variables": [
+          "identity"
+        ]
+      },
+      "roles": {
+        "owner": {
+          "state": {
+            "secrets": [
+              "controllerKey"
+            ]
+          },
+          "actions": [
+            {
+              "action": "approve",
+              "role": "owner",
+              "secrets": [
+                {
+                  "controllerKey": null
+                }
+              ]
+            },
+            {
+              "action": "changeSettings",
+              "role": "owner",
+              "secrets": [
+                {
+                  "controllerKey": null
+                }
+              ]
+            },
+            {
+              "action": "close",
+              "role": "owner",
+              "secrets": [
+                {
+                  "controllerKey": null
+                }
+              ]
+            }
+          ]
+        },
+        "recoverer": {
+          "state": {
+            "secrets": [
+              "recovererKey"
+            ]
+          },
+          "actions": [
+            {
+              "action": "requestRecovery",
+              "role": "recoverer",
+              "secrets": [
+                {
+                  "recovererKey": null
+                }
+              ]
+            },
+            {
+              "action": "completeRecovery",
+              "role": "recoverer",
+              "secrets": [
+                {
+                  "recovererKey": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "scripts": {
+    "controllerBytecode": "<$(<identity> OP_REVERSEBYTES)> 0x2dc0009dc2529d00cf8201459d76517f75518800ce7b517e8800cd00c78800d100ce8800d300d09d00cc00c6a2690089127ca97b88828c7f77760141877c0161879b69518915140000000000000000000000000000000000000000528978009c63008a76011a7f75567f7753795579518a72ad00d20201007b01317f75527f777e528a7e87776778519c63547a820114887c008a76527f75517f7701008876012e7f75011a7f7754795679518a547a547aad78528a87916900d20201017b01317f75527f777e7b7e87776778529c63008a76527f75517f77518876012e7f75011a7f7753795579518a72ad7601317f75012e7f7781b27576567f75527f77818b00d20201007b54807e527901457f7501317f777e7b01317f75011a7f777e528a7e87776778539c63547a82011488557a82011488567a825388537a008a76011a7f75567f777657795979518a577a577aad5479528a8791695379528a8791695279030000bf8403000000885279527f750200008791697c567f75527f778154797b87648b6800d20201007b54807e547a7e537a7e7b7e528a7e8777677c549dc0cf8201459d76517f755188c0ce7b517e88011a7f75567f77785379518aadc4519d00d1008768686868",
+    "unlockApprove": "<controllerKey.schnorr_signature.all_outputs> <controllerKey.public_key> <0>",
+    "unlockRequest": "<proposedOwnerKeyHash> <recovererKey.schnorr_signature.all_outputs> <recovererKey.public_key> <1>",
+    "unlockComplete": "<recovererKey.schnorr_signature.all_outputs> <recovererKey.public_key> <2>",
+    "unlockChangeSettings": "<newDelay> <newRecovererKeyHash> <newOwnerKeyHash> <controllerKey.schnorr_signature.all_outputs> <controllerKey.public_key> <3>",
+    "unlockClose": "<controllerKey.schnorr_signature.all_outputs> <controllerKey.public_key> <4>"
+  },
+  "variables": {
+    "controllerKey": {
+      "name": "Controller key",
+      "description": "The owner's key for the controller. It is used for nothing else.",
+      "type": "private_key"
+    },
+    "recovererKey": {
+      "name": "Recovery key",
+      "description": "The recoverer's key for this wallet.",
+      "type": "private_key"
+    },
+    "identity": {
+      "name": "Wallet identity",
+      "description": "The token category of the controller.",
+      "type": "token_category"
+    },
+    "nextState": {
+      "name": "Next controller state",
+      "description": "The 69 bytes of state the controller continues with.",
+      "type": "bytes"
+    },
+    "proposedOwnerKeyHash": {
+      "name": "Proposed owner",
+      "description": "The hash of the key a recovery is requested for.",
+      "type": "bytes"
+    },
+    "newOwnerKeyHash": {
+      "name": "New owner key hash",
+      "description": "New owner key hash",
+      "type": "bytes"
+    },
+    "newRecovererKeyHash": {
+      "name": "New recoverer key hash",
+      "description": "New recoverer key hash",
+      "type": "bytes"
+    },
+    "newDelay": {
+      "name": "New waiting period",
+      "description": "Three bytes, as the controller stores it.",
+      "type": "bytes"
+    },
+    "waitingSequence": {
+      "name": "Waiting period",
+      "description": "The waiting period as a sequence number.",
+      "type": "integer"
+    }
+  }
+}
