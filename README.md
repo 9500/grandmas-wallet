@@ -11,7 +11,7 @@ The first design, with its web demonstration and chipnet runs, is on the `main` 
 ## Documents
 
 - [Architecture proposal v0.4](Grandmas_Wallet_Architecture_Proposal_v0.4.md)
-- [Illustrated overview of the design, v0.4](docs/design_v0.4.html) (open in a browser)
+- [Illustrated overview of the design, v0.5](docs/design_v0.5.html) (open in a browser)
 - [Implementation plan v0.4](IMPLEMENTATION_PLAN_v0.4.md)
 - [Decisions log](docs/decisions.md)
 - What was learned about the XO engine: [trial](docs/xo-spike.md), [signing problem](docs/xo-engine-signing-bug.md), [chipnet header verification](docs/xo-chipnet-header-verification.md), [notes for feedback](docs/xo-feedback-notes.md)

@@ -2,7 +2,7 @@
 
 Protocol and tooling decisions, newest last. Each entry records what was decided, on what evidence, and what it affects.
 
-The log holds the decisions that apply to the design in [design_v0.4.html](design_v0.4.html). Numbers that are missing belong to parts that have been replaced; those entries, the run logs they cite and the acceptance tests that labels such as C05 or R01 refer to are in the repository at the tag `design-1`.
+The log holds the decisions that apply to the design in [design_v0.5.html](design_v0.5.html). Numbers that are missing belong to parts that have been replaced; those entries, the run logs they cite and the acceptance tests that labels such as C05 or R01 refer to are in the repository at the tag `design-1`.
 
 ## D1 — Controller state is stored unhashed in the NFT commitment
 

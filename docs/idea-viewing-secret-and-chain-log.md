@@ -123,6 +123,6 @@ Not a plan; a first reading of where the kit and the receipts reach.
 - `packages/app`: the recovery flow (`recovery-flow.ts`), what the wallet says about its protection (`protection.ts`), the user's backup (`user-backup.ts`), the transactions that bring in a seed (`owner-wallet.ts`).
 - `packages/core`: reading a controller's history would also return the data outputs beside each step.
 - The recoverer page and the wallet's set-up, takeover and move screens, which the new ways of enrolling would rewrite in any case.
-- The proposal's sections 9, 10.1, 10.6, 11, 16.5, 17 and 18.1, their tests in section 21, and the design page `docs/design_v0.4.html`.
+- The proposal's sections 9, 10.1, 10.6, 11, 16.5, 17 and 18.1, their tests in section 21, and the design page `docs/design_v0.5.html`.
 
 A token as the recoverer's authority is a separate change to the controller contract (`contracts/controller.cash`): the two recoverer actions would check that the transaction spends the recoverer's token, in place of a key and a signature. The state's layout can stay, with the hash of the token's category where the hash of the recoverer's key is now. It is mentioned here because the two changes meet in the recoverer page.

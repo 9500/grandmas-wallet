@@ -2,7 +2,7 @@
 
 **Implementation plan v0.4 — BCH Blaze 2026**  
 **Date:** 17 November 2026  
-**Design:** [Architecture proposal v0.4](Grandmas_Wallet_Architecture_Proposal_v0.4.md), with an illustrated overview in [docs/design_v0.4.html](docs/design_v0.4.html)  
+**Design:** [Architecture proposal v0.4](Grandmas_Wallet_Architecture_Proposal_v0.4.md), with an illustrated overview in [docs/design_v0.5.html](docs/design_v0.5.html)  
 **Target:** BCH Blaze 2026, "Build with XO" bounty, and use beyond it
 
 This plan gives the order of work and what must be true before each stage counts as done. It gives no dates. Section numbers and test IDs refer to the proposal. The proposal says what the wallet must do; this plan says in which stage each part is built and which of the proposal's acceptance tests (its section 21) close the stage. The three documents carry the same version number and are changed together.
