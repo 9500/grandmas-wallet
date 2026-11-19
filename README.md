@@ -6,7 +6,7 @@ Built for BCH Blaze 2026 on the XO stack.
 
 **Status:** a working demonstration on chipnet, the Bitcoin Cash test network. The wallet, the recoverer's page, two applications and the backup stores are built and have run through their whole course on chipnet, in scripts and in browsers. Nothing has been audited, the pages keep their keys unencrypted in the browser, and a phone watches for recovery requests only while the page is open. Use it with test coins only.
 
-This is the second design of the wallet (design 2), and `main` holds it. The first design, with its web demonstration and chipnet runs, is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1).
+This is the second design of the wallet (design 2), and `main` holds it. The first design, with its web demonstration and chipnet runs, is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1). The first design spent every coin together with the wallet's controller, which linked all of a wallet's activity and got in the way of applications; the second gives each address its own key and uses the controller only for recovery.
 
 ## Try it
 
