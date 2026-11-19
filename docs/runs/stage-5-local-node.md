@@ -7,17 +7,17 @@ Written by the run itself (`scripts/run-b.ts local`). The owner's wallet, the re
 - Started 2026-11-19T19:20:59.864Z
 - The XO invitation behind each transaction an account of the run sent, as the engine serializes it for sharing: `.chipnet/invitations/stage-5-local-node/`, with `index.json` naming the template, action and role of each.
 
-| Step | Transaction | Invitation | Bytes | Fee (sat) | Note |
+| Step | Transaction | Bytes | Fee (sat) | Note | Invitation |
 | --- | --- | --- | --- | --- | --- |
-| create | `1d0e50cd1386d732c4c4792d6a29de07bb66348579fbeb63039da6e7bd290d0a` | `01-the-owner-s-device-create-1d0e50cd.json` | 343 | 343 | the controller and the rest |
-| pay | `2576f5337ea9ee68d18fe06c00c350b6b0037a239bd35cdfae2eb9c267c00388` | `03-the-owner-s-device-pay-2576f533.json` | 384 | 384 | an everyday payment by key |
-| request | `d7124f2405769c88c25a8fce1f655e5648abe43a3b8d65c173141bf989f036b5` | `04-the-recoverer-pay-d7124f24.json` | 991 | 991 | the recoverer names the new device's key; paid from its balance in the same transaction |
-| complete | `3e61ddc3d5af823176cf4236b38d7c68e92e34e77ede8c9940abd215c96a97f6` | `05-the-recoverer-pay-3e61ddc3.json` | 970 | 970 | after the waiting period; no coin has moved |
-| sweep | `483b35af833531be19d82cba36a13ffc76830a1f4f10e1902e13f09f20359146` | `06-the-new-device-approve-483b35af.json` | 2177 | 2177 | 5 coins of the earlier seed, the vault coin and the NFT among them, to an address of the new seed |
-| pay | `5c6a9a6e455afd455c6d78a1442be4e4ec7bd0c0f868cf6486f125b94826a8d6` | `07-the-new-device-pay-5c6a9a6e.json` | 384 | 384 | the new owner pays from what it swept, by its own key |
-| send the NFT | `9d9e3c5d417b83573dfc8141244382e1d1b1f22cc9f87332fde1c0fadf050801` | `08-the-new-device-pay-9d9e3c5d.json` | 717 | 717 | unchanged; the fee from another coin |
-| close | `fc8b6846cf8f857a19af4a9ebd84f76ab34eebaaacf272123036854cb724d159` | `09-the-new-device-close-fc8b6846.json` | 977 | 977 | everything, and the controller's value, back to the address that paid for the run |
-| return the recoverer's balance | `1ac8c6b9a873622e2eb97a4544676cf36a02103dd169a2f4bc0794187870d054` | `10-the-recoverer-pay-1ac8c6b9.json` | 185 | 185 | what the recoverer did not use |
+| create | `1d0e50cd1386d732c4c4792d6a29de07bb66348579fbeb63039da6e7bd290d0a` | 343 | 343 | the controller and the rest | `01-the-owner-s-device-create-1d0e50cd.json` |
+| pay | `2576f5337ea9ee68d18fe06c00c350b6b0037a239bd35cdfae2eb9c267c00388` | 384 | 384 | an everyday payment by key | `03-the-owner-s-device-pay-2576f533.json` |
+| request | `d7124f2405769c88c25a8fce1f655e5648abe43a3b8d65c173141bf989f036b5` | 991 | 991 | the recoverer names the new device's key; paid from its balance in the same transaction | `04-the-recoverer-pay-d7124f24.json` |
+| complete | `3e61ddc3d5af823176cf4236b38d7c68e92e34e77ede8c9940abd215c96a97f6` | 970 | 970 | after the waiting period; no coin has moved | `05-the-recoverer-pay-3e61ddc3.json` |
+| sweep | `483b35af833531be19d82cba36a13ffc76830a1f4f10e1902e13f09f20359146` | 2177 | 2177 | 5 coins of the earlier seed, the vault coin and the NFT among them, to an address of the new seed | `06-the-new-device-approve-483b35af.json` |
+| pay | `5c6a9a6e455afd455c6d78a1442be4e4ec7bd0c0f868cf6486f125b94826a8d6` | 384 | 384 | the new owner pays from what it swept, by its own key | `07-the-new-device-pay-5c6a9a6e.json` |
+| send the NFT | `9d9e3c5d417b83573dfc8141244382e1d1b1f22cc9f87332fde1c0fadf050801` | 717 | 717 | unchanged; the fee from another coin | `08-the-new-device-pay-9d9e3c5d.json` |
+| close | `fc8b6846cf8f857a19af4a9ebd84f76ab34eebaaacf272123036854cb724d159` | 977 | 977 | everything, and the controller's value, back to the address that paid for the run | `09-the-new-device-close-fc8b6846.json` |
+| return the recoverer's balance | `1ac8c6b9a873622e2eb97a4544676cf36a02103dd169a2f4bc0794187870d054` | 185 | 185 | what the recoverer did not use | `10-the-recoverer-pay-1ac8c6b9.json` |
 
 Also observed:
 

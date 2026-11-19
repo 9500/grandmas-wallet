@@ -18,7 +18,7 @@ const rows = record
 describe('the complete course on chipnet, as recorded', () => {
   it('SW02: a wallet was created, recovered to a new device, swept and closed on chipnet through the engine, with its transactions', () => {
     expect(record).toMatch(/^# Stage 5 run on chipnet \(run B\)/);
-    expect(rows.map((row) => row.step)).toEqual(['create', 'pay', 'request', 'complete', 'sweep', 'pay', 'send the NFT', 'close', 'return the allowance']);
+    expect(rows.map((row) => row.step)).toEqual(['create', 'pay', 'request', 'complete', 'sweep', 'pay', 'send the NFT', 'close', 'return the recoverer\'s balance']);
     for (const row of rows) {
       expect(row.transactionId).toMatch(/^[0-9a-f]{64}$/);
       // 1 sat/byte, exactly.

@@ -9,18 +9,18 @@ Written by the run itself (`scripts/run-d.ts local`). The owner's wallet, the re
 - Started 2026-11-19T19:43:06.356Z
 - The XO invitation behind each transaction an account of the run sent, as the engine serializes it for sharing: `.chipnet/invitations/stage-8-local-node/`, with `index.json` naming the template, action and role of each.
 
-| Step | Transaction | Invitation | Bytes | Fee (sat) | Note |
+| Step | Transaction | Bytes | Fee (sat) | Note | Invitation |
 | --- | --- | --- | --- | --- | --- |
-| create | `7e65db8ea440a3ebefac1e1d776d646b5cb8f2e5021015a782b584a5194eca34` | `01-the-owner-s-device-create-7e65db8e.json` | 343 | 343 | the controller and the rest |
-| open the jar | `d961fe08a0018a7bafe90a631efe7c5fc76241f524a14d2a8e1b59ebfc6f239b` | `03-the-owner-s-device-open-d961fe08.json` | 477 | 477 | an action of the application's template: 30,000 satoshis into the jar, the key to a fresh address of the wallet |
-| request | `a459da77aa0121c3c9a0a50983b9c09faff5e43861c55bd4acc2e17b226c17c9` | `04-the-recoverer-pay-a459da77.json` | 991 | 991 | the recoverer names the new device's key; paid from its balance in the same transaction |
-| complete | `b4976e2ea396850581b582977feaff6a31e40c659054f68c0efafc6300fdf0a1` | `05-the-recoverer-pay-b4976e2e.json` | 970 | 970 | after the waiting period; no coin has moved |
-| sweep | `6ca0b432c6c123121903a8ef9a638ed3d10f8d6f5a0b3c27d663c974bc4bdfd0` | `06-the-new-device-approve-6ca0b432.json` | 1702 | 1702 | 3 coins of the earlier seed, the jar's key among them, to addresses of the new seed |
-| empty the jar | `a98919dfb2f56b29fdccfbf9101f44d87d0f5ba0f8166614520986ab55b4f90f` | `07-the-new-device-withdraw-a98919df.json` | 520 | 520 | the jar's 1 coin and the key in one transaction; the savings and the key to addresses of the new seed |
-| empty the jar again | `ead5bc4a77b3e144df55271b57d5a3decd15091dcc433a8d1bfb8f8f93ff31bb` | `08-the-new-device-withdraw-ead5bc4a.json` | 520 | 520 | 8,000 satoshis that someone paid in after the first withdrawal, with the same key |
-| send the key on | `986eee17b26571f01dbef6bec594c99f569ea82c15ce3384fda4c0536d6f6b7e` | `09-the-new-device-pay-986eee17.json` | 719 | 719 | unchanged, to the address that paid for the run |
-| close | `aea7c83ef47244444fd09ddfd671515745e664fcb36f3d859c4217e1498f73e2` | `10-the-new-device-close-aea7c83e.json` | 1569 | 1569 | everything, and the controller's value, back to the address that paid for the run |
-| return the recoverer's balance | `af4dd34a01e54eb58a9577d6329fb82e937f40f8e65f53b9f8b005658b92bcd9` | `11-the-recoverer-pay-af4dd34a.json` | 185 | 185 | what the recoverer did not use |
+| create | `7e65db8ea440a3ebefac1e1d776d646b5cb8f2e5021015a782b584a5194eca34` | 343 | 343 | the controller and the rest | `01-the-owner-s-device-create-7e65db8e.json` |
+| open the jar | `d961fe08a0018a7bafe90a631efe7c5fc76241f524a14d2a8e1b59ebfc6f239b` | 477 | 477 | an action of the application's template: 30,000 satoshis into the jar, the key to a fresh address of the wallet | `03-the-owner-s-device-open-d961fe08.json` |
+| request | `a459da77aa0121c3c9a0a50983b9c09faff5e43861c55bd4acc2e17b226c17c9` | 991 | 991 | the recoverer names the new device's key; paid from its balance in the same transaction | `04-the-recoverer-pay-a459da77.json` |
+| complete | `b4976e2ea396850581b582977feaff6a31e40c659054f68c0efafc6300fdf0a1` | 970 | 970 | after the waiting period; no coin has moved | `05-the-recoverer-pay-b4976e2e.json` |
+| sweep | `6ca0b432c6c123121903a8ef9a638ed3d10f8d6f5a0b3c27d663c974bc4bdfd0` | 1702 | 1702 | 3 coins of the earlier seed, the jar's key among them, to addresses of the new seed | `06-the-new-device-approve-6ca0b432.json` |
+| empty the jar | `a98919dfb2f56b29fdccfbf9101f44d87d0f5ba0f8166614520986ab55b4f90f` | 520 | 520 | the jar's 1 coin and the key in one transaction; the savings and the key to addresses of the new seed | `07-the-new-device-withdraw-a98919df.json` |
+| empty the jar again | `ead5bc4a77b3e144df55271b57d5a3decd15091dcc433a8d1bfb8f8f93ff31bb` | 520 | 520 | 8,000 satoshis that someone paid in after the first withdrawal, with the same key | `08-the-new-device-withdraw-ead5bc4a.json` |
+| send the key on | `986eee17b26571f01dbef6bec594c99f569ea82c15ce3384fda4c0536d6f6b7e` | 719 | 719 | unchanged, to the address that paid for the run | `09-the-new-device-pay-986eee17.json` |
+| close | `aea7c83ef47244444fd09ddfd671515745e664fcb36f3d859c4217e1498f73e2` | 1569 | 1569 | everything, and the controller's value, back to the address that paid for the run | `10-the-new-device-close-aea7c83e.json` |
+| return the recoverer's balance | `af4dd34a01e54eb58a9577d6329fb82e937f40f8e65f53b9f8b005658b92bcd9` | 185 | 185 | what the recoverer did not use | `11-the-recoverer-pay-af4dd34a.json` |
 
 Also observed:
 

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
  * complete course, with every transaction named and every fee exactly the size.
  */
 
-const STEPS = ['create', 'open the jar', 'request', 'complete', 'sweep', 'empty the jar', 'empty the jar again', 'send the key on', 'close', 'return the allowance'];
+const STEPS = ['create', 'open the jar', 'request', 'complete', 'sweep', 'empty the jar', 'empty the jar again', 'send the key on', 'close', 'return the recoverer\'s balance'];
 
 const read = (name: string) => {
   const record = readFileSync(new URL(`../docs/runs/${name}`, import.meta.url), 'utf8');
