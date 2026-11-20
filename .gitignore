@@ -14,3 +14,4 @@ coverage/
 .chipnet/
 .xo-demo/
 .vitest/
+.local-runs/
