@@ -64,7 +64,7 @@ The exit criterion was: the result is written to `docs/` with the transactions, 
 - Reading after a recovery: records of the earlier archive are copied as suggestions, and written as the new owner's own only after the chain has confirmed them (section 10.6).
 - A record of an action that was never sent is not copied.
 
-**Tests:** PR01, PR02, PR10, PR11. **Done when** they pass on the simulated chain with stores in memory.
+**Tests:** PR01, PR02, PR10, PR11. **Done on 20 November 2026:** they pass on the simulated chain with stores in memory, recorded in `docs/results/stage-12.md` on the branch `design-3`. Token notes are still written until stage 14 rewrites the tests that rest on them. The proposal's section 10.2 was corrected for three things the work showed: an address that is one of a script's own values stays in the record; a record is due only where a token of the wallet's takes part; the wallet may pay itself before the record exists.
 
 ## Stage 13 — The check, and positions that are not confirmed
 
