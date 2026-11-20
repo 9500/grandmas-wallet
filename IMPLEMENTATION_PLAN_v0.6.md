@@ -79,7 +79,7 @@ The exit criterion was: the result is written to `docs/` with the transactions, 
 - Filling a value: the wallet's own, the request, the record, the user, with an address and a paid-in amount never from a record (section 13.3). The kinds of the wallet's own outputs, named by the request where they are not a plain receipt.
 - An action about a token with no declaration: the request names the position and says whether the token is spent, or the template's own token input says so; the wallet makes sure the coin it puts there is the token.
 - The application's coins as the request names them, read from the chain, each matched to a script of the template by its bytecode, with the application's contracts run before the user is asked.
-- A token of the wallet's that would leave it, and a token made from the wallet's coin that would go elsewhere: shown, and carried out only with the user's tick.
+- A token of the wallet's that would leave it or come back changed, and a token made from the wallet's coin that would go elsewhere: shown, and carried out only with the user's tick.
 - From the wallet's own list: the actions a script offers; carried out alone where nothing is missing, and otherwise "Open the application to do this" with the page's address.
 - `xo_v1` in its version 2 (section 14.2): no profile, no declaration, the new answers to a positions request.
 - Removed: reading a declaration, finding a position from the chain, the template check that depends on a declaration, token names from a declaration.
@@ -153,5 +153,5 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 29 | The declaration as an optional extra | Decided, 20 November 2026 | No |
 | 30 | A token of the wallet's that an action does not return | Decided, 20 November 2026 | Carried out with the user's tick |
 | 31 | Acting without the application | Decided, 20 November 2026 | Not required; done where nothing is missing |
-| 32 | A token made from the wallet's coin that does not come to the wallet | Stage 14; put to the owner, not yet answered | Shown in the figures, without a tick |
+| 32 | A token made from the wallet's coin that does not come to the wallet | Decided, 20 November 2026 | Carried out with the user's tick |
 | 33 | Corrections from stage 11 | Taken into the proposal, 20 November 2026 | — |
