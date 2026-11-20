@@ -59,7 +59,7 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 
 ## Documents
 
-- Design 3, proposed: [architecture proposal v0.6](Grandmas_Wallet_Architecture_Proposal_v0.6.md) and [implementation plan v0.6](IMPLEMENTATION_PLAN_v0.6.md)
+- Design 3, proposed: [architecture proposal v0.6](Grandmas_Wallet_Architecture_Proposal_v0.6.md), [implementation plan v0.6](IMPLEMENTATION_PLAN_v0.6.md), and the [illustrated overview v0.6](docs/design_v0.6.html)
 - Design 2, as built: [architecture proposal v0.4](Grandmas_Wallet_Architecture_Proposal_v0.4.md), [implementation plan v0.4](IMPLEMENTATION_PLAN_v0.4.md), and the [illustrated overview v0.5](https://blaze2026.9500.cash/design.html) ([source](docs/design_v0.5.html))
 - [Decisions log](docs/decisions.md)
 - [XO templates and invitations](docs/xo-invitations.md)
