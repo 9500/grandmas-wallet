@@ -1173,6 +1173,9 @@ const TrustSuggested = ({ owner, identifier, onBack }: { owner: Owner; identifie
       const { contentHash, declaration } = suggestion;
       const kept = await applications.trust({ identifier, contentHash, ...(declaration === undefined ? {} : { declaration }) }, undefined);
       await applications.storeNow(kept.identifier);
+      // The earlier owner's position records of this template can now be checked against the chain (section 10.6).
+      // One that cannot be checked now stays a suggestion and is checked the next time the backup is read.
+      await applications.confirmRecords().catch((error: unknown) => console.warn(error));
       owner.apps.changed();
       owner.toast('The template is trusted on this phone.');
       onBack();

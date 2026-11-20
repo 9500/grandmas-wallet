@@ -42,7 +42,7 @@ import { type ApplicationInput, type AuthorityEntry, type BindingKind, type Read
 import type { ReservedAddress, Sent, TokenCoin, WalletParts } from './owner-wallet.js';
 import { type FoundPosition, type PositionStatus, type TokenOnChain, coinsAt, findPosition, valuesFrom } from './positions.js';
 import { type RecoveryArrangement, type StoreAt, writeRecord } from './recovery-flow.js';
-import { type PositionRecordCheck, checkPositionRecord, recordsDue, samePosition, sameRecord, sameNft } from './position-records.js';
+import { type PositionRecordCheck, type PositionRecordVerdict, checkPositionRecord, recordsDue, samePosition, sameRecord, sameNft } from './position-records.js';
 import { type PresentedTexts, type TemplateNames, type Verdict, checkTemplate, readPresented } from './template-check.js';
 import { type NameClaim, type TokenNaming, TokenNames } from './token-names.js';
 
@@ -276,6 +276,42 @@ export interface ActionPreview {
    * anything is signed, and the action is refused if no store confirms it (section 10.5).
    */
   recordsPosition?: boolean;
+  /**
+   * The action is at a position that is not confirmed (section 10.4), with the reason. It is carried out only
+   * because the wallet's own figures show that the wallet gives nothing but the fee.
+   */
+  notConfirmed?: string;
+}
+
+/**
+ * Where a position stands, as the wallet's records and the chain say (sections 10.4 and 14.2):
+ *
+ * - `open`: a record that counts, and its script holds coins.
+ * - `closed`: a record that counts, and its script holds nothing.
+ * - `unconfirmed`: a record that does not count; or one of several records that count for one token while
+ *   more than one of their scripts holds coins.
+ * - `held`: a record that names no script counts. The token is the template's; whether the position is open
+ *   is the application's to say.
+ */
+export type RecordedStatus = 'open' | 'closed' | 'unconfirmed' | 'held';
+
+/** A position the wallet lists from its records: an NFT it holds, and the record that ties it to a position. */
+export interface RecordedPosition {
+  /** The NFT, as the wallet holds it now. */
+  token: PositionToken & { outpoint: string; satoshis: bigint; place: TokenCoin['place'] };
+  template: { identifier: string; name?: string };
+  status: RecordedStatus;
+  /** Why the position is not confirmed. */
+  reason?: string;
+  record: PositionRecordEntry;
+  /** `own`: a record of this seed's; `suggested`: one an earlier seed wrote. */
+  standing: 'own' | 'suggested';
+  /** For a record that names a script: the script, as hex, and what it holds now. */
+  lockingBytecode?: string;
+  satoshis?: bigint;
+  coins?: number;
+  /** The actions the template offers the record's role at its script. */
+  actions?: string[];
 }
 
 export interface ActionOutcome {
@@ -472,8 +508,9 @@ export class Applications {
        */
       followUpTo?: number;
       /**
-       * The check of a position record of an earlier seed against the chain (section 10.4). Only a record it
-       * finds to count is written again as this seed's own. Until the check is built, none counts.
+       * The check of a position record against the chain (section 10.4); `checkPositionRecord` unless given. Only
+       * a record of an earlier seed that it finds to count is written again as this seed's own, and only records
+       * that count are listed as positions.
        */
       checkRecord?: PositionRecordCheck;
     } = {},
@@ -1266,6 +1303,7 @@ export class Applications {
     const walletFungibleOut = fungible(toWallet.map(({ output }) => output));
     const tokensNet = [...new Set([...walletFungibleIn.keys(), ...walletFungibleOut.keys()])].map((category) => ({ category, amount: (walletFungibleOut.get(category) ?? 0n) - (walletFungibleIn.get(category) ?? 0n) })).filter(({ amount }) => amount !== 0n);
     const records = await this.recordsOf(plan, request);
+    const notConfirmed = await this.onlyTakingOut(plan, request);
     return {
       template: summary,
       words: {
@@ -1296,6 +1334,7 @@ export class Applications {
       },
       firstUse: kept?.stored !== true,
       ...(records.length === 0 ? {} : { recordsPosition: true }),
+      ...(notConfirmed === undefined ? {} : { notConfirmed }),
     };
   }
 
@@ -1351,7 +1390,7 @@ export class Applications {
   async carryOut(request: ApplicationAction, onStage: (stage: 'recorded' | 'sent') => void = () => undefined): Promise<ActionOutcome> {
     this.wallet.requireUsable();
     // Everything that can refuse the action does so before the template is taken in.
-    await this.plan(request);
+    await this.onlyTakingOut(await this.plan(request), request);
     const kept = await this.ensureStored(await this.trust(request.template, request.presented, request.application));
     onStage('recorded');
     const identifier = await this.wallet.backend.importTemplate(kept.text);
@@ -1505,23 +1544,216 @@ export class Applications {
       }
     }
     this.change({ positionRecords: own, suggestedRecords: suggested });
+    await this.confirmSuggested(archive);
+  }
+
+  /**
+   * Check the records of an earlier seed against the chain again (section 10.6), for instance once the user has
+   * trusted their template. Each that counts is written again as this seed's own, with the values of the earlier
+   * record, once a store has confirmed it; and its script is made known to the key holder with those values.
+   */
+  async confirmRecords(): Promise<{ confirmed: number; suggested: number; followed: number; notFollowed: string[] }> {
+    const { archive } = this.options;
+    if (archive === undefined) return { confirmed: 0, suggested: this.suggestedRecords.length, followed: 0, notFollowed: [] };
+    return this.confirmSuggested(archive);
+  }
+
+  private async confirmSuggested(archive: ApplicationArchive): Promise<{ confirmed: number; suggested: number; followed: number; notFollowed: string[] }> {
     const check = this.options.checkRecord ?? checkPositionRecord;
-    for (const entry of suggested) {
+    let confirmed = 0;
+    let followed = 0;
+    const notFollowed: string[] = [];
+    for (const entry of [...(this.state.suggestedRecords ?? [])]) {
       const trusted = this.state.templates.find((template) => template.identifier === entry.templateIdentifier);
       let counts = false;
       try {
         counts = (await check(entry, this.wallet, trusted === undefined ? undefined : readTemplate(trusted.text))).counts;
       } catch {
-        // A check that cannot be made leaves the record a suggestion.
+        // A check that cannot be made leaves the record a suggestion; it is made again the next time.
       }
       if (!counts) continue;
-      const confirmed = await archive.write(entry).then(safelyStored, () => false);
-      if (!confirmed) continue;
+      const stored = await archive.write(entry).then(safelyStored, () => false);
+      if (!stored) continue;
+      confirmed += 1;
       this.change({
         positionRecords: [...(this.state.positionRecords ?? []), entry],
         suggestedRecords: (this.state.suggestedRecords ?? []).filter((known) => !sameRecord(known, entry)),
       });
+      // The new device's key holder knows only what it is given (section 10.6): the script, with the record's values.
+      if (trusted === undefined || entry.lockingScriptIdentifier === undefined || entry.roleIdentifier === undefined) continue;
+      try {
+        const identifier = await this.wallet.backend.importTemplate(trusted.text);
+        await this.wallet.backend.followScript({ template: identifier, lockingScript: entry.lockingScriptIdentifier, role: entry.roleIdentifier, variables: typedValues(readTemplate(trusted.text).definition, entry.variables ?? {}) });
+        followed += 1;
+      } catch (error) {
+        // An action on the position makes its script known again before it is built.
+        notFollowed.push(`${entry.lockingScriptIdentifier}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
+    return { confirmed, suggested: this.suggestedRecords.length, followed, notFollowed };
+  }
+
+  /** The script a record names, made from its template, where the device has the template's text. */
+  private recordScript(entry: PositionRecordEntry): string | undefined {
+    if (entry.lockingScriptIdentifier === undefined) return undefined;
+    const text = this.state.templates.find((template) => template.identifier === entry.templateIdentifier)?.text ?? (this.state.suggested ?? []).find((template) => template.identifier === entry.templateIdentifier)?.texts.template;
+    if (text === undefined) return undefined;
+    try {
+      const { definition } = readTemplate(text);
+      return hex(templateLockingBytecode(definition, entry.lockingScriptIdentifier, typedValues(definition, entry.variables ?? {})));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * The positions the wallet lists from its records (sections 10.4 and 14.2): for each NFT it holds, the records
+   * that name its category, each checked against the chain. Of the records that count for one NFT and name a
+   * script, the one whose script holds coins is the current one and the others are not listed; none holding
+   * coins means closed; more than one holding coins means each is shown as not confirmed. A record that names
+   * no script and counts gives the token under its template's name, with no word on whether the position is
+   * open. A record that does not count is shown as not confirmed. A token without a record is not a position:
+   * it is listed by `tokens` alone. A record whose NFT the wallet does not hold is no position.
+   *
+   * @param options.template - only records of this template
+   * @param options.categories - only NFTs of these categories
+   * @param options.trusting - a template the user is asked to trust together with an action: its records are
+   *   checked as if it were trusted, since nothing is done unless the user approves
+   * @throws when the chain cannot be read: the list is then not to be taken as empty
+   */
+  async recordedPositions(options: { template?: string; categories?: Set<string>; trusting?: ReadTemplate } = {}): Promise<RecordedPosition[]> {
+    const check = this.options.checkRecord ?? checkPositionRecord;
+    const records: { entry: PositionRecordEntry; standing: RecordedPosition['standing'] }[] = [];
+    for (const [list, standing] of [
+      [this.positionRecords, 'own'],
+      [this.suggestedRecords, 'suggested'],
+    ] as const) {
+      for (const entry of list) {
+        if (entry.token === undefined || (options.template !== undefined && entry.templateIdentifier !== options.template)) continue;
+        if (options.categories !== undefined && !options.categories.has(entry.token.category)) continue;
+        if (!records.some((known) => sameRecord(known.entry, entry))) records.push({ entry, standing });
+      }
+    }
+    if (records.length === 0) return [];
+    const coins = (await this.wallet.tokenCoins()).filter(({ coin }) => coin.utxo.output.token?.nft !== undefined);
+    const nameOf = (identifier: string): string | undefined => this.state.templates.find((template) => template.identifier === identifier)?.name ?? (this.state.suggested ?? []).find((template) => template.identifier === identifier)?.name;
+    const read = new Map<string, ReadTemplate>();
+    const trusted = (identifier: string): ReadTemplate | undefined => {
+      const kept = this.state.templates.find((template) => template.identifier === identifier);
+      if (kept === undefined) return options.trusting?.identifier === identifier ? options.trusting : undefined;
+      const known = read.get(identifier) ?? readTemplate(kept.text);
+      read.set(identifier, known);
+      return known;
+    };
+    const holding = new Map<string, { satoshis: bigint; coins: number }>();
+    const holds = async (script: string): Promise<{ satoshis: bigint; coins: number }> => {
+      const known = holding.get(script);
+      if (known !== undefined) return known;
+      const unspent = await this.wallet.chain.listUnspent(hexToBin(script));
+      const found = { satoshis: sum(unspent.map((entry) => entry.valueSatoshis)), coins: unspent.length };
+      holding.set(script, found);
+      return found;
+    };
+    const listed: RecordedPosition[] = [];
+    for (const { coin, place } of coins) {
+      const held = tokenOf(coin);
+      if (held === undefined) continue;
+      const category = hex(held.category);
+      const outpoint = outpointOf(coin.utxo);
+      const mine = records.filter(({ entry }) => entry.token?.category === category);
+      if (mine.length === 0) continue;
+      const token: RecordedPosition['token'] = { category, commitment: hex(held.commitment), capability: held.capability, outpoint, satoshis: coin.utxo.output.valueSatoshis, place };
+      const checked: { entry: PositionRecordEntry; standing: RecordedPosition['standing']; verdict: PositionRecordVerdict; script?: string }[] = [];
+      for (const { entry, standing } of mine) {
+        const verdict = await check(entry, this.wallet, trusted(entry.templateIdentifier));
+        // A record that counts belongs to the coin the check tied it to.
+        if (verdict.counts && verdict.heldAt !== undefined && verdict.heldAt !== outpoint) continue;
+        const script = verdict.lockingBytecode === undefined ? this.recordScript(entry) : hex(verdict.lockingBytecode);
+        checked.push({ entry, standing, verdict, ...(script === undefined ? {} : { script }) });
+      }
+      const position = async (item: (typeof checked)[number], status: RecordedStatus, reason?: string): Promise<RecordedPosition> => {
+        const lockingScript = item.entry.lockingScriptIdentifier === undefined ? undefined : (trusted(item.entry.templateIdentifier)?.definition.lockingScripts?.[item.entry.lockingScriptIdentifier] as { roles?: Record<string, { actions?: { action: string }[] }> } | undefined);
+        const actions = lockingScript?.roles?.[item.entry.roleIdentifier ?? '']?.actions?.map(({ action }) => action);
+        const name = nameOf(item.entry.templateIdentifier);
+        return {
+          token,
+          template: { identifier: item.entry.templateIdentifier, ...(name === undefined ? {} : { name }) },
+          status,
+          ...(reason === undefined ? {} : { reason }),
+          record: item.entry,
+          standing: item.standing,
+          ...(item.script === undefined ? {} : { lockingBytecode: item.script, ...(await holds(item.script)) }),
+          ...(actions === undefined ? {} : { actions }),
+        };
+      };
+      // Records that count and name a script, each script once; this seed's own record first.
+      const counting = checked.filter(({ verdict, entry }) => verdict.counts && entry.lockingScriptIdentifier !== undefined);
+      const scripts = [...new Map(counting.map((item) => [item.script ?? '', item])).values()];
+      const filled = [];
+      for (const item of scripts) if ((await holds(item.script ?? '')).coins > 0) filled.push(item);
+      if (filled.length === 1) listed.push(await position(filled[0] as (typeof checked)[number], 'open'));
+      else if (filled.length > 1) {
+        for (const item of filled) listed.push(await position(item, 'unconfirmed', `${filled.length} records count for this token and the scripts of more than one hold coins. One of them may be a trap.`));
+      } else if (scripts.length > 0) listed.push(await position(scripts.at(-1) as (typeof checked)[number], 'closed'));
+      for (const item of checked.filter(({ verdict, entry }) => verdict.counts && entry.lockingScriptIdentifier === undefined)) {
+        if (!listed.some((known) => known.token.outpoint === outpoint && known.status === 'held' && known.template.identifier === item.entry.templateIdentifier)) listed.push(await position(item, 'held'));
+      }
+      const shown = new Set(scripts.map(({ script }) => script));
+      for (const item of checked.filter(({ verdict }) => !verdict.counts)) {
+        if (item.script !== undefined && shown.has(item.script)) continue;
+        if (item.script !== undefined) shown.add(item.script);
+        listed.push(await position(item, 'unconfirmed', item.verdict.reason));
+      }
+    }
+    return listed;
+  }
+
+  /**
+   * Why an action is at a position that is not confirmed (section 10.4), or `undefined` where it is at none:
+   * the action is about a token of the wallet's for which no record counts, or it pays or spends at the script
+   * of a record that the wallet lists as not confirmed.
+   */
+  private async notConfirmedAt(plan: Plan, request: ApplicationAction): Promise<string | undefined> {
+    const about = new Set([...(request.tokens ?? []), ...(plan.token === undefined ? [] : [hex(plan.token.coin.utxo.output.token?.category ?? new Uint8Array())])]);
+    const touched = new Set([...plan.outputs.filter(({ wallet }) => wallet === undefined).map(({ output }) => hex(output.lockingBytecode)), ...plan.inputs.filter(({ kind }) => kind === 'application').map(({ coin }) => hex(coin.utxo.output.lockingBytecode))]);
+    const named = [...this.positionRecords, ...this.suggestedRecords].filter((entry) => entry.token !== undefined && touched.has(this.recordScript(entry) ?? '')).map((entry) => entry.token?.category as string);
+    if (about.size === 0 && named.length === 0) return undefined;
+    const listed = await this.recordedPositions({ categories: new Set([...about, ...named]), trusting: plan.template });
+    const confirmed = (position: RecordedPosition): boolean => position.status !== 'unconfirmed';
+    for (const category of about) {
+      const ofToken = listed.filter((position) => position.token.category === category);
+      if (!ofToken.some(confirmed)) return ofToken[0]?.reason ?? 'No record of this wallet ties the token to a position.';
+    }
+    for (const script of touched) {
+      const at = listed.filter((position) => position.lockingBytecode === script);
+      if (at.length > 0 && !at.some(confirmed)) return at[0]?.reason;
+    }
+    return undefined;
+  }
+
+  /**
+   * Whether the wallet's own figures show that it gives nothing but the fee: what leaves its coins comes back,
+   * less the fee, and every token of the wallet's that the action spends comes back unchanged.
+   */
+  private givesOnlyFee(plan: Plan): boolean {
+    const ours = plan.inputs.filter(({ kind }) => kind !== 'application').map(({ coin }) => coin.utxo.output);
+    const back = plan.outputs.filter(({ wallet }) => wallet !== undefined).map(({ output }) => output);
+    if (sum(ours.map((output) => output.valueSatoshis)) - sum(back.map((output) => output.valueSatoshis)) > plan.feeSatoshis) return false;
+    const fungibleBack = fungible(back);
+    if ([...fungible(ours)].some(([category, amount]) => (fungibleBack.get(category) ?? 0n) < amount)) return false;
+    return ours.every(({ token }) => token?.nft === undefined || back.some((output) => sameToken({ ...token, amount: 0n }, output.token === undefined ? undefined : { ...output.token, amount: 0n })));
+  }
+
+  /**
+   * The rule for a position that is not confirmed (section 10.4): an action there is carried out only when the
+   * wallet gives nothing but the fee. Money can be taken out, and none is paid in.
+   * @returns the reason the position is not confirmed, for an action that may go on
+   * @throws ActionRefusedError for any other action there
+   */
+  private async onlyTakingOut(plan: Plan, request: ApplicationAction): Promise<string | undefined> {
+    const reason = await this.notConfirmedAt(plan, request);
+    if (reason === undefined || this.givesOnlyFee(plan)) return reason;
+    return refuse(`This position is not confirmed: ${reason} The wallet carries out an action there only when it gives nothing but the fee, and this one would pay into it or give tokens away. Nothing was signed.`);
   }
 
   /**
@@ -1658,9 +1890,10 @@ export class Applications {
 
   /**
    * An action on a position, as the user asks for it from the wallet itself, with the application's site not
-   * consulted: everything comes from the token, the template and the chain.
+   * consulted: everything comes from the token, the template and the chain. The token is one the wallet lists,
+   * from `tokens` or from `recordedPositions`.
    */
-  actionOn(token: Pick<HeldToken, 'category' | 'template'>, action: string, variables: Record<string, string | number> = {}): ApplicationAction {
+  actionOn(token: { category: string; template?: { identifier: string } | undefined }, action: string, variables: Record<string, string | number> = {}): ApplicationAction {
     const kept = this.state.templates.find((template) => template.identifier === token.template?.identifier);
     if (kept === undefined) return refuse('The template of this token is not trusted on this device.');
     const described = this.read(kept).template.definition.actions?.[action];

@@ -139,3 +139,13 @@ export const deviceWith = async (values: bigint[], options: { stores?: Map<strin
 
 /** The hash a request names a text by. */
 export const presentationHash = textHash;
+
+/**
+ * Finish copying the earlier archives into the device's own, as the wallet does at its next turn once its search
+ * for coins is complete: a record that names only a token is copied when the wallet is found to hold that token.
+ */
+export const finishCopying = async (device: Device): Promise<void> => {
+  const copied = await copyEarlierArchives({ arrangement: device.arrangement, storeAt: (address) => device.stores.get(address) as MemoryStore, whetherSent: actionSent(device.wallet.parts) });
+  if (copied.unfinished.length > 0) throw new Error(`The earlier archives were not copied in full: ${copied.unfinished.join(' ')}`);
+  device.arrangement.copiedArchives = copied.arrangement.copiedArchives ?? [];
+};

@@ -110,7 +110,10 @@ export interface PositionToken {
  */
 export interface PositionRecordEntry {
   kind: 'position';
-  /** Absent for a position made without any NFT reaching the wallet. */
+  /**
+   * Written in every record of this version: a record is due only where a token of the wallet's takes part.
+   * Absent in some records an earlier build wrote; such a record is read, and never counts.
+   */
   token?: PositionToken;
   templateIdentifier: string;
   /** The script the position is at. Present together with `roleIdentifier` and `variables`, or not at all. */

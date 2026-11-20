@@ -114,6 +114,14 @@ const evaluate = (template: XOTemplate, text: string, values: TemplateValues, mo
 
 const isExpression = (value: unknown): value is string => typeof value === 'string' && isCashAssemblyExpression(value);
 
+/**
+ * A field of a template given as an expression, such as `$(<keyCategory>)`, worked out for the given values,
+ * as the wallet works out the token fields of an output: bytes as hex.
+ * @returns `undefined` when the field is not an expression
+ * @throws TemplateError if a value the expression needs is missing
+ */
+export const templateExpression = (template: XOTemplate, field: unknown, values: TemplateValues): string | undefined => (isExpression(field) ? evaluate(template, field, values, 'utf8') : undefined);
+
 const secretsOf = (template: XOTemplate): Set<string> => {
   const secrets = new Set<string>();
   for (const [name, variable] of Object.entries(template.variables ?? {})) if ((variable as { type?: string }).type === 'private_key') secrets.add(name);

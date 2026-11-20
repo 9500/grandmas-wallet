@@ -2,7 +2,7 @@ import { binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
 import { type ArchiveStore, type MemoryStore, type PositionRecordEntry, type RecordEntry, assessArchive, positionEntry, readArchive } from '@grandmas-wallet/archive';
 import { type PositionRecordCheck, Applications, NotStoredError, actionSent, applicationArchive, copyEarlierArchives } from '@grandmas-wallet/app';
 import { readControllerHistory, readTemplate, templateLockingBytecode } from '@grandmas-wallet/core';
-import { strongboxDeclaration, strongboxTemplate } from '@grandmas-wallet/testing';
+import { clubDeclaration, clubTemplate, strongboxDeclaration, strongboxTemplate } from '@grandmas-wallet/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type Device, STORES, bond, deviceWith, presentation, request, seedOf, strongbox } from './support/applications.js';
@@ -243,25 +243,58 @@ describe('position records: what is copied after a recovery', () => {
 });
 
 describe('what a position record holds', () => {
-  it('a position whose script holds an address keeps the script\'s other values, and no address of the wallet\'s', async () => {
+  it('an address that is one of a script\'s own values stays in the record, so that the script can be made again; no other address of the wallet\'s is kept', async () => {
     const device = await deviceWith([100_000n]);
     const posted = await device.applications.carryOut(request(bond, 'post', 'poster', { amount: 20_000, serial: '07' }));
     const category = posted.tokens[0]?.category as string;
     const records = device.applications.positionRecords;
-    // The bond and its marker are both scripts the wallet follows; the return address and the key's address are left out.
-    expect(records.map(({ lockingScriptIdentifier, variables, values, token }) => ({ lockingScriptIdentifier, variables, values, token }))).toEqual([
-      { lockingScriptIdentifier: 'bondLockingScript', variables: { bondKey: category }, values: { amount: '20000', serial: '07' }, token: { category, commitment: '07', capability: 'none' } },
-      { lockingScriptIdentifier: 'companionLockingScript', variables: { bondKey: category }, values: { amount: '20000', serial: '07' }, token: { category, commitment: '07', capability: 'none' } },
-    ]);
-    // Not the key's address, and not the return address, a vault address of the wallet's that the marker carries.
-    const text = JSON.stringify(records);
-    const [marker] = await device.chain.listUnspent(templateLockingBytecode(readTemplate(bond.texts.template).definition, 'companionLockingScript', { bondKey: category }));
+    // The return address, a vault address of the wallet's that the marker carries, is one of the bond's own values.
+    const definition = readTemplate(bond.texts.template).definition;
+    const [marker] = await device.chain.listUnspent(templateLockingBytecode(definition, 'companionLockingScript', { bondKey: category }));
     const markerTransaction = decodeTransactionBch(hexToBin((await device.chain.getTransaction(marker?.transactionId ?? '')) ?? ''));
     if (typeof markerTransaction === 'string') throw new Error(markerTransaction);
     const returnTo = hex(markerTransaction.outputs[marker?.index ?? 0]?.token?.nft?.commitment ?? new Uint8Array());
     expect(returnTo.length).toBeGreaterThan(40);
-    expect(text).not.toContain(returnTo);
+    expect(records.map(({ lockingScriptIdentifier, variables, values, token }) => ({ lockingScriptIdentifier, variables, values, token }))).toEqual([
+      { lockingScriptIdentifier: 'bondLockingScript', variables: { bondKey: category, refundTo: returnTo }, values: { amount: '20000', serial: '07' }, token: { category, commitment: '07', capability: 'none' } },
+      { lockingScriptIdentifier: 'companionLockingScript', variables: { bondKey: category }, values: { amount: '20000', serial: '07' }, token: { category, commitment: '07', capability: 'none' } },
+    ]);
+    // The bond's script is made again from the record alone: it is the one the transaction paid.
+    const [bondRecord] = records;
+    const bondAt = templateLockingBytecode(definition, 'bondLockingScript', bondRecord?.variables ?? {});
+    expect(await device.chain.getHistory(bondAt)).toEqual([expect.objectContaining({ transactionId: posted.transactionId })]);
+    // The key's address is in neither set of values.
+    const text = JSON.stringify(records);
     for (const { coin } of await device.wallet.parts.tokenCoins()) expect(text).not.toContain(hex(coin.utxo.output.lockingBytecode));
+  });
+
+  it('a record is due only where a token of the wallet\'s takes part: joining a club writes the locker\'s record with the card, and none for the door every member shares', async () => {
+    const device = await deviceWith([200_000n]);
+    const club = presentation(clubTemplate, clubDeclaration);
+    const definition = readTemplate(club.texts.template).definition;
+    const doorAt = templateLockingBytecode(definition, 'doorLockingScript', {});
+    device.chain.adopt([{ transactionId: 'd0'.repeat(32), index: 2, output: { lockingBytecode: doorAt, valueSatoshis: 1000n, token: { category: hexToBin('c1'.repeat(32)), amount: 1_000_000n, nft: { capability: 'minting', commitment: hexToBin('0700ffff') } } } }]);
+    const joined = await device.applications.carryOut(request(club, 'join', 'member', { credits: 30_000, deposit: 20_000 }));
+    const card = joined.tokens.find((token) => token.capability === 'none')?.category as string;
+    // The transaction pays the door and the locker, both scripts the member follows. Only the locker holds the card's category.
+    expect(device.applications.positionRecords.map(({ lockingScriptIdentifier, variables, token }) => ({ lockingScriptIdentifier, variables, token }))).toEqual([
+      { lockingScriptIdentifier: 'lockerLockingScript', variables: { memberKey: card }, token: { category: card, commitment: '01', capability: 'none' } },
+    ]);
+  });
+
+  it('a payment into someone else\'s position writes no record and needs no store', async () => {
+    const plain = presentation(strongboxTemplate);
+    const device = await deviceWith([100_000n]);
+    // The template is stored first, as before any first action.
+    await device.applications.trust(plain.names, plain.texts);
+    expect(await device.applications.storeNow(plain.names.identifier)).toBe(true);
+    unreachable(device, true);
+    const someoneElses = 'ab'.repeat(32);
+    const paid = request(plain, 'add', 'holder', { boxKey: someoneElses, amount: 5_000 });
+    expect((await device.applications.preview(paid)).recordsPosition).toBeUndefined();
+    await device.applications.carryOut(paid);
+    expect(device.applications.positionRecords).toEqual([]);
+    expect((await device.chain.listUnspent(templateLockingBytecode(readTemplate(plain.texts.template).definition, 'boxLockingScript', { boxKey: someoneElses }))).length).toBe(1);
   });
 
   it('a payment into a position that a record already names needs no new record, and goes on with no store reachable', async () => {

@@ -5,7 +5,7 @@ import { type ApplicationAction, type HeldToken, ActionRefusedError, readDeclara
 import { type BuiltTransaction, type InputSpec, type Utxo, readTemplate, textHash } from '@grandmas-wallet/core';
 import { describe, expect, it } from 'vitest';
 
-import { type Device, deviceWith } from '../../../test/support/applications.js';
+import { type Device, deviceWith, finishCopying } from '../../../test/support/applications.js';
 import {
   type LoanRequest,
   CHIPNET_FAST_PERIODS_6,
@@ -365,6 +365,9 @@ describe('a live loan through the loss of the device (PY03)', { timeout: 120_000
     await device.recover();
     const taken = await device.takeOver();
     await taken.wallet.search();
+    // Whether the loan key's record is of an action that was sent is known once the search is complete: the copy
+    // of the earlier archive is finished then, as the wallet does at its next turn.
+    await finishCopying(taken);
     const swept = await taken.wallet.sweepEarlier();
     return { device, taken, swept, keyCategory, opened, borrowed };
   };
