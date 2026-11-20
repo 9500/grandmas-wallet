@@ -4,7 +4,7 @@ Bitcoin Cash wallet with on-chain, challenge-period key recovery, built on the X
 
 - Design 3, the reference for new work: [Grandmas_Wallet_Architecture_Proposal_v0.6.md](Grandmas_Wallet_Architecture_Proposal_v0.6.md). Work order and exit criteria: [IMPLEMENTATION_PLAN_v0.6.md](IMPLEMENTATION_PLAN_v0.6.md). Nothing of design 3 is built until its stages say so.
 - Design 2, which is what the code holds: [Grandmas_Wallet_Architecture_Proposal_v0.4.md](Grandmas_Wallet_Architecture_Proposal_v0.4.md), [IMPLEMENTATION_PLAN_v0.4.md](IMPLEMENTATION_PLAN_v0.4.md), and the illustrated overview [docs/design_v0.5.html](docs/design_v0.5.html).
-- Design 3 starts on `main` after the tag `design-2`.
+- Code for design 3 goes on the branch `design-3`, which starts after the tag `design-2`. `main` stays at design 2, with the design-3 documents, until design 3 has run.
 - The earlier designs are at the tags `design-1` and `design-2`. Parts that are rewritten start from the files there (`git show <tag>:<path>`).
 
 # Workflow
