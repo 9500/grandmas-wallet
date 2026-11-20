@@ -30,13 +30,21 @@ export interface TokenStake {
 }
 
 /**
+ * What a token is called in the wallet's list (proposal section 17): an NFT that a record ties to a position by the
+ * template's name for it, or the template's name; a token that no record ties to anything by the name of the template
+ * a note of the second design gives for it, where the note gives one; otherwise as a token of unknown meaning.
+ */
+export const tokenTitle = (token: HeldToken): string => (token.meaning === 'unknown' ? (token.template?.name ?? 'A token of unknown meaning') : (token.tokenName ?? token.template?.name ?? 'A token'));
+
+/**
  * What sending this NFT gives away.
  * @param positions - the positions of the wallet's records as last read, or `undefined` while they are not
  */
 export const tokenStake = (token: HeldToken, positions: RecordedPosition[] | undefined): TokenStake => {
   const capability = token.capability === 'minting' || token.capability === 'mutable' ? { capability: token.capability } : {};
   const template = token.template === undefined ? {} : { template: token.template.name };
-  if (token.meaning === 'unknown') return { holds: { kind: 'none' }, ...capability };
+  // A note of the second design may name a template; no record ties the token to a position.
+  if (token.meaning === 'unknown') return { ...template, holds: { kind: 'none' }, ...capability };
   if (token.meaning === 'incomplete') return { ...template, holds: { kind: 'untrusted' }, ...capability };
   const own = positions?.filter((position) => position.token.outpoint === token.outpoint) ?? [];
   const confirmed = own.filter((position) => position.status !== 'unconfirmed');
@@ -63,6 +71,6 @@ export const CAPABILITY_WORDS: Record<'minting' | 'mutable', string> = {
 /** The line in view: what the token controls, or, for a token no record ties to anything, what its capability allows. */
 export const stakeHeadline = (stake: TokenStake): string => {
   if (stake.holds.kind === 'untrusted') return stake.template === undefined ? 'A record ties it to a template this phone does not have.' : `A record ties it to "${stake.template}", a template this phone does not trust yet.`;
-  if (stake.holds.kind === 'none') return stake.capability === undefined ? 'Nothing here says what it controls.' : CAPABILITY_WORDS[stake.capability];
+  if (stake.holds.kind === 'none') return stake.capability !== undefined ? CAPABILITY_WORDS[stake.capability] : stake.template === undefined ? 'Nothing here says what it controls.' : `No record ties it to a position of "${stake.template}".`;
   return stake.template === undefined ? 'It controls a position of an application.' : `It controls a position of "${stake.template}".`;
 };

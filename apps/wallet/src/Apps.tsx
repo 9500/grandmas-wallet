@@ -13,6 +13,7 @@ import type { Owner } from './OwnerApp.js';
 import { CONNECTION_ADDRESS } from './scan.js';
 import { CameraIcon, ScanDialog } from './Scanner.js';
 import { chooseToken } from './token-choice.js';
+import { tokenTitle } from './token-stake.js';
 import { type Connection, keep, kept } from './session.js';
 import { TokenAmount } from './token-words.js';
 import './apps.css';
@@ -1012,7 +1013,7 @@ export const PositionRow = ({ owner, position, onView }: { owner: Owner; positio
  */
 export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldToken; onView: (view: View) => void }) => {
   const suggestion = token.meaning === 'incomplete' && token.template !== undefined ? owner.apps.applications.suggestions.find((candidate) => candidate.identifier === token.template?.identifier) : undefined;
-  const title = token.meaning === 'unknown' ? 'A token of unknown meaning' : (token.tokenName ?? token.template?.name ?? 'A token');
+  const title = tokenTitle(token);
   const of = token.meaning === 'position' && token.tokenName !== undefined ? token.template?.name : undefined;
   return (
     <li class="token">
@@ -1063,7 +1064,7 @@ export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldTo
       {token.meaning === 'unknown' && (
         <div class="token-body">
           <div class="small muted token-line">
-            Nothing here says what it stands for.{' '}
+            {token.template === undefined ? 'Nothing here says what it stands for.' : 'No record ties it to a position.'}{' '}
             <Info label="About this token">
               <span>{token.reason ?? 'No record of this wallet ties it to a position.'}</span>
               <span>It is safe: the wallet holds it and moves it in a sweep or a recovery like any other coin.</span>

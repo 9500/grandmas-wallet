@@ -392,7 +392,8 @@ export const tokenLabel = (token: SendableToken): string => {
   if (token.kind === 'fungible') return 'Fungible tokens';
   const held = token.token;
   if (held.meaning === 'position' && held.tokenName !== undefined && held.template !== undefined) return `${held.tokenName} · ${held.template.name}`;
-  if (held.meaning !== 'unknown' && held.template !== undefined) return `A token of "${held.template.name}"`;
+  // Where no record ties it to a template, a note of the second design may still name one.
+  if (held.template !== undefined) return `A token of "${held.template.name}"`;
   return 'An NFT of unknown meaning';
 };
 

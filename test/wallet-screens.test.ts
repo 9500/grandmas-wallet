@@ -1,12 +1,12 @@
 import { binToHex } from '@bitauth/libauth';
-import { type ActionFinding, type HeldToken, type RecordedPosition, FindingRefusalError, NeedsApplicationError, NotStoredError, applicationConnector } from '@grandmas-wallet/app';
+import { type ActionFinding, type ApplicationsState, type HeldToken, type RecordedPosition, FindingRefusalError, NeedsApplicationError, NotStoredError, applicationConnector } from '@grandmas-wallet/app';
 import { type ActionDetails, type Channel, type Proposal, DappRequests } from '@grandmas-wallet/connect';
 import { p2pkhLockingBytecode } from '@grandmas-wallet/core';
 import { keyedStrongboxTemplate, strongboxTemplate, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
 import { approval, consentOf, leavingLine, leavingWords, refusalOf, tokenList } from '../apps/wallet/src/review-gate.js';
-import { stakeHeadline, tokenStake } from '../apps/wallet/src/token-stake.js';
+import { stakeHeadline, tokenStake, tokenTitle } from '../apps/wallet/src/token-stake.js';
 import { type Device, deviceWith, presentation, request } from './support/applications.js';
 
 /**
@@ -189,5 +189,25 @@ describe('what the Send screen says is at stake with a token', () => {
     const held = (await device.applications.tokens()).find((token) => token.meaning === 'position');
     expect(held).toBeDefined();
     expect(tokenStake(held as HeldToken, positions)).toEqual({ template: 'Keyed strongbox', holds: { kind: 'amount', satoshis: 30_000n, places: 1 } });
+  }, 60_000);
+});
+
+describe('a token of the second design, kept with a note and no record', () => {
+  it('is listed by the name of the template the note gives, with no position claimed for it', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    await device.applications.carryOut(request(keyedBox, 'open', 'holder', { amount: 30_000, label: '01' }));
+    const made = (await device.applications.tokens()).find((token) => token.meaning === 'position') as HeldToken & { template: { identifier: string } };
+    // What a phone of the second design keeps: the template it trusted and a note of the token it made, and no record.
+    const kept = device.wallet.parts.kept() as ApplicationsState;
+    device.wallet.parts.store({ ...kept, positionRecords: [], notes: [{ category: made.category, templateIdentifier: made.template.identifier }] });
+    const noted = (await device.applications.tokens()).find((token) => token.category === made.category) as HeldToken;
+    expect(noted).toMatchObject({ meaning: 'unknown', template: { name: 'Keyed strongbox' } });
+    expect(noted.reason).toMatch(/A note of an earlier version of this wallet says the template "Keyed strongbox" made this token/);
+    expect(tokenTitle(noted)).toBe('Keyed strongbox');
+    expect(stakeHeadline(tokenStake(noted, []))).toBe('No record ties it to a position of "Keyed strongbox".');
+    // Without a note nothing names it.
+    const { template: _template, ...bare } = noted;
+    expect(tokenTitle(bare)).toBe('A token of unknown meaning');
+    expect(stakeHeadline(tokenStake(bare, []))).toBe('Nothing here says what it controls.');
   }, 60_000);
 });
