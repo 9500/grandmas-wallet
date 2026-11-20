@@ -128,12 +128,12 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 | Stage | Tests |
 | --- | --- |
 | 12 | PR01, PR02, PR10, PR11 |
-| 13 | PR03–PR07, PR12, PR23, PR24 |
+| 13 | PR03–PR07, PR12, PR23, PR24, PR25 |
 | 14 | PR13–PR18, PR21, PR22 |
 | 15 | PR08, PR09 |
 | 17 | PR19, PR20 |
 
-All 24 tests that this version adds to the proposal's section 21 are in this table once. The tests of the second design are in the table of version 0.4; the proposal's section 21 says which of them this version retires or replaces.
+All 25 tests that this version adds to the proposal's section 21 are in this table once. The tests of the second design are in the table of version 0.4; the proposal's section 21 says which of them this version retires or replaces.
 
 `scripts/test-record.mjs` reads the statements of the tests from the proposal of version 0.6.
 
