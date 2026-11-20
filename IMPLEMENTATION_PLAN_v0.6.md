@@ -86,7 +86,7 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 - `xo_v1` in its version 2 (section 14.2): no profile, no declaration, the new answers to a positions request.
 - Second part, after stage 17: removed are reading a declaration, finding a position from the chain, the template check that depends on a declaration, and token names from a declaration. Token notes are no longer written. The tests of the second design that this version retires (proposal section 21) are removed with the code they test; the others still pass.
 
-**Tests:** PR13, PR14, PR15, PR16, PR17, PR18, PR22 in the first part; PR21 in the second. **Done when** they pass on the simulated chain.
+**Tests:** PR13, PR14, PR15, PR16, PR17, PR18, PR22 in the first part; PR21 in the second. **Done when** they pass on the simulated chain. **The first part was done on 20 November 2026** (`docs/results/stage-14.md` on the branch `design-3`), on the simulated chain only. The proposal's section 13.3 was corrected for what it showed: when an action creates a token category, and which input spends a position.
 
 ## Stage 15 — Findings for each action
 
