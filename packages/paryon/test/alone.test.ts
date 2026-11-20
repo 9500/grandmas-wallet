@@ -263,6 +263,20 @@ describe('a ParyonUSD loan from the template alone (PR20)', () => {
     expect(found?.loan.output.valueSatoshis).toBe(COLLATERAL);
   });
 
+  it('takes one of the manage function\'s coins as told, not always the first, so that two users\' actions seldom spend the same one', async () => {
+    const { device, keyCategory } = await openLoan(DEBT, COLLATERAL);
+    const listed = recorded.manage.map((entry) => `${entry.transactionId}:${entry.index}`).sort();
+    expect(listed.length).toBeGreaterThan(1);
+    const taken = async (pick: (count: number) => number): Promise<string> => {
+      const found = await loanCoins(pageChain(device), contracts, hexToBin(keyCategory), 1_000n, undefined, pick);
+      return `${hex(found?.manageFunction.transactionHash as Uint8Array)}:${found?.manageFunction.index}`;
+    };
+    expect(await taken(() => 0)).toBe(listed[0]);
+    expect(await taken((count) => count - 1)).toBe(listed[listed.length - 1]);
+    // Out of range is held to the list.
+    expect(await taken(() => 99)).toBe(listed[listed.length - 1]);
+  });
+
   it('collateral added, 100 PUSD repaid, the rest repaid and the loan closed, each from the page\'s requests; the key back where it was until the closing', async () => {
     const { device, keyCategory, borrowed } = await openLoan(DEBT, COLLATERAL);
     // Add collateral: the page names the loan, its sidecar, the price and the manage function, and the key's coin value.

@@ -156,19 +156,31 @@ export const findLoan = async (chain: ParyonChain, contracts: ParyonContracts, k
 /**
  * What an action on an open loan spends, as the loan's page names it in a request
  * (`page-requests.ts`): the loan and its sidecar found from the key (`findLoan`), the price thread with the highest
- * price, which Paryon's contracts reckon the collateral at, and a manage function's coin. The key's coin is the
+ * price, which Paryon's contracts reckon the collateral at, and one of the manage function's coins, taken at random. The key's coin is the
  * wallet's: what it holds comes from the wallet's answer to a positions request.
  *
  * Returns `undefined` when the key opens no open loan.
  * @throws when Paryon's shared contracts cannot be found
  */
-export const loanCoins = async (chain: ParyonChain, contracts: ParyonContracts, keyCategory: Uint8Array, keySatoshis: bigint, reader = new TransactionReader(chain)): Promise<(FoundLoan & { price: PriceThread; manageFunction: LiveOutput; keySatoshis: bigint }) | undefined> => {
+export const loanCoins = async (
+  chain: ParyonChain,
+  contracts: ParyonContracts,
+  keyCategory: Uint8Array,
+  keySatoshis: bigint,
+  reader = new TransactionReader(chain),
+  /** Which of the manage function's coins to take, by its place among them in the order of their outpoints. */
+  pick: (count: number) => number = (count) => Math.floor(Math.random() * count),
+): Promise<(FoundLoan & { price: PriceThread; manageFunction: LiveOutput; keySatoshis: bigint }) | undefined> => {
   const found = await findLoan(chain, contracts, keyCategory, reader);
   if (found === undefined) return undefined;
   const state = await readParyonState(chain, contracts, reader);
   const outpointOf = (utxo: Utxo): string => `${binToHex(utxo.transactionHash)}:${utxo.index}`;
   const [price] = state.price.slice().sort((a, b) => (b.state.price > a.state.price ? 1 : b.state.price < a.state.price ? -1 : outpointOf(a) < outpointOf(b) ? -1 : 1));
-  const [manageFunction] = state.manage.slice().sort((a, b) => (outpointOf(a) < outpointOf(b) ? -1 : 1));
+  // Anyone may spend a manage function's coin in an action of their own, which puts a new one in its place. Taking one at
+  // random among those listed, rather than always the first, makes it unlikely that someone else spends the same coin
+  // while the user looks at the request, which the network would then refuse as a conflict.
+  const functions = state.manage.slice().sort((a, b) => (outpointOf(a) < outpointOf(b) ? -1 : 1));
+  const manageFunction = functions[Math.min(Math.max(pick(functions.length), 0), functions.length - 1)];
   if (price === undefined) throw new Error('Paryon\'s price contract could not be found on the chain just now.');
   if (manageFunction === undefined) throw new Error('Paryon\'s manage function could not be found on the chain just now.');
   return { ...found, price, manageFunction, keySatoshis };
