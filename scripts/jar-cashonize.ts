@@ -12,6 +12,8 @@
 //   empty again  and empties it again
 //   check        the chain is read: the jar holds nothing, it is at the address the contract gives
 //   return       Cashonize sends what it holds back to the funding address
+//   destroy the key  the jar's key, which opens nothing once the jar is empty, is destroyed with Cashonize's key from
+//                its seed phrase, and its satoshis go to the funding address (Cashonize itself sends no token away)
 //
 // usage (from the repository's root):
 //   npx tsx scripts/jar-cashonize.ts [--until <step>] [--headed] [--public]
@@ -44,10 +46,12 @@ import {
   hexToBin,
   lockingBytecodeToCashAddress,
 } from '@bitauth/libauth';
+import { type InputSpec, buildTransaction, checkBeforeSending, keyPairFromPrivateKey, p2pkhInput } from '@grandmas-wallet/core';
 import { savingsJarScript, unlockTimeOf } from '@grandmas-wallet/savings-jar';
 import { type BrowserContext, type Locator, type Page, chromium } from 'playwright';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
+import { nodeRpc, testMempoolAccept } from '../packages/chipnet/src/node-rpc.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 /** The public jar page, as served, instead of one built from this checkout. */
@@ -70,14 +74,14 @@ const PAY_IN_BCH = '0.00003';
 const PAY_IN_AGAIN_BCH = '0.00002';
 const MINUTE = 60_000;
 
-const STEPS = ['wallet', 'fund', 'open', 'wait', 'empty', 'pay in', 'empty again', 'pay in again', 'empty a third time', 'check', 'return'] as const;
+const STEPS = ['wallet', 'fund', 'open', 'wait', 'empty', 'pay in', 'empty again', 'pay in again', 'empty a third time', 'check', 'return', 'destroy the key'] as const;
 type StepName = (typeof STEPS)[number];
 
 const argument = (name: string): string | undefined => {
   const index = process.argv.indexOf(`--${name}`);
   return index === -1 ? undefined : process.argv[index + 1];
 };
-const until = (argument('until') ?? 'return') as StepName;
+const until = (argument('until') ?? 'destroy the key') as StepName;
 if (!STEPS.includes(until)) throw new Error(`--until takes one of: ${STEPS.join(', ')}`);
 const headed = process.argv.includes('--headed');
 
@@ -728,6 +732,42 @@ try {
     finish('return');
   }
 
+  // destroy the key ----------------------------------------------------
+  if (isDone('return') && !isDone('destroy the key') && !reached('destroy the key')) {
+    begin('destroy the key');
+    const jarState = state.jar;
+    if (jarState === undefined) throw new Error('the run knows no jar');
+    if ((await electrum.listUnspent(lockingOf(jarState.address), 'include')).length > 0) throw new Error('the jar is not empty: its key is kept');
+    let transactionId = state.rows.find((entry) => entry.step === 'destroy the key')?.transactionId;
+    if (transactionId === undefined) {
+      const { seed } = JSON.parse(readFileSync(walletPath, 'utf8')) as { seed: string };
+      const node = deriveHdPrivateNodeFromBip39Mnemonic(seed);
+      const inputs: InputSpec[] = [];
+      for (const [locking, name] of await scannedAddresses()) {
+        for (const entry of await electrum.listUnspent(hexToBin(locking), 'include')) {
+          if (entry.token?.category !== jarState.category) continue;
+          const [branch, index] = name.split(' ');
+          const child = deriveHdPath(node, `m/44'/145'/0'/${branch === 'receive' ? 0 : 1}/${index}`);
+          if (typeof child === 'string') throw new Error(child);
+          const output = (await transactionOf(entry.transactionId)).outputs[entry.index];
+          if (output === undefined) throw new Error(`no output ${entry.transactionId}:${entry.index}`);
+          inputs.push(p2pkhInput({ transactionHash: hexToBin(entry.transactionId), index: entry.index, output }, keyPairFromPrivateKey(child.privateKey)));
+        }
+      }
+      if (inputs.length === 0) throw new Error('the jar\'s key is not at any of Cashonize\'s first addresses');
+      const built = buildTransaction({ inputs, outputs: [{ lockingBytecode: lockingOf(funderAddress), valueSatoshis: 0n }], remainderOutputIndex: 0, allowTokenBurn: true });
+      const check = checkBeforeSending(built);
+      if (check !== true) throw new Error(`destroying the key fails the check before sending: ${check}`);
+      const verdict = await testMempoolAccept(nodeRpc(JSON.parse(readFileSync(`${root}.chipnet/node-rpc.json`, 'utf8'))), binToHex(built.encoded));
+      if (!verdict.allowed) throw new Error(`the node refuses destroying the key: ${verdict.reason}`);
+      const result = await electrum.broadcast(binToHex(built.encoded));
+      if (!result.accepted) throw new Error(`the network refused destroying the key: ${result.reason}`);
+      transactionId = built.transactionId;
+    }
+    row('destroy the key', transactionId, 'the jar\'s key, which opens nothing now that the jar is empty, spent with Cashonize\'s key from its seed phrase and not carried on; its satoshis to the funding address');
+    finish('destroy the key');
+  }
+
   if (isDone('return')) {
     // What is left at Cashonize's addresses, read from the chain.
     const left: string[] = [];
@@ -760,13 +800,13 @@ try {
     const now = BigInt(satoshisIn(state.funderAfter));
     note(
       'funder-after',
-      `The funding address held ${before} satoshis before the run and holds ${now} after it${others.length === 0 ? '' : `; in between it also received ${others.join(', ')}, which are not part of this run`}. The run cost ${before + elsewhere - now} satoshis: ${fees} in fees for its ${state.rows.length} transactions and the ${before + elsewhere - now - fees} satoshis that stay with the jar's key.`,
+      `The funding address held ${before} satoshis before the run and holds ${now} after it${others.length === 0 ? '' : `; in between it also received ${others.join(', ')}, which are not part of this run`}. The run cost ${before + elsewhere - now} satoshis: ${fees} in fees for its ${state.rows.length} transactions${before + elsewhere - now - fees === 0n ? '; nothing stays with Cashonize' : ` and the ${before + elsewhere - now - fees} satoshis that stay with the jar's key`}.`,
     );
     const n = state.notes;
     const steps = ['fund the wallet', 'open the jar', 'empty', 'pay in', 'empty again', 'pay in again', 'empty a third time', 'return'].every((step) => state.rows.some((entry) => entry.step === step));
     const passed = steps && /: true\.$/.test(n['opening-address'] ?? '') && /holds 0 satoshis in 0 outputs/.test(n['jar-empty'] ?? '') && /carries the key: true\./.test(n['key-held'] ?? '');
     state.outcome ??= passed
-      ? 'passed. Cashonize, unmodified, connected to the jar page and signed the opening of a jar, three withdrawals and two payments into it, each built by the page; the page offered no withdrawal before the date; the jar ends empty on chain at the address the contract gives, and the key stays with Cashonize.'
+      ? `passed. Cashonize, unmodified, connected to the jar page and signed the opening of a jar, three withdrawals and two payments into it, each built by the page; the page offered no withdrawal before the date; the jar ends empty on chain at the address the contract gives, and ${isDone('destroy the key') ? 'the key, which opens nothing any more, was destroyed and its satoshis sent back' : 'the key stays with Cashonize'}.`
       : 'failed: see the observations above.';
     save();
   }
