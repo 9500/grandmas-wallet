@@ -41,7 +41,7 @@ for (const file of report.testResults) {
   }
 }
 
-const proposal = readFileSync('Grandmas_Wallet_Architecture_Proposal_v0.4.md', 'utf8');
+const proposal = readFileSync('Grandmas_Wallet_Architecture_Proposal_v0.6.md', 'utf8');
 const stated = (id) => new RegExp(`^\\| ${id} \\| (.+?) \\| (.+?) \\|$`, 'm').exec(proposal);
 const revision = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
 const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).split('\n').some((line) => line.trim() !== '' && !line.includes(`docs/results/stage-${stage}.md`));

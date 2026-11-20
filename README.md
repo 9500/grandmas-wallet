@@ -33,14 +33,15 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 
 - **Design 1** is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1), with its web demonstration and chipnet runs. It spent every coin together with the wallet's controller, which linked all of a wallet's activity and got in the way of applications.
 - **Design 2** is at the tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2), and is what the pages under "Try it" run. It gives each address its own key and uses the controller only for recovery. After a recovery, the new phone finds what the owner holds in an application from the application's token, its template and the chain alone.
-- **Design 3** starts from design 2 and keeps its keys, addresses and controller. It changes how an application's position comes back after a recovery. Its architecture proposal is still to be written; until then the documents below describe design 2.
+- **Design 3** starts from design 2 and keeps its keys, addresses and controller. It changes how an application's position comes back after a recovery. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6, and nothing of it is built yet.
 
 ### Why a third design
 
-- **The chain does not hold everything.** Design 2 finds a position again only when the values its script was made with are on chain, as they are for the Savings Jar and the ParyonUSD loan. It refuses the template of an application that keeps such values elsewhere, so the wallet cannot be used with that application at all.
+- **The chain does not hold everything.** Design 2 finds a position again only when the values its script was made with are on chain, as they are for the Savings Jar and the ParyonUSD loan, and only when someone has written down for the wallet where they are. It cannot be used with an application for which either is missing.
 - **Such values have to be carried from the old phone to the new one.** XO's authors, asked about [the proposal for finding positions](docs/xo-position-recovery.md), pointed to state synchronisation for this. XO's own synchronisation is not implemented yet.
 - **The wallet already has a way to carry them.** Its backup is sealed, and the recoverer hands the new phone the access to it. In design 3 the wallet stores there, before an action is signed, what the XO engine keeps for each script of an application it follows. The new phone reads these records and follows the scripts again. The recoverer's part does not change, and it needs to know nothing about any application.
-- **The chain stays in use.** A record is checked against the chain, and a position that has no record, such as one whose token came from someone else, is still found from the chain. The records keep the engine's own fields, so that XO's synchronisation can take the store's place when it exists.
+- **The chain stays in use, as the check.** A record counts only when the chain ties it to a token the wallet holds. The records keep the engine's own fields, so that XO's synchronisation can take the store's place when it exists.
+- **An application should need nothing but its XO template.** Design 2 also needs a second document written for this wallet, which says how to find a position and how the wallet takes part in each action. Design 3 retires it: what it said comes from the template, from the application's request and from the wallet's own record. An application's page then carries what only the application knows, and the wallet acts by itself only where nothing is missing.
 
 ## What is where
 
@@ -58,9 +59,8 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 
 ## Documents
 
-- [Architecture proposal v0.4](Grandmas_Wallet_Architecture_Proposal_v0.4.md)
-- [Illustrated overview of the design, v0.5](https://blaze2026.9500.cash/design.html) ([source](docs/design_v0.5.html))
-- [Implementation plan v0.4](IMPLEMENTATION_PLAN_v0.4.md)
+- Design 3, proposed: [architecture proposal v0.6](Grandmas_Wallet_Architecture_Proposal_v0.6.md) and [implementation plan v0.6](IMPLEMENTATION_PLAN_v0.6.md)
+- Design 2, as built: [architecture proposal v0.4](Grandmas_Wallet_Architecture_Proposal_v0.4.md), [implementation plan v0.4](IMPLEMENTATION_PLAN_v0.4.md), and the [illustrated overview v0.5](https://blaze2026.9500.cash/design.html) ([source](docs/design_v0.5.html))
 - [Decisions log](docs/decisions.md)
 - [XO templates and invitations](docs/xo-invitations.md)
 - [Trying the wallet by hand](docs/walkthrough.md)
