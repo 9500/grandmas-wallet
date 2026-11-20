@@ -72,9 +72,11 @@ The exit criterion was: the result is written to `docs/` with the transactions, 
 - Positions are listed from records that count. Several records for one token; the one whose script holds coins. A token without a record is listed as a token.
 - The status "not confirmed", and the rule that only an action in which the wallet gives nothing but the fee is carried out there.
 
-**Tests:** PR03, PR04, PR05, PR06, PR07, PR12, PR23, PR24. **Done when** they pass on the simulated chain, and PR03 on the local node through the engine.
+**Tests:** PR03, PR04, PR05, PR06, PR07, PR12, PR23, PR24. **Done on 20 November 2026:** they pass on the simulated chain (`docs/results/stage-13.md`), and PR03 ran on the local node through the engine with the real recovery flow (`docs/runs/stage-13-local-node.md`). In that run the record, the check, the listing and the hand-over to the engine used no declaration; the withdrawal still took its values from one, until stage 14.
 
 ## Stage 14 — An application from its template alone
+
+In two parts, so that the tree passes its check throughout. The first adds the way without a declaration beside the existing one. The second, after stage 17 has moved the two applications over, removes the declaration from the wallet.
 
 - Filling a value: the wallet's own, the request, the record, the user, with an address and a paid-in amount never from a record (section 13.3). The kinds of the wallet's own outputs, named by the request where they are not a plain receipt.
 - An action about a token with no declaration: the request names the position and says whether the token is spent, or the template's own token input says so; the wallet makes sure the coin it puts there is the token.
@@ -82,9 +84,9 @@ The exit criterion was: the result is written to `docs/` with the transactions, 
 - A token of the wallet's that would leave it or come back changed, and a token made from the wallet's coin that would go elsewhere: shown, and carried out only with the user's tick.
 - From the wallet's own list: the actions a script offers; carried out alone where nothing is missing, and otherwise "Open the application to do this" with the page's address.
 - `xo_v1` in its version 2 (section 14.2): no profile, no declaration, the new answers to a positions request.
-- Removed: reading a declaration, finding a position from the chain, the template check that depends on a declaration, token names from a declaration.
+- Second part, after stage 17: removed are reading a declaration, finding a position from the chain, the template check that depends on a declaration, and token names from a declaration. Token notes are no longer written. The tests of the second design that this version retires (proposal section 21) are removed with the code they test; the others still pass.
 
-**Tests:** PR13, PR14, PR15, PR16, PR17, PR18, PR21, PR22. **Done when** they pass on the simulated chain. The tests of the second design that this version retires (proposal section 21) are removed with the code they test; the others still pass.
+**Tests:** PR13, PR14, PR15, PR16, PR17, PR18, PR22 in the first part; PR21 in the second. **Done when** they pass on the simulated chain.
 
 ## Stage 15 — Findings for each action
 
@@ -155,3 +157,4 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 31 | Acting without the application | Decided, 20 November 2026 | Not required; done where nothing is missing |
 | 32 | A token made from the wallet's coin that does not come to the wallet | Decided, 20 November 2026 | Carried out with the user's tick |
 | 33 | Corrections from stage 11 | Taken into the proposal, 20 November 2026 | — |
+| 34 | Telling a moved position from one set beside it | Not in this version | The limit is stated |
