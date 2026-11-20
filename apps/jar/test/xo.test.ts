@@ -1,17 +1,20 @@
 import { hexToBin } from '@bitauth/libauth';
 import { applicationConnector, walletAnnouncement } from '@grandmas-wallet/app';
 import { type Channel, type Proposal, type XoMessage, DappRequests, RequestRefusedError } from '@grandmas-wallet/connect';
-import { savingsJarScript } from '@grandmas-wallet/savings-jar';
+import { savingsJarScript, unlockTimeBytes } from '@grandmas-wallet/savings-jar';
 import { describe, expect, it } from 'vitest';
 
 import { deviceWith } from '../../../test/support/applications.js';
 import { JAR_TEMPLATE } from '../src/jar.js';
-import { type PendingStore, STAGE_WORDS, XoJars, memoryStore, xoProblem } from '../src/xo.js';
+import { type PendingStore, STAGE_WORDS, XoJars, jarOfPosition, memoryStore, xoProblem } from '../src/xo.js';
 
 /**
  * The Savings Jar page with this project's wallet: the page's own functions against the wallet's library,
- * over a connection in memory. The page builds no transaction; it asks for actions of its template.
+ * over a connection in memory. The page builds no transaction; it asks for actions of its template, version 4,
+ * with requests of version 2 of `xo_v1`: no recovery declaration is named or sent (proposal section 15.3).
  */
+
+const PAGE = 'https://jar.example/';
 
 /** A pair of queues between the page and the wallet. Everything goes through JSON and back, as it travels. */
 const link = () => {
@@ -48,7 +51,8 @@ const setUp = async () => {
     connector.attach('savings jar page', wires.walletEnd);
     const requests = new DappRequests();
     requests.attach(wires.dappEnd);
-    return { jars: new XoJars(requests, store), requests, sentToWallet: wires.sentToWallet };
+    // The page reads each jar's balance from the chain itself.
+    return { jars: new XoJars(requests, store, { listUnspent: (lockingBytecode) => device.chain.listUnspent(lockingBytecode) }, PAGE), requests, sentToWallet: wires.sentToWallet };
   };
   /** Wait for the wallet to show the request, then approve or decline it as the user. */
   const answer = async <T>(asked: Promise<T>, approve = true): Promise<T> => {
@@ -62,10 +66,11 @@ const setUp = async () => {
 };
 
 describe('savings jars with a wallet that speaks xo_v1', () => {
-  it('the page works with what this wallet announces, and says why it cannot with another network', () => {
+  it('the page works with what this wallet announces, and says why it cannot with another network, or with a wallet of the earlier version only', () => {
     const offered = walletAnnouncement('chipnet');
     expect(xoProblem(offered, 'chipnet')).toBeUndefined();
     expect(xoProblem(offered, 'regtest')).toContain('Your wallet is on chipnet; this page is on regtest');
+    expect(xoProblem({ version: 1, network: 'chipnet', profiles: ['recoverable-app-v1'], bindings: ['receive', 'change', 'return', 'lasting'] }, 'chipnet')).toMatch(/only the earlier version/);
   });
 
   it('opens a jar, lists it, takes a payment in, refuses to empty it before its date in the wallet\'s words, empties it after, and lists the empty jar with its key kept', async () => {
@@ -84,13 +89,18 @@ describe('savings jars with a wallet that speaks xo_v1', () => {
     const category = opened.category as string;
     const script = savingsJarScript(hexToBin(category), unlockTime);
     expect(device.chain.balanceOf(script.lockingBytecode)).toBe(40_000n);
-    // The template went along only once the wallet said it did not have it; the page sent no transaction.
-    expect(sentToWallet.filter((message) => message.action === 'xo_action_request' && message.definition !== undefined)).toHaveLength(1);
+    // The template went along only once the wallet said it did not have it, alone; the page sent no transaction.
+    const requests = sentToWallet.filter((message) => message.action === 'xo_action_request');
+    expect(requests.filter((message) => message.definition !== undefined).map((message) => message.definition)).toEqual([{ template: JAR_TEMPLATE.texts.template }]);
+    expect(requests.every((message) => message.template.declaration === undefined && message.page === PAGE)).toBe(true);
+    // The wallet's record of the jar keeps the page's address.
+    expect(device.applications.positionRecords.map(({ token, applicationPage }) => [token?.category, applicationPage])).toEqual([[category, PAGE]]);
 
     expect(await jars.list()).toEqual({ trusted: true, jars: [{ category, unlockTime, satoshis: 40_000n, lockingBytecode: Buffer.from(script.lockingBytecode).toString('hex'), status: 'open' }] });
 
     // Paying in through the wallet, and by anyone with an ordinary payment to the jar's address.
     await answer(jars.deposit(category, 6_000n));
+    expect(sentToWallet.at(-1)).toMatchObject({ templateAction: 'deposit', variables: { savedSatoshis: 6_000 }, about: { category, spent: false } });
     device.chain.fund(script.lockingBytecode, 4_000n);
     expect((await jars.list()).jars[0]?.satoshis).toBe(50_000n);
 
@@ -105,6 +115,8 @@ describe('savings jars with a wallet that speaks xo_v1', () => {
     device.chain.nowMs += 3_700 * 1000;
     const before = (await device.wallet.balance()).recoverable;
     await answer(jars.withdraw(category));
+    // Emptying names the jar's key, and that it is spent; nothing else.
+    expect(sentToWallet.filter((message) => message.action === 'xo_action_request').at(-1)).toMatchObject({ templateAction: 'withdraw', variables: {}, about: { category, spent: true } });
     expect(device.chain.balanceOf(script.lockingBytecode)).toBe(0n);
     expect((await device.wallet.balance()).recoverable).toBeGreaterThan(before + 49_000n);
     expect(await jars.list()).toMatchObject({ trusted: true, jars: [{ category, satoshis: 0n, status: 'empty' }] });
@@ -147,4 +159,17 @@ describe('savings jars with a wallet that speaks xo_v1', () => {
     // The template is named by its hashes, as the page computes them from the texts.
     expect(JAR_TEMPLATE.names.identifier).toMatch(/^[0-9a-f]{64}$/);
   }, 60_000);
+
+  it('shows a jar from the wallet\'s answer only where the record\'s script is the jar the key names; one the wallet does not confirm is shown as such', () => {
+    const category = 'c1'.repeat(32);
+    const unlockTime = 1_900_000_000;
+    const commitment = Buffer.from(unlockTimeBytes(unlockTime)).toString('hex');
+    const reported = { category, commitment, capability: 'none', satoshis: '1000', status: 'open' as const, lockingScript: 'savingsJarLockingScript', variables: { keyCategory: category, unlockTime: String(unlockTime) } };
+    expect(jarOfPosition(reported, 5_000n)).toMatchObject({ category, unlockTime, satoshis: 5_000n, status: 'open' });
+    expect(jarOfPosition({ ...reported, status: 'closed' }, 0n)).toMatchObject({ status: 'empty' });
+    expect(jarOfPosition({ ...reported, status: 'unconfirmed' }, 5_000n)).toMatchObject({ status: 'unconfirmed' });
+    // A record whose values are not those the key carries names another script: it is not this page's jar.
+    expect(jarOfPosition({ ...reported, variables: { keyCategory: category, unlockTime: String(unlockTime + 1) } }, 5_000n)).toBeUndefined();
+    expect(jarOfPosition({ ...reported, variables: { keyCategory: 'ab'.repeat(32), unlockTime: String(unlockTime) } }, 5_000n)).toBeUndefined();
+  });
 });

@@ -152,3 +152,24 @@ export const findLoan = async (chain: ParyonChain, contracts: ParyonContracts, k
   if (found.length > 1) throw new Error(`The key ${binToHex(keyCategory)} opens ${found.length} loans; one is expected.`);
   return found[0];
 };
+
+/**
+ * What an action on an open loan spends, as the loan's page names it in a request without a declaration
+ * (`page-requests.ts`): the loan and its sidecar found from the key (`findLoan`), the price thread with the highest
+ * price, which Paryon's contracts reckon the collateral at, and a manage function's coin. The key's coin is the
+ * wallet's: what it holds comes from the wallet's answer to a positions request.
+ *
+ * Returns `undefined` when the key opens no open loan.
+ * @throws when Paryon's shared contracts cannot be found
+ */
+export const loanCoins = async (chain: ParyonChain, contracts: ParyonContracts, keyCategory: Uint8Array, keySatoshis: bigint, reader = new TransactionReader(chain)): Promise<(FoundLoan & { price: PriceThread; manageFunction: LiveOutput; keySatoshis: bigint }) | undefined> => {
+  const found = await findLoan(chain, contracts, keyCategory, reader);
+  if (found === undefined) return undefined;
+  const state = await readParyonState(chain, contracts, reader);
+  const outpointOf = (utxo: Utxo): string => `${binToHex(utxo.transactionHash)}:${utxo.index}`;
+  const [price] = state.price.slice().sort((a, b) => (b.state.price > a.state.price ? 1 : b.state.price < a.state.price ? -1 : outpointOf(a) < outpointOf(b) ? -1 : 1));
+  const [manageFunction] = state.manage.slice().sort((a, b) => (outpointOf(a) < outpointOf(b) ? -1 : 1));
+  if (price === undefined) throw new Error('Paryon\'s price contract could not be found on the chain just now.');
+  if (manageFunction === undefined) throw new Error('Paryon\'s manage function could not be found on the chain just now.');
+  return { ...found, price, manageFunction, keySatoshis };
+};

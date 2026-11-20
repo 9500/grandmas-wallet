@@ -244,6 +244,7 @@ const describeTime = (jar: JarView, ready: Readiness, facts: PageFacts): { when:
 
 const JarPill = ({ jar, ready }: { jar: JarView; ready: Readiness }) => {
   if (jar.status === 'unknown') return <Pill tone="warn">Not known</Pill>;
+  if (jar.status === 'unconfirmed') return <Pill tone="warn">Not confirmed</Pill>;
   if (jar.status === 'empty') return <Pill>Empty</Pill>;
   if (ready.kind === 'locked') return <Pill>Locked</Pill>;
   if (ready.kind === 'network') return <Pill tone="warn">Opening</Pill>;
@@ -318,7 +319,8 @@ export const JarItem = ({
   const ready = readiness(jar.unlockTime, facts.now, facts.clock);
   const { when, note } = describeTime(jar, ready, facts);
   const busy = state.running !== undefined;
-  const canEmpty = jar.status === 'open' && ready.kind === 'ready';
+  // A jar the wallet does not confirm can still be emptied: the wallet takes money out of it, and pays nothing in.
+  const canEmpty = (jar.status === 'open' || (jar.status === 'unconfirmed' && jar.satoshis > 0n)) && ready.kind === 'ready';
   return (
     <li class="jar" data-testid="jar">
       <div class="jar-top">
@@ -332,6 +334,8 @@ export const JarItem = ({
         <div class="jar-note">Emptied. The key stays in your wallet, so whatever is paid in later can be taken out too.</div>
       ) : jar.status === 'unknown' ? (
         <div class="jar-note">Your wallet holds the key but could not work out where the jar stands.</div>
+      ) : jar.status === 'unconfirmed' ? (
+        <div class="jar-note">Your wallet does not confirm this jar from its records. It takes savings out of it, and pays nothing in.</div>
       ) : (
         note !== undefined && <div class="jar-note">{note}</div>
       )}
@@ -342,10 +346,12 @@ export const JarItem = ({
             Empty the jar
           </Button>
         )}
-        <Button kind={jar.status === 'empty' || !canEmpty ? 'secondary' : 'quiet'} small disabled={busy && state.running?.name !== depositName(jar)} onClick={() => setPaying(!paying)}>
-          {state.running?.name === depositName(jar) && <Spinner />}
-          Pay in
-        </Button>
+        {jar.status !== 'unconfirmed' && (
+          <Button kind={jar.status === 'empty' || !canEmpty ? 'secondary' : 'quiet'} small disabled={busy && state.running?.name !== depositName(jar)} onClick={() => setPaying(!paying)}>
+            {state.running?.name === depositName(jar) && <Spinner />}
+            Pay in
+          </Button>
+        )}
       </div>
       {paying && <PayIn jar={jar} facts={facts} state={state} onDeposit={(satoshis) => onDeposit(jar, satoshis)} onClose={() => setPaying(false)} />}
       <Outcome state={state} name={withdrawName(jar)} explorer={facts.explorer} />

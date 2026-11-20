@@ -27,3 +27,13 @@ export const paryonTemplateTexts = (contracts: ParyonContracts): PresentedTempla
     declaration,
   };
 };
+
+/**
+ * The template alone, as a request of version 2 names and sends it (proposal section 15.3): the same text as
+ * `paryonTemplateTexts` gives, with no declaration.
+ */
+export const paryonTemplateAlone = (contracts: ParyonContracts): { names: { identifier: string; contentHash: string }; texts: { template: string } } => {
+  const template = JSON.stringify(paryonTemplateSource(contracts));
+  const read = readTemplate(template);
+  return { names: { identifier: read.identifier, contentHash: read.contentHash }, texts: { template } };
+};

@@ -1,26 +1,41 @@
 import type { ActionDetails, DappRequests, RequestStage, XoAdvertisement } from '@grandmas-wallet/connect';
-import { type BorrowingThread, type LoanRequest, type PresentedTemplate, borrowRequest, closeRequest, createKeyRequest, manageRequest, movePeriodRequest, repayRequest } from '@grandmas-wallet/paryon';
+import { speaks } from '@grandmas-wallet/connect';
+import {
+  type BorrowingThread,
+  type LoanCoins,
+  type LoanRequestAlone,
+  borrowRequestAlone,
+  closeRequestAlone,
+  createKeyRequestAlone,
+  manageRequestAlone,
+  movePeriodRequestAlone,
+  repayRequestAlone,
+} from '@grandmas-wallet/paryon';
+import type { Utxo } from '@grandmas-wallet/core';
 
 import { type BorrowPlan, type LoanView, type Market, CONTRACTS, LOAN_TEMPLATE } from './loan.js';
-import { type MadeKey, type PageChain, keyWaiting, readLoan, readMadeKey } from './market.js';
+import { type MadeKey, type PageChain, keyWaiting, readFactory, readLoan, readLoanCoins, readMadeKey } from './market.js';
 
 /**
- * Loans through a wallet that speaks `xo_v1`. The page builds no transaction and sees no key: it names its
- * template and asks for one of the template's actions, with the values only Paryon's arithmetic gives and the
- * contracts' coins it chose. The wallet fills in its own coins and addresses, reads the rest from the chain,
- * checks every value in the virtual machine with Paryon's contracts, and shows the user its own figures.
+ * Loans through a wallet that speaks `xo_v1`, version 2 (proposal sections 14.2 and 15.3). The page builds no
+ * transaction and sees no key: it names its template and asks for one of the template's actions. It sends no
+ * recovery declaration; what the declaration told the wallet, the page's requests now say (`packages/paryon`,
+ * `page-requests.ts`): every coin of Paryon's the action spends, by outpoint, found and read by the page itself
+ * (the loan and its sidecar from the key, the shared contracts it chose); the values read from them; which loan
+ * the action is about, by its key, and that the key is spent; that the key goes back to the script it left; and
+ * what the key's coin holds, as the wallet reported it. The wallet fills in its own coins and addresses, runs
+ * Paryon's contracts on the transaction before the user is asked, and shows the user its own figures.
+ *
+ * Every request carries the page's address, which the wallet keeps in the record it writes when the key arrives.
  *
  * A request is kept until it has an outcome, under the identifier the page chose. After the page is loaded
  * again it is sent once more with that identifier, and the wallet answers with what became of it.
  */
 
-export type LoanAction = LoanRequest['templateAction'];
+export type LoanAction = LoanRequestAlone['templateAction'];
 
 /** Seconds within which a server may not yet list the outputs of a key just made. */
 export const KEY_LISTED_WITHIN = 600;
-
-/** The template as `packages/paryon`'s request makers take it. Only its names go into a request. */
-const PRESENTED: PresentedTemplate = { names: LOAN_TEMPLATE.names, texts: LOAN_TEMPLATE.texts, ...LOAN_TEMPLATE.texts } as PresentedTemplate;
 
 /** A request that has no outcome yet. */
 export interface PendingRequest {
@@ -65,33 +80,35 @@ export const STAGE_WORDS: Record<RequestStage, string> = {
 export const xoProblem = (offered: XoAdvertisement | undefined, network: string): string | undefined => {
   if (offered === undefined) return 'Your wallet does not carry out actions of a template itself (xo_v1). Paryon\'s contracts take only wallets that do, or an ordinary wallet through Paryon\'s own site; this page works with the first kind only.';
   if (offered.network !== network) return `Your wallet is on ${offered.network}; this page is on ${network}. Switch the wallet to ${network} and connect again.`;
-  if (!offered.profiles.includes('recoverable-app-v1')) return 'Your wallet does not read the recovery declarations this page\'s template comes with.';
+  if (!speaks(offered, 2)) return 'Your wallet answers only the earlier version of XO requests, whose templates came with a recovery declaration. This page sends its template alone. Update the wallet and connect again.';
   if (!offered.bindings.includes('receive') || !offered.bindings.includes('return')) return 'Your wallet does not give the kinds of address this page\'s template asks for.';
   return undefined;
 };
 
 /** A request of `packages/paryon` as it travels. */
-export const detailsOf = (request: LoanRequest): ActionDetails => ({
+export const detailsOf = (request: LoanRequestAlone): ActionDetails => ({
   template: request.template,
   templateAction: request.templateAction,
   role: request.role,
   variables: request.variables,
   ...(request.bindings === undefined ? {} : { bindings: request.bindings }),
   ...(request.creates === undefined ? {} : { creates: request.creates }),
-  ...(request.spends === undefined ? {} : { spends: request.spends }),
+  ...(request.about === undefined ? {} : { about: request.about }),
   ...(request.inputs === undefined ? {} : { inputs: request.inputs }),
+  ...(request.page === undefined ? {} : { page: request.page }),
 });
 
-export const createKeyDetails = (): ActionDetails => detailsOf(createKeyRequest(PRESENTED));
-export const movePeriodDetails = (thread: BorrowingThread, lockHeight: number): ActionDetails => detailsOf(movePeriodRequest(PRESENTED, CONTRACTS, { borrowing: thread, lockHeight }));
-export const borrowDetails = (key: MadeKey, thread: BorrowingThread, market: Pick<Market, 'priceThread'>, plan: Pick<BorrowPlan, 'debt' | 'collateral'>): ActionDetails =>
-  detailsOf(borrowRequest(PRESENTED, { borrowing: thread, price: market.priceThread, enforcer: key.enforcer, proof: key.proof, debt: plan.debt, collateral: plan.collateral, startingInterest: 0 }));
-export const manageDetails = (category: string, collateral: bigint): ActionDetails => detailsOf(manageRequest(PRESENTED, { keyCategory: category, collateral }));
-export const repayDetails = (loan: LoanView, repay: bigint, collateral: bigint): ActionDetails => {
-  if (loan.found === undefined) throw new Error('The loan could not be read from the chain.');
-  return detailsOf(repayRequest(PRESENTED, { keyCategory: loan.category, loan: loan.found.loan, repay, collateral }));
-};
-export const closeDetails = (category: string): ActionDetails => detailsOf(closeRequest(PRESENTED, { keyCategory: category }));
+/** The address the page is served from, which goes into every request; `undefined` where it is not a web address. */
+export type PageAddress = string | undefined;
+const from = (page: PageAddress): { page?: string } => (page === undefined ? {} : { page });
+
+export const createKeyDetails = (factory: Utxo, page?: PageAddress): ActionDetails => detailsOf(createKeyRequestAlone(LOAN_TEMPLATE.names, { factory, ...from(page) }));
+export const movePeriodDetails = (thread: BorrowingThread, lockHeight: number, page?: PageAddress): ActionDetails => detailsOf(movePeriodRequestAlone(LOAN_TEMPLATE.names, CONTRACTS, { borrowing: thread, lockHeight, ...from(page) }));
+export const borrowDetails = (key: MadeKey, thread: BorrowingThread, market: Pick<Market, 'priceThread'>, plan: Pick<BorrowPlan, 'debt' | 'collateral'>, page?: PageAddress): ActionDetails =>
+  detailsOf(borrowRequestAlone(LOAN_TEMPLATE.names, { borrowing: thread, price: market.priceThread, enforcer: key.enforcer, proof: key.proof, debt: plan.debt, collateral: plan.collateral, startingInterest: 0, ...from(page) }));
+export const manageDetails = (coins: LoanCoins, collateral: bigint, page?: PageAddress): ActionDetails => detailsOf(manageRequestAlone(LOAN_TEMPLATE.names, { ...coins, collateral, ...from(page) }));
+export const repayDetails = (coins: LoanCoins, repay: bigint, collateral: bigint, page?: PageAddress): ActionDetails => detailsOf(repayRequestAlone(LOAN_TEMPLATE.names, { ...coins, repay, collateral, ...from(page) }));
+export const closeDetails = (coins: LoanCoins, page?: PageAddress): ActionDetails => detailsOf(closeRequestAlone(LOAN_TEMPLATE.names, { ...coins, ...from(page) }));
 
 const newId = (): string => `loan-${Array.from(crypto.getRandomValues(new Uint8Array(10)), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 
@@ -107,6 +124,8 @@ export class XoLoans {
     private readonly chain: PageChain,
     private readonly store: Kept<PendingRequest>,
     private readonly keys: Kept<KeptKey>,
+    /** The page's own address, for the wallet's record of each loan key. */
+    private readonly page?: PageAddress,
     private readonly now: () => number = () => Math.floor(Date.now() / 1000),
   ) {}
 
@@ -146,36 +165,49 @@ export class XoLoans {
   }
 
   private start(action: LoanAction, details: ActionDetails, onStage: (stage: RequestStage) => void): Promise<Outcome> {
-    const about = details.spends?.[0];
-    if (this.store.get().some((kept) => kept.action === action || (about !== undefined && kept.details.spends?.[0] === about))) {
+    const about = details.about?.category;
+    if (this.store.get().some((kept) => kept.action === action || (about !== undefined && kept.details.about?.category === about))) {
       return Promise.reject(new Error('A request like this one is still waiting for your wallet. Approve or decline it there first.'));
     }
     return this.send({ id: newId(), action, details, startedAt: this.now() }, onStage);
   }
 
-  createKey(onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
-    return this.start('createKey', createKeyDetails(), onStage);
+  /** Make a loan key, from a factory of Paryon's the page reads from the chain. The wallet asks for the user's tick: the key waits in Paryon's contract. */
+  async createKey(onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
+    return this.start('createKey', createKeyDetails(await readFactory(this.chain), this.page), onStage);
   }
 
   movePeriod(thread: BorrowingThread, lockHeight: number, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
-    return this.start('movePeriod', movePeriodDetails(thread, lockHeight), onStage);
+    return this.start('movePeriod', movePeriodDetails(thread, lockHeight, this.page), onStage);
   }
 
   borrow(key: MadeKey, thread: BorrowingThread, market: Pick<Market, 'priceThread'>, plan: BorrowPlan, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
     if (plan.problem !== undefined) return Promise.reject(new Error(plan.problem));
-    return this.start('borrow', borrowDetails(key, thread, market, plan), onStage);
+    return this.start('borrow', borrowDetails(key, thread, market, plan, this.page), onStage);
   }
 
-  manage(category: string, collateral: bigint, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
-    return this.start('manage', manageDetails(category, collateral), onStage);
+  /**
+   * What a request on the loan of a key names, read now: what the key's coin holds, as the wallet reports it, and
+   * the loan, its sidecar and Paryon's coins, as the chain shows them.
+   */
+  private async coinsOf(category: string): Promise<LoanCoins> {
+    const { positions } = await this.requests.recordedPositions(LOAN_TEMPLATE.names.identifier);
+    const reported = positions.find((position) => position.category === category && position.capability === 'minting');
+    if (reported === undefined || !/^\d+$/.test(reported.satoshis)) throw new Error('Your wallet does not report this loan key as one of this page\'s. Connect the wallet that holds it.');
+    return readLoanCoins(this.chain, category, BigInt(reported.satoshis));
   }
 
-  repay(loan: LoanView, repay: bigint, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
-    return this.start('repay', repayDetails(loan, repay, loan.found?.loan.output.valueSatoshis ?? 0n), onStage);
+  async manage(category: string, collateral: bigint, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
+    return this.start('manage', manageDetails(await this.coinsOf(category), collateral, this.page), onStage);
   }
 
-  close(category: string, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
-    return this.start('close', closeDetails(category), onStage);
+  async repay(loan: LoanView, repay: bigint, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
+    const coins = await this.coinsOf(loan.category);
+    return this.start('repay', repayDetails(coins, repay, coins.loan.output.valueSatoshis, this.page), onStage);
+  }
+
+  async close(category: string, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
+    return this.start('close', closeDetails(await this.coinsOf(category), this.page), onStage);
   }
 
   /**
@@ -192,14 +224,15 @@ export class XoLoans {
   }
 
   /**
-   * The loans whose keys the wallet holds, each read from the chain. `trusted: false` means the user has not
-   * used this page with this wallet yet: the wallet then reports nothing, whatever it holds.
+   * The loans whose keys the wallet holds, each read from the chain. The wallet says, from its records, which keys
+   * it holds under this page's template; whether each loan is open, and what it owes and holds, the page reads
+   * itself. `trusted: false` means the user has not used this page with this wallet yet: the wallet then reports
+   * nothing, whatever it holds.
    */
   async list(): Promise<{ trusted: boolean; loans: LoanView[] }> {
-    const { trusted, positions } = await this.requests.positions(LOAN_TEMPLATE.names.identifier);
-    const loans = await Promise.all(
-      positions.filter((position) => /^[0-9a-f]{64}$/.test(position.category)).map((position) => readLoan(this.chain, position.category, { status: position.status, satoshis: /^\d+$/.test(position.satoshis) ? BigInt(position.satoshis) : 0n })),
-    );
+    const { trusted, positions } = await this.requests.recordedPositions(LOAN_TEMPLATE.names.identifier);
+    const keys = positions.filter((position, index) => /^[0-9a-f]{64}$/.test(position.category) && position.capability === 'minting' && positions.findIndex((other) => other.category === position.category) === index);
+    const loans = await Promise.all(keys.map((position) => readLoan(this.chain, position.category, /^\d+$/.test(position.satoshis) ? BigInt(position.satoshis) : undefined)));
     // Open loans first, then the closed ones, each in the order the wallet gave.
     return { trusted, loans: [...loans.filter((loan) => loan.status === 'open'), ...loans.filter((loan) => loan.status !== 'open')] };
   }

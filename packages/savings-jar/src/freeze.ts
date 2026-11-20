@@ -1,17 +1,21 @@
-// Writes the texts a wallet is sent: the template and its recovery declaration, as they are served and
-// named by hash. Run after a deliberate change to the source: `npm run freeze -w @grandmas-wallet/savings-jar`.
+// Writes the texts a wallet is sent: the template of version 3 with its recovery declaration, and the template
+// of version 4, which comes with nothing beside it; as they are served and named by hash. Run after a deliberate
+// change to the source: `npm run freeze -w @grandmas-wallet/savings-jar`.
 import { writeFileSync } from 'node:fs';
 
 import { readTemplate } from '@grandmas-wallet/core';
 
-import { savingsJarDeclarationSource, savingsJarTemplateSource } from './template-source.js';
+import { savingsJarDeclarationSource, savingsJarTemplateSource, savingsJarV4TemplateSource } from './template-source.js';
 
 const templateText = JSON.stringify(savingsJarTemplateSource);
 const template = readTemplate(templateText);
 const declarationText = JSON.stringify({ profile: 'recoverable-app-v1', version: 1, template: { identifier: template.identifier, contentHash: template.contentHash }, ...savingsJarDeclarationSource });
+const v4Text = JSON.stringify(savingsJarV4TemplateSource);
+const v4 = readTemplate(v4Text);
 writeFileSync(new URL('../frozen/savings-jar-v3.json', import.meta.url), templateText);
 writeFileSync(new URL('../frozen/savings-jar-v3.declaration.json', import.meta.url), declarationText);
-// The same two texts as a module, for code that runs without a bundler.
+writeFileSync(new URL('../frozen/savings-jar-v4.json', import.meta.url), v4Text);
+// The same texts as a module, for code that runs without a bundler.
 writeFileSync(
   new URL('./frozen.ts', import.meta.url),
   [
@@ -20,6 +24,9 @@ writeFileSync(
     '',
     `export const savingsJarDeclarationText: string =\n  ${JSON.stringify(declarationText)};`,
     '',
+    `export const savingsJarV4TemplateText: string =\n  ${JSON.stringify(v4Text)};`,
+    '',
   ].join('\n'),
 );
-console.log(`template ${template.identifier}, content ${template.contentHash}`);
+console.log(`version 3: template ${template.identifier}, content ${template.contentHash}`);
+console.log(`version 4: template ${v4.identifier}, content ${v4.contentHash}`);

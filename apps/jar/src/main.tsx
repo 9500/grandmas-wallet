@@ -37,6 +37,15 @@ const chainOf = (connection: ChainConnection): PlainChain => ({
 
 const now = (): number => Math.floor(Date.now() / 1000);
 
+/**
+ * The address this page is served from, for the wallet's record of each jar: where the user can open the page
+ * again. A page is replaceable; whoever serves a copy has its own address here.
+ */
+const pageAddress = (): string | undefined => {
+  const { protocol, origin, pathname } = window.location;
+  return protocol === 'https:' || protocol === 'http:' ? `${origin}${pathname}` : undefined;
+};
+
 const RESUMED_TITLE: Record<PendingRequest['action'], string> = {
   open: 'Opening a jar, asked of your wallet before this page was loaded again.',
   deposit: 'A payment into a jar, asked of your wallet before this page was loaded again.',
@@ -219,10 +228,10 @@ const App = ({ environment }: { environment: Environment }) => {
   const source = useMemo((): JarSource | undefined => {
     const current = link.current;
     if (current === undefined || kind === undefined || status.state !== 'connected') return undefined;
-    if (kind.kind === 'xo') {
+    if (kind.kind === 'xo' && chain !== undefined) {
       const requests = new DappRequests();
       requests.attach(current.channel);
-      return xoSource(requests, pendingStore);
+      return xoSource(requests, pendingStore, chainOf(chain), pageAddress());
     }
     if (kind.kind === 'plain' && chain !== undefined) return plainSource(chainOf(chain), kind.paths, (request) => current.sign(request));
     return undefined;
@@ -234,7 +243,7 @@ const App = ({ environment }: { environment: Environment }) => {
       return (
         <Card title="The network cannot be reached" tone="bad">
           <p>{chainProblem}</p>
-          <p class="muted">With an ordinary wallet this page reads the chain itself, to find your coins and your jars.</p>
+          <p class="muted">This page reads the chain itself: for an ordinary wallet to find its coins and jars, and for any wallet what each jar holds.</p>
           <div class="actions">
             <Button onClick={reachChain}>Try again</Button>
             <Button kind="quiet" onClick={forget}>

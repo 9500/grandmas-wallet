@@ -1,6 +1,6 @@
 import { type Output, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
 import type { Utxo } from '@grandmas-wallet/core';
-import { type ListedOutput, type ParyonChain, findLoan, latestOraclePrice, readParyonState } from '@grandmas-wallet/paryon';
+import { type ListedOutput, type LoanCoins, type ParyonChain, findLoan, latestOraclePrice, loanCoins, readParyonState } from '@grandmas-wallet/paryon';
 
 import { type LoanView, type Market, CONTRACTS, DEPLOYMENT, finalLockHeight, lowerPrice, periodOf } from './loan.js';
 
@@ -58,12 +58,39 @@ export const readMarket = async (chain: PageChain, network: string, oracle: Orac
   };
 };
 
-/** A loan the wallet reported, with what the chain says of it. */
-export const readLoan = async (chain: PageChain, category: string, reported: { status: string; satoshis: bigint }): Promise<LoanView> => {
-  if (reported.status !== 'open') return { category, status: reported.status === 'closed' ? 'closed' : 'unknown', satoshis: reported.satoshis };
-  const found = await findLoan(chain, CONTRACTS, hexToBin(category));
-  if (found === undefined) return { category, status: 'closed', satoshis: 0n };
-  return { category, status: 'open', satoshis: found.loan.output.valueSatoshis, debt: found.state.borrowed, beingRedeemed: found.state.beingRedeemed, interestRate: found.state.currentInterestRate, found };
+/**
+ * A loan key the wallet reported, with what the chain says of its loan. The wallet says only that it holds the key
+ * under this page's template; whether the loan is open the page finds out itself, through the loan's sidecar
+ * (`findLoan`), which takes a look-alike sidecar beside anything but a genuine loan for none.
+ */
+export const readLoan = async (chain: PageChain, category: string, keySatoshis: bigint | undefined): Promise<LoanView> => {
+  const key = keySatoshis === undefined ? {} : { keySatoshis };
+  let found: Awaited<ReturnType<typeof findLoan>>;
+  try {
+    found = await findLoan(chain, CONTRACTS, hexToBin(category));
+  } catch {
+    return { category, status: 'unknown', satoshis: 0n, ...key };
+  }
+  if (found === undefined) return { category, status: 'closed', satoshis: 0n, ...key };
+  return { category, status: 'open', satoshis: found.loan.output.valueSatoshis, ...key, debt: found.state.borrowed, beingRedeemed: found.state.beingRedeemed, interestRate: found.state.currentInterestRate, found };
+};
+
+/**
+ * What a request on an open loan names: the loan and its sidecar, found from the key, and the price and manage
+ * coins of Paryon's the page chose, with what the key's coin holds as the wallet reported it.
+ * @throws when the key opens no open loan
+ */
+export const readLoanCoins = async (chain: PageChain, category: string, keySatoshis: bigint): Promise<LoanCoins> => {
+  const coins = await loanCoins(chain, CONTRACTS, hexToBin(category), keySatoshis);
+  if (coins === undefined) throw new Error('This key opens no loan on the chain just now. It may have been closed.');
+  return { keyCategory: category, keySatoshis, loan: coins.loan, sidecar: coins.sidecar, price: coins.price, manageFunction: coins.manageFunction };
+};
+
+/** A coin of Paryon's key factories, for making a key; the first by outpoint. */
+export const readFactory = async (chain: PageChain): Promise<Utxo> => {
+  const [factory] = (await readParyonState(chain, CONTRACTS)).loanKeyFactory.slice().sort((a, b) => (`${binToHex(a.transactionHash)}:${a.index}` < `${binToHex(b.transactionHash)}:${b.index}` ? -1 : 1));
+  if (factory === undefined) throw new MarketProblem('Paryon\'s key factory could not be found on the chain just now. Try again in a minute.');
+  return factory;
 };
 
 /** A loan key the page had the wallet make, read back from the transaction that made it. */

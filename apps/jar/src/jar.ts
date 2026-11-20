@@ -1,18 +1,21 @@
 import { binToHex, hexToBin } from '@bitauth/libauth';
-import { readTemplate, textHash } from '@grandmas-wallet/core';
-import { savingsJarDeclarationText, savingsJarScript, savingsJarTemplateText, unlockTimeOf } from '@grandmas-wallet/savings-jar';
+import { readTemplate } from '@grandmas-wallet/core';
+import { savingsJarScript, savingsJarV4TemplateText, unlockTimeOf } from '@grandmas-wallet/savings-jar';
 
 /**
  * What both kinds of wallet share on this page: the template as a wallet is sent it, what a jar is as the
  * page shows it, and the clock the network goes by.
  */
 
-const read = readTemplate(savingsJarTemplateText);
+const read = readTemplate(savingsJarV4TemplateText);
 
-/** The template and its recovery declaration: the texts, and the names a request gives them. */
+/**
+ * The template, version 4, which a wallet is sent with nothing beside it (proposal section 15.3): the text, and
+ * the names a request gives it.
+ */
 export const JAR_TEMPLATE = {
-  names: { identifier: read.identifier, contentHash: read.contentHash, declaration: textHash(savingsJarDeclarationText) },
-  texts: { template: savingsJarTemplateText, declaration: savingsJarDeclarationText },
+  names: { identifier: read.identifier, contentHash: read.contentHash },
+  texts: { template: savingsJarV4TemplateText },
 } as const;
 
 /** What the key output holds, as in the template. It comes back to the wallet with the key. */
@@ -36,8 +39,11 @@ export interface JarView {
   satoshis: bigint;
   /** The jar's locking bytecode, hex: where anyone pays in. */
   lockingBytecode: string;
-  /** `open` holds savings; `empty` was emptied (the key is kept); `unknown` could not be worked out by the wallet. */
-  status: 'open' | 'empty' | 'unknown';
+  /**
+   * `open` holds savings; `empty` was emptied (the key is kept); `unconfirmed`: the wallet's record of the jar is
+   * not borne out by the chain, and the wallet only takes money out of it; `unknown` could not be worked out.
+   */
+  status: 'open' | 'empty' | 'unconfirmed' | 'unknown';
 }
 
 /** The address of the jar a key opens: P2SH32 of the contract with the key's category and date. */

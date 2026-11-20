@@ -1,4 +1,3 @@
-import { readTemplate, textHash } from '@grandmas-wallet/core';
 import {
   type BorrowingThread,
   type FoundLoan,
@@ -10,9 +9,8 @@ import {
   collateralAtRatio,
   collateralRatio,
   minimumCollateral,
-  paryonChipnetDeclarationText,
-  paryonChipnetTemplateText,
   paryonContracts,
+  paryonTemplateAlone,
   periodAt,
   repaymentAllowed,
 } from '@grandmas-wallet/paryon';
@@ -29,12 +27,11 @@ import {
 export const DEPLOYMENT: ParyonDeployment = CHIPNET_FAST_PERIODS_6;
 export const CONTRACTS = paryonContracts(DEPLOYMENT);
 
-const read = readTemplate(paryonChipnetTemplateText);
-/** The template and its recovery declaration, as a wallet is sent them, and the names a request gives them. */
-export const LOAN_TEMPLATE = {
-  names: { identifier: read.identifier, contentHash: read.contentHash, declaration: textHash(paryonChipnetDeclarationText) },
-  texts: { template: paryonChipnetTemplateText, declaration: paryonChipnetDeclarationText },
-} as const;
+/**
+ * The template, as a wallet is sent it, and the names a request gives it. It goes alone, with no recovery
+ * declaration (proposal section 15.3): what the declaration told the wallet, the page's requests now say.
+ */
+export const LOAN_TEMPLATE = paryonTemplateAlone(CONTRACTS);
 
 /** What the page proposes: collateral worth 125% of the debt at the lower of the two prices. */
 export const DEFAULT_PERCENT = 125;
@@ -188,10 +185,15 @@ export const borrowPlan = (debt: bigint, percent: number, market: Pick<Market, '
 export interface LoanView {
   /** The loan key's category, explorer order. Names the loan. */
   category: string;
-  /** `open`; `closed` once the key opens no loan; `unknown` when the wallet or the chain could not say. */
+  /**
+   * Where the loan stands, as the page reads it from the chain: `open`; `closed` once the key opens no loan;
+   * `unknown` when the chain could not say.
+   */
   status: 'open' | 'closed' | 'unknown';
-  /** What the wallet says the position holds, from its answer. */
+  /** The loan's collateral, read from the chain; 0 for a loan that is not open. */
   satoshis: bigint;
+  /** What the coin that holds the key holds, as the wallet reports it: Paryon's contracts require an action to repeat it. */
+  keySatoshis?: bigint;
   /** Read from the chain, for an open loan. */
   debt?: bigint;
   beingRedeemed?: bigint;
