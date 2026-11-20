@@ -669,7 +669,9 @@ try {
       });
       await block();
       await until('the loan closed', async () => ((await findLoan(server, contracts(), hexToBin(keyCategory))) === undefined ? true : undefined));
-      note(`After closing, the page finds no loan for the key; the key is still in the wallet (${(await wallet.balance()).tokens.length === 1}); the wallet holds no PUSD. ${noDeclaration(applications, 'The new device')}.`, 'the loan closed');
+      // The wallet's list, right after the closing: it waits itself for the engine to list what the closing gave it.
+      const heldAfter = await applications.tokens();
+      note(`After closing, the page finds no loan for the key; the key is still in the wallet (${heldAfter.some((token) => token.category === keyCategory)}); the wallet holds ${heldAfter.some((token) => token.amount > 0n) ? 'PUSD' : 'no PUSD'}. ${noDeclaration(applications, 'The new device')}.`, 'the loan closed');
 
       await once('the key is sent on', async () => {
         const holding = await until('the key', async () => { const now = await wallet.balance(); return now.tokens.length === 1 && now.toSweep === 0n ? now.tokens[0] : undefined; });
