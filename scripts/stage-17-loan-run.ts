@@ -354,7 +354,7 @@ const sat = (value: bigint): string => `${value.toLocaleString('en-US')} sat`;
  * The page's side, on a device: its requests, from the library the page uses, sent as the page sends them. Every
  * request is checked to carry no declaration and the page's address; the request as it travelled is noted.
  */
-const thePage = (applications: Applications, wallet: OwnerWallet) => {
+const thePage = (applications: Applications) => {
   const link: PageLink = pageLink(applications, 'the loan page');
   const ask = async (request: LoanRequestAlone, about: string, tick = false): Promise<{ transactionId: string; tokens: { category: string; capability: string; amount?: string }[] }> => {
     const asked = link.requests.request(detailsOf(request), template().texts);
@@ -370,11 +370,8 @@ const thePage = (applications: Applications, wallet: OwnerWallet) => {
     const last = travelled.at(-1);
     if (last?.page !== PAGE) throw new Error('the page\'s request did not carry its address');
     note(`${about}: the page's request, as it travelled: ${JSON.stringify({ templateAction: last.templateAction, variables: last.variables, ...(last.bindings === undefined ? {} : { bindings: last.bindings }), ...(last.about === undefined ? {} : { about: last.about }), ...(last.creates === undefined ? {} : { creates: last.creates }), inputs: last.inputs, page: last.page })}.`);
-    // The next action takes what this one left the wallet: the engine lists it a moment after the transaction is sent.
-    await until(`the wallet's outputs of ${result.transactionId.slice(0, 12)}…`, async () => {
-      const coins = [...(await wallet.parts.ownCoins()), ...(await wallet.parts.tokenCoins()).map(({ coin }) => coin)];
-      return coins.some((coin) => hex(coin.utxo.transactionHash) === result.transactionId);
-    }, 120_000);
+    // The next action takes what this one left the wallet: the wallet itself waits for the engine to list it, a
+    // moment after the transaction is sent. The run does not wait here.
     return result;
   };
   return { link, ask };
@@ -468,7 +465,7 @@ try {
       keep();
     }
     const applications = new Applications(wallet.parts, { archive: applicationArchive({ arrangement: () => facts.ownerArrangement, storeAt, seed: ownerSeed, identity, chain }) });
-    const { link, ask } = thePage(applications, wallet);
+    const { link, ask } = thePage(applications);
     facts.loan ??= { collateral: String(collateral) };
     keep();
 
@@ -654,11 +651,11 @@ try {
         (error: unknown) => error,
       );
       if (!(byItself instanceof NeedsApplicationError)) throw new Error(`the wallet did not send the user to the page: ${String(byItself)}`);
-      note(`From its own list the wallet offers ${offered.length} actions for the key, and asked to close the loan by itself it answers: "${byItself.message}" (the page: ${byItself.page}).`, 'the wallet sends the user to the page');
+      note(`From its own list the wallet offers ${offered.length} actions for the key and shows it with "Open the application to do this" and the page's address from the record (${position.page ?? 'none'}); asked to close the loan by itself it answers: "${byItself.message}" (the page: ${byItself.page}).`, 'the wallet sends the user to the page');
 
       // The page on the new phone: connected afresh, it is told of the key once the user allows it, finds the loan and closes it.
       await once('the page closes the loan', async () => {
-        const { link, ask } = thePage(applications, wallet);
+        const { link, ask } = thePage(applications);
         const asked = await link.requests.recordedPositions(template().names.identifier);
         note(`The page on the new phone asked which keys of its template the wallet holds: ${asked.trusted ? 'answered' : 'not answered, since the template came from the backup and this page has not been allowed yet'}.`);
         applications.allow(template().names.identifier, 'the loan page');
