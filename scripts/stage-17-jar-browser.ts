@@ -1,6 +1,5 @@
-// The Savings Jar course of stage 17 in browsers, on the local node (acceptance test PR19 of proposal v0.6, its
-// local part): the wallet page, the recoverer page and the Savings Jar page of this checkout, driven as a person
-// would. Each device is a browser profile of its own, kept on disk; the Savings Jar page is a second tab of the
+// The Savings Jar course of stage 17 in browsers, on the local node or on chipnet (acceptance test PR19 of proposal
+// v0.6, run G on chipnet): the wallet page, the recoverer page and the Savings Jar page, driven as a person would. Each device is a browser profile of its own, kept on disk; the Savings Jar page is a second tab of the
 // phone that uses it. The wallet reads no recovery declaration: the jar reaches it as its template, in the page's
 // requests of `xo_v1` version 2, and comes back after the loss of the phone from the wallet's own record of it.
 //
@@ -15,7 +14,9 @@
 // beside the profiles, so that a continued run keeps them), and the run stops if one goes to the Savings Jar page.
 //
 // usage (from the repository's root, with the local node running and the pages built: deploy/preview.sh build):
-//   npx tsx scripts/stage-17-jar-browser.ts [--screens] [--headed] [--until <step>] [--from 5|7|8|9] [--ports <base>]
+//   npx tsx scripts/stage-17-jar-browser.ts [local] [--screens] [--headed] [--until <step>] [--from 5|7|8|9] [--ports <base>]
+// on chipnet, with the public pages and backup stores, paid from the key in .chipnet/funder-design-2.json:
+//   npx tsx scripts/stage-17-jar-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 5|7|8|9]
 //
 // The pages, a relay and two backup stores are served on this machine on ports of the run's own (see
 // scripts/browser-course.ts; 8301 to 8304, 8311 and 8312 unless --ports says otherwise). The run makes the blocks
@@ -23,7 +24,9 @@
 // .local-runs/stage-17-jar-browser/. `--from` continues a run that stopped, with the profiles on disk.
 //
 // The record is written to docs/runs/stage-17-jar-browser-local-node.md; with --screens, pictures at 390x844 and
-// 1280x800 go to docs/screens/ as live-jar-*.png.
+// 1280x800 go to docs/screens/ as live-jar-*.png. On chipnet the blocks, the waiting period and the jar's date take
+// their real time; the profiles and the log are under .chipnet/stage-17-jar-browser-chipnet/, the record is
+// docs/runs/stage-17-jar-browser-chipnet.md and the pictures are chipnet-jar-*.png.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { hexToBin } from '@bitauth/libauth';
@@ -31,8 +34,8 @@ import { controllerScript } from '@grandmas-wallet/core';
 import { savingsJarScript } from '@grandmas-wallet/savings-jar';
 import type { Locator, Page } from 'playwright';
 
-import { type Device, JAR, RECOVERER, WALLET, argument, click, completeTakeover, config, course, firstSteps, newPhoneAsks, openDeskWorking, patience, recordFile, reviewEverything, root, see, sendAllOfBalance, valueOf, wait } from './browser-course.js';
-import { type LedgerTransaction, addressOf, ledgerSection, localHeight, runTransactions } from './browser-ledger.js';
+import { type Device, JAR, RECOVERER, WALLET, argument, chipnet, click, completeTakeover, config, course, firstSteps, newPhoneAsks, openDeskWorking, pagesUsed, patience, recordFile, reviewEverything, root, see, sendAllOfBalance, servedFrom, valueOf, wait } from './browser-course.js';
+import { type LedgerTransaction, addressOf, chainClock, chainHeight, ledgerSection, runTransactions } from './browser-ledger.js';
 import { type RequestLog, controllerLabels, flat, localPayerLocking, lockingOf, openFolds, recordRequests, requestsSection, textOf, walletKept, walletPlaces } from './browser-live.js';
 
 const until = Number(argument('until') ?? '99');
@@ -58,12 +61,17 @@ interface Kept {
   continued: string[];
   /** The names of the pictures taken. */
   screens: string[];
+  /** On chipnet: which release of the public pages each part of the run used. */
+  served?: string[];
 }
 const keptFile = `${work}jar.json`;
 const kept: Kept =
   from > 1 && existsSync(keptFile)
     ? (JSON.parse(readFileSync(keptFile, 'utf8')) as Kept)
-    : { startHeight: localHeight(), category: '', unlockTime: 0, jarAddress: '', fundsAddress: '', labels: {}, facts: [], continued: [], screens: [] };
+    : { startHeight: await chainHeight(), category: '', unlockTime: 0, jarAddress: '', fundsAddress: '', labels: {}, facts: [], continued: [], screens: [] };
+/** The names of the pictures and of the record: of the local node, or of chipnet. */
+const where = chipnet ? 'chipnet' : 'local-node';
+const prefix = chipnet ? 'chipnet-jar' : 'live-jar';
 const save = (): void => writeFileSync(keptFile, JSON.stringify(kept, null, 1));
 save();
 const fact = (line: string): void => {
@@ -76,7 +84,7 @@ const label = (transactionId: string, what: string): void => {
   save();
 };
 const picture = async (page: Page, name: string): Promise<void> => {
-  await shot(page, `live-jar-${name}`);
+  await shot(page, `${prefix}-${name}`);
   if (!kept.screens.includes(name)) kept.screens.push(name);
   save();
 };
@@ -85,11 +93,6 @@ const requests: RequestLog = recordRequests(`${work}requests.json`, from > 1);
 // ------------------------------------------------------------------ reading the pages
 
 const iso = (seconds: number): string => new Date(seconds * 1000).toISOString().replace('.000Z', 'Z');
-const chainClock = (): { tip: number; median: number } => {
-  const cli = (...parameters: string[]): string => theCourse.run(`${root}deploy/regtest/regtest.sh`, ['cli', ...parameters]);
-  const header = JSON.parse(cli('getblockheader', cli('getbestblockhash'))) as { time: number; mediantime: number };
-  return { tip: header.time, median: header.mediantime };
-};
 
 /** The row of the jar's key in the wallet's list, as a position from a record or as a token. */
 const keyRow = (page: Page): Locator => page.locator('li.token').filter({ has: page.locator(`.token-id [title="${kept.category}"]`) });
@@ -135,7 +138,7 @@ const steps = async (): Promise<void> => {
     log(`   the jar page lists: "${await textOf(oldJar.locator('.card').filter({ hasText: 'Your jars' }).locator('p'))}"`);
     // The date: some minutes ahead of the chain's clock and of this machine's, so that it is still ahead after the
     // waiting period of the takeover has moved the chain's clock on.
-    const clock = chainClock();
+    const clock = await chainClock();
     const now = Math.floor(Date.now() / 1000);
     kept.unlockTime = Math.ceil((Math.max(now, clock.tip, clock.median) + 25 * 60) / 60) * 60;
     save();
@@ -242,9 +245,12 @@ const steps = async (): Promise<void> => {
   // 8 ------------------------------------------------------------------
   if (state.step < 8) {
     if (!begin('The jar\'s date passes; the new phone empties the jar from its own list, the jar page never opened')) return;
-    const clock = chainClock();
+    const clock = await chainClock();
     if (clock.median <= kept.unlockTime) log(`   ${passTime(kept.unlockTime - clock.tip + 120)}`);
-    log(`   the chain's median time is ${iso(chainClock().median)}, past the jar's date ${iso(kept.unlockTime)}`);
+    // On chipnet the chain's clock passes the date by itself, as blocks come.
+    if (chipnet && clock.median <= kept.unlockTime) log(`   the chain's median time is ${iso(clock.median)}; waiting for it to pass the jar's date ${iso(kept.unlockTime)}`);
+    for (let attempt = 0; chipnet && attempt < 180 && (await chainClock()).median <= kept.unlockTime; attempt++) await wait(30_000);
+    log(`   the chain's median time is ${iso((await chainClock()).median)}, past the jar's date ${iso(kept.unlockTime)}`);
     await phone.page.goto(`${WALLET}apps`);
     const position = phone.page.getByTestId('position-open').filter({ has: phone.page.locator(`.token-id [title="${kept.category}"]`) });
     await position.waitFor({ state: 'visible', timeout: 180_000 * patience });
@@ -308,7 +314,6 @@ const steps = async (): Promise<void> => {
 
 const writeRecord = async (outcome: string): Promise<void> => {
   // Every transaction of the run, read from the chain, and whose each coin is.
-  const ledger = await runTransactions(kept.startHeight);
   const wallet = walletKept(work, ['old-phone', 'new-phone'], WALLET);
   const places = await walletPlaces(wallet);
   const identity = wallet.identity;
@@ -317,9 +322,11 @@ const writeRecord = async (outcome: string): Promise<void> => {
   const outside = lockingOf(elsewhere());
   const funds = kept.fundsAddress === '' ? '' : lockingOf(kept.fundsAddress);
   const payer = localPayerLocking();
+  // On chipnet the run's transactions are found from the run's own addresses.
+  const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, jarLocking, outside, funds, payer]);
   for (const entry of wallet.activity) label(entry.transactionId, `${entry.who === 'old-phone' ? 'The owner\'s phone' : 'The new phone'}: ${entry.what}`);
   const placeOf = (lockingBytecode: string): string | undefined =>
-    lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === jarLocking ? 'the jar' : lockingBytecode === outside ? `the outside address the coins went back to (${addressOf(outside)})` : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === payer ? 'the local payer (`scripts/local-pay.ts`)' : places.get(lockingBytecode);
+    lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === jarLocking ? 'the jar' : lockingBytecode === outside ? `the outside address the coins went back to (${addressOf(outside)})` : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === payer ? (chipnet ? 'the funding address (`scripts/chipnet-pay.ts`)' : 'the local payer (`scripts/local-pay.ts`)') : places.get(lockingBytecode);
   const ofController = await controllerLabels(identity);
   const labelOf = (transaction: LedgerTransaction): string | undefined => {
     const named = kept.labels[transaction.transactionId] ?? ofController.get(transaction.transactionId);
@@ -330,16 +337,17 @@ const writeRecord = async (outcome: string): Promise<void> => {
     if (touches(controller)) return 'A transaction of the controller';
     if (fromFunds && transaction.outputs.some((output) => output.lockingBytecode === outside)) return 'The recoverer sends her balance back';
     if (fromFunds) return 'Paid from the recoverer\'s balance';
-    if (transaction.inputs.some((input) => input.lockingBytecode === payer)) return 'The local payer pays';
+    if (transaction.inputs.some((input) => input.lockingBytecode === payer)) return chipnet ? 'The funding address pays' : 'The local payer pays';
     return undefined;
   };
   const toJarPage = requests.urls().filter((url) => url.startsWith(JAR_ORIGIN));
+  const served = (kept.served ?? []).length === 0 ? '' : ` ${(kept.served ?? []).join(' Then, for the part that continued: ')}`;
   writeFileSync(
-    recordFile('stage-17-jar-browser-local-node.md'),
+    recordFile(`stage-17-jar-browser-${where}.md`),
     [
-      '# Stage 17 in browsers on the local node: the Savings Jar from its template alone, through the loss of a phone (PR19)',
+      `# Stage 17 in browsers on ${chipnet ? 'chipnet (run G)' : 'the local node'}: the Savings Jar from its template alone, through the loss of a phone (PR19)`,
       '',
-      `Written by \`scripts/stage-17-jar-browser.ts${process.argv.slice(2).length === 0 ? '' : ` ${process.argv.slice(2).join(' ')}`}\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the Savings Jar page is a second tab of the phone that uses it. The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${JAR}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. The run made the blocks and moved the chain's clock. The wallet reads no recovery declaration: the Savings Jar reached it as its template of version 4, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
+      `Written by \`scripts/stage-17-jar-browser.ts${process.argv.slice(2).length === 0 ? '' : ` ${process.argv.slice(2).join(' ')}`}\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the Savings Jar page is a second tab of the phone that uses it. ${chipnet ? pagesUsed([WALLET, RECOVERER, JAR], 'Blocks, the waiting period and the jar\'s date took their real time; the coins came from the funding address and went back to it.') : `The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${JAR}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. The run made the blocks and moved the chain's clock.`}${served} The wallet reads no recovery declaration: the Savings Jar reached it as its template of version 4, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
       '',
       `Outcome: ${outcome}`,
       ...(kept.continued.length === 0 ? [] : ['', ...kept.continued]),
@@ -353,10 +361,12 @@ const writeRecord = async (outcome: string): Promise<void> => {
       ...requestsSection(requests, JAR_ORIGIN, 'the Savings Jar page', toJarPage),
       '## Transactions and coins',
       '',
-      `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, and in the node's pool. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
+      chipnet
+        ? `Read from chipnet's server after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the wallet's addresses of both phones' seeds, its controller, the jar, the recoverer's balance and the funding address). The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`
+        : `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, and in the node's pool. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
       '',
       ...ledgerSection(ledger, labelOf, placeOf),
-      ...(kept.screens.length === 0 ? [] : ['## Pictures', '', `In \`docs/screens/\`, each at 390×844 (\`-phone\`) and 1280×800 (\`-desktop\`): ${kept.screens.map((name) => `\`live-jar-${name}\``).join(', ')}.`, '']),
+      ...(kept.screens.length === 0 ? [] : ['## Pictures', '', `In \`docs/screens/\`, each at 390×844 (\`-phone\`) and 1280×800 (\`-desktop\`): ${kept.screens.map((name) => `\`${prefix}-${name}\``).join(', ')}.`, '']),
       '## Log',
       '',
       '```',
@@ -365,7 +375,7 @@ const writeRecord = async (outcome: string): Promise<void> => {
       '',
     ].join('\n'),
   );
-  log(`record written to ${recordFile('stage-17-jar-browser-local-node.md').slice(root.length)}`);
+  log(`record written to ${recordFile(`stage-17-jar-browser-${where}.md`).slice(root.length)}`);
 };
 
 try {
@@ -376,6 +386,11 @@ try {
     theCourse.note(`       continued from step ${from}`);
   }
   await prepare(['wallet', 'recoverer', 'jar']);
+  if (chipnet) {
+    const now = await servedFrom([WALLET, RECOVERER, JAR]);
+    if (!(kept.served ?? []).includes(now)) kept.served = [...(kept.served ?? []), now];
+    save();
+  }
   log(`   the run starts after block ${kept.startHeight}; the jar page is at ${JAR}, on ${config.network}`);
   await steps();
   const all = state.step >= 9 && until >= 9;

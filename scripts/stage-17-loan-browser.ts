@@ -1,7 +1,7 @@
-// The ParyonUSD course of stage 17 in browsers, on the local node (acceptance test PR20 of proposal v0.6, its local
-// part): the wallet page, the recoverer page and the loan page of this checkout, driven as a person would, with
-// Paryon's contracts as published deployed on the local chain by this script (packages/paryon/src/local-deployment.ts)
-// and named to the loan page in its configuration. Each device is a browser profile of its own, kept on disk; the
+// The ParyonUSD course of stage 17 in browsers, on the local node or on chipnet (acceptance test PR20 of proposal v0.6,
+// run H on chipnet): the wallet page, the recoverer page and the loan page, driven as a person would. On the local node
+// Paryon's contracts as published are deployed on the local chain by this script (packages/paryon/src/local-deployment.ts)
+// and named to the loan page in its configuration; on chipnet the public pages use Paryon's own test deployment. Each device is a browser profile of its own, kept on disk; the
 // loan page is a second tab of the phone that uses it. The wallet reads no recovery declaration: the loan reaches it as
 // Paryon's template, in the page's requests of `xo_v1` version 2.
 //
@@ -20,12 +20,20 @@
 // before then.
 //
 // usage (from the repository's root, with the local node running and the pages built: deploy/preview.sh build):
-//   npx tsx scripts/stage-17-loan-browser.ts [--screens] [--headed] [--until <step>] [--from 7|9|10|11] [--ports <base>]
+//   npx tsx scripts/stage-17-loan-browser.ts [local] [--screens] [--headed] [--until <step>] [--from 7|9|10|11] [--ports <base>]
+// on chipnet, with the public pages and backup stores, paid from the key in .chipnet/funder-design-2.json:
+//   npx tsx scripts/stage-17-loan-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 7|9|10|11]
+//
+// On chipnet the collateral is most of what the funding address holds: the run pays the owner's wallet all of it but a
+// small reserve, and borrows at the highest ratio from 125% down to the page's least, 115%, that the wallet can pay at
+// the page's own prices; where not even 115% can be paid it stops before anything is paid. A run that stops keeps its
+// profiles and words on disk and is continued with --from, so that the loan is closed and the collateral comes back.
 //
 // Served on this machine as the jar course is (scripts/browser-course.ts); the loan page with the deployment in its
 // configuration. Profiles, the stores' data, the log and what the run knows between steps are under
 // .local-runs/stage-17-loan-browser/. The record is written to docs/runs/stage-17-loan-browser-local-node.md; with
-// --screens, pictures at 390x844 and 1280x800 go to docs/screens/ as live-loan-*.png.
+// --screens, pictures at 390x844 and 1280x800 go to docs/screens/ as live-loan-*.png. On chipnet: under
+// .chipnet/stage-17-loan-browser-chipnet/, docs/runs/stage-17-loan-browser-chipnet.md and chipnet-loan-*.png.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { binToHex, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
@@ -33,8 +41,10 @@ import { type Utxo, controllerScript, keyPairFromPrivateKey, p2pkhLockingBytecod
 import { type ParyonDeployment, localDeployment, paryonContracts } from '@grandmas-wallet/paryon';
 import type { Page } from 'playwright';
 
-import { type Device, LOAN, RECOVERER, WALLET, argument, click, completeTakeover, config, course, firstSteps, newPhoneAsks, openDeskWorking, patience, recordFile, reviewEverything, root, see, sendAllOfBalance, valueOf, wait } from './browser-course.js';
-import { type LedgerTransaction, addressOf, ledgerSection, localHeight, runTransactions } from './browser-ledger.js';
+import { DEPLOYMENT, borrowPlan, formatPrice } from '../apps/loan/src/loan.js';
+import { generalProtocolsOracle, readMarket } from '../apps/loan/src/market.js';
+import { type Device, LOAN, RECOVERER, WALLET, argument, chipnet, click, completeTakeover, config, course, firstSteps, newPhoneAsks, openDeskWorking, pagesUsed, patience, recordFile, reviewEverything, root, see, sendAllOfBalance, servedFrom, valueOf, wait } from './browser-course.js';
+import { type LedgerTransaction, addressOf, chainHeight, chainServer, ledgerSection, runTransactions } from './browser-ledger.js';
 import { type RequestLog, controllerLabels, flat, localPayerLocking, lockingOf, openFolds, recordRequests, requestsSection, textOf, walletKept, walletPlaces } from './browser-live.js';
 
 const until = Number(argument('until') ?? '99');
@@ -58,6 +68,9 @@ interface Kept {
   fundsAddress: string;
   /** How many of the new phone's requests were made before the loan page was opened on it. */
   requestsBeforePage?: number;
+  /** On chipnet: what the funding address paid the owner's wallet for the loan, and which release of the pages each part used. */
+  paidForLoan?: string;
+  served?: string[];
   labels: Record<string, string>;
   facts: string[];
   continued: string[];
@@ -67,7 +80,16 @@ const keptFile = `${work}loan.json`;
 const kept: Kept =
   from > 1 && existsSync(keptFile)
     ? (JSON.parse(readFileSync(keptFile, 'utf8')) as Kept)
-    : { startHeight: localHeight(), deployer: binToHex(crypto.getRandomValues(new Uint8Array(32))), category: '', fundsAddress: '', labels: {}, facts: [], continued: [], screens: [] };
+    : { startHeight: await chainHeight(), deployer: binToHex(crypto.getRandomValues(new Uint8Array(32))), category: '', fundsAddress: '', labels: {}, facts: [], continued: [], screens: [] };
+/** The names of the pictures and of the record: of the local node, or of chipnet. */
+const where = chipnet ? 'chipnet' : 'local-node';
+const prefix = chipnet ? 'chipnet-loan' : 'live-loan';
+/** The collateral added from the page in step 6, in BCH as typed. */
+const ADDED = chipnet ? '0.0001' : '0.001';
+/** What the funding address keeps back when it pays the owner's wallet for the loan on chipnet. */
+const RESERVE = 40_000n;
+/** 100.00 PUSD, in cents. */
+const DEBT = 10_000n;
 const save = (): void => writeFileSync(keptFile, JSON.stringify(kept, null, 1), { mode: 0o600 });
 save();
 const fact = (line: string): void => {
@@ -86,7 +108,7 @@ const paid = (address: string, satoshis: number, what: string): string => {
   return said;
 };
 const picture = async (page: Page, name: string): Promise<void> => {
-  await shot(page, `live-loan-${name}`);
+  await shot(page, `${prefix}-${name}`);
   if (!kept.screens.includes(name)) kept.screens.push(name);
   save();
 };
@@ -99,6 +121,8 @@ const deployer = keyPairFromPrivateKey(hexToBin(kept.deployer));
 const deployerLocking = p2pkhLockingBytecode(deployer.keyHash);
 /** Deployed once, before the pages are served: the loan page is told of the deployment in its configuration. */
 const deploy = async (): Promise<ParyonDeployment> => {
+  // On chipnet the page uses Paryon's own test deployment.
+  if (chipnet) return DEPLOYMENT;
   if (kept.deployment !== undefined) return kept.deployment;
   const addressOf = (bytecode: Uint8Array): string => {
     const made = lockingBytecodeToCashAddress({ prefix: 'bchreg', bytecode });
@@ -123,6 +147,27 @@ const deploy = async (): Promise<ParyonDeployment> => {
   kept.deployment = deployed.deployment;
   save();
   return deployed.deployment;
+};
+
+// ------------------------------------------------------------------ the collateral on chipnet
+
+/** Paryon's prices as the loan page reads them: the stored price, the oracle's, and the lower of the two. */
+const chipnetMarket = async (): Promise<Awaited<ReturnType<typeof readMarket>>> => {
+  const server = await chainServer();
+  try {
+    return await readMarket({ getTransaction: (id) => server.getTransaction(id), listUnspent: (bytecode) => server.listUnspent(bytecode, 'include'), tip: () => server.tip() }, 'chipnet', generalProtocolsOracle);
+  } finally {
+    await server.disconnect();
+  }
+};
+/**
+ * The highest ratio from the proposed 125% down to the page's least, 115%, at which a wallet holding `holds` can
+ * borrow 100.00 PUSD and add the collateral of step 6, with room for the network fees.
+ */
+const affordable = (market: Awaited<ReturnType<typeof readMarket>>, holds: bigint): number | undefined => {
+  const added = BigInt(Math.round(Number(ADDED) * 1e8));
+  for (let percent = 125; percent >= 115; percent -= 1) if (borrowPlan(DEBT, percent, market).total + added + 30_000n <= holds) return percent;
+  return undefined;
 };
 
 // ------------------------------------------------------------------ the pages
@@ -204,7 +249,19 @@ const steps = async (): Promise<void> => {
     if (!begin('The owner is paid for the loan, connects the wallet to the loan page, and the page has the wallet make a loan key')) return;
     await old.page.getByRole('link', { name: 'Receive' }).first().click();
     const receiving = await valueOf(old.page, 'receive-address');
-    log(`   ${paid(receiving, 61_000_000, 'The local payer pays the owner\'s wallet for the loan\'s collateral')}`);
+    if (chipnet) {
+      if (kept.paidForLoan === undefined) {
+        const balance = BigInt(/^(\d+) satoshis/.exec(theCourse.run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'balance']))?.[1] ?? '0');
+        const market = await chipnetMarket();
+        const amount = balance - RESERVE;
+        const percent = affordable(market, amount);
+        if (percent === undefined) throw new Error(`The funding address holds ${balance} satoshis. Borrowing 100.00 PUSD at no less than 115% of ${formatPrice(market.lower)} (the lower of the stored ${formatPrice(market.stored)} and the oracle's ${market.oracle === undefined ? 'none' : formatPrice(market.oracle.price)}) needs ${borrowPlan(DEBT, 115, market).total + 40_000n} satoshis in the wallet. Nothing was paid.`);
+        log(`   at ${formatPrice(market.lower)} the wallet can borrow at ${percent}% with ${amount} satoshis`);
+        kept.paidForLoan = paid(receiving, Number(amount), 'The funding address pays the owner\'s wallet for the loan\'s collateral');
+        save();
+      }
+      log(`   ${kept.paidForLoan}`);
+    } else log(`   ${paid(receiving, 61_000_000, 'The local payer pays the owner\'s wallet for the loan\'s collateral')}`);
     const oldLoan = await old.context.newPage();
     watchPage('old-phone, loan tab', oldLoan);
     await connect(old.page, oldLoan);
@@ -219,6 +276,15 @@ const steps = async (): Promise<void> => {
     // 5 ------------------------------------------------------------------
     if (!begin('The page brings Paryon\'s contracts up to date and borrows 100.00 PUSD')) return;
     await oldLoan.locator('#loan-amount').fill('100');
+    if (chipnet) {
+      // The ratio the wallet can pay at the page's prices as they are now.
+      const paidAmount = BigInt(/paid (\d+) satoshis/.exec(kept.paidForLoan ?? '')?.[1] ?? '0');
+      const market = await chipnetMarket();
+      const percent = affordable(market, paidAmount - 5_000n);
+      if (percent === undefined) throw new Error(`At ${formatPrice(market.lower)} the ${paidAmount} satoshis paid to the wallet do not borrow 100.00 PUSD at 115%. The key is made and no loan is open; the run can be continued with --from when the price allows.`);
+      await oldLoan.locator('#loan-ratio').fill(String(percent));
+      log(`   the collateral set to ${percent}% of the debt at ${formatPrice(market.lower)}`);
+    }
     const move = oldLoan.getByRole('button', { name: 'Bring the contracts up to date' });
     const ready = oldLoan.getByText(/^Up to date\. A loan opened now/);
     await move.or(ready).first().waitFor({ state: 'visible', timeout: 120_000 * patience });
@@ -244,10 +310,10 @@ const steps = async (): Promise<void> => {
     // 6 ------------------------------------------------------------------
     if (!begin('Collateral is added from the loan page')) return;
     await loan.getByRole('button', { name: 'Change the collateral' }).click();
-    await oldLoan.locator(`[id^="collateral-"]`).first().fill('0.001');
+    await oldLoan.locator(`[id^="collateral-"]`).first().fill(ADDED);
     await loan.getByRole('button', { name: /^Add$/ }).click();
-    const added = await approveRequest(old.page, 'Adding 0.001 BCH of collateral', 'manage-review');
-    label(added, 'The owner\'s phone adds 0.001 BCH of collateral, on the loan page\'s request: the key goes back to the address it came from (`return`)');
+    const added = await approveRequest(old.page, `Adding ${ADDED} BCH of collateral`, 'manage-review');
+    label(added, `The owner's phone adds ${ADDED} BCH of collateral, on the loan page's request: the key goes back to the address it came from (\`return\`)`);
     await pageDone(oldLoan, 'The collateral is changed. The key is back where it was in your wallet.');
     mine(1);
     await oldLoan.reload();
@@ -390,7 +456,6 @@ const steps = async (): Promise<void> => {
 // ------------------------------------------------------------------ the record
 
 const writeRecord = async (outcome: string): Promise<void> => {
-  const ledger = await runTransactions(kept.startHeight);
   const wallet = walletKept(work, ['old-phone', 'new-phone'], WALLET);
   const places = await walletPlaces(wallet);
   const identity = wallet.identity;
@@ -398,8 +463,10 @@ const writeRecord = async (outcome: string): Promise<void> => {
   const outside = lockingOf(elsewhere());
   const funds = kept.fundsAddress === '' ? '' : lockingOf(kept.fundsAddress);
   const payer = localPayerLocking();
-  const deployerHex = binToHex(deployerLocking);
-  const contracts = kept.deployment === undefined ? undefined : paryonContracts(kept.deployment);
+  const deployerHex = chipnet ? '' : binToHex(deployerLocking);
+  // On chipnet the run's transactions are found from the run's own addresses; Paryon's contracts are everybody's.
+  const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, outside, funds, payer]);
+  const contracts = chipnet ? paryonContracts(DEPLOYMENT) : kept.deployment === undefined ? undefined : paryonContracts(kept.deployment);
   const paryonPlaces = new Map<string, string>();
   if (contracts !== undefined) {
     for (const [name, value] of Object.entries(contracts)) {
@@ -409,7 +476,7 @@ const writeRecord = async (outcome: string): Promise<void> => {
   }
   for (const entry of wallet.activity) label(entry.transactionId, `${entry.who === 'old-phone' ? 'The owner\'s phone' : 'The new phone'}: ${entry.what}`);
   const placeOf = (lockingBytecode: string): string | undefined =>
-    lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === outside ? `the outside address the coins went back to (${addressOf(outside)})` : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === payer ? 'the local payer (`scripts/local-pay.ts`)' : lockingBytecode === deployerHex ? 'the key that deployed Paryon\'s contracts, which gets Paryon\'s fee' : (paryonPlaces.get(lockingBytecode) ?? places.get(lockingBytecode));
+    lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === outside ? `the outside address the coins went back to (${addressOf(outside)})` : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === payer ? (chipnet ? 'the funding address (`scripts/chipnet-pay.ts`)' : 'the local payer (`scripts/local-pay.ts`)') : lockingBytecode === deployerHex ? 'the key that deployed Paryon\'s contracts, which gets Paryon\'s fee' : (paryonPlaces.get(lockingBytecode) ?? places.get(lockingBytecode));
   const ofController = await controllerLabels(identity);
   const labelOf = (transaction: LedgerTransaction): string | undefined => {
     const named = kept.labels[transaction.transactionId] ?? ofController.get(transaction.transactionId);
@@ -417,24 +484,25 @@ const writeRecord = async (outcome: string): Promise<void> => {
     const fromFunds = funds !== '' && transaction.inputs.some((input) => input.lockingBytecode === funds);
     if (fromFunds && transaction.outputs.some((output) => output.lockingBytecode === outside)) return 'The recoverer sends her balance back';
     if (fromFunds) return 'Paid from the recoverer\'s balance';
-    if (transaction.inputs.some((input) => input.lockingBytecode === payer)) return 'The local payer pays';
+    if (transaction.inputs.some((input) => input.lockingBytecode === payer)) return chipnet ? 'The funding address pays' : 'The local payer pays';
     return undefined;
   };
   const urls = requests.urls();
   const beforePage = kept.requestsBeforePage === undefined ? urls : urls.slice(0, kept.requestsBeforePage);
   const toPage = urls.filter((url) => url.startsWith(LOAN_ORIGIN));
   const early = beforePage.filter((url) => url.startsWith(LOAN_ORIGIN));
+  const served = (kept.served ?? []).length === 0 ? '' : ` ${(kept.served ?? []).join(' Then, for the part that continued: ')}`;
   writeFileSync(
-    recordFile('stage-17-loan-browser-local-node.md'),
+    recordFile(`stage-17-loan-browser-${where}.md`),
     [
-      '# Stage 17 in browsers on the local node: a ParyonUSD loan from its template alone, through the loss of a phone (PR20)',
+      `# Stage 17 in browsers on ${chipnet ? 'chipnet (run H)' : 'the local node'}: a ParyonUSD loan from its template alone, through the loss of a phone (PR20)`,
       '',
-      `Written by \`scripts/stage-17-loan-browser.ts${process.argv.slice(2).length === 0 ? '' : ` ${process.argv.slice(2).join(' ')}`}\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the loan page is a second tab of the phone that uses it. The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${LOAN}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. Paryon's contracts as published (\`@paryonusd/contracts\` 1.1.0) were deployed on the local chain by the run (\`packages/paryon/src/local-deployment.ts\`, the price at $${(Number(PRICE) / 100).toFixed(2)}, periods of 10 blocks) and named to the loan page in its configuration; the oracle is not read for such a deployment. The run made the blocks and moved the chain's clock. The wallet reads no recovery declaration: the loan reached it as Paryon's template, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
+      `Written by \`scripts/stage-17-loan-browser.ts${process.argv.slice(2).length === 0 ? '' : ` ${process.argv.slice(2).join(' ')}`}\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the loan page is a second tab of the phone that uses it. ${chipnet ? `${pagesUsed([WALLET, RECOVERER, LOAN], 'Blocks and the waiting period took their real time; the coins came from the funding address and went back to it.')}${served} The loan page used Paryon's own test deployment \`${DEPLOYMENT.name}\`, unchanged, and read the oracle's price.` : `The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${LOAN}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. Paryon's contracts as published (\`@paryonusd/contracts\` 1.1.0) were deployed on the local chain by the run (\`packages/paryon/src/local-deployment.ts\`, the price at $${(Number(PRICE) / 100).toFixed(2)}, periods of 10 blocks) and named to the loan page in its configuration; the oracle is not read for such a deployment. The run made the blocks and moved the chain's clock.`} The wallet reads no recovery declaration: the loan reached it as Paryon's template, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
       '',
       `Outcome: ${outcome}`,
       ...(kept.continued.length === 0 ? [] : ['', ...kept.continued]),
       '',
-      ...(kept.deployment === undefined ? [] : [`Paryon's deployment on the local chain: PUSD \`${kept.deployment.tokenIds.paryon}\`, key factories \`${kept.deployment.tokenIds.loanKeyFactory}\`. The loan key: \`${kept.category}\`.`, '']),
+      ...(kept.deployment === undefined || chipnet ? [] : [`Paryon's deployment on the local chain: PUSD \`${kept.deployment.tokenIds.paryon}\`, key factories \`${kept.deployment.tokenIds.loanKeyFactory}\`. The loan key: \`${kept.category}\`.`, '']),
       'What the run showed:',
       '',
       ...kept.facts.map((line) => `- ${line}`),
@@ -444,10 +512,12 @@ const writeRecord = async (outcome: string): Promise<void> => {
       ...requestsSection(requests, LOAN_ORIGIN, 'the loan page', toPage, kept.requestsBeforePage === undefined ? '' : `The loan page was first opened on the new phone after its ${kept.requestsBeforePage}th request; ${early.length === 0 ? 'none of the requests before went to the loan page\'s origin' : `${early.length} before then went to the loan page's origin`}, and the requests to that origin listed below are those of the page itself once it was opened, with the requests it made of the chain's server and the relay.`),
       '## Transactions and coins',
       '',
-      `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, and in the node's pool. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
+      chipnet
+        ? `Read from chipnet's server after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the wallet's addresses of both phones' seeds, its controller, the recoverer's balance and the funding address). Paryon's contracts are named where the run's coins went into them. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`
+        : `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, and in the node's pool. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
       '',
       ...ledgerSection(ledger, labelOf, placeOf),
-      ...(kept.screens.length === 0 ? [] : ['## Pictures', '', `In \`docs/screens/\`, each at 390×844 (\`-phone\`) and 1280×800 (\`-desktop\`): ${kept.screens.map((name) => `\`live-loan-${name}\``).join(', ')}.`, '']),
+      ...(kept.screens.length === 0 ? [] : ['## Pictures', '', `In \`docs/screens/\`, each at 390×844 (\`-phone\`) and 1280×800 (\`-desktop\`): ${kept.screens.map((name) => `\`${prefix}-${name}\``).join(', ')}.`, '']),
       '## Log',
       '',
       '```',
@@ -456,7 +526,7 @@ const writeRecord = async (outcome: string): Promise<void> => {
       '',
     ].join('\n'),
   );
-  log(`record written to ${recordFile('stage-17-loan-browser-local-node.md').slice(root.length)}`);
+  log(`record written to ${recordFile(`stage-17-loan-browser-${where}.md`).slice(root.length)}`);
 };
 
 try {
@@ -466,7 +536,12 @@ try {
     theCourse.note(`       continued from step ${from}`);
   }
   const deployment = await deploy();
-  await prepare(['wallet', 'recoverer', 'loan'], { paryon: deployment });
+  await prepare(['wallet', 'recoverer', 'loan'], chipnet ? {} : { paryon: deployment });
+  if (chipnet) {
+    const now = await servedFrom([WALLET, RECOVERER, LOAN]);
+    if (!(kept.served ?? []).includes(now)) kept.served = [...(kept.served ?? []), now];
+    save();
+  }
   log(`   the run starts after block ${kept.startHeight}; Paryon's deployment "${deployment.name}" on ${config.network}, PUSD ${deployment.tokenIds.paryon.slice(0, 12)}…`);
   await steps();
   const all = state.step >= 11 && until >= 11;

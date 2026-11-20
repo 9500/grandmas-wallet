@@ -276,7 +276,7 @@ export const course = (options: { directory: string; continuing: boolean; until:
   const prepare = async (apps: App[], served: Record<string, unknown> = {}): Promise<void> => {
     if (chipnet && !localPages) {
       for (const app of apps) {
-        const url = app === 'wallet' ? WALLET : app === 'recoverer' ? RECOVERER : JAR;
+        const url = app === 'wallet' ? WALLET : app === 'recoverer' ? RECOVERER : app === 'jar' ? JAR : LOAN;
         const version = (await (await fetch(`${url}version.json`)).json()) as { commit?: string; branch?: string; network?: string; releasedAt?: string };
         if (version.network !== 'chipnet') throw new Error(`${url} does not serve chipnet`);
         log(`${app} page: ${url}, commit ${version.commit} of ${version.branch}, released ${version.releasedAt}`);
@@ -512,6 +512,20 @@ const waitsConcluded = (facts: string[]): string[] => {
   if (said.length === 0) return [];
   said.push('The waits that remain are those the proposal keeps: the waiting period of a recovery request, which counts from the block that holds the request; a device retiring for good only once a block holds another owner; and the time locks of applications.');
   return ['What these show:', '', ...said.map((line) => `- ${line}`), ''];
+};
+
+/** Which release each public page serves, as its `version.json` says: one sentence for a record. */
+export const servedFrom = async (urls: string[]): Promise<string> => {
+  const said: string[] = [];
+  for (const url of urls) {
+    try {
+      const version = (await (await fetch(`${url}version.json`)).json()) as { commit?: string; branch?: string; releasedAt?: string };
+      said.push(`${url} commit ${version.commit} of ${version.branch}, released ${version.releasedAt}`);
+    } catch (error) {
+      said.push(`${url} (its version could not be read: ${(error as Error).message})`);
+    }
+  }
+  return `Served from: ${said.join('; ')}.`;
 };
 
 /** The sentence of a record that says which pages the run used. */

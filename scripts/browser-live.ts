@@ -7,8 +7,8 @@ import { type ChainReader, ADDRESS_KIND, deriveSeedKeys, keyPairFromPrivateKey, 
 import type { BrowserContext, Locator } from 'playwright';
 
 import { walletTemplateNumbers } from '../packages/app/src/templates.js';
-import { Electrum } from '../packages/chipnet/src/electrum.js';
-import { root } from './browser-course.js';
+import { chipnet, root } from './browser-course.js';
+import { chainServer } from './browser-ledger.js';
 
 /** Text without its line breaks and repeated spaces. */
 export const flat = (text: string | null | undefined): string => (text ?? '').replace(/\s+/g, ' ').trim();
@@ -23,9 +23,12 @@ export const lockingOf = (address: string): string => {
   return typeof decoded === 'string' ? '' : binToHex(decoded.bytecode);
 };
 
-/** The locking bytecode of the local payer of `scripts/local-pay.ts`, as hex; empty before it has a key. */
+/**
+ * The locking bytecode of the payer of the course, as hex: the local payer of `scripts/local-pay.ts`, or on chipnet
+ * the funding address of `scripts/chipnet-pay.ts`. Empty before it has a key.
+ */
 export const localPayerLocking = (): string => {
-  const file = `${root}.local-runs/local-funder.json`;
+  const file = chipnet ? `${root}.chipnet/funder-design-2.json` : `${root}.local-runs/local-funder.json`;
   if (!existsSync(file)) return '';
   return binToHex(p2pkhLockingBytecode(keyPairFromPrivateKey(hexToBin((JSON.parse(readFileSync(file, 'utf8')) as { privateKey: string }).privateKey)).keyHash));
 };
@@ -125,7 +128,7 @@ export const walletKept = (work: string, phones: string[], walletUrl: string): W
 };
 
 const localChain = async <T>(work: (chain: ChainReader) => Promise<T>): Promise<T> => {
-  const server = await Electrum.connect('ws://127.0.0.1:60403');
+  const server = await chainServer();
   try {
     return await work({
       getHistory: (lockingBytecode) => server.getHistory(lockingBytecode),
@@ -144,7 +147,7 @@ const TRANSITIONS: Record<string, string> = {
   ownerAuthorize: 'The owner approves a spend at the controller',
 };
 
-/** What each transaction of the wallet's controller was, from its history on the local chain. */
+/** What each transaction of the wallet's controller was, from its history on the course's chain. */
 export const controllerLabels = async (identity: string | undefined): Promise<Map<string, string>> => {
   const labels = new Map<string, string>();
   if (identity === undefined) return labels;
@@ -161,7 +164,7 @@ export const controllerLabels = async (identity: string | undefined): Promise<Ma
 export const walletPlaces = async (kept: WalletKept, names: Record<string, string> = { 'old-phone': 'an address of the lost phone\'s seed', 'new-phone': 'an address of the new phone\'s seed' }): Promise<Map<string, string>> => {
   const places = new Map<string, string>();
   if (kept.identity === undefined) return places;
-  const server = await Electrum.connect('ws://127.0.0.1:60403');
+  const server = await chainServer();
   try {
     const chain: ChainReader = {
       getHistory: (lockingBytecode) => server.getHistory(lockingBytecode),
