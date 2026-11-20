@@ -55,7 +55,8 @@ import { type NameClaim, type TokenNaming, TokenNames } from './token-names.js';
  * check about it; and finding, from the tokens the wallet holds, the positions they control.
  *
  * Nothing here knows any application. Everything the wallet does for one comes from the application's
- * template and its recovery declaration.
+ * template and the request, with either the template's recovery declaration (the second design) or, for a
+ * template that comes with nothing beside it, the wallet's own position records (section 13.3).
  *
  * The XO engine builds each transaction from the template. Before that, this code works the same
  * transaction out by itself: to choose coins and the exact fee, and to show the user figures that the
