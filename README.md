@@ -18,7 +18,7 @@ Built for BCH Blaze 2026 on the XO stack.
 | Savings Jar, an application the wallet uses from its XO template | <https://jar.9500.cash/> |
 | Loan desk, an independent page for ParyonUSD's contracts on chipnet, not affiliated with Paryon | <https://paryon.9500.cash/> |
 
-[docs/walkthrough.md](docs/walkthrough.md) goes through the course by hand: a helper sets up a wallet, the owner receives and pays, a request nobody asked for is refused, the phone is lost, and the wallet comes back on a new one. It takes about twenty minutes and a little chipnet coin.
+[docs/walkthrough.md](docs/walkthrough.md) goes through the course by hand: a helper sets up a wallet, the owner receives and pays, opens a savings jar and a loan, a request nobody asked for is refused, the phone is lost, and the wallet comes back on a new one with the jar and the loan. It takes about half an hour, a little chipnet coin, and about 0.6 BCH of it more for the loan.
 
 ## Built on XO
 
