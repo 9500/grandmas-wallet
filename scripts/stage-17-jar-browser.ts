@@ -235,7 +235,7 @@ const steps = async (): Promise<void> => {
     await position.waitFor({ state: 'visible', timeout: 180_000 * patience });
     const listed = await textOf(position);
     log(`   trusted; the wallet's list: "${listed}"`);
-    fact(`Once the user trusted the template the earlier owner had stored, the new phone checked the record against the chain and listed the jar from it as open: "${listed}". The actions it offers: ${(await position.locator('.token-actions button').allInnerTexts()).map((text) => `"${flat(text)}"`).join(', ')}.`);
+    fact(`Once the user trusted the template the earlier owner had stored, the new phone checked the record against the chain and listed the jar from it as open: "${listed}". The actions it offers: ${(await position.locator('.token-actions button:not(.info-button):not(.hex)').allInnerTexts()).map((text) => `"${flat(text)}"`).join(', ')}.`);
     await picture(phone.page, 'positions-after-recovery');
   }
 

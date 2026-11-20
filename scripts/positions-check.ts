@@ -167,7 +167,7 @@ try {
   const open = list.locator('[data-testid="position-open"]').first();
   check((await open.locator('.token-title').innerText()).replace(/\s+/g, ' ').trim() === 'Box key · Example money box (test network)', 'a confirmed position by the template\'s name for its token and the template\'s name');
   check(await open.getByText('Open', { exact: true }).isVisible() && /Holds/.test(await open.innerText()), 'open, and what it holds');
-  check(await open.getByRole('button', { name: 'Take everything out' }).isVisible() && (await open.getByRole('button', { name: 'Put money in' }).isVisible()), 'with the actions its script offers');
+  check(await open.getByRole('button', { name: 'Take everything out', exact: true }).isVisible() && (await open.getByRole('button', { name: 'Put money in', exact: true }).isVisible()), 'with the actions its script offers');
   const club = list.locator('[data-testid="position-open"]').nth(1);
   check(await club.getByText('Open the application to do this').isVisible(), 'an action only the application can do says to open the application');
   check((await club.getByRole('link').getAttribute('href')) === 'https://shared-box.example.org/', 'with the address of its page, as a link');
@@ -180,13 +180,13 @@ try {
   const colour = await greyed.locator('.token-title').evaluate((element) => getComputedStyle(element).color);
   const normal = await open.locator('.token-title').evaluate((element) => getComputedStyle(element).color);
   check(colour !== normal, `and greyed (${colour} against ${normal})`);
-  check(await greyed.getByRole('button', { name: 'Take everything out' }).isVisible() && (await greyed.getByRole('button', { name: 'Put money in' }).count()) === 0, 'taking out is offered there; paying in is not');
-  check((await list.getByRole('button', { name: 'Send' }).count()) === 5, 'every token can be sent');
+  check(await greyed.getByRole('button', { name: 'Take everything out', exact: true }).isVisible() && (await greyed.getByRole('button', { name: 'Put money in', exact: true }).count()) === 0, 'taking out is offered there; paying in is not');
+  check((await list.getByRole('button', { name: 'Send', exact: true }).count()) === 5, 'every token can be sent');
   await fitsPhone(page, 'the list');
   await shoot(page, 'apps-positions');
 
   // ---------------------------------------------------------------- acting from the list
-  await open.getByRole('button', { name: 'Put money in' }).tap();
+  await open.getByRole('button', { name: 'Put money in', exact: true }).tap();
   const amount = page.getByLabel('Amount');
   await amount.waitFor();
   await fitsPhone(page, 'the value the action needs');

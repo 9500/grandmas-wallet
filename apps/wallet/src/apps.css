@@ -109,7 +109,8 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .flow-bch .unit { font-size: 13px; font-weight: 600; color: var(--muted); }
 .flow-nothing { color: var(--muted); font-size: 14px; }
 
-@container (min-width: 360px) {
+/* Side by side only where the lanes between them have room for a token's chip in full. */
+@container (min-width: 480px) {
   .flow { grid-template-columns: 88px minmax(0, 1fr) 88px; grid-template-areas: 'wallet lanes app'; align-items: center; }
   .flow-node, .flow-node.theirs { align-items: center; text-align: center; gap: 6px; }
   .flow-icon { width: 44px; height: 44px; border-radius: 12px; }
