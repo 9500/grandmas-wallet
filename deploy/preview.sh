@@ -12,9 +12,9 @@
 #   status          what is running
 #
 # The pages listen on 127.0.0.1: wallet 8101, recoverer 8102, Savings Jar 8103, loan page 8104, backup stores
-# 8111 and 8112. The loan page is an independent demonstration with Paryon's contracts on chipnet; it has no
-# public address and is served here only. From another computer, forward those ports (and 60403, the local
-# node's server, for `local`) and open http://localhost:8101 and the others. A page at localhost counts as
+# 8111 and 8112. The loan page uses Paryon's deployment on chipnet; on the local node it says it has none, since
+# the preview deploys none. From another computer, forward those ports (and 60403, the local node's server, for
+# `local`) and open http://localhost:8101 and the others. A page at localhost counts as
 # secure for the browser, which the pages' cryptography needs; a page at this machine's network address
 # over plain HTTP does not.
 #
@@ -85,7 +85,7 @@ case "${1:-}" in
     [ -f "$STATE/chain" ] && echo "chain: $(cat "$STATE/chain")"
     ;;
   *)
-    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac
