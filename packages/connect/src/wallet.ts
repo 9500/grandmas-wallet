@@ -59,11 +59,17 @@ export const temporaryLedger = (): LedgerStorage => {
   return { load: () => kept, save: (entries) => void (kept = entries) };
 };
 
+/** What the user agreed to beside the action itself, as the wallet asked for it before approving. */
+export interface ApprovalConsent {
+  /** The user ticked that tokens of the wallet's leave it, come back changed or end, as the wallet showed them. */
+  tokensLeave?: boolean;
+}
+
 /** What the wallet shows the user before acting. */
 export interface Proposal {
   entry: LedgerEntry;
   /** Agree, and have the wallet carry the request out. For a template the wallet did not have, this also trusts it. */
-  approve(): Promise<void>;
+  approve(consent?: ApprovalConsent): Promise<void>;
   decline(): Promise<void>;
 }
 
@@ -90,9 +96,9 @@ export interface WalletConnectorOptions {
   storage?: LedgerStorage;
   /**
    * Carry out an approved request. Called at most once per request.
-   * `stage` reports progress to the application.
+   * `stage` reports progress to the application; `consent` is what the user ticked beside approving.
    */
-  execute(entry: LedgerEntry, stage: (stage: 'recorded' | 'sent') => void): Promise<Record<string, unknown>>;
+  execute(entry: LedgerEntry, stage: (stage: 'recorded' | 'sent') => void, consent: ApprovalConsent): Promise<Record<string, unknown>>;
   /**
    * The tokens of a template the wallet holds, for the application that asks: as the template's declaration
    * finds them (version 1), or as the wallet's records tie them to the template (version 2).
@@ -154,7 +160,7 @@ export class WalletConnector {
     this.options.onProposals(
       this.entries
         .filter((entry) => entry.status === 'asked')
-        .map((entry) => ({ entry, approve: () => this.carryOut(entry), decline: () => this.decline(entry) })),
+        .map((entry) => ({ entry, approve: (consent?: ApprovalConsent) => this.carryOut(entry, consent ?? {}), decline: () => this.decline(entry) })),
     );
   }
 
@@ -357,7 +363,7 @@ export class WalletConnector {
     this.announce();
   }
 
-  private async carryOut(entry: LedgerEntry): Promise<void> {
+  private async carryOut(entry: LedgerEntry, consent: ApprovalConsent): Promise<void> {
     if (entry.status !== 'asked') return;
     entry.status = 'working';
     this.persist();
@@ -365,7 +371,7 @@ export class WalletConnector {
     const { application } = entry;
     await this.send(application, { action: INVITATION_UPDATE, time: this.now(), id: entry.id, stage: 'approved' });
     try {
-      entry.result = await this.options.execute(entry, (stage) => void this.send(application, { action: INVITATION_UPDATE, time: this.now(), id: entry.id, stage }));
+      entry.result = await this.options.execute(entry, (stage) => void this.send(application, { action: INVITATION_UPDATE, time: this.now(), id: entry.id, stage }), consent);
       entry.status = 'done';
     } catch (error) {
       entry.status = 'failed';

@@ -1,12 +1,13 @@
 import { binToHex } from '@bitauth/libauth';
-import { type ActionOutcome, type ActionPreview, type ApplicationAction, type HeldToken, type TemplateSummary, type TokenAction, NotStoredError, WALLET_TEMPLATES, actionOf } from '@grandmas-wallet/app';
+import { type ActionOutcome, type ActionPreview, type ApplicationAction, type Applications, type HeldToken, type RecordedPosition, type TemplateSummary, type TokenAction, NotStoredError, WALLET_TEMPLATES, actionOf } from '@grandmas-wallet/app';
 import { readLink } from '@grandmas-wallet/app/links';
 import type { LedgerEntry, Offer, Proposal } from '@grandmas-wallet/connect';
 import { Amount, Button, Card, Field, Info, KeyValues, Loading, Notice, PageHead, Pill, Spinner, TaskStatus, TextInput, Value, formatTime, lockingBytecodeOfAddress, useTask } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
-import { ActionReview, Hex, Part, TemplateView, TypedValue, plainRefusal, refusalOf } from './ActionReview.js';
+import { ActionReview, Hex, Part, RefusalView, TemplateView, TypedValue, plainRefusal, refusalOf } from './ActionReview.js';
+import { type BackupState, type Refusal, type TokenList, BACKUP_UNREACHABLE, approval, consentOf, needsStore, refusalOf as refusalShown, tokenList } from './review-gate.js';
 import { type ApplicationsPart, type PositionsAsk, relayOf } from './connections.js';
 import type { Owner } from './OwnerApp.js';
 import { CONNECTION_ADDRESS } from './scan.js';
@@ -22,7 +23,7 @@ import './apps.css';
  * shows about one comes from the application's template, and its name for itself is marked as unverified.
  */
 
-type View = { at: 'main' } | { at: 'act'; token: HeldToken; action: TokenAction } | { at: 'trust'; identifier: string } | { at: 'template'; identifier: string };
+type View = { at: 'main' } | { at: 'act'; token?: HeldToken; position?: RecordedPosition; action: TokenAction } | { at: 'trust'; identifier: string } | { at: 'template'; identifier: string };
 
 /** Requests the user decided while the page has been open: their outcome stays on the screen until dismissed. */
 const followed = new Set<string>();
@@ -53,7 +54,7 @@ export const Apps = ({ owner }: { owner: Owner }) => {
   return (
     <TokenNamesContext.Provider value={names}>
       {view.at === 'act' ? (
-        <ActOnToken owner={owner} token={view.token} action={view.action} onBack={back} />
+        <ActOnToken owner={owner} {...(view.token === undefined ? {} : { token: view.token })} {...(view.position === undefined ? {} : { position: view.position })} action={view.action} onBack={back} />
       ) : view.at === 'trust' ? (
         <TrustSuggested owner={owner} identifier={view.identifier} onBack={back} />
       ) : view.at === 'template' ? (
@@ -310,7 +311,44 @@ const NoBackup = ({ owner, children }: { owner: Owner; children: ComponentChildr
   </Notice>
 );
 
-const needsBackup = (preview: ActionPreview | undefined): boolean => (preview?.firstUse === true || preview?.recordsPosition === true) && kept('arrangement') === undefined;
+/**
+ * Where the backup stands for an action that has to be stored before it is signed (section 10.5), checked when the
+ * review is shown and again just before approving. Where no store answers, the action is not offered for approval.
+ * @returns the state, and a check that runs again and says whether a store answers
+ */
+export const useBackup = (applications: Pick<Applications, 'backupAnswers'>, preview: ActionPreview | undefined): [BackupState, () => Promise<boolean>] => {
+  const [state, setState] = useState<BackupState>('checking');
+  const check = async (): Promise<boolean> => {
+    if (preview === undefined || !needsStore(preview)) {
+      setState('answers');
+      return true;
+    }
+    if (kept('arrangement') === undefined) {
+      setState('none');
+      return false;
+    }
+    setState('checking');
+    const answers = await applications.backupAnswers().catch(() => false);
+    setState(answers ? 'answers' : 'unreachable');
+    return answers;
+  };
+  useEffect(() => {
+    void check();
+  }, [preview]);
+  return [state, check];
+};
+
+/** No backup store answers: the action is not offered, and can be tried again. */
+const Unreachable = ({ onRetry, busy }: { onRetry: () => void; busy: boolean }) => (
+  <Notice tone="warn">
+    <div class="backup-unreachable">
+      <span>{BACKUP_UNREACHABLE}</span>
+      <Button small kind="secondary" disabled={busy} onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  </Notice>
+);
 
 const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entry: LedgerEntry; proposal: Proposal | undefined; onDismiss: () => void }) => {
   const { apps } = owner;
@@ -324,12 +362,15 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
     }
   }, [keyOf(entry)]);
   const [preview, setPreview] = useState<ActionPreview | undefined>();
-  const [refusal, setRefusal] = useState<string | undefined>(unusable);
+  const [refusal, setRefusal] = useState<Refusal | undefined>(unusable === undefined ? undefined : { kind: 'other', title: 'This wallet would not carry it out', words: unusable });
   const [notStored, setNotStored] = useState(false);
+  const [ticked, setTicked] = useState(false);
+  const [backup, checkBackup] = useBackup(applications, preview);
   useEffect(() => {
     if (entry.status !== 'asked' || summary === undefined) return;
-    applications.preview(actionOf(entry)).then(setPreview, (error: unknown) => setRefusal(refusalOf(error)));
+    applications.preview(actionOf(entry)).then(setPreview, (error: unknown) => setRefusal(refusalShown(error, refusalOf(error))));
   }, [keyOf(entry)]);
+  const gate = approval({ ...(preview === undefined ? {} : { preview }), refused: summary === undefined || refusal !== undefined, violation: summary?.verdict.statement === 'violation' && !summary.trusted, backup, ticked });
 
   const name = nameOf(apps, entry.application);
   const asker = (withName: boolean) => (
@@ -354,10 +395,15 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
         apps.changed();
         return;
       }
+      // A backup that stopped answering since the review was shown: the request stays open, to be tried again.
+      if (!(await checkBackup())) {
+        followed.delete(keyOf(entry));
+        return;
+      }
       progress(preview?.firstUse === true ? 'Storing the template in your backup' : 'Checking the action again');
       const stop = applications.watch((stage) => progress(stage === 'recorded' ? 'Signing and sending' : 'Sent. Finishing'));
       try {
-        await proposal.approve();
+        await proposal.approve(consentOf(gate, ticked));
       } finally {
         stop();
       }
@@ -395,15 +441,18 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
     );
   }
 
-  const blocked = summary === undefined || refusal !== undefined || preview === undefined || needsBackup(preview) || (summary.verdict.statement === 'violation' && !summary.trusted);
+  // What the wallet found refuses the action in place of the review: the template is named, the action, and why.
+  const foundAgainst = refusal !== undefined && refusal.kind !== 'other';
   return (
     <Card title={`${name ?? 'An application'} asks for your decision`} cls="request-card" id={`request-${entry.id}`}>
       <div class="stack">
         {asker(false)}
         {summary === undefined ? (
           <Notice tone="bad">The template sent with this request cannot be used: {unusable}</Notice>
+        ) : foundAgainst ? (
+          <RefusalView refusal={refusal} context={<>{actionName} · {summary.name}</>} />
         ) : preview !== undefined ? (
-          <ActionReview preview={preview} summary={summary} />
+          <ActionReview preview={preview} summary={summary} {...(gate.tick ? { tick: { ticked, onTick: setTicked } } : {})} />
         ) : (
           <>
             <Part title="Template">
@@ -412,28 +461,29 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
             {refusal === undefined ? <Loading>Working out what this would do…</Loading> : null}
           </>
         )}
-        {summary !== undefined && refusal !== undefined && (
+        {summary !== undefined && refusal !== undefined && !foundAgainst && (
           <Notice tone="bad">
             <div class="stack-s">
               <strong>This wallet would not carry it out.</strong>
-              <span class="failure">{refusal}</span>
+              <span class="failure">{refusal.words}</span>
             </div>
           </Notice>
         )}
         {summary?.verdict.statement === 'violation' && !summary.trusted && <Notice tone="bad">This wallet does not take in a template with a violation. You can only decline.</Notice>}
-        {needsBackup(preview) && <NoBackup owner={owner}>This wallet has no backup store yet. A template is stored there before its first action, so that a new phone can operate what is made with it. Set up recovery first.</NoBackup>}
+        {gate.blocked === 'no backup' && <NoBackup owner={owner}>This wallet has no backup store yet. A template is stored there before its first action, so that a new phone can operate what is made with it. Set up recovery first.</NoBackup>}
+        {gate.blocked === 'backup unreachable' && <Unreachable busy={task.busy !== undefined} onRetry={() => void checkBackup()} />}
         <TaskStatus task={task} />
         <div class="actions decide">
-          {!blocked && (
-            <Button task={task} name="approve" disabled={entry.status !== 'asked'} onClick={() => void decide(true)}>
+          {gate.shown && (
+            <Button task={task} name="approve" disabled={entry.status !== 'asked' || !gate.enabled} onClick={() => void decide(true)}>
               Approve
             </Button>
           )}
-          <Button task={task} name="decline" kind={blocked ? 'secondary' : 'quiet'} disabled={entry.status !== 'asked'} onClick={() => void decide(false)}>
+          <Button task={task} name="decline" kind={gate.shown ? 'quiet' : 'secondary'} disabled={entry.status !== 'asked'} onClick={() => void decide(false)}>
             Decline
           </Button>
         </div>
-        <p class="small muted">Nothing is signed or sent unless you approve.</p>
+        {gate.shown && <p class="small muted">Nothing is signed or sent unless you approve.</p>}
       </div>
     </Card>
   );
@@ -770,15 +820,22 @@ const STATUS: Record<string, { label: string; tone?: 'good' | 'warn' }> = {
 const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void }) => {
   const { apps } = owner;
   const [tokens, setTokens] = useState<HeldToken[] | undefined>();
+  const [recorded, setRecorded] = useState<RecordedPosition[]>([]);
   const task = useTask();
   const count = owner.balance?.tokens.length;
   const read = () =>
     task.run('read', async () => {
-      setTokens(await apps.applications.tokens());
+      // Positions from the wallet's records, each checked against the chain, and every token the wallet holds.
+      const [held, positions] = await Promise.all([apps.applications.tokens(), apps.applications.recordedPositions()]);
+      setRecorded(positions);
+      setTokens(held);
     });
   useEffect(() => {
     void read();
   }, [apps.version, count]);
+  const declared = (identifier: string): boolean => apps.applications.templates.some((template) => template.identifier === identifier && template.declaration !== undefined);
+  const list = tokens === undefined ? undefined : tokenList(recorded, tokens, declared);
+  const empty = list !== undefined && list.positions.length + list.held.length + list.unconfirmed.length + list.tokens.length === 0;
   return (
     <Card cls="tokens-card">
       <TitleInfo
@@ -793,7 +850,7 @@ const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void 
           )
         }
       />
-      {tokens === undefined ? (
+      {list === undefined ? (
         task.error === undefined ? (
           <div class="tokens-loading">
             <Spinner /> Reading the tokens and the chain…
@@ -801,19 +858,145 @@ const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void 
         ) : (
           <TaskStatus task={task} name="read" />
         )
-      ) : tokens.length === 0 ? (
+      ) : empty ? (
         <p class="tokens-none">No tokens yet.</p>
       ) : (
         <>
           {task.error !== undefined && <TaskStatus task={task} name="read" />}
-          <ul class="list tokens">
-            {tokens.map((token) => (
-              <TokenRow owner={owner} token={token} onView={onView} />
-            ))}
-          </ul>
+          <TokenListView owner={owner} list={list} onView={onView} />
         </>
       )}
     </Card>
+  );
+};
+
+/** The list itself: positions, tokens a record ties to a template, other tokens, and apart, positions not confirmed. */
+export const TokenListView = ({ owner, list, onView }: { owner: Owner; list: TokenList; onView: (view: View) => void }) => (
+  <>
+    {list.positions.length + list.held.length + list.tokens.length > 0 && (
+      <ul class="list tokens">
+        {list.positions.map((position) => (
+          <PositionRow owner={owner} position={position} onView={onView} />
+        ))}
+        {list.held.map((position) => (
+          <PositionRow owner={owner} position={position} onView={onView} />
+        ))}
+        {list.tokens.map((token) => (
+          <TokenRow owner={owner} token={token} onView={onView} />
+        ))}
+      </ul>
+    )}
+    {list.unconfirmed.length > 0 && (
+      <section class="unconfirmed-part" data-testid="not-confirmed">
+        <h3 class="part-title">
+          Not confirmed{' '}
+          <Info label="About positions that are not confirmed">The chain does not bear out this wallet's record of {list.unconfirmed.length === 1 ? 'this position' : 'these positions'}. You can take money out. Nothing can be paid in.</Info>
+        </h3>
+        <ul class="list tokens unconfirmed">
+          {list.unconfirmed.map((position) => (
+            <PositionRow owner={owner} position={position} onView={onView} />
+          ))}
+        </ul>
+      </section>
+    )}
+  </>
+);
+
+/** Send a token: the Send screen, with this token chosen. */
+const SendToken = ({ owner, choice }: { owner: Owner; choice: string }) => (
+  <div class="token-send">
+    <Button
+      small
+      kind="quiet"
+      onClick={() => {
+        chooseToken(choice);
+        owner.navigate('send');
+        window.scrollTo(0, 0);
+      }}
+    >
+      Send
+    </Button>
+  </div>
+);
+
+/**
+ * A position from a record (sections 10.4 and 13.3): the token by the template's name for the output that made it and
+ * the template's name, what its script holds, and the actions the script offers, each carried out by the wallet or
+ * through the application's page. A token whose record names no script is shown under the template's name, with no
+ * word on whether the position is open.
+ */
+export const PositionRow = ({ owner, position, onView }: { owner: Owner; position: RecordedPosition; onView: (view: View) => void }) => {
+  const actions = owner.apps.applications.offeredActions(position);
+  const usable = position.token.place === 'address';
+  const { status } = position;
+  return (
+    <li class={`token position${status === 'unconfirmed' ? ' unconfirmed' : ''}`} data-testid={`position-${status}`}>
+      <div class="token-head">
+        <div>
+          <div class="token-title">
+            {position.tokenName ?? 'A token'}
+            <span class="token-of"> · {position.template.name ?? 'a template this phone does not trust'}</span>
+          </div>
+          <div class="small muted token-id">
+            {position.token.capability === 'none' ? 'NFT' : `NFT, ${position.token.capability}`} · <Hex value={position.token.category} />
+            {position.token.commitment !== '' && (
+              <>
+                {' '}
+                · <Hex value={position.token.commitment} head={6} tail={4} />
+              </>
+            )}
+          </div>
+        </div>
+        {status === 'open' && <Pill tone="good">Open</Pill>}
+        {status === 'closed' && <Pill>Closed</Pill>}
+      </div>
+      {status !== 'held' && (
+        <div class="token-body">
+          {status === 'closed' ? (
+            <p>It holds nothing now.</p>
+          ) : (
+            position.satoshis !== undefined && (
+              <p>
+                Holds <Amount satoshis={position.satoshis} exact />
+                {(position.coins ?? 0) > 1 && <span class="muted"> in {position.coins} coins</span>}
+              </p>
+            )
+          )}
+          {actions.length > 0 && (
+            <ul class="token-actions">
+              {actions.map((action) => (
+                <li class={action.needsApplication === undefined ? undefined : 'through-application'}>
+                  {action.needsApplication === undefined ? (
+                    <>
+                      <div class="small muted">{action.description !== '' ? action.description : 'An action of the template.'}</div>
+                      <Button small kind="secondary" disabled={!usable} onClick={() => onView({ at: 'act', position, action })}>
+                        {action.name}
+                      </Button>
+                    </>
+                  ) : (
+                    <div>
+                      <div class="token-action-name">{action.name}</div>
+                      <div class="small elsewhere-line">
+                        Open the application to do this{' '}
+                        <Info label={`Why "${action.name}" needs the application`}>{action.needsApplication}</Info>
+                      </div>
+                      {action.page !== undefined && (
+                        <a class="small application-page" href={action.page} target="_blank" rel="noopener noreferrer">
+                          {action.page.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {position.token.place === 'earlier' && <Notice tone="warn">This token is at an address of an earlier phone. It is moved to this phone's addresses first; until then it cannot be used here.</Notice>}
+      {position.token.place === 'vault' && <Notice>This token is at a vault address. It is moved to an ordinary address before it can be used here.</Notice>}
+      <SendToken owner={owner} choice={`nft:${position.token.outpoint}`} />
+    </li>
   );
 };
 
@@ -928,19 +1111,7 @@ export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldTo
       {token.noteRefused !== undefined && <p class="small muted">{token.noteRefused}</p>}
       {token.place === 'earlier' && <Notice tone="warn">This token is at an address of an earlier phone, where that phone's words could still move it. It is moved to this phone's addresses first, with the other coins at earlier addresses; until then it cannot be used here.</Notice>}
       {token.place === 'vault' && <Notice>This token is at a vault address. It is moved to an ordinary address of the wallet before it can be used here.</Notice>}
-      <div class="token-send">
-        <Button
-          small
-          kind="quiet"
-          onClick={() => {
-            chooseToken(token.capability === undefined ? `fungible:${token.category}` : `nft:${token.outpoint}`);
-            owner.navigate('send');
-            window.scrollTo(0, 0);
-          }}
-        >
-          Send
-        </Button>
-      </div>
+      <SendToken owner={owner} choice={token.capability === undefined ? `fungible:${token.category}` : `nft:${token.outpoint}`} />
     </li>
   );
 };
@@ -985,20 +1156,31 @@ const valueOf = (wanted: Wanted, text: string, network: Owner['session']['networ
   return trimmed;
 };
 
-type Acting = { at: 'form' } | { at: 'review'; request: ApplicationAction; preview: ActionPreview } | { at: 'refused'; reason: string } | { at: 'done'; outcome: ActionOutcome } | { at: 'failed'; reason: string; notStored: boolean };
+type Acting = { at: 'form' } | { at: 'review'; request: ApplicationAction; preview: ActionPreview } | { at: 'refused'; refusal: Refusal } | { at: 'done'; outcome: ActionOutcome } | { at: 'failed'; refusal: Refusal; notStored: boolean };
 
-const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: HeldToken; action: TokenAction; onBack: () => void }) => {
+/**
+ * An action the user starts from the wallet's own list, on a token a declaration explains or on a position from a
+ * record: the values the user types where the action needs them, then the same review as for a request, with its
+ * tick and its backup check; a refusal in place of the review.
+ */
+const ActOnToken = ({ owner, token, position, action, onBack }: { owner: Owner; token?: HeldToken; position?: RecordedPosition; action: TokenAction; onBack: () => void }) => {
   const { applications } = owner.apps;
   // What the user gives: the library says which values neither the token nor the chain supplies.
   const wanted: Wanted[] = action.asks ?? [];
   // A value the position holds now, as the template reads it from the chain, is where the user starts from.
   const [prefilled] = useState<Record<string, string>>(() =>
-    Object.fromEntries(wanted.flatMap((item) => token.position?.state?.filter((entry) => entry.variable === item.variable).map((entry) => [item.variable, entry.value]) ?? [])),
+    Object.fromEntries(wanted.flatMap((item) => token?.position?.state?.filter((entry) => entry.variable === item.variable).map((entry) => [item.variable, entry.value]) ?? [])),
   );
   const [values, setValues] = useState<Record<string, string>>(prefilled);
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [acting, setActing] = useState<Acting>({ at: 'form' });
+  const [ticked, setTicked] = useState(false);
+  const preview = acting.at === 'review' ? acting.preview : undefined;
+  const [backup, checkBackup] = useBackup(applications, preview);
+  const gate = approval({ ...(preview === undefined ? {} : { preview }), refused: false, backup, ticked });
   const task = useTask();
+  const target = position ?? token;
+  const templateName = position?.template.name ?? token?.template?.name;
 
   const review = () =>
     task.run('review', async () => {
@@ -1010,12 +1192,13 @@ const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: Hel
         else found[item.variable] = value.problem;
       }
       setProblems(found);
-      if (Object.keys(found).length > 0) return;
+      if (Object.keys(found).length > 0 || target === undefined) return;
       try {
-        const request = applications.actionOn(token, action.action, variables);
+        const request = applications.actionOn(target, action.action, variables);
+        setTicked(false);
         setActing({ at: 'review', request, preview: await applications.preview(request) });
       } catch (error) {
-        setActing({ at: 'refused', reason: refusalOf(error) });
+        setActing({ at: 'refused', refusal: refusalShown(error, refusalOf(error)) });
       }
     });
   useEffect(() => {
@@ -1025,23 +1208,24 @@ const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: Hel
   const carryOut = () =>
     task.run('carry', async (progress) => {
       if (acting.at !== 'review') return;
+      if (!(await checkBackup())) return;
       progress(acting.preview.firstUse ? 'Storing the template in your backup' : 'Checking the action again');
       try {
-        const outcome = await applications.carryOut(acting.request, (stage) => progress(stage === 'recorded' ? 'Signing and sending' : 'Sent. Finishing'));
+        const outcome = await applications.carryOut(acting.request, (stage) => progress(stage === 'recorded' ? 'Signing and sending' : 'Sent. Finishing'), consentOf(gate, ticked));
         setActing({ at: 'done', outcome });
       } catch (error) {
-        setActing({ at: 'failed', reason: refusalOf(error), notStored: error instanceof NotStoredError });
+        setActing({ at: 'failed', refusal: refusalShown(error, refusalOf(error)), notStored: error instanceof NotStoredError && !/Try again when a store can be reached/.test(error.message) });
       }
     });
 
   return (
     <div class="stack">
-      <PageHead title={action.name}>{action.description !== '' ? action.description : `An action of the template "${token.template?.name ?? ''}".`}</PageHead>
+      <PageHead title={action.name}>{action.description !== '' ? action.description : `An action of the template "${templateName ?? ''}".`}</PageHead>
       <div class="grid two">
         <div class="stack">
           {acting.at === 'form' && wanted.length > 0 && (
             <Card title="What the action needs">
-              <p class="small muted card-lead">The template asks for these values. Their names and descriptions are the template's.{Object.keys(prefilled).length > 0 && ' Where the position holds a value now, the field starts with it.'}</p>
+              <p class="small muted card-lead">The template asks for these values.{Object.keys(prefilled).length > 0 && ' Where the position holds a value now, the field starts with it.'}</p>
               {wanted.map((item) => (
                 <Field label={item.name} id={`value-${item.variable}`} hint={hintOf(item)} error={problems[item.variable]}>
                   {item.type === 'satoshis' ? (
@@ -1072,35 +1256,40 @@ const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: Hel
             </Card>
           )}
           {acting.at === 'refused' && (
-            <Card title="This wallet would not carry it out" tone="bad">
-              <p class="failure">{acting.reason}</p>
-              <div class="actions">
-                {wanted.length > 0 && (
-                  <Button kind="secondary" onClick={() => setActing({ at: 'form' })}>
-                    Change the values
+            <Card cls="request-card refused-card">
+              <div class="stack">
+                <RefusalView refusal={acting.refusal} />
+                <div class="actions">
+                  {wanted.length > 0 && acting.refusal.kind === 'other' && (
+                    <Button kind="secondary" onClick={() => setActing({ at: 'form' })}>
+                      Change the values
+                    </Button>
+                  )}
+                  <Button kind="quiet" onClick={onBack}>
+                    Back
                   </Button>
-                )}
-                <Button kind="quiet" onClick={onBack}>
-                  Back
-                </Button>
+                </div>
               </div>
             </Card>
           )}
           {acting.at === 'review' && (
             <Card title="Check and carry out" cls="request-card">
               <div class="stack">
-                <ActionReview preview={acting.preview} />
-                {needsBackup(acting.preview) && <NoBackup owner={owner}>This wallet has no backup store yet. A template is stored there before its first action. Set up recovery first.</NoBackup>}
+                <ActionReview preview={acting.preview} {...(gate.tick ? { tick: { ticked, onTick: setTicked } } : {})} />
+                {gate.blocked === 'no backup' && <NoBackup owner={owner}>This wallet has no backup store yet. A template is stored there before its first action. Set up recovery first.</NoBackup>}
+                {gate.blocked === 'backup unreachable' && <Unreachable busy={task.busy !== undefined} onRetry={() => void checkBackup()} />}
                 <TaskStatus task={task} name="carry" />
                 <div class="actions decide">
-                  <Button task={task} name="carry" disabled={needsBackup(acting.preview)} onClick={() => void carryOut()}>
-                    Carry it out
-                  </Button>
-                  <Button kind="quiet" disabled={task.busy !== undefined} onClick={wanted.length > 0 ? () => setActing({ at: 'form' }) : onBack}>
+                  {gate.shown && (
+                    <Button task={task} name="carry" disabled={!gate.enabled} onClick={() => void carryOut()}>
+                      Carry it out
+                    </Button>
+                  )}
+                  <Button kind={gate.shown ? 'quiet' : 'secondary'} disabled={task.busy !== undefined} onClick={wanted.length > 0 ? () => setActing({ at: 'form' }) : onBack}>
                     {wanted.length > 0 ? 'Change the values' : 'Back'}
                   </Button>
                 </div>
-                <p class="small muted">Nothing is signed or sent until you carry it out.</p>
+                {gate.shown && <p class="small muted">Nothing is signed or sent until you carry it out.</p>}
               </div>
             </Card>
           )}
@@ -1118,9 +1307,9 @@ const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: Hel
             </Card>
           )}
           {acting.at === 'failed' && (
-            <Card title="Not carried out" tone="bad">
+            <Card cls="request-card refused-card">
               <div class="stack">
-                <p class="failure">{acting.reason}</p>
+                <RefusalView refusal={acting.refusal.kind === 'other' ? { ...acting.refusal, title: 'Not carried out' } : acting.refusal} />
                 {acting.notStored && <NoBackup owner={owner}>A template is stored in your backup before its first action, and no backup store confirmed it. Set up recovery, or try again when a store can be reached.</NoBackup>}
                 <div class="actions">
                   <Button kind="quiet" onClick={onBack}>
@@ -1135,16 +1324,30 @@ const ActOnToken = ({ owner, token, action, onBack }: { owner: Owner; token: Hel
           <Card flat>
             <div class="stack-s token-aside">
               <h3>The token</h3>
-              <p class="small">
-                {token.template?.name ?? 'A token'} · <Hex value={token.category} />
-              </p>
-              {token.position?.status === 'open' && (
+              {position !== undefined ? (
+                <p class="small">
+                  {position.tokenName ?? 'A token'}
+                  {position.template.name !== undefined && <span class="muted"> · {position.template.name}</span>}
+                  <br />
+                  <Hex value={position.token.category} />
+                </p>
+              ) : (
+                <p class="small">
+                  {token?.template?.name ?? 'A token'} · <Hex value={token?.category ?? ''} />
+                </p>
+              )}
+              {token?.position?.status === 'open' && (
                 <p class="small">
                   Holds <Amount satoshis={token.position.satoshis} exact />
                 </p>
               )}
-              {token.position?.status === 'open' && (token.position.state ?? []).length > 0 && <PositionState state={token.position.state ?? []} />}
-              <p class="small muted">You act from the wallet itself. Everything comes from the token, the template you trust and the chain; no application is asked.</p>
+              {position !== undefined && position.status !== 'held' && position.satoshis !== undefined && (
+                <p class="small">
+                  Holds <Amount satoshis={position.satoshis} exact />
+                </p>
+              )}
+              {token?.position?.status === 'open' && (token.position.state ?? []).length > 0 && <PositionState state={token.position.state ?? []} />}
+              <p class="small muted">From the wallet itself. No application is asked.</p>
             </div>
           </Card>
         </div>

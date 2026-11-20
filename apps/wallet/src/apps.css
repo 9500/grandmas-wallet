@@ -245,3 +245,43 @@ button.template-row > :first-child { display: flex; flex-direction: column; min-
 .template-row-name { font-weight: 600; overflow-wrap: anywhere; }
 .template-row-go { color: var(--muted); font-size: 20px; }
 .templates-own .list { margin-bottom: 8px; }
+
+/* ------------------------------------------------------------------ what an action leaves behind, and its tick */
+
+/* Tokens that do not come back as they are: each as a chip, with what becomes of it; the tick under them. */
+.leaving-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.leaving-list > li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; }
+.leaving-list .chip { background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.leaving .choice { margin-top: 0; background: var(--surface); }
+.leaving .choice-text > span { font-weight: 600; }
+
+/* A refusal in place of the review: the plain line in view, the wallet's full reason behind a "?". */
+.refusal { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: var(--r-m); background: var(--bad-soft); border: 1px solid color-mix(in srgb, var(--bad) 22%, transparent); }
+.refusal.elsewhere { background: var(--sunken); border-color: var(--line); }
+.refusal-context { overflow-wrap: anywhere; }
+.refusal-title { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 17px; color: color-mix(in srgb, var(--bad) 85%, var(--ink)); }
+.refusal.elsewhere .refusal-title { color: var(--ink); }
+.refusal-words { color: var(--ink); font-size: 16px; }
+.refusal-page { overflow-wrap: anywhere; font-weight: 600; }
+.refused-card .refusal { margin: 0; }
+
+/* No backup store answers: the line and the way to try again, side by side where they fit. */
+.backup-unreachable { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.backup-unreachable > span { flex: 1 1 14em; }
+
+/* What the wallet found about a template's actions, when the template is shown. */
+.findings strong { font-weight: 650; }
+
+/* ------------------------------------------------------------------ positions from records */
+
+/* Positions the chain does not confirm: apart, under their heading, and greyed. */
+.unconfirmed-part { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.unconfirmed-part > .part-title { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.tokens.unconfirmed > li.token { color: var(--muted); }
+.tokens.unconfirmed .token-title { color: var(--muted); }
+.tokens.unconfirmed .token-actions { background: var(--sunken); }
+
+/* An action done through the application: its name, the line, and the page's address as a link. */
+.elsewhere-line { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--ink); }
+.application-page { display: inline-block; margin-top: 2px; overflow-wrap: anywhere; }
+.tokens.unconfirmed .token-body p, .tokens.unconfirmed .amount { color: var(--muted); }

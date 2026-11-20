@@ -98,8 +98,8 @@ export const applicationConnector = (
     has: (template) => applications.has(template),
     // Reading what was sent refuses a text that is not the one named, and a declaration of an unknown profile.
     check: (template, texts) => void applications.describe(template, texts),
-    execute: async (entry, stage) => {
-      const outcome = await applications.carryOut(actionOf(entry), stage);
+    execute: async (entry, stage, consent) => {
+      const outcome = await applications.carryOut(actionOf(entry), stage, consent.tokensLeave === true ? { tokensLeave: true } : {});
       return { transactionId: outcome.transactionId, tokens: outcome.tokens };
     },
     positions: async (templateIdentifier, application, version) => {

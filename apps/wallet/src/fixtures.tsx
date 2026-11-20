@@ -3,7 +3,26 @@ import './apps.css';
 import './set-up.css';
 
 import { type Output, binToHex, encodeLockingBytecodeP2sh32 as p2sh32, generateBip39Mnemonic, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
-import { type ActionPreview, type HeldToken, type TemplateSummary, type TokenNaming, TokenNames, type TokenSendQuote, type TokenSendRequest, type UserBackup, userBackupText, walletTemplateNumbers } from '@grandmas-wallet/app';
+import {
+  type ActionFinding,
+  type ActionPreview,
+  type ApplicationAction,
+  type Finding,
+  type HeldToken,
+  type RecordedPosition,
+  type RecoveryArrangement,
+  type TemplateSummary,
+  type TokenAction,
+  type TokenNaming,
+  TokenNames,
+  type TokenSendQuote,
+  type TokenSendRequest,
+  type UserBackup,
+  FindingRefusalError,
+  userBackupText,
+  walletTemplateNumbers,
+} from '@grandmas-wallet/app';
+import type { LedgerEntry } from '@grandmas-wallet/connect';
 import { type ChallengeDelay, INPUT_BYTES, InsufficientFundsError, deriveSeedKeys, smallestOutputValue, transactionBytes } from '@grandmas-wallet/core';
 import { sealPackage, signEnrollmentRequest } from '@grandmas-wallet/enrollment';
 import { type Environment, Button, Card, Field, Frame, PageHead, Pill, TextArea, TextInput, formatTime } from '@grandmas-wallet/ui';
@@ -29,7 +48,9 @@ import { Welcome } from './Welcome.js';
 /*
  * Parts of the wallet's screens, fed from fixed data, for looking at them in a browser without a wallet: the
  * list of tokens (`fixtures.html?show=tokens`), the Applications screen (`show=apps`, `&connected` with a connection,
- * `&held` with tokens, `&linked` as opened from an application's connection link), a request for a decision on an
+ * `&held` with tokens, `&linked` as opened from an application's connection link; for a template that comes with no
+ * declaration, `&request=tick`, `backup`, `tied` or `unclear` for a request, `&offer=pool` for a template offered with an
+ * action this wallet refuses, and `&records` for the list of positions from records), a request for a decision on an
  * action (`show=review` to borrow, `closing` to repay and close, `box-open` and `box-empty` for the actions of a
  * second template), the fields that take a scanned code (`show=scan`, and `&open` to show the scanner already
  * opened), and a recoverer's code taken in, with something sealed handed to the recoverer's page over the session the
@@ -453,21 +474,219 @@ const coinOwner = { ...tokenOwner, balance: { ...tokenOwner.balance, tokens: [] 
 // ------------------------------------------------------------------ the Applications screen, Recovery, the backup
 
 const params = new URLSearchParams(window.location.search);
-const appsHeld = params.has('held') ? [open, dollars, unknown] : [];
 const pairing = 'f3'.repeat(16);
+
+// ------------------------------------------------------------------ templates that come with no declaration (the third design)
+
+/*
+ * The Applications screen as it is for a template that comes with nothing beside it, fed from fixed data through the
+ * real screen: `show=apps&request=` with `tick` (a token made from the wallet's coin goes to the application, with the
+ * tick), `backup` (no backup store answers), `tied` (an action that would tie money to the phone alone) or `unclear`
+ * (one of which the wallet cannot tell); `show=apps&records` for the list of positions from records.
+ */
+
+const MONEY_KEY = '7d2e9a41c3b05f68e1d7a2c4b9f03e5d6a8c1b2e4f7a9d0c3b5e8f1a2d4c6b9e';
+const TICKET = '3c8e1f5a7b9d2c4e6f8a0b1c3d5e7f9a2b4c6d8e0f1a3b5c7d9e2f4a6b8c0d1e';
+const CARD = '9a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e3f5a7b9c1d2e4f6a8b';
+const PAGE = 'https://shared-box.example.org/';
+
+/** What a template without a declaration says about itself, with what the wallet found about each of its actions. */
+const bare = (identifier: string, name: string, description: string, actions: [string, string, string, Finding?][], trusted: boolean): TemplateSummary => ({
+  identifier,
+  contentHash: identifier.split('').reverse().join(''),
+  name,
+  description,
+  actions: actions.map(([action, actionName, actionDescription]) => ({ action, name: actionName, description: actionDescription })),
+  verdict: { statement: 'not verified', reasons: ['This wallet works out what each of its actions would leave behind, and keeps a record of each position it makes.'] },
+  trusted,
+  findings: actions.map(([action, actionName, , finding]) => ({ action, role: 'holder', name: actionName, finding: finding ?? 'comes back', outputs: [] })),
+});
+
+const lending = bare(
+  'b1'.repeat(32),
+  'Example lending, step by step (test network)',
+  'Borrow a dollar token against BCH. A key is made from your coin first and waits in the lending contract until the position is opened.',
+  [
+    ['prepare', 'Start borrowing', 'Make the key of a new position. It waits in the lending contract until the position is opened.'],
+    ['borrow', 'Borrow', 'Open the position with the key.'],
+  ],
+  true,
+);
+const moneyBox = bare(
+  'b2'.repeat(32),
+  'Example money box (test network)',
+  'Money kept until a date. Whoever holds the box\'s key can empty it from that date on.',
+  [
+    ['open', 'Open a money box', 'Make a new box with its key, and pay the first money in.'],
+    ['deposit', 'Put money in', 'Add money to a box.'],
+    ['withdraw', 'Take everything out', 'Empty the box. The key stays with you.'],
+  ],
+  true,
+);
+const keyedPool = bare(
+  'b3'.repeat(32),
+  'Example pool (test network)',
+  'Provide coins to a trading pool, or trade with one.',
+  [
+    ['open', 'Open a pool', 'Put coins in a pool that this device\'s key unlocks.', 'does not come back'],
+    ['trade', 'Trade', 'Trade with a pool. Nothing is left behind.'],
+  ],
+  false,
+);
+const ruleBox = bare(
+  'b4'.repeat(32),
+  'Example box with a rule (test network)',
+  'Coins kept in a box, which a wallet follows only while it holds enough.',
+  [
+    ['open', 'Open a box', 'Make a box and its key, and put coins in.', 'cannot tell'],
+    ['take', 'Take everything out', 'Empty the box. The key stays with you.'],
+  ],
+  false,
+);
+
+/** Starting to borrow: a key is made from the wallet's coin and goes to the lending contract. */
+const startBorrowing: ActionPreview = {
+  template: lending,
+  finding: { action: 'prepare', role: 'holder', name: 'Start borrowing', finding: 'comes back', outputs: [] },
+  words: { action: { name: 'Start borrowing', description: 'Make the key of a new position. It waits in the lending contract until the position is opened.' }, outcome: '', values: [] },
+  figures: {
+    givesSatoshis: 50_000n,
+    getsSatoshis: 46_620n,
+    feeSatoshis: 380n,
+    remainderSatoshis: 0n,
+    bytes: 380,
+    intoApplicationSatoshis: 3_000n,
+    fromApplication: { satoshis: 1_000n, coins: 1 },
+    applicationInputs: [{ name: 'The lending contract', outpoint: `${'3467af925ecfe80e459e20b5266ab1b64c996da69fa870ffb23f2b7f5d879f45'}:0`, satoshis: 1_000n, token: { category: UNITS, amount: 9_870_000n, nft: { capability: 'minting', commitment: 'f6270000' } } }],
+    toOthers: [
+      { name: 'The lending contract', lockingBytecode: 'aa20'.padEnd(70, '1'), satoshis: 1_000n, token: { category: UNITS, amount: 9_870_000n, nft: { capability: 'minting', commitment: 'f6270000' } } },
+      { name: 'Key, waiting', lockingBytecode: 'aa20'.padEnd(70, '6'), satoshis: 3_000n, token: { category: MONEY_KEY, amount: 0n, nft: { capability: 'minting', commitment: '' } } },
+    ],
+    toWallet: [{ kind: 'left over', satoshis: 46_620n }],
+    tokensSpent: [],
+    tokensNet: [],
+    tokensDestroyed: [],
+  },
+  firstUse: false,
+  tokensLeaving: [{ token: { category: MONEY_KEY, commitment: '', capability: 'minting' }, how: 'leaves', made: true, to: 'Key, waiting' }],
+};
+
+const { payingItself: _paying, ...withoutPayingItself } = boxOpening.figures;
+/** Opening a money box: it leaves a position, so its record is stored before anything is signed. */
+const openMoneyBox: ActionPreview = {
+  ...boxOpening,
+  template: moneyBox,
+  finding: { action: 'open', role: 'holder', name: 'Open a money box', finding: 'comes back', outputs: [{ output: 'boxOutput', name: 'Money box', lockingScript: 'boxLockingScript', scriptName: 'Money box', keys: [] }] },
+  figures: { ...withoutPayingItself, toWallet: [{ kind: 'receive', satoshis: 1_000n, token: { category: MONEY_KEY, amount: 0n, nft: { capability: 'none', commitment: '01' } } }, { kind: 'left over', satoshis: 8_550n }] },
+  words: { ...boxOpening.words, values: boxOpening.words.values.map((value) => (value.value === BOX_KEY ? { ...value, value: MONEY_KEY } : value)) },
+  firstUse: false,
+  recordsPosition: true,
+};
+
+/** Paying into a money box, from the wallet's own list. */
+const payIntoBox: ActionPreview = {
+  template: moneyBox,
+  finding: { action: 'deposit', role: 'holder', name: 'Put money in', finding: 'comes back', outputs: [{ output: 'boxOutput', name: 'Money box', lockingScript: 'boxLockingScript', scriptName: 'Money box', keys: [] }] },
+  words: { action: { name: 'Put money in', description: 'Add money to a box.' }, outcome: '20000 satoshis were put into a money box.', values: [{ name: 'Amount', description: 'Satoshis to put in.', value: '20000' }] },
+  figures: {
+    givesSatoshis: 52_340n,
+    getsSatoshis: 32_100n,
+    feeSatoshis: 240n,
+    remainderSatoshis: 0n,
+    bytes: 240,
+    intoApplicationSatoshis: 20_000n,
+    fromApplication: { satoshis: 0n, coins: 0 },
+    applicationInputs: [],
+    toOthers: [{ name: 'Money box', lockingBytecode: boxAt, satoshis: 20_000n }],
+    toWallet: [{ kind: 'left over', satoshis: 32_100n }],
+    tokensSpent: [],
+    tokensNet: [],
+    tokensDestroyed: [],
+  },
+  firstUse: false,
+};
+
+/** Emptying a money box, from the wallet's own list: the key is spent and comes back. */
+const { notBefore: _date, ...anyTime } = boxEmptying.figures;
+const emptyBox: ActionPreview = { ...boxEmptying, template: moneyBox, finding: { action: 'withdraw', role: 'holder', name: 'Take everything out', finding: 'comes back', outputs: [] }, figures: anyTime };
+
+/** Requests of templates without a declaration, as the application sends them. */
+const requested = (id: string, summary: TemplateSummary, action: string): LedgerEntry => ({
+  id,
+  application: pairing,
+  templateKnown: summary.trusted,
+  receivedAt: 1_795_000_300,
+  status: 'asked',
+  template: { identifier: summary.identifier, contentHash: summary.contentHash },
+  ...(summary.trusted ? {} : { definition: { template: '' } }),
+  templateAction: action,
+  role: 'holder',
+  variables: {},
+});
+
+const findingOf = (summary: TemplateSummary, action: string): ActionFinding => {
+  const found = summary.findings?.find((candidate) => candidate.action === action) as ActionFinding;
+  return { ...found, outputs: [{ output: 'poolOutput', name: found.finding === 'cannot tell' ? 'Box' : 'Pool', lockingScript: 'poolLockingScript', scriptName: found.finding === 'cannot tell' ? 'Box' : 'Pool', keys: found.finding === 'cannot tell' ? [] : ['poolKey'], ...(found.finding === 'cannot tell' ? { expression: true as const } : {}) }] };
+};
+
+const REQUESTS: Record<string, { entry: LedgerEntry; summary: TemplateSummary; preview: () => Promise<ActionPreview> }> = {
+  tick: { entry: requested('tick', lending, 'prepare'), summary: lending, preview: async () => startBorrowing },
+  backup: { entry: requested('backup', moneyBox, 'open'), summary: moneyBox, preview: async () => openMoneyBox },
+  tied: { entry: requested('tied', keyedPool, 'open'), summary: keyedPool, preview: async () => Promise.reject(new FindingRefusalError(findingOf(keyedPool, 'open'))) },
+  unclear: { entry: requested('unclear', ruleBox, 'open'), summary: ruleBox, preview: async () => Promise.reject(new FindingRefusalError(findingOf(ruleBox, 'open'))) },
+};
+
+// The positions a record ties to tokens of the wallet's: confirmed, held under a template's name, and not confirmed.
+const nft = (category: string, commitment: string, at: number) => ({ category, commitment, capability: 'none' as const, outpoint: `${'5e'.repeat(32)}:${at}`, satoshis: 1_000n, place: 'address' as const });
+const recordOf = (templateIdentifier: string, category: string, commitment: string, script?: string): RecordedPosition['record'] => ({
+  kind: 'position',
+  token: { category, commitment, capability: 'none' },
+  templateIdentifier,
+  ...(script === undefined ? {} : { lockingScriptIdentifier: script, roleIdentifier: 'holder', variables: { boxKey: category } }),
+  values: {},
+});
+const clubIdentifier = 'b5'.repeat(32);
+const cloakIdentifier = 'b6'.repeat(32);
+const recordedHeld: RecordedPosition[] = [
+  { token: nft(MONEY_KEY, '01', 1), template: { identifier: moneyBox.identifier, name: moneyBox.name }, tokenName: 'Box key', status: 'open', record: recordOf(moneyBox.identifier, MONEY_KEY, '01', 'boxLockingScript'), standing: 'own', lockingBytecode: boxAt, satoshis: 50_000n, coins: 1, actions: ['withdraw', 'deposit'] },
+  { token: nft(CARD, '01', 2), template: { identifier: clubIdentifier, name: 'Example club (test network)' }, tokenName: 'Member card', status: 'open', record: { ...recordOf(clubIdentifier, CARD, '01', 'lockerLockingScript'), applicationPage: PAGE }, standing: 'own', lockingBytecode: 'aa20'.padEnd(70, 'c'), satoshis: 20_000n, coins: 1, actions: ['use'] },
+  { token: nft(TICKET, '01', 3), template: { identifier: cloakIdentifier, name: 'Example cloakroom (test network)' }, tokenName: 'Ticket', status: 'held', record: recordOf(cloakIdentifier, TICKET, '01'), standing: 'own' },
+  { token: nft(BOX_KEY, '02', 4), template: { identifier: moneyBox.identifier, name: moneyBox.name }, tokenName: 'Box key', status: 'unconfirmed', reason: 'No transaction on chain carried this token and paid the record\'s script.', record: recordOf(moneyBox.identifier, BOX_KEY, '02', 'boxLockingScript'), standing: 'suggested', lockingBytecode: 'aa20'.padEnd(70, 'd'), satoshis: 75_000n, coins: 1, actions: ['withdraw', 'deposit'] },
+];
+const take: TokenAction = { action: 'withdraw', role: 'holder', name: 'Take everything out', description: 'Empty the box. The key stays with you.' };
+const putIn: TokenAction = { action: 'deposit', role: 'holder', name: 'Put money in', description: 'Add money to a box.', asks: [{ variable: 'amount', name: 'Amount', description: 'Satoshis to put in.', type: 'satoshis' }] };
+const offeredFor = (position: Pick<RecordedPosition, 'template' | 'status'>): TokenAction[] =>
+  position.template.identifier === clubIdentifier
+    ? [{ action: 'use', role: 'holder', name: 'Use the locker', description: 'Spend credits; the deposit comes back.', needsApplication: 'It spends a coin of the application\'s, "The club\'s door", which only the application can name.', page: PAGE }]
+    : position.template.identifier === moneyBox.identifier
+      ? position.status === 'unconfirmed'
+        ? [take]
+        : [take, putIn]
+      : [];
+/** A wallet's tokens with records: the positions above, and one token with no record. */
+const heldWithRecords: HeldToken[] = [...recordedHeld.map((position) => ({ ...position.token, amount: 0n, meaning: 'unknown' as const })), unknown];
+
+const withRecords = params.has('records');
+const asked = REQUESTS[params.get('request') ?? ''];
+const appsHeld = withRecords ? heldWithRecords : params.has('held') ? [open, dollars, unknown] : [];
+const summaries = [lending, moneyBox, keyedPool, ruleBox];
+/** The previews of actions started from the wallet's own list, by action. */
+const fromList: Record<string, ActionPreview> = { withdraw: emptyBox, deposit: payIntoBox };
 /** The Applications screen's part of a wallet: no request, a connection with `&connected`, tokens with `&held`. */
 const appsOwner = {
   ...tokenOwner,
   balance: { ...tokenOwner.balance, tokens: appsHeld.map(() => ({})) },
   apps: {
     version: 0,
-    connector: { ledger: [] },
-    proposals: [],
+    connector: { ledger: asked === undefined ? [] : [asked.entry] },
+    proposals: asked === undefined ? [] : [{ entry: asked.entry, approve: async () => undefined, decline: async () => undefined }],
     asks: [],
-    connections: params.has('connected') ? [{ uri: 'wiz://relay.example.org/?p=example', privateKey: '', pairing, name: 'Example app', addedAt: 1_795_000_000 }] : [],
-    statuses: params.has('connected') ? { [pairing]: { state: 'connected', peerName: 'Example app' } } : {},
+    connections: params.has('connected') || asked !== undefined || params.get('offer') === 'pool' ? [{ uri: 'wiz://relay.example.org/?p=example', privateKey: '', pairing, name: 'Example app', addedAt: 1_795_000_000 }] : [],
+    statuses: params.has('connected') || asked !== undefined || params.get('offer') === 'pool' ? { [pairing]: { state: 'connected', peerName: 'Example app' } } : {},
     // Templates with `&templates`: one trusted, one the user stopped trusting; an app's offer of one with `&offer`.
-    offers: params.has('offer')
+    offers: params.get('offer') === 'pool'
+      ? [{ application: pairing, template: { identifier: keyedPool.identifier, contentHash: keyedPool.contentHash }, definition: { template: '' }, receivedAt: 1_795_000_600, accept: async () => undefined, decline: async () => undefined }]
+      : params.has('offer')
       ? [{ application: pairing, template: { identifier: template.identifier, contentHash: template.contentHash }, definition: { template: '' }, receivedAt: 1_795_000_600, accept: async () => undefined, decline: async () => undefined }]
       : [],
     stopTrusting: async () => ({ name: box.name, backupTold: true }),
@@ -475,11 +694,21 @@ const appsOwner = {
       readBackup: async () => undefined,
       names: () => reviewNames,
       tokens: async () => appsHeld,
-      templates: params.has('templates') ? [{ identifier: box.identifier, contentHash: box.contentHash, name: box.name, trustedAt: 1_794_000_000, applications: [pairing], stored: true }] : [],
+      templates: params.has('templates')
+        ? [{ identifier: box.identifier, contentHash: box.contentHash, name: box.name, trustedAt: 1_794_000_000, applications: [pairing], stored: true }]
+        : withRecords
+          ? [{ identifier: moneyBox.identifier, contentHash: moneyBox.contentHash, name: moneyBox.name, trustedAt: 1_794_000_000, applications: [pairing], stored: true }]
+          : [],
       suggestions: params.has('templates') ? [{ identifier: template.identifier, contentHash: template.contentHash, name: template.name, texts: { template: '' }, withdrawn: { renewal: 0, stored: true } }] : [],
-      describe: (names: { identifier: string }, presented?: unknown) => (names.identifier === box.identifier ? box : { ...template, trusted: presented === undefined }),
+      describe: (names: { identifier: string }, presented?: unknown) => summaries.find((summary) => summary.identifier === names.identifier) ?? (names.identifier === box.identifier ? box : { ...template, trusted: presented === undefined }),
       disallow: () => undefined,
       describeAction: () => undefined,
+      recordedPositions: async () => (withRecords ? recordedHeld : []),
+      offeredActions: offeredFor,
+      actionOn: (_target: unknown, action: string): ApplicationAction => ({ template: { identifier: moneyBox.identifier, contentHash: moneyBox.contentHash }, action, role: 'holder', variables: {} }),
+      preview: async (request: ApplicationAction) => (asked !== undefined ? asked.preview() : (fromList[request.action] ?? emptyBox)),
+      backupAnswers: async () => params.get('request') !== 'backup',
+      watch: () => () => undefined,
     },
     changed: () => undefined,
     connect: () => undefined,
@@ -489,6 +718,8 @@ const appsOwner = {
   },
 } as unknown as Owner;
 if (params.get('show') === 'apps') keep('incoming', params.has('linked') ? { kind: 'connect', text: 'wiz://relay.example.org/?p=example-from-a-link' } : undefined);
+// A backup arrangement, so that an action that is stored first can be offered: whether a store answers is the fixture's.
+if (params.get('show') === 'apps') keep('arrangement', asked !== undefined || withRecords ? ({ archive: { stores: ['https://store.example.org/'], archiveId: '4e'.repeat(16), contentKey: 'a1'.repeat(32) }, earlierArchives: [], earlierViewingKeyRecords: [] } as unknown as RecoveryArrangement) : undefined);
 
 /** A wallet whose watch has found it quiet and protected, with a waiting period of a day. */
 const recoveryOwner = {

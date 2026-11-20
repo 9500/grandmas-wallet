@@ -1,9 +1,10 @@
-import type { ActionPreview, MovedOutput, TemplateSummary } from '@grandmas-wallet/app';
+import { type ActionPreview, type MovedOutput, type TemplateSummary, thisWalletRefuses } from '@grandmas-wallet/app';
 import { InsufficientFundsError } from '@grandmas-wallet/core';
-import { Amount, Icon, Info, KeyValues, More, Notice, Sat, Status, formatBch, formatSatoshis, formatTime, plainError, shorten } from '@grandmas-wallet/ui';
+import { Amount, Choice, Icon, Info, KeyValues, More, Notice, Sat, Status, formatBch, formatSatoshis, formatTime, plainError, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useContext, useState } from 'preact/hooks';
 
+import { type Refusal, leavingLine, leavingWords } from './review-gate.js';
 import { TokenNamesContext, amountText, rawUnits } from './token-words.js';
 
 /**
@@ -83,6 +84,35 @@ export const Statement = ({ verdict, subject }: { verdict: TemplateSummary['verd
   );
 };
 
+/**
+ * What the wallet found about the actions of a template that comes with no declaration (section 14.3): the actions this
+ * wallet refuses, because they would tie money to the phone alone or because it cannot tell. Nothing where there are none.
+ */
+export const Findings = ({ summary }: { summary: TemplateSummary }) => {
+  const refused = (summary.findings ?? []).filter(thisWalletRefuses);
+  // An action offered in several roles is named once.
+  const tied = [...new Set(refused.filter(({ finding }) => finding === 'does not come back').map(({ name }) => name))];
+  const unclear = [...new Set(refused.filter(({ finding }) => finding === 'cannot tell').map(({ name }) => name))].filter((name) => !tied.includes(name));
+  if (tied.length === 0 && unclear.length === 0) return null;
+  const quoted = (names: string[]): string => names.map((name) => `"${name}"`).join(', ');
+  return (
+    <Notice tone="warn">
+      <div class="stack-s findings">
+        {tied.length > 0 && (
+          <span>
+            <strong>This wallet won't do {quoted(tied)}.</strong> It would tie money to this phone alone.
+          </span>
+        )}
+        {unclear.length > 0 && (
+          <span>
+            <strong>This wallet won't do {quoted(unclear)}.</strong> It can't tell whether the money would come back.
+          </span>
+        )}
+      </div>
+    </Notice>
+  );
+};
+
 /** A template: its own name and description, what the wallet can say about it, and what it can ask for. */
 export const TemplateView = ({ summary, showActions, standing = true }: { summary: TemplateSummary; showActions?: boolean; standing?: boolean }) => (
   <div class="stack-s">
@@ -90,7 +120,15 @@ export const TemplateView = ({ summary, showActions, standing = true }: { summar
       <div class="template-name">{summary.name}</div>
       {summary.description !== '' && <p class="template-description">{summary.description}</p>}
     </div>
-    {standing && <Statement verdict={summary.verdict} />}
+    <Findings summary={summary} />
+    {/* A template that comes with no declaration is judged action by action: the wallet says what it found, and once a
+        token of it has led to its position after a recovery, that it has come back (section 14.3). */}
+    {standing && summary.findings === undefined && <Statement verdict={summary.verdict} />}
+    {summary.findings !== undefined && summary.cameBack === true && (
+      <Status tone="good" title="It has come back once">
+        <p>A token made with it led to its position after a recovery. This is no audit of its contracts.</p>
+      </Status>
+    )}
     {showActions === true && summary.actions.length > 0 && (
       <More summary={summary.actions.length === 1 ? 'The one action it has' : `The ${summary.actions.length} actions it has`}>
         <ul class="list">
@@ -226,8 +264,10 @@ export const ways = (figures: ActionPreview['figures']): { out: Way; back: Way }
   const nftsOf = (outputs: MovedOutput[]): Moving[] => outputs.flatMap((output) => (output.token?.nft === undefined ? [] : [output.token]));
   const spent = nftsOf(figures.tokensSpent);
   const arriving = nftsOf(figures.toWallet);
+  // An NFT that goes to others and that neither the wallet nor the application's coins brought is made now from the wallet's coin.
+  const made = without(without(nftsOf(figures.toOthers), nftsOf(figures.applicationInputs)), spent);
   return {
-    out: { satoshis: into > 0n ? into : 0n, fungible: figures.tokensNet.filter((entry) => entry.amount < 0n).map((entry) => ({ category: entry.category, amount: -entry.amount })), nfts: without(spent, arriving) },
+    out: { satoshis: into > 0n ? into : 0n, fungible: figures.tokensNet.filter((entry) => entry.amount < 0n).map((entry) => ({ category: entry.category, amount: -entry.amount })), nfts: [...without(spent, arriving), ...made] },
     back: { satoshis: into < 0n ? -into : 0n, fungible: figures.tokensNet.filter((entry) => entry.amount > 0n), nfts: without(arriving, spent) },
   };
 };
@@ -386,12 +426,51 @@ const Destroyed = ({ figures }: { figures: ActionPreview['figures'] }) => (
   </Notice>
 );
 
+/** The user's tick, for a review whose action does not deliver a token to the wallet unchanged. */
+export interface Tick {
+  ticked: boolean;
+  onTick: (ticked: boolean) => void;
+}
+
+/**
+ * Tokens that an action does not deliver to the wallet unchanged (section 13.3), said plainly, and the tick before the
+ * action can be approved: as for sending a token that controls something.
+ */
+export const TokensLeaving = ({ leaving, tick }: { leaving: NonNullable<ActionPreview['tokensLeaving']>; tick?: Tick | undefined }) => {
+  const { title, tick: words } = leavingWords(leaving);
+  return (
+    <div class="controls leaving stack-s" data-testid="tokens-leaving">
+      <Notice tone="warn">
+        <div class="stack-s">
+          <strong>{title}</strong>
+          <ul class="leaving-list">
+            {leaving.map((entry) => (
+              <li>
+                <TokenChip category={entry.token.category} {...(entry.token.amount === undefined || entry.token.capability !== undefined ? {} : { amount: entry.token.amount })} {...(entry.token.capability === undefined ? {} : { nft: { capability: entry.token.capability, commitment: entry.token.commitment } })} />
+                <span>{leavingLine(entry)}</span>
+              </li>
+            ))}
+          </ul>
+          {leaving.some(({ how }) => how === 'leaves') && <span>Whoever gets it can use what it controls.</span>}
+        </div>
+      </Notice>
+      {tick !== undefined && (
+        <Choice type="checkbox" checked={tick.ticked} onChange={tick.onTick} title={words}>
+          This cannot be undone.
+        </Choice>
+      )}
+    </div>
+  );
+};
+
 /** The standing of the template where it asks for care, and what else does: tokens destroyed, paying itself first, a time. */
-const Cautions = ({ preview, summary }: { preview: ActionPreview; summary: TemplateSummary }) => {
+const Cautions = ({ preview, summary, tick }: { preview: ActionPreview; summary: TemplateSummary; tick?: Tick | undefined }) => {
   const { figures } = preview;
   return (
     <>
-      {summary.verdict.statement !== 'verified' && (
+      {(preview.tokensLeaving ?? []).length > 0 && <TokensLeaving leaving={preview.tokensLeaving ?? []} tick={tick} />}
+      {/* A template that comes with no declaration is judged action by action: an action that comes back needs no more. */}
+      {summary.verdict.statement !== 'verified' && summary.findings === undefined && (
         <div class={`standing ${summary.verdict.statement === 'violation' ? 'bad' : 'warn'}`}>
           <Statement verdict={summary.verdict} subject="Template" />
         </div>
@@ -552,7 +631,7 @@ const TheTemplate = ({ summary }: { summary: TemplateSummary }) => (
  * An action, for a decision: the picture and the headline, what asks for care, the action in the template's
  * words, and folded, the figures in full and the template.
  */
-export const ActionReview = ({ preview, summary }: { preview: ActionPreview; summary?: TemplateSummary }) => {
+export const ActionReview = ({ preview, summary, tick }: { preview: ActionPreview; summary?: TemplateSummary; tick?: Tick | undefined }) => {
   const template = summary ?? preview.template;
   return (
     <div class="review stack">
@@ -560,7 +639,7 @@ export const ActionReview = ({ preview, summary }: { preview: ActionPreview; sum
         <Picture preview={preview} />
         <Headline figures={preview.figures} />
       </div>
-      <Cautions preview={preview} summary={template} />
+      <Cautions preview={preview} summary={template} tick={tick} />
       <TheirWords words={preview.words} />
       <div class="folds">
         <OwnFigures figures={preview.figures} />
@@ -569,6 +648,31 @@ export const ActionReview = ({ preview, summary }: { preview: ActionPreview; sum
     </div>
   );
 };
+
+/**
+ * A refusal in place of the review: what the wallet found, in one plain line that is never behind a "?", and its full
+ * reason behind one. For an action done through the application, its page as a link.
+ */
+export const RefusalView = ({ refusal, context }: { refusal: Refusal; context?: ComponentChildren }) => (
+  <div class={`refusal ${refusal.kind === 'other' || refusal.kind === 'backup' ? 'bad' : refusal.kind === 'application' ? 'elsewhere' : 'bad'}`} data-testid="refusal" role={refusal.kind === 'application' ? undefined : 'alert'}>
+    {context !== undefined && <div class="refusal-context small muted">{context}</div>}
+    <div class="refusal-title">
+      {refusal.title}
+      {refusal.detail !== undefined && (
+        <>
+          {' '}
+          <Info label="Why">{refusal.detail}</Info>
+        </>
+      )}
+    </div>
+    <p class="refusal-words failure">{refusal.words}</p>
+    {refusal.page !== undefined && (
+      <a class="refusal-page" href={refusal.page} target="_blank" rel="noopener noreferrer">
+        {refusal.page.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+      </a>
+    )}
+  </div>
+);
 
 /** What approving does to a template the wallet has not trusted or not yet stored. */
 export const FirstUse = ({ summary, firstUse }: { summary: TemplateSummary; firstUse: boolean }) => {

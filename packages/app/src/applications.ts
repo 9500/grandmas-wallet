@@ -40,7 +40,7 @@ import {
   variableType,
 } from '@grandmas-wallet/core';
 
-import { TYPEABLE, actionShape, applicationInputs, offeredAt, paysTo, spendingInputs } from './action-shape.js';
+import { TYPEABLE, actionShape, applicationInputs, expressionVariable, offeredAt, paysTo, spendingInputs } from './action-shape.js';
 import { type ActionFinding, actionFinding, findingReason, templateFindings, thisWalletRefuses } from './findings.js';
 import { type ActionEntry, type ApplicationInput, type AuthorityEntry, type BindingKind, type ReadDeclaration, type RecoveryDeclaration, BINDING_KINDS, isCompanionPosition, readDeclaration } from './declaration.js';
 import type { ReservedAddress, Sent, TokenCoin, WalletParts } from './owner-wallet.js';
@@ -412,6 +412,11 @@ export interface RecordedPosition {
   /** The NFT, as the wallet holds it now. */
   token: PositionToken & { outpoint: string; satoshis: bigint; place: TokenCoin['place'] };
   template: { identifier: string; name?: string };
+  /**
+   * The template's name for the output that made the token (section 13.3), for a template the user trusts: with the
+   * template's name, what the wallet calls the token. The template's claim.
+   */
+  tokenName?: string;
   status: RecordedStatus;
   /** Why the position is not confirmed. */
   reason?: string;
@@ -670,6 +675,23 @@ const offered = (definition: ReadTemplate['definition'], declaration: RecoveryDe
         }),
     ...(missing.length === 0 ? {} : { needsApplication: `It needs values that the application works out: ${missing.map((variable) => `"${definition.variables?.[variable]?.name ?? variable}"`).join(', ')}.` }),
   };
+};
+
+/**
+ * The template's name for the output that made a record's token (section 13.3): an output that carries an NFT at an
+ * address the role provides, whose category is a variable that holds the token's category in the record.
+ */
+const recordTokenName = (definition: ReadTemplate['definition'], entry: PositionRecordEntry): string | undefined => {
+  const category = entry.token?.category;
+  if (category === undefined) return undefined;
+  const holding = new Set(Object.entries({ ...entry.values, ...(entry.variables ?? {}) }).flatMap(([variable, value]) => (value === category ? [variable] : [])));
+  for (const [identifier, output] of Object.entries(definition.outputs ?? {})) {
+    const { name, lockingScript, token } = output as { name?: string; lockingScript?: string; token?: { category?: unknown; nft?: unknown } | null };
+    if (token?.nft === undefined || token.nft === null || expressionVariable(lockingScript) === undefined) continue;
+    const variable = expressionVariable(token.category);
+    if (variable !== undefined && holding.has(variable)) return name ?? identifier;
+  }
+  return undefined;
 };
 
 export class Applications {
@@ -2271,9 +2293,12 @@ export class Applications {
         const lockingScript = item.entry.lockingScriptIdentifier === undefined ? undefined : (trusted(item.entry.templateIdentifier)?.definition.lockingScripts?.[item.entry.lockingScriptIdentifier] as { roles?: Record<string, { actions?: { action: string }[] }> } | undefined);
         const actions = lockingScript?.roles?.[item.entry.roleIdentifier ?? '']?.actions?.map(({ action }) => action);
         const name = nameOf(item.entry.templateIdentifier);
+        const definition = this.state.templates.some((kept) => kept.identifier === item.entry.templateIdentifier) ? trusted(item.entry.templateIdentifier)?.definition : undefined;
+        const tokenName = definition === undefined ? undefined : recordTokenName(definition, item.entry);
         return {
           token,
           template: { identifier: item.entry.templateIdentifier, ...(name === undefined ? {} : { name }) },
+          ...(tokenName === undefined ? {} : { tokenName }),
           status,
           ...(reason === undefined ? {} : { reason }),
           record: item.entry,
