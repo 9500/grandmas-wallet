@@ -1,7 +1,7 @@
 # Stage 14: record of the acceptance tests
 
-Made by `node scripts/test-record.mjs 14 PR13-PR18 PR22-PR22` at revision `567d4dd`.
-All tests of the repository: 655 passed, 0 failed, of 655.
+Made by `node scripts/test-record.mjs 14 PR13-PR18 PR22-PR22` at revision `2db7f2b`.
+All tests of the repository: 656 passed, 0 failed, of 656.
 
 | No. | Test, as the proposal states it | Expected | Tests that carry the number | Result |
 | --- | --- | --- | --- | --- |
