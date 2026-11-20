@@ -284,9 +284,10 @@ describe('the check of a position record, and positions from records', () => {
     const device = await deviceWith([100_000n, 100_000n]);
     const spareHolder = hex(elsewhere);
     // Two keys of one category, with different commitments: the wallet's is told apart by its commitment.
-    const apart = await device.applications.carryOut(openBox(twinBox, '01', { spareLabel: '02', spareHolder }));
+    // The spare key is made from the wallet's coin and goes elsewhere: the user ticks that (section 13.3).
+    const apart = await device.applications.carryOut(openBox(twinBox, '01', { spareLabel: '02', spareHolder }), undefined, { tokensLeave: true });
     // Two keys alike in everything: which one is the wallet's cannot be told.
-    const alike = await device.applications.carryOut(openBox(twinBox, '03', { spareLabel: '03', spareHolder }));
+    const alike = await device.applications.carryOut(openBox(twinBox, '03', { spareLabel: '03', spareHolder }), undefined, { tokensLeave: true });
     const [first, second] = [apart, alike].map((outcome) => outcome.tokens[0]?.category as string);
     expect(device.chain.outputsAt(elsewhere).map((coin) => [hex(coin.output.token?.category ?? new Uint8Array()), hex(coin.output.token?.nft?.commitment ?? new Uint8Array())])).toEqual([
       [first, '02'],

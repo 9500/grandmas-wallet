@@ -62,7 +62,7 @@ const secretsOf = (device: Device): string[] => {
 describe('a session with an application', () => {
   it('the wallet announces the profiles it reads and the kinds of output it fills, and names no template', () => {
     const announced = walletAnnouncement('chipnet');
-    expect(announced).toEqual({ version: 1, network: 'chipnet', profiles: ['recoverable-app-v1'], bindings: ['receive', 'change', 'return', 'lasting'] });
+    expect(announced).toEqual({ version: 1, network: 'chipnet', profiles: ['recoverable-app-v1'], bindings: ['receive', 'change', 'return', 'lasting'], versions: [1, 2] });
     expect(readAdvertisement({ [XO_EXTENSION]: announced })).toEqual(announced);
   });
 

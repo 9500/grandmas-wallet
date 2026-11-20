@@ -3,6 +3,7 @@ import {
   type ActionRequest,
   type ActionResult,
   type Channel,
+  type RecordedPositionReport,
   type ReportedPosition,
   type TemplateTexts,
   ACTION_REQUEST,
@@ -53,7 +54,7 @@ const newId = (): string => Array.from(crypto.getRandomValues(new Uint8Array(12)
 
 export class DappRequests {
   private readonly pending = new Map<string, Pending>();
-  private readonly listing = new Map<string, (answer: { trusted: boolean; positions: ReportedPosition[]; error?: string }) => void>();
+  private readonly listing = new Map<string, (answer: { trusted: boolean; positions: unknown[]; error?: string }) => void>();
   private readonly offering = new Map<string, (answer: { trusted: boolean; reason?: string }) => void>();
   private channel: Channel | undefined;
   private stop: (() => void) | undefined;
@@ -109,6 +110,19 @@ export class DappRequests {
    * @throws WalletSilentError if the wallet does not answer; RequestRefusedError if it could not read the chain
    */
   positions(templateIdentifier: string, attempts = 4, intervalMs = 7_000): Promise<{ trusted: boolean; positions: ReportedPosition[] }> {
+    return this.askPositions(templateIdentifier, 1, attempts, intervalMs) as Promise<{ trusted: boolean; positions: ReportedPosition[] }>;
+  }
+
+  /**
+   * Ask which tokens of a template the wallet holds, answered from the wallet's records (version 2, proposal
+   * section 14.2): each token a record ties to the template, with where its position stands. A token without a
+   * record is not reported. Asked again, and refused, as `positions` is.
+   */
+  recordedPositions(templateIdentifier: string, attempts = 4, intervalMs = 7_000): Promise<{ trusted: boolean; positions: RecordedPositionReport[] }> {
+    return this.askPositions(templateIdentifier, 2, attempts, intervalMs) as Promise<{ trusted: boolean; positions: RecordedPositionReport[] }>;
+  }
+
+  private askPositions(templateIdentifier: string, version: 1 | 2, attempts: number, intervalMs: number): Promise<{ trusted: boolean; positions: unknown[] }> {
     const { channel } = this;
     if (channel === undefined) return Promise.reject(new Error('No wallet is connected.'));
     const id = newId();
@@ -126,7 +140,7 @@ export class DappRequests {
         }
         asked += 1;
         // Each asking carries the current time; the wallet answers every one, and the first answer is taken.
-        (this.channel ?? channel).send({ action: POSITIONS_REQUEST, time: this.now(), id, template: templateIdentifier }).catch(() => undefined);
+        (this.channel ?? channel).send({ action: POSITIONS_REQUEST, time: this.now(), id, template: templateIdentifier, ...(version === 2 ? { version } : {}) }).catch(() => undefined);
       };
       const timer = setInterval(ask, intervalMs);
       this.listing.set(id, (answer) => {
@@ -185,7 +199,7 @@ export class DappRequests {
     }
     if (action === POSITIONS) {
       const { trusted, positions, error } = message as { trusted?: unknown; positions?: unknown; error?: unknown };
-      this.listing.get(id)?.({ trusted: trusted === true, positions: Array.isArray(positions) ? (positions as ReportedPosition[]) : [], ...(typeof error === 'string' && error !== '' ? { error } : {}) });
+      this.listing.get(id)?.({ trusted: trusted === true, positions: Array.isArray(positions) ? (positions as unknown[]) : [], ...(typeof error === 'string' && error !== '' ? { error } : {}) });
       return;
     }
     const open = this.pending.get(id);

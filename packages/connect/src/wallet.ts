@@ -3,6 +3,7 @@ import {
   type ActionRequest,
   type ActionResult,
   type Channel,
+  type RecordedPositionReport,
   type ReportedPosition,
   type TemplateName,
   type TemplateTexts,
@@ -93,10 +94,11 @@ export interface WalletConnectorOptions {
    */
   execute(entry: LedgerEntry, stage: (stage: 'recorded' | 'sent') => void): Promise<Record<string, unknown>>;
   /**
-   * The tokens of a template the wallet holds, for the application that asks.
+   * The tokens of a template the wallet holds, for the application that asks: as the template's declaration
+   * finds them (version 1), or as the wallet's records tie them to the template (version 2).
    * @returns `undefined` when the user has not trusted the template in a session with that application
    */
-  positions(templateIdentifier: string, application: string): Promise<ReportedPosition[] | undefined>;
+  positions(templateIdentifier: string, application: string, version?: number): Promise<ReportedPosition[] | RecordedPositionReport[] | undefined>;
   /** Called when a request needs the user's decision, and again whenever the list of open proposals changes. */
   onProposals(proposals: Proposal[]): void;
   /**
@@ -203,19 +205,20 @@ export class WalletConnector {
 
   /** Say which tokens of a template the wallet holds. Only a template the user trusted with this application gets an answer other than none. */
   private async report(application: string, channel: Channel, message: unknown): Promise<void> {
-    const { id, template } = (message ?? {}) as { id?: unknown; template?: unknown };
+    const { id, template, version } = (message ?? {}) as { id?: unknown; template?: unknown; version?: unknown };
     if (typeof id !== 'string' || typeof template !== 'string') return;
-    let positions: ReportedPosition[] | undefined;
+    const fromRecords = version === 2;
+    let positions: ReportedPosition[] | RecordedPositionReport[] | undefined;
     let error: string | undefined;
     try {
-      positions = await this.options.positions(template, application);
+      positions = await this.options.positions(template, application, fromRecords ? 2 : 1);
     } catch (problem) {
       // Not being able to read the chain is not the same as holding nothing, and must not look like it.
       error = (problem as Error).message || 'The wallet could not read its positions.';
     }
     const trusted = positions !== undefined || error !== undefined;
     // An error is reported only for a template the application may ask about: otherwise it would say whether the wallet has the template.
-    await channel.send({ action: POSITIONS, time: this.now(), id, trusted, positions: positions ?? [], ...(error === undefined ? {} : { error }) }).catch(() => undefined);
+    await channel.send({ action: POSITIONS, time: this.now(), id, trusted, ...(fromRecords ? { version: 2 } : {}), positions: positions ?? [], ...(error === undefined ? {} : { error }) }).catch(() => undefined);
   }
 
   private announceOffers(): void {

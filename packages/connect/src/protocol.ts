@@ -18,7 +18,14 @@
  */
 
 export const XO_EXTENSION = 'xo_v1';
+/** The version a wallet announces as `version`, which the pages of the second design check for. */
 export const XO_EXTENSION_VERSION = 1;
+/**
+ * The versions this software speaks. Version 2 (proposal section 14.2) needs no recovery declaration: a request
+ * says which position it is about and whether it spends the token, names the application's coins by outpoint,
+ * and may name the application's page; a positions request of version 2 is answered from the wallet's records.
+ */
+export const XO_EXTENSION_VERSIONS = [1, 2] as const;
 
 export const ACTION_REQUEST = 'xo_action_request';
 export const ACTION_RESPONSE = 'xo_action_response';
@@ -57,7 +64,15 @@ export interface XoAdvertisement {
   profiles: string[];
   /** The kinds of output the wallet fills with an address of its own: `receive`, `change`, `return`, `lasting`. */
   bindings: string[];
+  /**
+   * Every version of the requests the wallet answers, where it speaks more than the one in `version`. An
+   * application of version 2 looks for 2 here; one of version 1 reads `version` and `profiles` as before.
+   */
+  versions?: number[];
 }
+
+/** Whether a wallet's announcement says that it answers requests of the given version. */
+export const speaks = (offered: XoAdvertisement, version: number): boolean => offered.version === version || (offered.versions ?? []).includes(version);
 
 export type ParameterValue = string | number;
 
@@ -79,12 +94,23 @@ export interface ActionDetails {
   bindings?: Record<string, string>;
   /** The variable the wallet fills with the category of the tokens the action creates. The wallet supplies the coin that defines it. */
   creates?: string;
-  /** The categories of the wallet's tokens the action spends. */
+  /**
+   * Version 1: the categories of the wallet's tokens the action is about, as the template's recovery declaration
+   * describes them. A request of version 2 says `about` instead.
+   */
   spends?: string[];
   /**
+   * Version 2: which position the action is about, by the category of the wallet's token, and whether the action
+   * spends that token. Paying into a position is about its token and does not spend it.
+   */
+  about?: { category: string; spent: boolean };
+  /** Version 2: the address of the application's page, which the wallet keeps in the position's record. */
+  page?: string;
+  /**
    * The application's own coins the action is to spend, by template input, as `<transaction id>:<output index>`:
-   * which of the contracts its users share the application chose. The wallet reads each from the chain and
-   * checks it against the template's declaration.
+   * which of the contracts its users share the application chose, and, for a position at a script many users
+   * share, the coin that is the position. The wallet reads each from the chain; in version 1 it checks it against
+   * the template's declaration, in version 2 it finds which of the template's scripts the coin is at.
    */
   inputs?: Record<string, string>;
 }
@@ -131,6 +157,8 @@ export interface PositionsRequest extends Envelope {
   id: string;
   /** The template's identifier. */
   template: string;
+  /** 2 for an answer made from the wallet's records (section 14.2); absent for the answer of version 1. */
+  version?: number;
 }
 
 /** A token of the application's template that the wallet holds, and where its position stands on chain. */
@@ -150,12 +178,38 @@ export interface ReportedPosition {
   actions: string[];
 }
 
+/**
+ * A token of the application's template that the wallet holds and that a record of the wallet's ties to the
+ * template (version 2, proposal section 14.2). A token without a record is not reported.
+ */
+export interface RecordedPositionReport {
+  /** The NFT, as hex. */
+  category: string;
+  commitment: string;
+  capability: string;
+  /** The value of the coin that holds the token, in satoshis: some contracts require an action to repeat it. */
+  satoshis: string;
+  /**
+   * - `open`, `closed`: a position at a script of its own, which the chain confirms, and whose script holds coins
+   *   or holds nothing.
+   * - `unconfirmed`: a position at a script of its own that the chain does not confirm.
+   * - `held`: a position at a script many users share. The wallet holds the token; whether the position is open
+   *   is the application's to find out.
+   */
+  status: 'open' | 'closed' | 'unconfirmed' | 'held';
+  /** For a position at a script of its own: the template's locking script, and the values it was made with. */
+  lockingScript?: string;
+  variables?: Record<string, string>;
+}
+
 export interface PositionsResponse extends Envelope {
   action: typeof POSITIONS;
   id: string;
   /** Whether the user trusted the template in a session with this application. If not, nothing is reported whatever the wallet holds. */
   trusted: boolean;
-  positions: ReportedPosition[];
+  /** 2 when the answer is made from the wallet's records. */
+  version?: number;
+  positions: ReportedPosition[] | RecordedPositionReport[];
   /** Set if the wallet could not read the chain just now. The list is then not to be taken as empty. */
   error?: string;
 }
@@ -207,13 +261,14 @@ export const readAdvertisement = (extensions: unknown): XoAdvertisement | undefi
   if (offered['version'] !== XO_EXTENSION_VERSION) {
     throw new ProtocolError(`The wallet speaks version ${offered['version']} of XO requests; this application knows version ${XO_EXTENSION_VERSION}.`);
   }
-  const { profiles, bindings } = offered;
+  const { profiles, bindings, versions } = offered;
   if (!isText(offered['network']) || !Array.isArray(profiles) || !Array.isArray(bindings)) throw new ProtocolError('The wallet\'s XO advertisement cannot be read.');
   return {
     version: offered['version'],
     network: offered['network'],
     profiles: profiles.filter((item): item is string => isText(item, 60)),
     bindings: bindings.filter((item): item is string => isText(item, 40)),
+    ...(Array.isArray(versions) ? { versions: versions.filter((item): item is number => Number.isInteger(item) && item > 0 && item < 100) } : {}),
   };
 };
 
@@ -246,7 +301,7 @@ const readTexts = (definition: unknown): TemplateTexts => {
  */
 export const parseRequest = (message: unknown): ActionRequest => {
   if (!isObject(message) || message['action'] !== ACTION_REQUEST) throw new ProtocolError('Not a request.');
-  const { time, sequence, id, template, definition, templateAction, role, variables, bindings, creates, spends, inputs } = message;
+  const { time, sequence, id, template, definition, templateAction, role, variables, bindings, creates, spends, inputs, about, page } = message;
   if (typeof time !== 'number' || typeof sequence !== 'number' || !isText(id, 80) || !isText(templateAction, 80) || !isText(role, 80)) {
     throw new ProtocolError('The request is missing something or has a field of the wrong kind.');
   }
@@ -259,6 +314,8 @@ export const parseRequest = (message: unknown): ActionRequest => {
     throw new ProtocolError('The request names coins in a form this wallet does not accept.');
   }
   if (bound !== undefined && Object.values(bound).some((source) => typeof source !== 'string')) throw new ProtocolError('The request\'s bindings are not names.');
+  if (about !== undefined && (!isObject(about) || !isHash(about['category']) || typeof about['spent'] !== 'boolean')) throw new ProtocolError('The request names the position it is about in a form this wallet does not accept.');
+  if (page !== undefined && (!isText(page, 400) || !/^https?:\/\/[^\s]+$/.test(page))) throw new ProtocolError('The request names the application\'s page in a form this wallet does not accept.');
   return {
     action: ACTION_REQUEST,
     time,
@@ -273,6 +330,8 @@ export const parseRequest = (message: unknown): ActionRequest => {
     ...(creates === undefined ? {} : { creates }),
     ...(spends === undefined ? {} : { spends: spends as string[] }),
     ...(named === undefined ? {} : { inputs: named as Record<string, string> }),
+    ...(about === undefined ? {} : { about: { category: (about as { category: string }).category, spent: (about as { spent: boolean }).spent } }),
+    ...(page === undefined ? {} : { page: page as string }),
   };
 };
 
@@ -311,6 +370,9 @@ export const sameRequest = (a: ActionDetails, b: ActionDetails): boolean =>
   a.role === b.role &&
   a.creates === b.creates &&
   (a.spends ?? []).join() === (b.spends ?? []).join() &&
+  a.about?.category === b.about?.category &&
+  a.about?.spent === b.about?.spent &&
+  a.page === b.page &&
   sameValues(a.variables, b.variables) &&
   sameValues(a.bindings, b.bindings) &&
   sameValues(a.inputs, b.inputs);

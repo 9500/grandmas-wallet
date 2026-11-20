@@ -310,5 +310,108 @@ export const clubDeclaration = {
   },
 } as const;
 
+/*
+ * Templates that come with no recovery declaration, as the third design has them (proposal section 13.3). The
+ * wallet works from the template, the request and its own records alone.
+ *
+ * - The Strongbox as it is, without its declaration: the key is not an input of its own, and the take names the
+ *   input that spends the key by a number (`keyInput`) that the request gives.
+ * - **Keyed strongbox**: the Strongbox with its key as an input of its own, at index 0, and that index in the
+ *   box's unlocking as a constant, as the Savings Jar of the trial of stage 11 has it.
+ * - **Club with lockers**: the Club, with each of its scripts naming its unlocking and the locker offering its
+ *   action to the member. The card is not an input of its own; the door is a coin every member shares, which a
+ *   request names.
+ * - **Cloakroom**: every guest's coat hangs at one script, a rack the wallet need not follow; a coat goes to whoever
+ *   spends a ticket of its category in the same transaction. The ticket is an input of its own; leaving a coat
+ *   makes the ticket from the wallet's coin and puts a token of its category on the rack.
+ */
+
+/** The Strongbox with its key as an input of its own, at index 0. */
+export const keyedStrongboxTemplate = {
+  ...strongboxTemplate,
+  ...view('Keyed strongbox', 'Coins kept in a box. Whoever holds the box\'s key token can take them out. The key is spent first.'),
+  actions: { ...strongboxTemplate.actions, take: action('Take everything out', 'Take every coin out of a strongbox. The key stays with you.', 'holder', ['boxKey', 'holder', 'label'], 'takeTransaction') },
+  transactions: { ...strongboxTemplate.transactions, takeTransaction: { ...strongboxTemplate.transactions.takeTransaction, inputs: [{ input: 'boxKeyInput', inputIndex: 0 }, { input: 'boxInput' }] } },
+  inputs: { ...strongboxTemplate.inputs, boxKeyInput: { ...view('Strongbox key', 'The box\'s key, spent and given back.'), token: { category: '$(<boxKey>)', nft: { capability: 'none', commitment: '$(<label>)' } } } },
+  // The box offers its holder both actions: taking everything out, and putting more in.
+  lockingScripts: {
+    boxLockingScript: {
+      ...strongboxTemplate.lockingScripts.boxLockingScript,
+      roles: {
+        holder: {
+          ...strongboxTemplate.lockingScripts.boxLockingScript.roles.holder,
+          actions: [
+            { action: 'take', role: 'holder' },
+            { action: 'add', role: 'holder' },
+          ],
+        },
+      },
+    },
+  },
+  scripts: { ...strongboxTemplate.scripts, unlockBox: '<0>' },
+  variables: (({ keyInput: _keyInput, ...rest }) => rest)(strongboxTemplate.variables),
+} as const;
+
+/** The Club with each script naming its unlocking, and the locker offering its action to the member. */
+export const lockerClubTemplate = {
+  ...clubTemplate,
+  ...view('Club with lockers', 'Join the club: a member card, a locker with a deposit, and the club\'s credits.'),
+  lockingScripts: {
+    doorLockingScript: { ...clubTemplate.lockingScripts.doorLockingScript, unlockingBytecode: 'unlockDoor' },
+    lockerLockingScript: { ...clubTemplate.lockingScripts.lockerLockingScript, unlockingBytecode: 'unlockLocker', roles: { member: { selectable: false, actions: [{ action: 'use', role: 'member' }] } } },
+  },
+} as const;
+
+/**
+ * The rack: a coat goes to whoever spends, at the input whose number the unlocking gives, a token of the coat's
+ * category. That input may not be the coat itself.
+ */
+const RACK = 'OP_DUP OP_INPUTINDEX OP_NUMNOTEQUAL OP_VERIFY OP_UTXOTOKENCATEGORY OP_INPUTINDEX OP_UTXOTOKENCATEGORY OP_EQUAL';
+
+export const cloakroomTemplate = {
+  $schema: SCHEMA,
+  ...view('Cloakroom', 'Leave coins on a rack every guest shares, and take them back with the ticket.'),
+  version: '1',
+  supported: ['BCH_2026_05'],
+  roles: { guest: view('Guest', 'Holds a ticket.') },
+  start: [{ action: 'leave', role: 'guest' }],
+  actions: {
+    leave: action('Leave a coat', 'Put coins on the rack and get a ticket for them.', 'guest', ['ticket', 'amount', 'holder'], 'leaveTransaction'),
+    collect: action('Collect the coat', 'Take the coins back from the rack. The ticket stays with you.', 'guest', ['ticket', 'holder'], 'collectTransaction'),
+  },
+  transactions: {
+    leaveTransaction: { ...view('Coat left', 'A coat of $(<amount>) satoshis was left on the rack.'), inputs: [], outputs: [{ output: 'coatOutput' }, { output: 'ticketOutput' }], version: 2, locktime: 0 },
+    collectTransaction: { ...view('Coat collected', 'A coat was taken back from the rack.'), inputs: [{ input: 'ticketInput', inputIndex: 0 }, { input: 'rackInput' }], outputs: [{ output: 'ticketOutput' }], version: 2, locktime: 0 },
+  },
+  inputs: {
+    ticketInput: { ...view('Ticket', 'The ticket, spent and given back.'), token: { category: '$(<ticket>)' } },
+    rackInput: { ...view('Coat', 'A coat on the rack. A ticket of its category in the same transaction takes it.'), unlockingScript: 'unlockRack' },
+  },
+  outputs: {
+    coatOutput: {
+      ...view('Coat', '$(<amount>) satoshis on the rack, with a token of the ticket\'s category.'),
+      lockingScript: 'rackLockingScript',
+      valueSatoshis: '$(<amount>)',
+      token: { category: '$(<ticket>)', amount: null, nft: { capability: 'none', commitment: '00' } },
+    },
+    ticketOutput: { ...view('Ticket', 'The token that takes the coat back. Keep it in the wallet.'), lockingScript: '$(<holder>)', valueSatoshis: '1000', token: { category: '$(<ticket>)', amount: null, nft: { capability: 'none', commitment: '01' } } },
+  },
+  lockingScripts: {
+    rackLockingScript: {
+      ...view('Rack', 'Every guest\'s coat hangs here.'),
+      lockingType: 'p2sh',
+      lockingBytecode: 'rackBytecode',
+      unlockingBytecode: 'unlockRack',
+      roles: { guest: { relevant: false, selectable: false, actions: [{ action: 'collect', role: 'guest' }] } },
+    },
+  },
+  scripts: { rackBytecode: RACK, unlockRack: '<0>' },
+  variables: {
+    ticket: { ...view('Ticket', 'The token category of the ticket.'), type: 'token_category' },
+    amount: { ...view('Amount', 'Satoshis to leave.'), type: 'satoshis' },
+    holder: { ...view('Ticket holder', 'Where the ticket goes: an address of the wallet.'), type: 'locking_script' },
+  },
+} as const;
+
 /** A template as an application would send it: its text. */
 export const templateText = (template: unknown): string => JSON.stringify(template);

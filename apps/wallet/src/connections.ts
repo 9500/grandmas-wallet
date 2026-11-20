@@ -1,5 +1,5 @@
 import { hexToBin } from '@bitauth/libauth';
-import { type ActionOutcome, type ApplicationAction, type OwnerWallet, Applications, applicationArchive, applicationConnector, walletAnnouncement } from '@grandmas-wallet/app';
+import { type ActionConsent, type ActionOutcome, type ApplicationAction, type OwnerWallet, Applications, applicationArchive, applicationConnector, walletAnnouncement } from '@grandmas-wallet/app';
 import type { Offer, Proposal, WalletConnector } from '@grandmas-wallet/connect';
 import { type LinkStatus, type WalletLink, newLinkKey, openWalletLink, pairingOf } from '@grandmas-wallet/connect/wizard';
 import type { SeedKeys } from '@grandmas-wallet/core';
@@ -31,14 +31,18 @@ export class PageApplications extends Applications {
   /** Why the last action that was tried failed, as it was thrown: the page tells a missing backup store from other reasons. */
   lastError: unknown;
 
-  override async carryOut(request: ApplicationAction, onStage: (stage: ActionStage) => void = () => undefined): Promise<ActionOutcome> {
+  override async carryOut(request: ApplicationAction, onStage: (stage: ActionStage) => void = () => undefined, consent: ActionConsent = {}): Promise<ActionOutcome> {
     this.lastError = undefined;
     let outcome: ActionOutcome;
     try {
-      outcome = await super.carryOut(request, (stage) => {
-        onStage(stage);
-        for (const listener of [...this.listeners]) listener(stage);
-      });
+      outcome = await super.carryOut(
+        request,
+        (stage) => {
+          onStage(stage);
+          for (const listener of [...this.listeners]) listener(stage);
+        },
+        consent,
+      );
     } catch (error) {
       this.lastError = error;
       throw error;
