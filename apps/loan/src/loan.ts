@@ -1,6 +1,7 @@
 import {
   type BorrowingThread,
   type FoundLoan,
+  type ParyonContracts,
   type ParyonDeployment,
   type PriceThread,
   CHIPNET_FAST_PERIODS_6,
@@ -23,15 +24,42 @@ import {
  * Amounts: debts and repayments in PUSD cents, prices in US cents per BCH, collateral and fees in satoshis.
  */
 
-/** The deployment of Paryon's public contracts this page uses: their test deployment on chipnet. */
-export const DEPLOYMENT: ParyonDeployment = CHIPNET_FAST_PERIODS_6;
-export const CONTRACTS = paryonContracts(DEPLOYMENT);
+/**
+ * A deployment of Paryon's contracts, with what the page makes from it: the contracts, and the template as a wallet
+ * is sent it, with the names a request gives it. The template goes alone, with no recovery declaration (proposal
+ * section 15.3): what the declaration told the wallet, the page's requests now say.
+ */
+export interface Desk {
+  deployment: ParyonDeployment;
+  contracts: ParyonContracts;
+  template: ReturnType<typeof paryonTemplateAlone>;
+  /** Whether it is Paryon's own deployment, whose prices General Protocols' oracle signs. */
+  paryons: boolean;
+}
+
+const deskOf = (deployment: ParyonDeployment, paryons: boolean): Desk => {
+  const contracts = paryonContracts(deployment);
+  return { deployment, contracts, template: paryonTemplateAlone(contracts), paryons };
+};
+
+/** Paryon's public contracts through their test deployment on chipnet: what the page uses on chipnet. */
+export const CHIPNET_DESK = deskOf(CHIPNET_FAST_PERIODS_6, true);
+export const DEPLOYMENT: ParyonDeployment = CHIPNET_DESK.deployment;
+export const CONTRACTS = CHIPNET_DESK.contracts;
+export const LOAN_TEMPLATE = CHIPNET_DESK.template;
 
 /**
- * The template, as a wallet is sent it, and the names a request gives it. It goes alone, with no recovery
- * declaration (proposal section 15.3): what the declaration told the wallet, the page's requests now say.
+ * The deployment the page uses on a network: the one its configuration names (`paryon`), which is how the page is
+ * served for a chain of one's own with Paryon's contracts deployed on it; otherwise Paryon's own on chipnet.
+ * @returns `undefined` where the network has none
  */
-export const LOAN_TEMPLATE = paryonTemplateAlone(CONTRACTS);
+export const deskFor = (environment: { network: string; paryon?: unknown }): Desk | undefined => {
+  const named = environment.paryon as Partial<ParyonDeployment> | undefined;
+  if (named !== undefined && typeof named === 'object' && typeof named.name === 'string' && typeof named.tokenIds?.paryon === 'string' && typeof named.tokenIds.loanKeyFactory === 'string') {
+    return deskOf(named as ParyonDeployment, false);
+  }
+  return environment.network === 'chipnet' ? CHIPNET_DESK : undefined;
+};
 
 /** What the page proposes: collateral worth 125% of the debt at the lower of the two prices. */
 export const DEFAULT_PERCENT = 125;
@@ -134,8 +162,8 @@ export const periodNeed = (market: Pick<Market, 'borrowing' | 'period'>, debt: b
   return { needed: true, thread: fullest, behind: market.period - fullest.period, atMost: BigInt(market.period - fullest.period) * MISSED_PERIOD_FEE };
 };
 
-/** The period a lock height falls in, for this deployment. */
-export const periodOf = (lockHeight: number): number => periodAt(DEPLOYMENT, lockHeight);
+/** The period a lock height falls in, for a deployment. */
+export const periodOf = (lockHeight: number, deployment: ParyonDeployment = DEPLOYMENT): number => periodAt(deployment, lockHeight);
 
 // ------------------------------------------------------------------ borrowing
 

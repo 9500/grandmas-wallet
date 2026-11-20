@@ -6,11 +6,12 @@ import { useState } from 'preact/hooks';
 
 import {
   type BorrowPlan,
+  type Desk,
   type LoanView,
   type Market,
   type PeriodNeed,
+  CHIPNET_DESK,
   DEFAULT_PERCENT,
-  DEPLOYMENT,
   SAFE_PERCENT,
   borrowPlan,
   collateralProblem,
@@ -97,9 +98,16 @@ export const Intro = () => (
 );
 
 /** Said on every screen: whose page this is and whose contracts it uses. */
-export const Independent = () => (
+export const Independent = ({ desk = CHIPNET_DESK }: { desk?: Desk | undefined }) => (
   <div class="independent" role="note">
-    <strong>An independent implementation of a front end for Paryon's contracts, not affiliated with Paryon in any way.</strong> This page is not Paryon's site and is not made, reviewed or endorsed by Paryon. It is a demonstration on chipnet, Bitcoin Cash's test network, and uses Paryon's public contracts unchanged, through their test deployment <span class="mono">{DEPLOYMENT.name}</span>. Only test coins, which have no value, are used.
+    <strong>An independent implementation of a front end for Paryon's contracts, not affiliated with Paryon in any way.</strong> This page is not Paryon's site and is not made, reviewed or endorsed by Paryon.{' '}
+    {desk.paryons ? (
+      <>
+        It is a demonstration on chipnet, Bitcoin Cash's test network, and uses Paryon's public contracts unchanged, through their test deployment <span class="mono">{desk.deployment.name}</span>. Only test coins, which have no value, are used.
+      </>
+    ) : (
+      <>It uses Paryon's published contracts, unchanged, deployed on a test chain of its own (<span class="mono">{desk.deployment.name}</span>) with a price that nobody updates. Only test coins, which have no value, are used.</>
+    )}
   </div>
 );
 
@@ -116,7 +124,7 @@ export const HowItWorks = () => (
       </li>
       <li>
         <strong>You manage the loan with the key.</strong>
-        <span>Add collateral or take some out, repay part, or repay all of it and get the collateral back. Your wallet can also close the loan by itself, from its list of tokens, without this page.</span>
+        <span>Add collateral or take some out, repay part, or repay all of it and get the collateral back. If your wallet is recovered to a new phone, open this page there and connect: the loan is found from its key.</span>
       </li>
     </ol>
   </Card>

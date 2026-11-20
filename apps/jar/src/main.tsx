@@ -113,6 +113,11 @@ const Jars = ({ environment, source, peerName, chain, onDisconnect }: { environm
   useEvery(30_000, async () => {
     if (!running.current) await refresh();
   }, [source]);
+  // While the wallet tells this page nothing, the user may be deciding in the wallet whether it may: asked again soon,
+  // so that the list follows the user's word within seconds.
+  useEvery(4_000, async () => {
+    if (!running.current && listing?.trusted === false) await refresh();
+  }, [source]);
   useEvery(15_000, () => setTime(now()));
   useEvery(30_000, async () => {
     if (chain !== undefined) setClock(await networkTime(chain.chain));

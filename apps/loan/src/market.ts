@@ -2,7 +2,7 @@ import { type Output, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/
 import type { Utxo } from '@grandmas-wallet/core';
 import { type ListedOutput, type LoanCoins, type ParyonChain, findLoan, latestOraclePrice, loanCoins, readParyonState } from '@grandmas-wallet/paryon';
 
-import { type LoanView, type Market, CONTRACTS, DEPLOYMENT, finalLockHeight, lowerPrice, periodOf } from './loan.js';
+import { type Desk, type LoanView, type Market, CHIPNET_DESK, DEPLOYMENT, finalLockHeight, lowerPrice, periodOf } from './loan.js';
 
 /**
  * What the page reads from the chain and from the oracle: Paryon's contracts and prices, a loan from its key,
@@ -30,8 +30,8 @@ export class MarketProblem extends Error {
  * Paryon's contracts and prices as they stand.
  * @throws MarketProblem if the deployment shows no contract of a kind a loan needs
  */
-export const readMarket = async (chain: PageChain, network: string, oracle: OracleReader | undefined): Promise<Market & { oracleProblem?: string }> => {
-  const [{ height }, state] = await Promise.all([chain.tip(), readParyonState(chain, CONTRACTS)]);
+export const readMarket = async (chain: PageChain, network: string, oracle: OracleReader | undefined, desk: Desk = CHIPNET_DESK): Promise<Market & { oracleProblem?: string }> => {
+  const [{ height }, state] = await Promise.all([chain.tip(), readParyonState(chain, desk.contracts)]);
   if (state.borrowing.length === 0 || state.price.length === 0) throw new MarketProblem('Paryon\'s contracts could not be found on the chain just now. Try again in a minute.');
   const priceThread = state.price.slice().sort((a, b) => (b.state.price > a.state.price ? 1 : b.state.price < a.state.price ? -1 : 0))[0] as Market['priceThread'];
   const stored = state.price.reduce((lowest, thread) => (thread.state.price < lowest ? thread.state.price : lowest), priceThread.state.price);
@@ -48,7 +48,7 @@ export const readMarket = async (chain: PageChain, network: string, oracle: Orac
   return {
     height,
     lockHeight,
-    period: periodOf(lockHeight),
+    period: periodOf(lockHeight, desk.deployment),
     borrowing: state.borrowing,
     priceThread,
     stored,
@@ -63,11 +63,11 @@ export const readMarket = async (chain: PageChain, network: string, oracle: Orac
  * under this page's template; whether the loan is open the page finds out itself, through the loan's sidecar
  * (`findLoan`), which takes a look-alike sidecar beside anything but a genuine loan for none.
  */
-export const readLoan = async (chain: PageChain, category: string, keySatoshis: bigint | undefined): Promise<LoanView> => {
+export const readLoan = async (chain: PageChain, category: string, keySatoshis: bigint | undefined, desk: Desk = CHIPNET_DESK): Promise<LoanView> => {
   const key = keySatoshis === undefined ? {} : { keySatoshis };
   let found: Awaited<ReturnType<typeof findLoan>>;
   try {
-    found = await findLoan(chain, CONTRACTS, hexToBin(category));
+    found = await findLoan(chain, desk.contracts, hexToBin(category));
   } catch {
     return { category, status: 'unknown', satoshis: 0n, ...key };
   }
@@ -80,15 +80,15 @@ export const readLoan = async (chain: PageChain, category: string, keySatoshis: 
  * coins of Paryon's the page chose, with what the key's coin holds as the wallet reported it.
  * @throws when the key opens no open loan
  */
-export const readLoanCoins = async (chain: PageChain, category: string, keySatoshis: bigint): Promise<LoanCoins> => {
-  const coins = await loanCoins(chain, CONTRACTS, hexToBin(category), keySatoshis);
+export const readLoanCoins = async (chain: PageChain, category: string, keySatoshis: bigint, desk: Desk = CHIPNET_DESK): Promise<LoanCoins> => {
+  const coins = await loanCoins(chain, desk.contracts, hexToBin(category), keySatoshis);
   if (coins === undefined) throw new Error('This key opens no loan on the chain just now. It may have been closed.');
   return { keyCategory: category, keySatoshis, loan: coins.loan, sidecar: coins.sidecar, price: coins.price, manageFunction: coins.manageFunction };
 };
 
 /** A coin of Paryon's key factories, for making a key; the first by outpoint. */
-export const readFactory = async (chain: PageChain): Promise<Utxo> => {
-  const [factory] = (await readParyonState(chain, CONTRACTS)).loanKeyFactory.slice().sort((a, b) => (`${binToHex(a.transactionHash)}:${a.index}` < `${binToHex(b.transactionHash)}:${b.index}` ? -1 : 1));
+export const readFactory = async (chain: PageChain, desk: Desk = CHIPNET_DESK): Promise<Utxo> => {
+  const [factory] = (await readParyonState(chain, desk.contracts)).loanKeyFactory.slice().sort((a, b) => (`${binToHex(a.transactionHash)}:${a.index}` < `${binToHex(b.transactionHash)}:${b.index}` ? -1 : 1));
   if (factory === undefined) throw new MarketProblem('Paryon\'s key factory could not be found on the chain just now. Try again in a minute.');
   return factory;
 };

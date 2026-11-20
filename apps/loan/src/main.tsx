@@ -8,7 +8,7 @@ import { type Environment, Button, Card, Frame, Loading, Vault, formatBch, loadE
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { type LoanView, type Market, formatPusd } from './loan.js';
+import { type Desk, type LoanView, type Market, deskFor, formatPusd } from './loan.js';
 import { type MadeKey, type PageChain, generalProtocolsOracle, readMarket } from './market.js';
 import { type ActionState, type LinkWords, type Progress, ConnectCard, ConnectedCard, HowItWorks, Independent, Intro, LoanList, NewLoanCard, OnItsWay, PricesCard, borrowName, closeName, keyName, manageName, moveName, repayName } from './view.js';
 import { type KeptKey, type Outcome, type PendingRequest, STAGE_WORDS, XoLoans, xoProblem } from './xo.js';
@@ -75,7 +75,7 @@ const pageAddress = (): string | undefined => {
 };
 
 /** The page once a wallet is connected. */
-const Loans = ({ environment, loans, chain, peerName, onDisconnect }: { environment: Environment; loans: XoLoans; chain: PageChain; peerName: string; onDisconnect: () => void }) => {
+const Loans = ({ environment, desk, loans, chain, peerName, onDisconnect }: { environment: Environment; desk: Desk; loans: XoLoans; chain: PageChain; peerName: string; onDisconnect: () => void }) => {
   const [market, setMarket] = useState<(Market & { oracleProblem?: string }) | undefined>();
   const [marketProblem, setMarketProblem] = useState<string | undefined>();
   const [listing, setListing] = useState<{ trusted: boolean; loans: LoanView[] } | undefined>();
@@ -86,7 +86,8 @@ const Loans = ({ environment, loans, chain, peerName, onDisconnect }: { environm
 
   const readPrices = async (): Promise<void> => {
     try {
-      setMarket(await readMarket(chain, environment.network, generalProtocolsOracle));
+      // The oracle signs the prices of Paryon's own deployments; one on a chain of one's own has a price nobody updates.
+      setMarket(await readMarket(chain, environment.network, desk.paryons ? generalProtocolsOracle : undefined, desk));
       setMarketProblem(undefined);
     } catch (error) {
       setMarketProblem(plainError(error));
@@ -118,8 +119,9 @@ const Loans = ({ environment, loans, chain, peerName, onDisconnect }: { environm
     await Promise.all([refresh(), readPrices()]);
     running.current = false;
     setState(ended);
-    // A server may list a transaction a moment after it took it.
-    setTimeout(() => void refresh(), 4_000);
+    // A server may list a transaction a moment after it took it: the lists and Paryon's contracts are read again, so
+    // that a step just done is not offered again until the next reading.
+    setTimeout(() => void Promise.all([refresh(), readPrices()]), 4_000);
   };
 
   useEffect(() => {
@@ -135,6 +137,11 @@ const Loans = ({ environment, loans, chain, peerName, onDisconnect }: { environm
   useEvery(30_000, async () => {
     if (!running.current) await refresh();
   }, [loans]);
+  // While the wallet tells this page nothing, the user may be deciding in the wallet whether it may: asked again soon,
+  // so that the list follows the user's word within seconds.
+  useEvery(4_000, async () => {
+    if (!running.current && listing?.trusted === false) await refresh();
+  }, [loans]);
   useEvery(60_000, async () => {
     if (!running.current) await readPrices();
   }, [loans]);
@@ -149,7 +156,7 @@ const Loans = ({ environment, loans, chain, peerName, onDisconnect }: { environm
       : undefined;
   return (
     <div class="stack">
-      <Independent />
+      <Independent desk={desk} />
       <ConnectedCard peerName={peerName} onDisconnect={onDisconnect} />
       <div class="columns">
         <div class="stack">
@@ -197,6 +204,7 @@ const Loans = ({ environment, loans, chain, peerName, onDisconnect }: { environm
 };
 
 const App = ({ environment }: { environment: Environment }) => {
+  const desk = useMemo(() => deskFor(environment), [environment]);
   const link = useRef<DappLink | undefined>(undefined);
   const [status, setStatus] = useState<LinkStatus>({ state: 'connecting' });
   const [problem, setProblem] = useState<string | undefined>();
@@ -242,7 +250,7 @@ const App = ({ environment }: { environment: Environment }) => {
   };
 
   useEffect(() => {
-    if (environment.network !== 'chipnet') return;
+    if (desk === undefined) return;
     const saved = vault.get<DappCredentials>('credentials');
     // A session with a wallet is resumed; without one, a fresh address is shown.
     start(saved?.walletPublicKey === undefined ? undefined : saved);
@@ -261,21 +269,21 @@ const App = ({ environment }: { environment: Environment }) => {
     if (current === undefined || !usable || status.state !== 'connected' || chain === undefined) return undefined;
     const requests = new DappRequests();
     requests.attach(current.channel);
-    return new XoLoans(requests, chain, pendingStore, keyStore, pageAddress());
+    return new XoLoans(requests, chain, pendingStore, keyStore, pageAddress(), undefined, desk);
   }, [usable, chain, status.state === 'connected']);
 
-  if (environment.network !== 'chipnet') {
+  if (desk === undefined) {
     return (
       <div class="stack">
         <Independent />
         <Card title="Chipnet only" tone="warn">
-          <p>This demonstration uses Paryon's deployment on chipnet, and this page is configured for {environment.network}. Open it with the chipnet configuration.</p>
+          <p>This demonstration uses Paryon's deployment on chipnet, and this page is configured for {environment.network} without a deployment of Paryon's contracts. Open it with the chipnet configuration.</p>
         </Card>
       </div>
     );
   }
   if (status.state === 'connected' && usable) {
-    if (loans !== undefined && chain !== undefined) return <Loans environment={environment} loans={loans} chain={chain} peerName={status.peerName ?? 'your wallet'} onDisconnect={forget} />;
+    if (loans !== undefined && chain !== undefined) return <Loans environment={environment} desk={desk} loans={loans} chain={chain} peerName={status.peerName ?? 'your wallet'} onDisconnect={forget} />;
     if (chainProblem !== undefined) {
       return (
         <Card title="The network cannot be reached" tone="bad">
@@ -296,7 +304,7 @@ const App = ({ environment }: { environment: Environment }) => {
   return (
     <div class="stack">
       <Intro />
-      <Independent />
+      <Independent desk={desk} />
       <div class="columns">
         <ConnectCard uri={address} state={words} problem={problem} onForget={resuming || problem !== undefined || vault.get<DappCredentials>('credentials')?.walletPublicKey !== undefined ? forget : undefined} />
         <HowItWorks />
