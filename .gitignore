@@ -11,7 +11,7 @@ coverage/
 *.sqlite-*
 *.mnemonic
 .claude/settings.local.json
-.chipnet/
+.chipnet
 .xo-demo/
 .vitest/
 .local-runs/
