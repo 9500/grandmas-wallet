@@ -2,7 +2,7 @@ import { binToHex, hash160 } from '@bitauth/libauth';
 import type { ControllerHistory, XoNetwork } from '@grandmas-wallet/core';
 
 import { type Receipt, readReceipt } from './receipt.js';
-import { type ArchiveRecord, type Blob, type LabelEntry, type TemplateEntry, type TemplateWithdrawalEntry, type TokenNoteEntry, decodeBlob, encodeBlob, readRecord } from './records.js';
+import { type ArchiveRecord, type Blob, type LabelEntry, type PositionRecordEntry, type TemplateEntry, type TemplateWithdrawalEntry, type TokenNoteEntry, decodeBlob, encodeBlob, readRecord } from './records.js';
 import { blobIdOf, seal, unseal } from './seal.js';
 import type { SignedMessage } from './signing.js';
 import type { ArchiveStore } from './store.js';
@@ -220,6 +220,12 @@ export interface Assessment {
     withdrawn?: number;
   })[];
   tokenNotes: AssessedRecord<TokenNoteEntry>[];
+  /**
+   * Position records signed by an owner. Whose signature it is decides nothing here: the holder of an earlier
+   * seed can still sign records. A position record counts only once the chain bears it out (section 10.4); one
+   * of an earlier seed is a suggestion until then.
+   */
+  positions: AssessedRecord<PositionRecordEntry>[];
   labels: AssessedRecord<LabelEntry>[];
   /** Receipts signed with the recovery key the controller names now. */
   receipts: Receipt[];
@@ -259,7 +265,7 @@ export const assessArchive = (contents: ArchiveContents, authority: Authority): 
   const currentOwner = hex(history.current.state.ownerKeyHash);
   const owners = new Set(history.owners.map((period) => hex(period.ownerKeyHash)));
   const proposed = history.current.state.proposedOwnerKeyHash === undefined ? undefined : hex(history.current.state.proposedOwnerKeyHash);
-  const assessment: Assessment = { viewingKeys: [], templates: [], tokenNotes: [], labels: [], receipts: [], refused: [], conflicts: [], currency: 'unknown', notices: [...contents.problems] };
+  const assessment: Assessment = { viewingKeys: [], templates: [], tokenNotes: [], positions: [], labels: [], receipts: [], refused: [], conflicts: [], currency: 'unknown', notices: [...contents.problems] };
   const refuse = (blobId: string, reason: string): void => {
     assessment.refused.push({ blobId, reason });
   };
@@ -293,6 +299,7 @@ export const assessArchive = (contents: ArchiveContents, authority: Authority): 
         if (record.entry.kind === 'template') assessment.templates.push({ entry: record.entry, ...assessed });
         else if (record.entry.kind === 'template-withdrawal') withdrawals.push({ entry: record.entry, signerKeyHash: record.signerKeyHash });
         else if (record.entry.kind === 'token-note') assessment.tokenNotes.push({ entry: record.entry, ...assessed });
+        else if (record.entry.kind === 'position') assessment.positions.push({ entry: record.entry, ...assessed });
         else assessment.labels.push({ entry: record.entry, ...assessed });
       }
     } catch (error) {
