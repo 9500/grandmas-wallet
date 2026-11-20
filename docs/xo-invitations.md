@@ -2,7 +2,9 @@
 
 Every transaction this wallet sends is an invitation of an XO template, built and signed by the XO engine. This page lists the templates and the invitations kept in this repository, shows how to open one in XO's debug tool, and says how to produce the invitations again.
 
-Everything here is on chipnet, the Bitcoin Cash test network. The engine is `@xo-cash/engine` `0.1.1-next.18170561234`, as published, with no local change.
+Everything kept here is on chipnet, the Bitcoin Cash test network. The engine is `@xo-cash/engine` `0.1.1-next.18170561234`, as published, with no local change.
+
+The invitations kept here were made by the second design (tag `design-2`), in which an application came with a recovery declaration beside its template. The wallet's own templates, and the ParyonUSD template, are the same in the third design, which is what this branch holds; the Savings Jar's template changed. How to make invitations with the third design is at the end.
 
 ## Templates
 
@@ -14,11 +16,14 @@ Everything here is on chipnet, the Bitcoin Cash test network. The engine is `@xo
 | Grandma's Wallet change | [templates/grandmas-wallet-change.json](templates/grandmas-wallet-change.json) | `c7419f58e404da2a9847df27cebd6e38cf3240f66e46e4e94a36d0958f72acd1` |
 | Wallet (P2PKH), from `@xo-cash/templates` | [templates/grandmas-wallet-coins.json](templates/grandmas-wallet-coins.json) | `a31eb85891dbf248f1709a92b0fa7e3e6fdc518e6b34e376b197ed7f12dbc672` |
 | ParyonUSD loan (chipnet-fast-periods-6) | [../packages/paryon/frozen/paryon-loan-v1-chipnet-fast-periods-6.json](../packages/paryon/frozen/paryon-loan-v1-chipnet-fast-periods-6.json) | `aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be` |
-| Savings Jar | [../packages/savings-jar/frozen/savings-jar-v3.json](../packages/savings-jar/frozen/savings-jar-v3.json) | `04db6aef50ad127d6f34c7a6bdb3872007995e375b14437e1e9a2ca2b0a5ee5c` |
+| Savings Jar, version 4 (third design) | [../packages/savings-jar/frozen/savings-jar-v4.json](../packages/savings-jar/frozen/savings-jar-v4.json) | `fde627e027ac2474d28ed10f84b255c097e546720771ce264d5cc134efceff25` |
+| Savings Jar, version 3 (second design) | at the tag `design-2`: `git show design-2:packages/savings-jar/frozen/savings-jar-v3.json` | `04db6aef50ad127d6f34c7a6bdb3872007995e375b14437e1e9a2ca2b0a5ee5c` |
 
 The wallet's own templates are defined in `packages/app/src/templates.ts`. The files under `templates/` are written from there by `scripts/export-templates.ts`, and a test fails if they differ.
 
-The ParyonUSD template drives [Paryon's](https://paryonusd.com/) public contracts on chipnet as they are deployed; nothing of Paryon's was changed. It is written in `packages/paryon/src/template-source.ts`. A wallet that has never heard of Paryon carries out a loan from this template alone.
+The ParyonUSD template drives [Paryon's](https://paryonusd.com/) public contracts on chipnet as they are deployed; nothing of Paryon's was changed. It is written in `packages/paryon/src/template-source.ts`. A wallet that has never heard of Paryon carries out a loan from this template alone, with the values the loan page sends in its requests.
+
+The Savings Jar's version 4 gives the jar's key an input of its own at a fixed place, so that the wallet can empty a jar by itself (proposal section 15.3). The jar run kept here used version 3, the one to import for its invitations.
 
 ## Invitations
 
@@ -30,6 +35,8 @@ Each folder holds one file per transaction, numbered in the order sent, and an `
 | ParyonUSD loan | [runs/stage-9-template-chipnet.md](runs/stage-9-template-chipnet.md) | [runs/invitations/stage-9-template-chipnet/](runs/invitations/stage-9-template-chipnet/) | A loan of 100 PUSD is opened and managed, the device is lost, and the new device finds the loan and closes it |
 | Savings jar | [runs/stage-8-chipnet.md](runs/stage-8-chipnet.md) | [runs/invitations/stage-8-chipnet/](runs/invitations/stage-8-chipnet/) | A jar is opened, the device is lost, and the new device finds the jar and empties it twice |
 | One payment | | [runs/invitations/test-chipnet/](runs/invitations/test-chipnet/) | The smallest case: one `pay` action |
+
+All four are runs of the second design (tag `design-2`), made in November 2026 with the scripts of that time. In the loan and jar runs the new device found the position from the chain, as the declaration told it; in the third design it finds it from its own record. The transactions of the wallet's own templates are made the same way in both designs.
 
 Each record lists its transactions in a table whose last column links the invitation.
 
@@ -65,27 +72,40 @@ The template has to be imported before its invitation. The `pay` invitation in `
 
 ## Producing the invitations again
 
-There are three ways, from the least to the most work.
+The scripts that made the loan and jar runs above (`run-d.ts`, `run-e-template.ts` and those before them) went with the recovery declaration and are at the tag `design-2` only. With the third design there are three ways.
 
 ### In the browser
 
-The public pages are this repository's wallet on chipnet.
-
-1. Follow [walkthrough.md](walkthrough.md) with <https://wallet.9500.cash/> and <https://recoverer.9500.cash/> to set up a wallet and send something. For the applications, <https://paryon.9500.cash/> opens a ParyonUSD loan and <https://jar.9500.cash/> a savings jar, each through the wallet.
+1. Follow [walkthrough.md](walkthrough.md) with the public pages to set up a wallet and send something; for the applications, open a savings jar at <https://jar.9500.cash/> and a ParyonUSD loan at <https://paryon.9500.cash/>, each through the wallet. Each page's `version.json` names the commit and branch it was built from: `design-3` for the third design.
 2. In the wallet, open **Technical details** (on the home screen, or under **Recovery**) and tick **Developer mode**. On the recoverer's page it is under **Settings**.
 3. The card lists every transaction that browser sent, with its action and template. **Save** downloads the invitation as a file, the same kind of file as the ones here.
 
-A browser holds the invitations of what it sent itself. After a recovery the new phone does not have those of the lost one.
+A browser holds the invitations of what it sent itself. After a recovery the new phone does not have those of the lost one. The same pages run on your own machine against the local node (the end of [walkthrough.md](walkthrough.md)).
 
-### One payment by script
+### The runs of the third design, on the local node
+
+```bash
+cd packages/app
+npx tsx ../../scripts/stage-17-jar-run.ts     # the Savings Jar through the loss of a device
+npx tsx ../../scripts/stage-17-loan-run.ts    # a ParyonUSD loan through the loss of a device
+```
+
+They run against the local node ([local-node.md](local-node.md)), need no coins and take a few minutes; the loan run deploys Paryon's contracts as published on the local chain first. Each writes its record to `docs/runs/` ([runs/stage-17-jar-local-node.md](runs/stage-17-jar-local-node.md), [runs/stage-17-loan-local-node.md](runs/stage-17-loan-local-node.md)) and its invitations to `.local-runs/invitations/stage-17-jar/` and `.local-runs/invitations/stage-17-loan/`, which are not kept in git. A run that stops is continued by the same command; `--new` starts again. Their transactions are on the local chain only, so the debug tool's **Inspect** step, which reads a transaction from a public network, cannot show them; the loan run's template names the local deployment of Paryon's contracts, and its identifier is in the run's record.
+
+The same courses in browsers, with the pages of this checkout and a relay on this machine, are `npx tsx scripts/stage-17-jar-browser.ts` and `npx tsx scripts/stage-17-loan-browser.ts` (from the repository's root, after `deploy/preview.sh build`). They keep each device's browser profile under `.local-runs/`, and write no invitation files.
+
+### One payment, and the wallet's whole life, by script on chipnet
+
+These two are unchanged from the second design.
 
 ```bash
 npm ci
 cd packages/app
-npx tsx ../../scripts/test-invitation.ts
+npx tsx ../../scripts/test-invitation.ts          # one payment
+npx tsx ../../scripts/run-b.ts chipnet            # the wallet's whole life
 ```
 
-It needs a funding key with a few thousand satoshis of chipnet coins in `.chipnet/funder-design-2.json`:
+They need a funding key with chipnet coins in `.chipnet/funder-design-2.json`:
 
 ```json
 { "privateKey": "<32 bytes as hex>" }
@@ -93,31 +113,6 @@ It needs a funding key with a few thousand satoshis of chipnet coins in `.chipne
 
 `npx tsx scripts/chipnet-pay.ts address` (from the repository's root) prints that key's address, to send test coins to. Faucets: <https://tbch.googol.cash/>, <https://chipnet.bch.ninja/>.
 
-The script pays 3,000 satoshis to an engine account and sends them back as a `pay` action. It writes the invitation to `docs/runs/invitations/test-chipnet/`. It costs about 700 satoshis.
+`test-invitation.ts` pays 3,000 satoshis to an engine account and sends them back as a `pay` action. It writes the invitation to `docs/runs/invitations/test-chipnet/` and costs about 700 satoshis.
 
-### The full runs
-
-```bash
-cd packages/app
-npx tsx ../../scripts/run-b.ts chipnet            # the wallet's whole life
-npx tsx ../../scripts/run-d.ts chipnet            # the savings jar
-npx tsx ../../scripts/run-e-template.ts chipnet   # the ParyonUSD loan
-```
-
-Each run writes its record to `docs/runs/` and its invitations to `docs/runs/invitations/`, replacing those of the run before. New keys are made for every run, so the identifiers and transactions differ from the ones kept here; the templates, actions and their order are the same.
-
-| Run | Funding key needs | Takes | Costs about |
-| --- | --- | --- | --- |
-| Wallet | 150,000 sat | 15 minutes | 10,000 sat |
-| Savings jar | 150,000 sat | 25 minutes | 10,000 sat |
-| ParyonUSD loan | 0.61 BCH at a price near $207, for 100 PUSD at about 124% collateral | 30 minutes | 137,000 sat, of which 121,000 are Paryon's borrowing fee |
-
-What a run needs besides the funding key:
-
-- **Time.** Each run goes through a real waiting period of 512 seconds of the chain's clock.
-- **For the loan run, a chipnet node's RPC** in `.chipnet/node-rpc.json` as `{ "url": "…", "user": "…", "password": "…" }`. The run tries every transaction with `testmempoolaccept` before sending it, and reads the height the node takes as final for lock times. The node has to be a build with chipnet's one-minute blocks.
-- **The server.** The scripts give the engine `chipnet.9500.cash`; another chipnet Electrum server can be named in the script's `openAccount`.
-
-A run that stops is continued by the same command. Its state, with the words of its wallets, is in `.chipnet/`, which is not in git; a run starts afresh when that file is moved away. Everything a run holds goes back to the funding key at its end.
-
-The same three runs work on a local node with `local` in place of `chipnet`, with no coins and in a few minutes: see [local-node.md](local-node.md).
+`run-b.ts` writes its record to `docs/runs/` and its invitations to `docs/runs/invitations/`, replacing those of the run before. New keys are made for every run, so the identifiers and transactions differ from the ones kept here; the templates, actions and their order are the same. Its funding key needs 150,000 satoshis; it takes about 15 minutes, of which a waiting period of 512 seconds of the chain's clock, and costs about 10,000 satoshis. A run that stops is continued by the same command; its state, with the words of its wallets, is in `.chipnet/`, which is not in git. Everything a run holds goes back to the funding key at its end. `run-b.ts local` makes the same run on the local node, with no coins and in a few minutes.
