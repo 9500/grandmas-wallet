@@ -53,11 +53,13 @@ This decides the shape of the later stages, and is the proposal's first checkpoi
 - A second seed, in an account with no history, is given the key by an ordinary transfer and the file. It hands the script to the engine and empties the jar after the date, every value coming from the file or from the wallet.
 - The check of proposal section 10.4 is worked through by hand for this jar, from the script's side, and for a ParyonUSD loan from the records in `docs/runs/`, from the token's side.
 
-**Done when** the result is written to `docs/` with the transactions, and it says: whether the engine takes an input that names a token and has no unlocking script; whether the engine's stored values are enough to follow and to spend; which fields the record needs; whether filling from the role's requirements works; and whether the check holds for both applications. Where the answer is no, the proposal is changed before stage 12 starts.
+**Done on 20 November 2026.** The result is in `docs/stage-11-trial.md` on the branch `design-3`: the engine takes such an input and signs with the wallet's coin there; the engine's stored values are enough; the record needs the script's values, one other value of the action, and the token; filling works once an address and a paid-in amount never come from a record; and the check holds for the jar on the local node and for the jars and loans of earlier chipnet runs. The proposal's sections 10.2, 10.4, 13.3 and 14.2 were corrected accordingly (its decision 33).
+
+The exit criterion was: the result is written to `docs/` with the transactions, and it says: whether the engine takes an input that names a token and has no unlocking script; whether the engine's stored values are enough to follow and to spend; which fields the record needs; whether filling from the role's requirements works; and whether the check holds for both applications. Where the answer is no, the proposal is changed before stage 12 starts.
 
 ## Stage 12 — Position records in the backup
 
-- The record type, with the engine's field names, the token, the other values of the action and the address of the application's page (proposal section 10.2). Token notes are still read and no longer written.
+- The record type, with the engine's field names, the token, the action's other values kept apart from the script's, no address of the wallet's, and the address of the application's page (proposal section 10.2). A record without a script, for a token of an application whose scripts the wallet does not follow. Token notes are still read and no longer written.
 - Writing: the wallet builds the record from the transaction it has worked out, and a store confirms it before anything is signed (section 10.5).
 - Reading after a recovery: records of the earlier archive are copied as suggestions, and written as the new owner's own only after the chain has confirmed them (section 10.6).
 - A record of an action that was never sent is not copied.
@@ -66,23 +68,23 @@ This decides the shape of the later stages, and is the proposal's first checkpoi
 
 ## Stage 13 — The check, and positions that are not confirmed
 
-- The check of section 10.4, from the chain alone: a transaction carried the token and paid the record's script; the token is the one the wallet holds. From the script's side, and from the token's side for a script many users share.
+- The check of section 10.4, from the chain alone: a transaction carried the token and paid the record's script; the token is the one the wallet holds, compared whole and followed back where it could have been copied; the template's token input agrees with the record.
 - Positions are listed from records that count. Several records for one token; the one whose script holds coins. A token without a record is listed as a token.
 - The status "not confirmed", and the rule that only an action in which the wallet gives nothing but the fee is carried out there.
 
-**Tests:** PR03, PR04, PR05, PR06, PR07, PR12. **Done when** they pass on the simulated chain, and PR03 on the local node through the engine.
+**Tests:** PR03, PR04, PR05, PR06, PR07, PR12, PR23, PR24. **Done when** they pass on the simulated chain, and PR03 on the local node through the engine.
 
 ## Stage 14 — An application from its template alone
 
-- Filling a value: the request, the record, the wallet's own, the user (section 13.3). The kinds of the wallet's own outputs, named by the request where they are not a plain receipt.
-- An action about a token with no declaration: the request names the token, or it is the record's.
-- The application's coins as the request names them, read from the chain, with the application's contracts run before the user is asked.
+- Filling a value: the wallet's own, the request, the record, the user, with an address and a paid-in amount never from a record (section 13.3). The kinds of the wallet's own outputs, named by the request where they are not a plain receipt.
+- An action about a token with no declaration: the request names the position and says whether the token is spent, or the template's own token input says so; the wallet makes sure the coin it puts there is the token.
+- The application's coins as the request names them, read from the chain, each matched to a script of the template by its bytecode, with the application's contracts run before the user is asked.
 - A token of the wallet's that would leave it, and a token made from the wallet's coin that would go elsewhere: shown, and carried out only with the user's tick.
 - From the wallet's own list: the actions a script offers; carried out alone where nothing is missing, and otherwise "Open the application to do this" with the page's address.
 - `xo_v1` in its version 2 (section 14.2): no profile, no declaration, the new answers to a positions request.
 - Removed: reading a declaration, finding a position from the chain, the template check that depends on a declaration, token names from a declaration.
 
-**Tests:** PR13, PR14, PR15, PR16, PR17, PR18, PR21. **Done when** they pass on the simulated chain. The tests of the second design that this version retires (proposal section 21) are removed with the code they test; the others still pass.
+**Tests:** PR13, PR14, PR15, PR16, PR17, PR18, PR21, PR22. **Done when** they pass on the simulated chain. The tests of the second design that this version retires (proposal section 21) are removed with the code they test; the others still pass.
 
 ## Stage 15 — Findings for each action
 
@@ -122,12 +124,12 @@ This decides the shape of the later stages, and is the proposal's first checkpoi
 | Stage | Tests |
 | --- | --- |
 | 12 | PR01, PR02, PR10, PR11 |
-| 13 | PR03–PR07, PR12 |
-| 14 | PR13–PR18, PR21 |
+| 13 | PR03–PR07, PR12, PR23, PR24 |
+| 14 | PR13–PR18, PR21, PR22 |
 | 15 | PR08, PR09 |
 | 17 | PR19, PR20 |
 
-All 21 tests that this version adds to the proposal's section 21 are in this table once. The tests of the second design are in the table of version 0.4; the proposal's section 21 says which of them this version retires or replaces.
+All 24 tests that this version adds to the proposal's section 21 are in this table once. The tests of the second design are in the table of version 0.4; the proposal's section 21 says which of them this version retires or replaces.
 
 `scripts/test-record.mjs` reads the statements of the tests from the proposal of version 0.6.
 
@@ -151,3 +153,5 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 29 | The declaration as an optional extra | Decided, 20 November 2026 | No |
 | 30 | A token of the wallet's that an action does not return | Decided, 20 November 2026 | Carried out with the user's tick |
 | 31 | Acting without the application | Decided, 20 November 2026 | Not required; done where nothing is missing |
+| 32 | A token made from the wallet's coin that does not come to the wallet | Stage 14; put to the owner, not yet answered | Shown in the figures, without a tick |
+| 33 | Corrections from stage 11 | Taken into the proposal, 20 November 2026 | — |
