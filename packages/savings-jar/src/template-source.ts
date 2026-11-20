@@ -1,7 +1,8 @@
 import { savingsJarBytecodeHex } from '@grandmas-wallet/contracts/savingsJar';
 
 /**
- * The XO template of the Savings Jar application, and its recovery declaration.
+ * The XO template of the Savings Jar application: version 3 with its recovery declaration, which the wallets of
+ * the second design read, and version 4 (below), which needs nothing beside it.
  *
  * A jar holds savings until a date. Anyone can pay in. From the date on, whoever holds the jar's key token
  * can empty it. The template has no key and no secret: authority over a jar is its key token, which the
@@ -93,6 +94,51 @@ export const savingsJarTemplateSource = {
     keyHolder: { ...view('Key holder', 'Where the jar\'s key goes: an address of the wallet.'), type: 'locking_script' },
     keyInput: { ...view('Key input', 'The number of the input that spends the jar\'s key.'), type: 'integer' },
   },
+} as const;
+
+/**
+ * Version 4 of the template, for a wallet that takes nothing but the template (proposal section 15.3). The
+ * contract is the same, and so is every script but the jar's unlocking: a jar of either version is at the
+ * address its key's category and date give, and is emptied by the same contract.
+ *
+ * - **The key is an input of its own.** `jarKeyInput` names the key's category and has no unlocking script: the
+ *   wallet puts its own key coin there, signed by the key's address, and a wallet knows from the template alone
+ *   that the withdrawal spends the key. It is input 0 of the withdrawal, the jar's coins after it.
+ * - **The jar's unlocking gives that index as a constant,** `<0>`, in place of the variable `keyInput` that a
+ *   declaration used to fill. Everything else a withdrawal needs is in the wallet's record of the jar (the
+ *   script's two values and the date as written on the key) or is the wallet's own to give (the key's address),
+ *   so a wallet empties a jar by itself, after a recovery too.
+ * - **The date stays on the key.** An ordinary wallet keeps no record; the jar's page finds such a wallet's jars
+ *   from the key's category and the date written on it.
+ *
+ * Field order is that of version 3: a template's identifier depends on it.
+ */
+export const savingsJarV4TemplateSource = {
+  ...savingsJarTemplateSource,
+  version: '4',
+  actions: {
+    ...savingsJarTemplateSource.actions,
+    withdraw: action('Empty a savings jar', 'Take everything out of the jar. Possible from the jar\'s date on. The key stays with you, so the jar can be used again.', ['keyCategory', 'unlockTime', 'unlockTimeBytes', 'keyHolder'], 'withdrawTransaction'),
+  },
+  transactions: {
+    ...savingsJarTemplateSource.transactions,
+    withdrawTransaction: {
+      ...savingsJarTemplateSource.transactions.withdrawTransaction,
+      // The key first, at the place the jar's unlocking names; the jar's coins after it.
+      inputs: [{ input: 'jarKeyInput', inputIndex: 0 }, { input: 'savingsJarInput' }],
+    },
+  },
+  inputs: {
+    ...savingsJarTemplateSource.inputs,
+    // The wallet's own coin with the key: no unlocking script here, its address's key signs it.
+    jarKeyInput: { ...view('Jar key', 'The jar\'s key, spent and given back. It opens the jar.'), token: { category: '$(<keyCategory>)' } },
+  },
+  scripts: {
+    ...savingsJarTemplateSource.scripts,
+    // The key is input 0 of the withdrawal.
+    unlockSavingsJar: '<0>',
+  },
+  variables: (({ keyInput: _keyInput, ...rest }) => rest)(savingsJarTemplateSource.variables),
 } as const;
 
 /**

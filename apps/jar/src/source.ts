@@ -3,7 +3,7 @@ import type { WalletOffer } from '@grandmas-wallet/connect/wizard';
 
 import { type JarView, explain } from './jar.js';
 import { type PlainChain, type Signer, type WalletPaths, PlainWallet, networkOf, readPaths } from './plain.js';
-import { type PendingStore, STAGE_WORDS, XoJars, xoProblem } from './xo.js';
+import { type JarChain, type PageAddress, type PendingStore, STAGE_WORDS, XoJars, xoProblem } from './xo.js';
 
 /**
  * One page for both kinds of wallet. What the wallet offers when it connects decides how the page works
@@ -87,8 +87,12 @@ const explained = async <T>(work: Promise<T>): Promise<T> => {
 
 export const stageProgress = (stage: RequestStage): Progress => ({ text: STAGE_WORDS[stage], stage });
 
-export const xoSource = (requests: DappRequests, store: PendingStore): JarSource & { jars: XoJars } => {
-  const jars = new XoJars(requests, store);
+/**
+ * @param chain - where the page reads each jar's balance
+ * @param page - the page's own address, which goes into every request and so into the wallet's record of a jar
+ */
+export const xoSource = (requests: DappRequests, store: PendingStore, chain: JarChain, page: PageAddress): JarSource & { jars: XoJars } => {
+  const jars = new XoJars(requests, store, chain, page);
   const follow = (progress: (step: Progress) => void) => (stage: RequestStage) => progress(stageProgress(stage));
   return {
     kind: 'xo',
