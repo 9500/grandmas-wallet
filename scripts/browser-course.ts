@@ -707,12 +707,23 @@ export const firstSteps = async (
   await shoot(recoverer.page, 'recoverer-friend-confirm');
   await click(recoverer.page, 'Set it up');
   mark('paid');
+  // Anna's page says the wallet is set up for some seconds and then offers a new code for the next phone: it is
+  // watched for from the moment she says yes, since on a public network the phone may say so later than that.
+  const setUpShown = recoverer.page
+    .getByText('Grandma\'s wallet is set up')
+    .first()
+    .waitFor({ state: 'visible', timeout: 240_000 * patience })
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    );
   // The phone goes on as soon as the network has the creation: no block is waited for.
   await see(old.page, 'Your wallet is ready', 180_000);
   log(`   the phone shows "Your wallet is ready" with ${(await old.page.locator('.set-up-balance .balance-sub').first().textContent())?.trim()}`);
   await standingNow(old.page, `From "Set it up" to "Your wallet is ready": ${since('paid')}`);
   await shoot(old.page, 'wallet-ready');
-  await see(recoverer.page, 'Grandma\'s wallet is set up', 60_000);
+  const notShown = await setUpShown;
+  if (notShown !== undefined) throw notShown;
   log('   Anna\'s page says the wallet is set up and keeps what a recovery needs');
   await click(old.page, 'Open my wallet');
   await see(old.page, 'Protected', 180_000);
