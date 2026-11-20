@@ -585,8 +585,8 @@ try {
     empty: 'the jar\'s coin and the key in one transaction; the savings and the key back to Cashonize\'s addresses; built by the page, signed by Cashonize',
     'pay in': `${PAY_IN_BCH} BCH from Cashonize's coins into the emptied jar, with the page's "Pay in"`,
     'empty again': 'what was paid in after the first withdrawal, with the same key',
-    'pay in again': `${PAY_IN_AGAIN_BCH} BCH more, with the page rebuilt with the fixes found in this run`,
-    'empty a third time': 'the same, emptied with the rebuilt page',
+    'pay in again': publicPage ? `${PAY_IN_AGAIN_BCH} BCH more` : `${PAY_IN_AGAIN_BCH} BCH more, with the page rebuilt with the fixes found in this run`,
+    'empty a third time': publicPage ? 'the same, emptied a third time' : 'the same, emptied with the rebuilt page',
   };
   /** The page's words about the jar once it agrees with what was done. */
   const settled = async (emptied: boolean): Promise<string> => {
@@ -648,8 +648,8 @@ try {
   if (!isDone('empty') && !reached('empty')) await emptyTheJar('empty', 'Emptying');
   if (!isDone('pay in') && !reached('pay in')) await payIn('pay in', 'Paying in', PAY_IN_BCH);
   if (!isDone('empty again') && !reached('empty again')) await emptyTheJar('empty again', 'Emptying again');
-  if (!isDone('pay in again') && !reached('pay in again')) await payIn('pay in again', 'Paying in again, with the rebuilt page', PAY_IN_AGAIN_BCH);
-  if (!isDone('empty a third time') && !reached('empty a third time')) await emptyTheJar('empty a third time', 'Emptying a third time, with the rebuilt page');
+  if (!isDone('pay in again') && !reached('pay in again')) await payIn('pay in again', publicPage ? 'Paying in again' : 'Paying in again, with the rebuilt page', PAY_IN_AGAIN_BCH);
+  if (!isDone('empty a third time') && !reached('empty a third time')) await emptyTheJar('empty a third time', publicPage ? 'Emptying a third time' : 'Emptying a third time, with the rebuilt page');
 
   // check -------------------------------------------------------------
   if (!isDone('check') && !reached('check')) {
@@ -763,6 +763,14 @@ try {
       const result = await electrum.broadcast(binToHex(built.encoded));
       if (!result.accepted) throw new Error(`the network refused destroying the key: ${result.reason}`);
       transactionId = built.transactionId;
+      // What is left is read from the server next: it is given the time to show the key spent.
+      const spent = built.transaction.inputs.map((input) => `${binToHex(input.outpointTransactionHash)}:${input.outpointIndex}`);
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const still = [];
+        for (const locking of (await scannedAddresses()).keys()) for (const entry of await electrum.listUnspent(hexToBin(locking), 'include')) still.push(`${entry.transactionId}:${entry.index}`);
+        if (!still.some((outpoint) => spent.includes(outpoint))) break;
+        await pause(2_000);
+      }
     }
     row('destroy the key', transactionId, 'the jar\'s key, which opens nothing now that the jar is empty, spent with Cashonize\'s key from its seed phrase and not carried on; its satoshis to the funding address');
     finish('destroy the key');
@@ -798,6 +806,18 @@ try {
     for (const entry of state.rows) fees += (await sizeAndFee(entry.transactionId)).fee;
     const before = BigInt(satoshisIn(state.funderBefore ?? '0'));
     const now = BigInt(satoshisIn(state.funderAfter));
+    if (publicPage) {
+      // Other runs may use the funding address at the same time, and the server lists unconfirmed transactions in no
+      // order: what the run took from it and gave back is read from the run's own transactions.
+      const funderHex = binToHex(lockingOf(funderAddress));
+      const toFunder = async (transactionId: string): Promise<bigint> => (await transactionOf(transactionId)).outputs.filter((output) => binToHex(output.lockingBytecode) === funderHex).reduce((sum, output) => sum + output.valueSatoshis, 0n);
+      const fund = state.rows.find((entry) => entry.step === 'fund the wallet');
+      const paidOut = fund === undefined ? 0n : (await transactionOf(fund.transactionId)).outputs.filter((output) => binToHex(output.lockingBytecode) !== funderHex).reduce((sum, output) => sum + output.valueSatoshis, 0n);
+      const fundFee = fund === undefined ? 0n : (await sizeAndFee(fund.transactionId)).fee;
+      let back = 0n;
+      for (const entry of state.rows.filter((row) => row.step === 'return' || row.step === 'destroy the key')) back += await toFunder(entry.transactionId);
+      note('funder-after', `The funding address held ${before} satoshis before the run and ${now} after it; other runs used it meanwhile. Of the run's own: it paid Cashonize ${paidOut} satoshis (fee ${fundFee}) and got ${back} back from Cashonize's send and the destroyed key, so the run cost ${paidOut + fundFee - back} satoshis, the fees of its ${state.rows.length} transactions together being ${fees}.`);
+    }
     note(
       'funder-after',
       `The funding address held ${before} satoshis before the run and holds ${now} after it${others.length === 0 ? '' : `; in between it also received ${others.join(', ')}, which are not part of this run`}. The run cost ${before + elsewhere - now} satoshis: ${fees} in fees for its ${state.rows.length} transactions${before + elsewhere - now - fees === 0n ? '; nothing stays with Cashonize' : ` and the ${before + elsewhere - now - fees} satoshis that stay with the jar's key`}.`,
