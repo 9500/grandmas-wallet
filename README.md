@@ -6,7 +6,7 @@ Built for BCH Blaze 2026 on the XO stack.
 
 **Status:** a working demonstration on chipnet, the Bitcoin Cash test network. The wallet, the recoverer's page, two applications and the backup stores are built and have run through their whole course on chipnet, in scripts and in browsers. Nothing has been audited, the pages keep their keys unencrypted in the browser, and a phone watches for recovery requests only while the page is open. Use it with test coins only.
 
-`main` holds the second design of the wallet (design 2) as it was built and run. The third design (design 3) is proposed in the documents here and is being built on the branch `design-3`; `main` moves to it once it has run. [Designs](#designs) says what each design is and why the third was started.
+`main` holds the code of the second design of the wallet (design 2) as it was built and run, and the documents of the third (design 3). The third design is built on the branch [`design-3`](https://github.com/9500/grandmas-wallet/tree/design-3), has run on chipnet, and is what the pages under "Try it" serve since 20 November 2026; `main` has not yet moved to it. [Designs](#designs) says what each design is and why the third was started.
 
 ## Try it
 
@@ -32,8 +32,8 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 ## Designs
 
 - **Design 1** is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1), with its web demonstration and chipnet runs. It spent every coin together with the wallet's controller, which linked all of a wallet's activity and got in the way of applications.
-- **Design 2** is at the tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2), and is what the pages under "Try it" run. It gives each address its own key and uses the controller only for recovery. After a recovery, the new phone finds what the owner holds in an application from the application's token, its template and the chain alone.
-- **Design 3** starts from design 2 and keeps its keys, addresses and controller. It is built on the branch `design-3`. It changes how an application's position comes back after a recovery. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6. It is built and has run on a local test node; it has not yet run on chipnet.
+- **Design 2** is at the tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2), and was what the pages under "Try it" ran until 20 November 2026. It gives each address its own key and uses the controller only for recovery. After a recovery, the new phone finds what the owner holds in an application from the application's token, its template and the chain alone.
+- **Design 3** starts from design 2 and keeps its keys, addresses and controller. It is built on the branch `design-3`. It changes how an application's position comes back after a recovery. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6. It is built, has run on a local test node and on chipnet, and is what the pages under "Try it" serve since 20 November 2026.
 
 ### Why a third design
 
