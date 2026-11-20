@@ -186,7 +186,7 @@ describe('a Savings Jar through the loss of the device (PR19)', () => {
 
     taken.chain.nowMs += 3_700 * 1000;
     const action = taken.applications.actionOn(position, 'withdraw');
-    expect(action).toEqual({ template: names, action: 'withdraw', role: 'saver', variables: {}, about: { category, spent: true }, fromWallet: { typed: {} } });
+    expect(action).toEqual({ template: names, action: 'withdraw', role: 'saver', variables: {}, about: { category, spent: true }, fromWallet: { typed: {}, script: position.lockingBytecode } });
     expect(action).not.toHaveProperty('page');
     expect(action).not.toHaveProperty('application');
     const nextChange = takeNumber(taken.state().allocation, ADDRESS_KIND.change);

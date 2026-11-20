@@ -226,29 +226,25 @@ describe('the check of a position record, and positions from records', () => {
 
   it('PR05: at a position that is not confirmed, an action whose figures show the wallet giving nothing but the fee is carried out, and any other is refused', async () => {
     const device = await deviceWith([100_000n, 100_000n]);
-    const opened = await device.applications.carryOut(request(strongbox, 'open', 'holder', { amount: 30_000, label: '01' }));
+    // The opening makes two keys alike in everything, one for someone else: which is the wallet's cannot be told,
+    // so the record does not count, while the box holds what was paid into it.
+    const opened = await device.applications.carryOut(openBox(twinBox, '03', { spareLabel: '03', spareHolder: hex(elsewhere) }), undefined, { tokensLeave: true });
     const category = opened.tokens[0]?.category as string;
-    const [genuine] = device.applications.positionRecords;
-    if (genuine === undefined) throw new Error('no record');
-    // A second script that the key's own transaction paid, and a record for it: two records count, and both scripts hold coins.
-    await payWithKey(device, category, boxAt(strongbox, OTHER));
-    await archiveOf(device).write(lookAlike(genuine));
-    await device.applications.readBackup();
     const positions = await device.applications.recordedPositions();
-    expect(positions.map(({ status }) => status)).toEqual(['unconfirmed', 'unconfirmed']);
-    expect(positions[0]?.reason).toMatch(/2 records count for this token and the scripts of more than one hold coins/);
+    expect(positions.map(({ status }) => status)).toEqual(['unconfirmed']);
+    expect(positions[0]?.reason).toMatch(/cannot be told apart/);
 
-    const key = positions.find((position) => position.lockingBytecode === hex(boxAt(strongbox, category))) as RecordedPosition;
+    const key = positions.find((position) => position.lockingBytecode === hex(boxAt(twinBox, category))) as RecordedPosition;
     // Paying in: the wallet would give more than the fee.
     await refusedThere(device, device.applications.actionOn(key, 'add', { amount: 1_000 }));
     // Taking everything out: the wallet gives its key and the fee, and gets the key and the box's coins back.
     const take = device.applications.actionOn(key, 'take', { keyInput: 1 });
     const preview = await device.applications.preview(take);
-    expect(preview.notConfirmed).toMatch(/more than one hold coins/);
+    expect(preview.notConfirmed).toMatch(/cannot be told apart/);
     expect(preview.figures.intoApplicationSatoshis).toBe(-30_000n);
     const outcome = await device.applications.carryOut(take);
     expect(outcome.tokens).toEqual([expect.objectContaining({ category })]);
-    expect(await device.chain.listUnspent(boxAt(strongbox, category))).toEqual([]);
+    expect(await device.chain.listUnspent(boxAt(twinBox, category))).toEqual([]);
   }, 60_000);
 
   it('PR06: a position moved to another script by a later action has two records that count; the one whose script holds coins is the current one, and the other is not listed', async () => {
@@ -344,7 +340,7 @@ describe('the check of a position record, and positions from records', () => {
     await refusedThere(taken, payInto(keyedBox, OTHER));
   }, 60_000);
 
-  it('PR23: the same with a template that does not name the key as an input, while the genuine position holds coins: both are shown as not confirmed, and nothing is paid into either', async () => {
+  it('PR23: the same with a template that does not name the key as an input: the record counts, and its script is listed beside the genuine position; the holder of an earlier seed is not someone the check keeps out', async () => {
     const device = await deviceWith([100_000n, 100_000n]);
     const opened = await device.applications.carryOut(openBox(plainBox, '01'));
     const category = opened.tokens[0]?.category as string;
@@ -356,13 +352,34 @@ describe('the check of a position record, and positions from records', () => {
     expect((await checkPositionRecord(lookAlike(genuine), taken.wallet.parts, readTemplate(plainBox.texts.template))).counts).toBe(true);
     const positions = await taken.applications.recordedPositions();
     expect(listed(positions)).toEqual([
-      { status: 'unconfirmed', lockingBytecode: hex(boxAt(plainBox, category)), satoshis: 30_000n },
-      { status: 'unconfirmed', lockingBytecode: hex(boxAt(plainBox, OTHER)), satoshis: 20_000n },
+      { status: 'open', lockingBytecode: hex(boxAt(plainBox, category)), satoshis: 30_000n },
+      { status: 'open', lockingBytecode: hex(boxAt(plainBox, OTHER)), satoshis: 20_000n },
     ]);
     expect(positions.map(({ standing }) => standing)).toEqual(['own', 'own']);
-    await taken.receive(50_000n);
-    await refusedThere(taken, payInto(plainBox, category));
-    await refusedThere(taken, payInto(plainBox, OTHER));
+  }, 60_000);
+
+  it('PR25: a position moved to another script, and its earlier script paid again by someone else: both are listed as open; an action from the wallet\'s list is carried out on the entry it was asked on, and a request about the token means the one recorded last', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    const opened = await device.applications.carryOut(request(movingBox, 'open', 'holder', { amount: 30_000, label: '01' }));
+    const category = opened.tokens[0]?.category as string;
+    const [box] = await device.applications.recordedPositions();
+    await device.applications.carryOut(device.applications.actionOn(box as RecordedPosition, 'move', { keyInput: 1 }));
+    const atBox = hex(boxAt(movingBox, category));
+    const atSafe = hex(boxAt(movingBox, category, 'safeLockingScript'));
+    // Someone who kept the box's address pays into it again.
+    someonePays(device, hexToBin(atBox), 5_000n);
+    const positions = await device.applications.recordedPositions();
+    expect(listed(positions)).toEqual([
+      { status: 'open', lockingBytecode: atBox, satoshis: 5_000n },
+      { status: 'open', lockingBytecode: atSafe, satoshis: 30_000n },
+    ]);
+    // From the wallet's own list, on the box's entry: what was paid there again is taken out, and the safe stays.
+    await device.applications.carryOut(device.applications.actionOn(positions[0] as RecordedPosition, 'take', { keyInput: 1 }));
+    expect(listed(await device.applications.recordedPositions())).toEqual([{ status: 'open', lockingBytecode: atSafe, satoshis: 30_000n }]);
+    // Paid again, and then a request about the key with nothing said of which: the safe, where the wallet last moved the position.
+    someonePays(device, hexToBin(atBox), 4_000n);
+    await device.applications.carryOut(request(movingBox, 'take', 'holder', { keyInput: 1 }, { about: { category, spent: true } }));
+    expect(listed(await device.applications.recordedPositions())).toEqual([{ status: 'open', lockingBytecode: atBox, satoshis: 4_000n }]);
   }, 60_000);
 
   it('PR24: a record whose NFT differs from the wallet\'s only in its commitment or its capability does not count', async () => {

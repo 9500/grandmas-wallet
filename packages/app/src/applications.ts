@@ -155,7 +155,7 @@ export interface ApplicationAction {
    * user typed. A value is then taken from the user only after the record and the wallet itself, and only for
    * a value a person can type; anything else missing is the application's to give.
    */
-  fromWallet?: { typed: Record<string, string | number> };
+  fromWallet?: { typed: Record<string, string | number>; script?: string };
   /**
    * Coins of the application the action is to spend, by template input, as `<transaction id>:<output index>`:
    * the page's choice among the contracts every user of the application shares, and, for a position at a script
@@ -395,10 +395,10 @@ export class NeedsApplicationError extends ActionRefusedError {
 /**
  * Where a position stands, as the wallet's records and the chain say (sections 10.4 and 14.2):
  *
- * - `open`: a record that counts, and its script holds coins.
+ * - `open`: a record that counts, and its script holds coins. Several records of one token can be open at once:
+ *   a position that moved, and its earlier script that was paid again.
  * - `closed`: a record that counts, and its script holds nothing.
- * - `unconfirmed`: a record that does not count; or one of several records that count for one token while
- *   more than one of their scripts holds coins.
+ * - `unconfirmed`: a record that does not count.
  * - `held`: a record that names no script counts. The token is the template's; whether the position is open
  *   is the application's to say.
  */
@@ -1255,7 +1255,9 @@ export class Applications {
    * - **The token.** The request names the position by its token's category and says whether the action spends
    *   it. Where the template gives the token an input of its own, an action whose transaction has it spends it.
    * - **The record.** Of the records of that token and template, the one at a script the action spends, continues
-   *   or pays into, as the wallet lists it from the chain: open before closed before not confirmed.
+   *   or pays into, as the wallet lists it from the chain: open before closed before not confirmed, and of several
+ *   that stand alike the one recorded last, which is where the wallet last moved the position. An action the user
+ *   asks for from the wallet's own list names the script of the entry it was asked on.
    * - **Each value the role provides,** from the first that applies: (1) the record, for the values of the
    *   position's own script; (2) the wallet itself: a token category the action creates, the category of the token
    *   the action is about where an output names the variable as its token's category and no input does, a locking
@@ -1301,8 +1303,9 @@ export class Applications {
       const rank: Record<RecordedStatus, number> = { open: 0, closed: 1, unconfirmed: 2, held: 3 };
       const listed = (await this.recordedPositions({ template: template.identifier, categories: new Set([category]), trusting: template }))
         .filter(({ record: entry }) => entry.lockingScriptIdentifier !== undefined && entry.roleIdentifier === request.role && touches(entry.lockingScriptIdentifier))
-        .sort((a, b) => rank[a.status] - rank[b.status]);
-      record = listed[0]?.record;
+        .filter(({ lockingBytecode }) => request.fromWallet?.script === undefined || lockingBytecode === request.fromWallet.script);
+      const best = Math.min(...listed.map(({ status }) => rank[status]));
+      record = listed.filter(({ status }) => rank[status] === best).at(-1)?.record;
     }
     const page =
       record?.applicationPage ??
@@ -1922,8 +1925,8 @@ export class Applications {
   /**
    * The positions the wallet lists from its records (sections 10.4 and 14.2): for each NFT it holds, the records
    * that name its category, each checked against the chain. Of the records that count for one NFT and name a
-   * script, the one whose script holds coins is the current one and the others are not listed; none holding
-   * coins means closed; more than one holding coins means each is shown as not confirmed. A record that names
+   * script, each whose script holds coins is listed as open, in the order the records were written, and the others
+   * are not listed; none holding coins means closed. A record that names
    * no script and counts gives the token under its template's name, with no word on whether the position is
    * open. A record that does not count is shown as not confirmed. A record of a template the user does not trust
    * is not checked and gives no position: its token is listed by `tokens` as one of a template not trusted. A token without a record is not a position:
@@ -2013,10 +2016,9 @@ export class Applications {
       const scripts = [...new Map(counting.map((item) => [item.script ?? '', item])).values()];
       const filled = [];
       for (const item of scripts) if ((await holds(item.script ?? '')).coins > 0) filled.push(item);
-      if (filled.length === 1) listed.push(await position(filled[0] as (typeof checked)[number], 'open'));
-      else if (filled.length > 1) {
-        for (const item of filled) listed.push(await position(item, 'unconfirmed', `${filled.length} records count for this token and the scripts of more than one hold coins. One of them may be a trap.`));
-      } else if (scripts.length > 0) listed.push(await position(scripts.at(-1) as (typeof checked)[number], 'closed'));
+      // More than one can hold coins: a position that moved, and its earlier script that someone paid again.
+      for (const item of filled) listed.push(await position(item, 'open'));
+      if (filled.length === 0 && scripts.length > 0) listed.push(await position(scripts.at(-1) as (typeof checked)[number], 'closed'));
       for (const item of checked.filter(({ verdict, entry }) => verdict.counts && entry.lockingScriptIdentifier === undefined)) {
         if (!listed.some((known) => known.token.outpoint === outpoint && known.status === 'held' && known.template.identifier === item.entry.templateIdentifier)) listed.push(await position(item, 'held'));
       }
@@ -2237,7 +2239,7 @@ export class Applications {
    * action spends it where the template gives it an input of its own or the action spends the position; what the
    * user typed comes after the record and the wallet's own values.
    */
-  actionOn(position: Pick<RecordedPosition, 'token' | 'template' | 'record'>, action: string, variables: Record<string, string | number> = {}): ApplicationAction {
+  actionOn(position: Pick<RecordedPosition, 'token' | 'template' | 'record'> & Pick<Partial<RecordedPosition>, 'lockingBytecode'>, action: string, variables: Record<string, string | number> = {}): ApplicationAction {
     const kept = this.keptById(position.template.identifier);
     if (kept === undefined) return refuse('The template of this token is not trusted on this device.');
     const { definition } = readTemplate(kept.text);
@@ -2254,7 +2256,7 @@ export class Applications {
       role,
       variables: {},
       about: { category: position.token.category, spent },
-      fromWallet: { typed: variables },
+      fromWallet: { typed: variables, ...(position.lockingBytecode === undefined ? {} : { script: position.lockingBytecode }) },
     };
   }
 }
