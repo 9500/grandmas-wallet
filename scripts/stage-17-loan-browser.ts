@@ -185,7 +185,14 @@ const affordable = (market: Awaited<ReturnType<typeof readMarket>>, holds: bigin
 const connect = async (wallet: Page, loanPage: Page): Promise<void> => {
   await loanPage.goto(LOAN);
   const address = loanPage.locator('.value-text[data-value^="wiz:"]').first();
-  await address.waitFor({ state: 'visible', timeout: 120_000 * patience });
+  // A page that was connected to this wallet in a part of the run that stopped takes that session up again.
+  const resumed = loanPage.getByText('Your loans').first();
+  await address.or(resumed).or(loanPage.getByText(/Reaching the wallet/).first()).first().waitFor({ state: 'visible', timeout: 120_000 * patience });
+  if (!(await address.isVisible())) {
+    await resumed.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    log('   the loan page took up the session it had with this wallet before, and shows "Your loans"');
+    return;
+  }
   const uri = (await address.getAttribute('data-value')) ?? '';
   log(`   the loan page shows its connection address (${uri.length} characters) and waits for a wallet`);
   await wallet.goto(`${WALLET}apps`);
@@ -416,21 +423,26 @@ const steps = async (): Promise<void> => {
   // 10 ------------------------------------------------------------------
   if (state.step < 10) {
     if (!begin('The loan page is opened on the new phone, connects, finds the loan and closes it')) return;
-    const before = requests.urls();
-    const early = before.filter((url) => url.startsWith(LOAN_ORIGIN));
-    if (early.length > 0) throw new Error(`the new phone asked the loan page before it was opened: ${early.join(', ')}`);
-    kept.requestsBeforePage = before.length;
-    save();
+    // A part that stopped after the page was first opened here has checked and kept this already.
+    if (kept.requestsBeforePage === undefined) {
+      const before = requests.urls();
+      const early = before.filter((url) => url.startsWith(LOAN_ORIGIN));
+      if (early.length > 0) throw new Error(`the new phone asked the loan page before it was opened: ${early.join(', ')}`);
+      kept.requestsBeforePage = before.length;
+      save();
+    }
     const newLoan = await phone.context.newPage();
     watchPage('new-phone, loan tab', newLoan);
     await connect(phone.page, newLoan);
     // The template came from the backup: the wallet asks before it tells this page which keys of it it holds.
     const ask = phone.page.locator('.request-card').filter({ hasText: 'asks to see your tokens' }).first();
-    await ask.waitFor({ state: 'visible', timeout: 180_000 * patience });
-    log(`   the wallet: "${await textOf(ask)}"`);
-    await picture(phone.page, 'positions-ask');
-    await ask.getByRole('button', { name: 'Allow' }).click();
     const loan = newLoan.getByTestId('loan').first();
+    await ask.or(loan).first().waitFor({ state: 'visible', timeout: 180_000 * patience });
+    if (await ask.isVisible()) {
+      log(`   the wallet: "${await textOf(ask)}"`);
+      await picture(phone.page, 'positions-ask');
+      await ask.getByRole('button', { name: 'Allow' }).click();
+    } else log('   the user had allowed the page to see the wallet\'s tokens of its template in the part of the run that stopped');
     await loan.waitFor({ state: 'visible', timeout: 180_000 * patience });
     const found = await textOf(loan);
     log(`   allowed; the loan page found the loan from the key: "${found}"`);
@@ -496,6 +508,8 @@ const writeRecord = async (outcome: string): Promise<void> => {
       const bytecode = (value as { lockingBytecode?: Uint8Array } | undefined)?.lockingBytecode;
       if (bytecode instanceof Uint8Array) paryonPlaces.set(binToHex(bytecode), `Paryon's ${name} contract`);
     }
+    const fee = chipnet ? DEPLOYMENT.protocolFeeLockingBytecode : kept.deployment?.protocolFeeLockingBytecode;
+    if (fee !== undefined && fee !== deployerHex) paryonPlaces.set(fee, 'Paryon\'s fee address (its borrowing fee)');
   }
   for (const entry of wallet.activity) label(entry.transactionId, `${entry.who === 'old-phone' ? 'The owner\'s phone' : 'The new phone'}: ${entry.what}`);
   const placeOf = (lockingBytecode: string): string | undefined =>
