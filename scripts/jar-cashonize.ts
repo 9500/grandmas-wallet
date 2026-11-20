@@ -14,7 +14,11 @@
 //   return       Cashonize sends what it holds back to the funding address
 //
 // usage (from the repository's root):
-//   npx tsx scripts/jar-cashonize.ts [--until <step>] [--headed]
+//   npx tsx scripts/jar-cashonize.ts [--until <step>] [--headed] [--public]
+//
+// --public: the jar page is the public one, https://jar.9500.cash/, as it is served, instead of one built from this
+// checkout. The same Cashonize wallet is used (its profile in .chipnet/cashonize-run/profile); what the run keeps is
+// in .chipnet/cashonize-run-public/ and the record is docs/runs/stage-17-jar-cashonize-chipnet.md.
 //
 // The run is kept in .chipnet/cashonize-run/ (not in git): the browser profile, which holds Cashonize's
 // keys, wallet.json with its address and seed phrase (written before it is paid), run.json with every step
@@ -46,15 +50,19 @@ import { type BrowserContext, type Locator, type Page, chromium } from 'playwrig
 import { Electrum } from '../packages/chipnet/src/electrum.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const work = `${root}.chipnet/cashonize-run/`;
-const profile = `${work}profile`;
+/** The public jar page, as served, instead of one built from this checkout. */
+const publicPage = process.argv.includes('--public');
+const work = publicPage ? `${root}.chipnet/cashonize-run-public/` : `${root}.chipnet/cashonize-run/`;
+/** Cashonize's wallet: the same profile either way. */
+const profile = `${root}.chipnet/cashonize-run/profile`;
 const shots = `${work}shots/`;
 const statePath = `${work}run.json`;
 const walletPath = `${work}wallet.json`;
-const recordPath = `${root}docs/runs/stage-8-cashonize-chipnet.md`;
+const recordPath = publicPage ? `${root}docs/runs/stage-17-jar-cashonize-chipnet.md` : `${root}docs/runs/stage-8-cashonize-chipnet.md`;
 const CASHONIZE = 'https://cashonize.com';
 const PORT = 8193;
-const JAR_PAGE = `http://127.0.0.1:${PORT}/`;
+const PUBLIC_JAR_PAGE = 'https://jar.9500.cash/';
+const JAR_PAGE = publicPage ? PUBLIC_JAR_PAGE : `http://127.0.0.1:${PORT}/`;
 const CHAIN = 'wss://chipnet.9500.cash:443';
 const FUNDING = 40_000;
 const JAR_BCH = '0.00004';
@@ -120,7 +128,7 @@ const begin = (step: StepName): void => {
   say(`== ${step}`);
   if (['open', 'empty', 'pay in', 'empty again', 'pay in again', 'empty a third time'].includes(step) && pageNoted !== served) {
     pageNoted = served;
-    note(`page-${served}`, `From "${step}" on, the jar page was built from ${served}.`);
+    note(`page-${served}`, `From "${step}" on, the jar page was ${publicPage ? '' : 'built from '}${served}.`);
   }
 };
 const finish = (step: StepName): void => {
@@ -194,7 +202,13 @@ const pageSource = (): string => {
   const digest = createHash('sha256').update(git('diff', 'HEAD', '--', 'apps/jar')).digest('hex').slice(0, 12);
   return `commit \`${commit}\` with uncommitted changes to ${changed.map((name) => `\`${name}\``).join(', ')} (diff ${digest})`;
 };
-const served = pageSource();
+/** The release the public page serves, as its version record says. */
+const publicSource = async (): Promise<string> => {
+  const version = (await (await fetch(`${PUBLIC_JAR_PAGE}version.json`)).json()) as { commit?: string; branch?: string; releasedAt?: string; network?: string };
+  if (version.network !== 'chipnet') throw new Error(`${PUBLIC_JAR_PAGE} does not serve chipnet`);
+  return `the public page ${PUBLIC_JAR_PAGE}, commit \`${version.commit}\` of ${version.branch}, released ${version.releasedAt}`;
+};
+const served = publicPage ? await publicSource() : pageSource();
 
 const serve = (): ChildProcess => {
   execFileSync('npx', ['vite', 'build', '--outDir', `${work}jar-dist`, '--emptyOutDir'], { cwd: `${root}apps/jar`, stdio: 'inherit' });
@@ -388,21 +402,21 @@ const writeRecord = async (): Promise<void> => {
   }
   const jar = state.jar;
   const lines = [
-    '# Stage 8 run on chipnet (SJ03, an ordinary wallet): a savings jar opened and emptied with Cashonize',
+    publicPage ? '# Stage 17 run on chipnet: a savings jar opened and emptied with Cashonize on the public jar page' : '# Stage 8 run on chipnet (SJ03, an ordinary wallet): a savings jar opened and emptied with Cashonize',
     '',
-    `Written by the run itself (\`scripts/jar-cashonize.ts\`). The ordinary wallet is the Cashonize web wallet at ${CASHONIZE}, unmodified, as it was served on the day of the run; the page that builds every transaction is this project's Savings Jar page (\`apps/jar\`), the page and contract Grandma's Wallet uses. Cashonize and the page ran in one Chromium (Playwright) profile kept on disk; the page was built from this checkout and served on 127.0.0.1:${PORT} by \`deploy/serve.mjs\` with \`deploy/config/local.json\` (chipnet). Every transaction was signed in Cashonize after its request was shown, and sent by the page.`,
+    `Written by the run itself (\`scripts/jar-cashonize.ts${publicPage ? ' --public' : ''}\`). The ordinary wallet is the Cashonize web wallet at ${CASHONIZE}, unmodified, as it was served on the day of the run; the page that builds every transaction is this project's Savings Jar page (\`apps/jar\`), the page and contract Grandma's Wallet uses. Cashonize and the page ran in one Chromium (Playwright) profile kept on disk; ${publicPage ? `the page was the public one, ${PUBLIC_JAR_PAGE}, as served (its release is noted below), with the jar's template of version 4` : `the page was built from this checkout and served on 127.0.0.1:${PORT} by \`deploy/serve.mjs\` with \`deploy/config/local.json\` (chipnet)`}. Every transaction was signed in Cashonize after its request was shown, and sent by the page.`,
     '',
     `- Date: ${state.started.slice(0, 10)}`,
     `- Cashonize: ${state.cashonize?.build ?? '?'}`,
     `- Browser: ${state.cashonize?.browser ?? '?'}`,
-    `- Cashonize's chipnet wallet receives at \`${state.cashonize?.address ?? '?'}\` (keys in the browser profile; its seed phrase in \`.chipnet/cashonize-run/wallet.json\`, not in git)`,
+    `- Cashonize's chipnet wallet receives at \`${state.cashonize?.address ?? '?'}\` (keys in the browser profile; its seed phrase in \`${walletPath.slice(root.length)}\`, not in git)`,
     ...(jar === undefined
       ? []
       : [
           `- Jar key (token category): \`${jar.category}\`; the jar's date: ${new Date(jar.unlockTime * 1000).toISOString()}`,
           `- Jar address: \`${jar.address}\``,
         ]),
-    `- Jar page: this repository's \`apps/jar\`; the source each step was carried out with is noted below (the record was written at commit \`${commit}\`)`,
+    publicPage ? `- Jar page: ${served}; the record was written at commit \`${commit}\`` : `- Jar page: this repository's \`apps/jar\`; the source each step was carried out with is noted below (the record was written at commit \`${commit}\`)`,
     `- Started ${state.started}`,
     '',
     '| Step | Transaction | Bytes | Fee (sat) | Note |',
@@ -427,7 +441,7 @@ save();
 let server: ChildProcess | undefined;
 let context: BrowserContext | undefined;
 try {
-  server = serve();
+  if (!publicPage) server = serve();
   context = await chromium.launchPersistentContext(profile, { headless: !headed, viewport: { width: 1000, height: 1100 } });
   for (const blank of context.pages()) await blank.close();
   const wallet = await openCashonize(context);
