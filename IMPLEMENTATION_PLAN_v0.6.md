@@ -16,7 +16,7 @@ The rules of version 0.4 hold unchanged: mainnet-capable code, test coins are no
 - **No signature before its dependencies are stored.** To the template, the viewing key and the kit this version adds the record of every position an action leaves (proposal section 10.5).
 - **The wallet knows no application, and reads nothing written for it.** Everything the wallet does for an application comes from the application's XO template, the request and the wallet's own record. A test fails if wallet code names an application or reads a declaration.
 - **Pushes** happen at the milestones marked below, or when asked.
-- **The public sites keep showing the second design.** They are served from a release copy and are released again only when the owner says so. A design-2 release is built from the tag `design-2`.
+- **The public sites show the third design since 20 November 2026,** by the owner's decision (first from commit `cd18348` of `design-3`, then `b67f221`). They are served from a release copy and are released again only when the owner says so. The second design's release, its unit files and a copy of the stores' data are kept in `~/.local/share/grandmas-wallet/switches/2026-11-20-to-design-3/`; how to put it back is in `docs/runs/stage-17-switch.md` on the branch, and has not been tried.
 
 ## Where tests run
 
@@ -114,14 +114,42 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 
 **Tests:** PR19, PR20. **Done when** the runs' records are committed. **Push.**
 
-**State on 20 November 2026:** the template, the two pages and their packages are changed, and both courses ran on the local node through the engine without a browser (`docs/runs/stage-17-jar-local-node.md`, `docs/runs/stage-17-loan-local-node.md` on the branch `design-3`), and again after the declaration was removed from the wallet. Both courses then ran in browsers on the local node, with the new phone's requests recorded (`docs/runs/stage-17-jar-browser-local-node.md`, `docs/runs/stage-17-loan-browser-local-node.md`; pictures in `docs/screens/live-*.png`): PR19 and PR20 pass there. Six defects the courses showed were corrected, among them what the wallet's review said about an application's own NFTs. Still open: the positions of the second design on chipnet, and the chipnet runs G and H, which close PR19 and PR20.
+A release is checked with `node deploy/check-public.mjs <configuration> --expect <commit>` and then `npx tsx scripts/page-smoke.ts <configuration>`, which goes through the start screens of the public pages and needs no coins. `docs/walkthrough.md` is the hand course of this version; the second design's is at the tag `design-2`. The invitations kept in `docs/xo-invitations.md` are the second design's.
+
+The owner decided on 20 November 2026 that the pages of this version are served at the public addresses, in place of the second design's, whose release is kept so that it can be put back. Whether `main` moves to this version is decided separately.
+
+**State on 20 November 2026:** the template, the two pages and their packages are changed, and both courses ran on the local node through the engine without a browser (`docs/runs/stage-17-jar-local-node.md`, `docs/runs/stage-17-loan-local-node.md` on the branch `design-3`), and again after the declaration was removed from the wallet. Both courses then ran in browsers on the local node, with the new phone's requests recorded (`docs/runs/stage-17-jar-browser-local-node.md`, `docs/runs/stage-17-loan-browser-local-node.md`; pictures in `docs/screens/live-*.png`): PR19 and PR20 pass there. Six defects the courses showed were corrected, among them what the wallet's review said about an application's own NFTs. **Done on chipnet, 20 and 21 November 2026:** the second design's wallets and what the first design left that was worth its fee were drained to the funding address, and `.xo-demo/leftovers.md` says what stays; the pages of this version were released to the public addresses; run G (`docs/runs/stage-17-jar-browser-chipnet.md`), run H (`docs/runs/stage-17-loan-browser-chipnet.md`) and the Savings Jar page with the unmodified Cashonize wallet (`docs/runs/stage-17-jar-cashonize-chipnet.md`) ran against them. PR19 and PR20 are closed. Run H did not run straight through: its recovery request waited about 25 minutes for a block, the first closing was refused because someone else had spent a coin of Paryon's that it named, and the loan was closed by driving the same pages directly. What follows from it is in the next stage's list.
 
 ## Stage 18 — For XO, and the documents
+
+- From run H: a page tries again at once when the network refuses a transaction because someone else spent a coin it named; the wallet tells the page so in a form it can act on. The run scripts stop within seconds where a page does not show what it should, and keep a picture and the page's text; only waits on the chain are long. Each chipnet run gets its own funded key, so that runs go side by side.
+- A fee rate of exactly 1 satoshi per byte was seen to confirm slowly on chipnet in these runs; whether the wallet pays slightly more there is to be decided once that is measured.
 
 - The notes for developer feedback are kept up to date in [docs/xo-feedback-notes.md](docs/xo-feedback-notes.md). The feedback itself is written by the owner.
 - What XO's authors answer about a call to follow a script, about synchronisation and about how invitations travel (proposal section 13.6) is noted in the proposal's section 22.
 - The proposal is brought in line with what was built: its status table and every new test with its result. The overview page follows under the same version number.
 - **Push.**
+
+## Stage 19 — Token names and units from a registry
+
+Asked for by the owner on 20 November 2026, for after the chipnet runs. Until then the wallet shows a fungible token by its category and in raw units (proposal section 13.3, decision 25).
+
+- First an evaluation, before anything is built: whether the wallet can read Bitcoin Cash Metadata Registries (BCMR) to show a token's name, symbol and decimals. **Written on 20 November 2026: [docs/token-registries.md](docs/token-registries.md),** from the specification, the sources of Cashonize and Selene, and a trial that followed PUSD's registry on chipnet from its category to a file with the published hash. It proposes names taken only from a file the token's own chain of transactions publishes, and lists eight decisions for the owner.
+- What has to be settled there: which registries the wallet trusts and how a category's own registry is found and checked against the chain; what a lookup tells a server about the wallet's tokens; what is kept on the device and in the backup, so that a new phone shows the same names; what the wallet shows when a registry and a template disagree; that amounts the wallet's own figures show stay the wallet's, with a registry supplying only the name and where the decimal point goes.
+- Then the wallet's screens: balances, sending, the review of an action, and typed amounts in the token's own units.
+
+**Done when** the owner has decided the points of that document's section 8, and, if it is built, its tests TR01 to TR14 pass and its exit criteria are met.
+
+## Stage 20 — Mainnet by configuration
+
+Asked for by the owner on 20 November 2026, to meet the requirements of BCH Blaze. The code has been kept able to run on mainnet throughout (the rules above); this stage makes it something a configuration can turn on.
+
+- One configuration parameter for the wallet, the recoverer's page and the two applications' pages, off by default, in the configuration file the pages are served with. Nothing in a page's own interface turns it on.
+- With it on, every page shows a warning that stays in view and that the user confirms once before a wallet is created or opened: mainnet is enabled only to meet the requirements of BCH Blaze; nothing here has been audited; coins can be lost; this project does not recommend enabling it.
+- What mainnet changes and has to be checked before it is turned on anywhere: the chain servers and their checkpoints; the recoverer's waiting periods, whose mainnet default is about a day; XO's key path for mainnet; the stores' addresses; fees and the smallest outputs; and for the loan page, whether a deployment of ParyonUSD is named at all or the page stays off on mainnet.
+- A run on mainnet with small amounts is the owner's decision and is not part of this stage.
+
+**Done when** a page built with the parameter on shows the warning and works against mainnet servers in a test that sends nothing, and a page built without it cannot be brought to mainnet.
 
 ## Which stage closes which test
 
@@ -159,4 +187,8 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 31 | Acting without the application | Decided, 20 November 2026 | Not required; done where nothing is missing |
 | 32 | A token made from the wallet's coin that does not come to the wallet | Decided, 20 November 2026 | Carried out with the user's tick |
 | 33 | Corrections from stage 11 | Taken into the proposal, 20 November 2026 | — |
-| 34 | Telling a moved position from one set beside it | Not in this version | The limit is stated |
+| 34 | Several places that hold coins for one token | Decided, 20 November 2026 | Each is listed as an open position; telling a moved position from one set beside it is not pursued |
+| 36 | Where the pages of this version are served for the chipnet runs | Decided, 20 November 2026 | At the public addresses, in place of the second design's pages |
+| 37 | The wait for the engine to list the coins of an action just sent | Decided, 20 November 2026 | Accepted |
+| 38 | Token names and units from a registry (BCMR) | Stage 19 | Evaluated in `docs/token-registries.md`; its eight decisions are open |
+| 39 | Mainnet | Stage 20 | By a configuration parameter, off by default, with a warning |
