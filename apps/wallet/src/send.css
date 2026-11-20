@@ -45,6 +45,11 @@
 .token-review .kv dd strong { font-weight: 650; }
 .controls .choice { margin-top: 4px; }
 .token-review .controls { margin-top: 12px; }
+.stake-headline { display: inline; }
+.stake-headline .info { vertical-align: middle; }
+.stake-holds { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+.stake-application { display: flex; flex-direction: column; gap: 2px; }
+.stake-application .application-page { font-weight: 600; }
 
 @media (min-width: 960px) {
   .send-page .card { padding: 28px 32px; }

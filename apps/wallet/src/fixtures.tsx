@@ -55,7 +55,8 @@ import { Welcome } from './Welcome.js';
  * already opened); the start (`show=welcome`), setting a wallet up with a recoverer's code (`show=setup-bank`,
  * `setup-friend`) and the wallet ready (`show=ready`); the Send screen for Bitcoin Cash (`show=send`, `&little` for a
  * wallet that holds too little to send everything) and with tokens to choose from (`show=send-token`, `&nft` to open
- * with the key chosen); the Receive screen (`show=receive`, `&again` for an address shown again); the Recovery screen
+ * with the key chosen, `&nft=ticket` with a key whose record names no script, `&nft=spent` with one whose position is
+ * emptied); the Receive screen (`show=receive`, `&again` for an address shown again); the Recovery screen
  * (`show=recovery`) and the user's own backup (`show=backup`, with a sample complete backup). Served by the
  * development server; the build of the page does not include it. The templates here are invented examples, as a
  * template would describe itself, and what is handed to the recoverer is a sample that their page cannot open.
@@ -343,7 +344,13 @@ const SetUpFixture = ({ kind }: { kind: 'bank' | 'friend' }) => {
 
 const DOLLARS = 'a1d53bd8fa94e1c3a42e6d5c3e6d0b0a6b9f0e2c5d17c8f9e3b1a20475c6d8e9';
 const dollars: HeldToken = { category: DOLLARS, commitment: '', amount: 25_000n, place: 'address', outpoint: `${'7b'.repeat(32)}:1`, satoshis: 1_000n, meaning: 'unknown' };
-const held: HeldToken[] = [dollars, unknown, open];
+/** A key whose position sits at a script many users share: its record names no script, and the application's page. */
+const SEND_TICKET = 'd7'.repeat(32);
+const ticket: HeldToken = { category: SEND_TICKET, commitment: '', capability: 'minting', amount: 0n, place: 'address', outpoint: `${'d8'.repeat(32)}:0`, satoshis: 1_000n, meaning: 'position', template: { identifier: 'b6'.repeat(32), name: 'Example cloakroom (test network)' }, tokenName: 'Ticket' };
+/** A key whose position at a script of its own was emptied. */
+const SPENT_KEY = 'd9'.repeat(32);
+const spentKey: HeldToken = { category: SPENT_KEY, commitment: '01', capability: 'none', amount: 0n, place: 'address', outpoint: `${'da'.repeat(32)}:0`, satoshis: 1_000n, meaning: 'position', template: { identifier: 'b4'.repeat(32), name: 'Example money box (test network)' }, tokenName: 'Box key' };
+const held: HeldToken[] = [dollars, unknown, open, ticket, spentKey];
 /** Where the key's position stands, as the wallet's record and the chain say. */
 const keyPosition: RecordedPosition = {
   token: { category: open.category, commitment: open.commitment, capability: 'minting', outpoint: open.outpoint, satoshis: open.satoshis, place: 'address' },
@@ -355,6 +362,26 @@ const keyPosition: RecordedPosition = {
   lockingBytecode: 'aa20'.padEnd(70, '7'),
   satoshis: 59_957_301n,
   coins: 1,
+};
+const ticketPosition: RecordedPosition = {
+  token: { category: SEND_TICKET, commitment: '', capability: 'minting', outpoint: ticket.outpoint, satoshis: ticket.satoshis, place: 'address' },
+  template: { identifier: 'b6'.repeat(32), name: 'Example cloakroom (test network)' },
+  tokenName: 'Ticket',
+  status: 'held',
+  record: { kind: 'position', token: { category: SEND_TICKET, commitment: '', capability: 'minting' }, templateIdentifier: 'b6'.repeat(32), values: {}, applicationPage: 'https://cloakroom.example.org/coats/' },
+  standing: 'own',
+  page: 'https://cloakroom.example.org/coats/',
+};
+const spentPosition: RecordedPosition = {
+  token: { category: SPENT_KEY, commitment: '01', capability: 'none', outpoint: spentKey.outpoint, satoshis: spentKey.satoshis, place: 'address' },
+  template: { identifier: 'b4'.repeat(32), name: 'Example money box (test network)' },
+  tokenName: 'Box key',
+  status: 'closed',
+  record: { kind: 'position', token: { category: SPENT_KEY, commitment: '01', capability: 'none' }, templateIdentifier: 'b4'.repeat(32), lockingScriptIdentifier: 'boxLockingScript', roleIdentifier: 'holder', variables: { boxKey: SPENT_KEY }, values: {} },
+  standing: 'own',
+  lockingBytecode: 'aa20'.padEnd(70, '9'),
+  satoshis: 0n,
+  coins: 0,
 };
 
 /** Where the fixtures send to: a script, written in either form. */
@@ -406,7 +433,7 @@ const everythingOf = (to: Uint8Array) => {
 const tokenOwner = {
   session: { network: 'testnet', environment: { explorer: '' } },
   balance: { recoverable: spendable, vault: 0n, notRecoverable: 0n, voided: 0n, toSweep: 0n, tokens: held.map(() => ({})) },
-  apps: { version: 0, applications: { tokens: async () => held, recordedPositions: async () => [keyPosition], suggestions: [] } },
+  apps: { version: 0, applications: { tokens: async () => held, recordedPositions: async () => [keyPosition, ticketPosition, spentPosition], suggestions: [] } },
   wallet: {
     quoteTokens: async (request: TokenSendRequest) => quoteOf(request),
     sendTokens: async (request: TokenSendRequest) => ({ transactionId: '3f'.repeat(32), bytes: quoteOf(request).bytes, feeSatoshis: quoteOf(request).feeSatoshis, remainderSatoshis: 0n, quote: quoteOf(request) }),
@@ -742,7 +769,8 @@ const makeSample = async (complete: boolean): Promise<string> => {
 
 const show = params.get('show') ?? 'tokens';
 const REVIEWS: Record<string, ActionPreview> = { review: borrowing, closing, 'box-open': boxOpening, 'box-empty': boxEmptying };
-if (show === 'send-token') chooseToken(new URLSearchParams(window.location.search).has('nft') ? `nft:${open.outpoint}` : `fungible:${DOLLARS}`);
+const chosenNft = new URLSearchParams(window.location.search).get('nft');
+if (show === 'send-token') chooseToken(chosenNft === null ? `fungible:${DOLLARS}` : `nft:${chosenNft === 'ticket' ? ticket.outpoint : chosenNft === 'spent' ? spentKey.outpoint : open.outpoint}`);
 const ignore = () => undefined;
 /** The list of tokens on its own: what the wallet offers at each position, and the template the backup holds. */
 const listOwner = { apps: { applications: { suggestions: [lendingSuggestion], offeredActions: offeredFor } }, navigate: ignore } as unknown as Owner;

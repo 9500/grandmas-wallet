@@ -36,6 +36,7 @@ import type { Owner } from './OwnerApp.js';
 import { paymentAddress, tokenAddress } from './scan.js';
 import { WithScan } from './Scanner.js';
 import { takeChosenToken } from './token-choice.js';
+import { CAPABILITY_WORDS, stakeHeadline, tokenStake } from './token-stake.js';
 import { TokenAmount, rawUnits } from './token-words.js';
 import './send.css';
 
@@ -437,13 +438,13 @@ const controls = (token: SendableToken): boolean => token.kind === 'nft' && (tok
 const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
   const [held, setHeld] = useState<HeldToken[] | undefined>();
   // Where the positions of the wallet's records stand, for what an NFT controls. Without the chain, nothing is said of it.
-  const [positions, setPositions] = useState<RecordedPosition[]>([]);
+  const [positions, setPositions] = useState<RecordedPosition[] | undefined>();
   const reading = useTask();
   useEffect(() => {
     void reading.run('read', async () => setHeld(await owner.apps.applications.tokens()));
-    owner.apps.applications.recordedPositions().then(setPositions, () => setPositions([]));
+    owner.apps.applications.recordedPositions().then(setPositions, () => setPositions(undefined));
   }, [owner.balance?.tokens.length, owner.apps.version]);
-  const positionOf = (token: SendableToken): RecordedPosition | undefined => (token.kind === 'nft' ? positions.find((position) => position.token.outpoint === token.token.outpoint && position.status !== 'unconfirmed') : undefined);
+  const positionOf = (token: SendableToken): RecordedPosition | undefined => (token.kind === 'nft' ? positions?.find((position) => position.token.outpoint === token.token.outpoint && position.status !== 'unconfirmed') : undefined);
   const sendable = useMemo(() => (held === undefined ? undefined : sendableTokens(held)), [held]);
   const [key, setKey] = useState<string | undefined>(chosen);
   const token = sendable?.find((entry) => entry.key === key) ?? sendable?.[0];
@@ -651,7 +652,7 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
         {stage.at === 'review' && (
           <Card title="Check and send" cls="token-review send-review">
             <TokenReview stage={stage} />
-            {controls(stage.token) && stage.token.kind === 'nft' && <Controlled token={stage.token.token} position={positionOf(stage.token)} understood={understood} onUnderstood={setUnderstood} />}
+            {controls(stage.token) && stage.token.kind === 'nft' && <Controlled token={stage.token.token} positions={positions} understood={understood} onUnderstood={setUnderstood} />}
             <TaskStatus task={task} name="send" />
             <div class="actions">
               <Button task={task} name="send" disabled={controls(stage.token) && !understood} onClick={() => void send()}>
@@ -775,38 +776,73 @@ const TokenReview = ({ stage }: { stage: Extract<TokenStage, { at: 'review' }> }
   );
 };
 
-/** What a capability lets the token's holder do, in plain words. */
-const CAPABILITY: Record<'minting' | 'mutable', string> = {
-  minting: 'It can make new tokens of its category: whoever holds it can create more of them, fungible or NFTs, as many as they like.',
-  mutable: 'Whoever holds it can change what is written on it, its commitment, each time they move it.',
-};
+/** Where the application's page is, as a link, by its host and path. */
+const PageLink = ({ page }: { page: string }) => (
+  <a class="application-page" href={page} target="_blank" rel="noopener noreferrer">
+    {page.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+  </a>
+);
 
-/** A token that gives its holder more than itself: what it controls, said plainly, and a tick before it can be sent. */
-const Controlled = ({ token, position, understood, onUnderstood }: { token: HeldToken; position: RecordedPosition | undefined; understood: boolean; onUnderstood: (value: boolean) => void }) => (
-    <div class="controls stack-s">
+/**
+ * A token that gives its holder more than itself: what it controls, from the wallet's own record, the template's name
+ * and the chain, and a tick before it can be sent. The line in view says what is at stake; why, behind a "?".
+ */
+const Controlled = ({ token, positions, understood, onUnderstood }: { token: HeldToken; positions: RecordedPosition[] | undefined; understood: boolean; onUnderstood: (value: boolean) => void }) => {
+  const stake = tokenStake(token, positions);
+  const { holds } = stake;
+  const position = holds.kind !== 'none' && holds.kind !== 'untrusted';
+  return (
+    <div class="controls stack-s" data-testid="token-stake">
       <Notice tone="warn">
         <div class="stack-s">
-          <strong>This token gives its holder more than itself</strong>
-          {token.meaning !== 'unknown' && (
-            <span>
-              {token.template === undefined ? 'A record of this wallet ties it to a position' : `It controls a position of the template "${token.template.name}"`}
-              {position?.status === 'open' && position.satoshis !== undefined ? (
+          <span class="stake-headline">
+            <strong>{stakeHeadline(stake)}</strong>{' '}
+            <Info label="About what this token controls">
+              {position ? (
                 <>
-                  , which holds <Amount satoshis={position.satoshis} exact />.
+                  A record in this wallet's backup ties this token to a position of the template. Whoever holds the token can take the position's actions; once it is sent, this wallet no longer lists the position or offers them.
+                  {holds.kind === 'application' && ' The position sits at a script that many users share. Which coin it is, and what it holds, the application says.'}
+                  {holds.kind === 'amount' && holds.places > 1 && ` The figure is what ${holds.places} places of this position hold together.`}
                 </>
-              ) : position?.status === 'closed' ? (
-                ', which holds nothing now.'
+              ) : holds.kind === 'untrusted' ? (
+                'Until the template is trusted on this phone, the wallet does not check the record against the chain, and cannot say what the token controls.'
               ) : (
-                '.'
-              )}{' '}
-              Whoever receives it controls that from then on, and can take its actions. This wallet will no longer list it or offer them.
+                'No record of this wallet ties the token to a position.'
+              )}
+              {stake.capability !== undefined && holds.kind !== 'none' && <> {CAPABILITY_WORDS[stake.capability]}</>}
+            </Info>
+          </span>
+          {holds.kind === 'amount' ? (
+            <span class="stake-holds">
+              <span>Holds now</span>
+              <strong>
+                <Amount satoshis={holds.satoshis} exact />
+              </strong>
             </span>
-          )}
-          {(token.capability === 'minting' || token.capability === 'mutable') && <span>{CAPABILITY[token.capability]}</span>}
+          ) : holds.kind === 'nothing' ? (
+            <span class="stake-holds">
+              <span>Holds now</span>
+              <strong>Nothing</strong>
+            </span>
+          ) : holds.kind === 'application' ? (
+            <span class="stake-application">
+              The application shows what it holds{holds.page === undefined ? '.' : ':'}
+              {holds.page !== undefined && <PageLink page={holds.page} />}
+            </span>
+          ) : holds.kind === 'not confirmed' ? (
+            <span>
+              <strong>Not confirmed.</strong> The chain does not bear out this wallet's record of it.
+            </span>
+          ) : holds.kind === 'not read' ? (
+            <span>What it holds can't be read just now.</span>
+          ) : holds.kind === 'untrusted' ? (
+            <span>What it controls can't be shown here.</span>
+          ) : null}
         </div>
       </Notice>
       <Choice type="checkbox" checked={understood} onChange={onUnderstood} title="I understand that whoever receives this token gets what it controls">
         Sending it cannot be undone.
       </Choice>
     </div>
-);
+  );
+};

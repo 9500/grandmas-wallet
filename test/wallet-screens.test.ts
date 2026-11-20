@@ -6,6 +6,7 @@ import { keyedStrongboxTemplate, strongboxTemplate, testKey } from '@grandmas-wa
 import { describe, expect, it } from 'vitest';
 
 import { approval, consentOf, leavingLine, leavingWords, refusalOf, tokenList } from '../apps/wallet/src/review-gate.js';
+import { stakeHeadline, tokenStake } from '../apps/wallet/src/token-stake.js';
 import { type Device, deviceWith, presentation, request } from './support/applications.js';
 
 /**
@@ -146,4 +147,47 @@ describe('the wallet\'s screens on the wallet', () => {
     // A token that no record lists as a position is listed as a token, and only it.
     expect(list.tokens.map(({ outpoint }) => outpoint)).toEqual(['f:0', 'g:0']);
   });
+});
+
+describe('what the Send screen says is at stake with a token', () => {
+  const key = (more: Partial<HeldToken> = {}): HeldToken => ({ category: 'ef'.repeat(32), commitment: '01', capability: 'none', amount: 0n, place: 'address', outpoint: 'k:0', satoshis: 1_000n, meaning: 'position', template: { identifier: 'tt', name: 'Keyed strongbox' }, tokenName: 'Strongbox key', ...more });
+  const at = (status: RecordedPosition['status'], more: Partial<RecordedPosition> = {}, outpoint = 'k:0'): RecordedPosition =>
+    ({ token: { category: 'ef'.repeat(32), commitment: '01', capability: 'none', outpoint, satoshis: 1_000n, place: 'address' }, template: { identifier: 'tt', name: 'Keyed strongbox' }, status, record: { kind: 'position', templateIdentifier: 'tt', values: {} }, standing: 'own', ...more }) as RecordedPosition;
+
+  it('names the template, and shows what a script of the position\'s own holds, in all of its places', () => {
+    const stake = tokenStake(key(), [at('open', { satoshis: 30_000n }), at('open', { satoshis: 2_000n }), at('closed', { satoshis: 0n }), at('open', { satoshis: 9_999n }, 'other:0')]);
+    expect(stake).toEqual({ template: 'Keyed strongbox', holds: { kind: 'amount', satoshis: 32_000n, places: 2 } });
+    expect(stakeHeadline(stake)).toBe('It controls a position of "Keyed strongbox".');
+    expect(tokenStake(key(), [at('closed', { satoshis: 0n })]).holds).toEqual({ kind: 'nothing' });
+  });
+
+  it('sends the user to the application, at the page the record names, where the record names no script', () => {
+    expect(tokenStake(key({ capability: 'minting' }), [at('held', { page: 'https://loans.example.org/' })])).toEqual({ template: 'Keyed strongbox', holds: { kind: 'application', page: 'https://loans.example.org/' }, capability: 'minting' });
+    // The page as the record has it, where the listing gives none.
+    expect(tokenStake(key(), [at('held', { record: { kind: 'position', templateIdentifier: 'tt', values: {}, applicationPage: 'https://copy.example.net/' } })]).holds).toEqual({ kind: 'application', page: 'https://copy.example.net/' });
+    expect(tokenStake(key(), [at('held')]).holds).toEqual({ kind: 'application' });
+  });
+
+  it('says so where it cannot tell: positions not read, a record the chain does not bear out, a template not trusted', () => {
+    expect(tokenStake(key(), undefined).holds).toEqual({ kind: 'not read' });
+    expect(tokenStake(key(), []).holds).toEqual({ kind: 'not read' });
+    expect(tokenStake(key(), [at('unconfirmed', { satoshis: 5_000n })]).holds).toEqual({ kind: 'not confirmed' });
+    const untrusted = tokenStake(key({ meaning: 'incomplete' }), []);
+    expect(untrusted).toEqual({ template: 'Keyed strongbox', holds: { kind: 'untrusted' } });
+    expect(stakeHeadline(untrusted)).toBe('A record ties it to "Keyed strongbox", a template this phone does not trust yet.');
+    // A token no record ties to anything: what its capability lets its holder do.
+    const { template: _template, ...bare } = key({ meaning: 'unknown', capability: 'minting' });
+    const minting = tokenStake(bare, []);
+    expect(minting).toEqual({ holds: { kind: 'none' }, capability: 'minting' });
+    expect(stakeHeadline(minting)).toMatch(/^It can make new tokens of its category/);
+  });
+
+  it('reads the amount from the chain for a position the wallet made', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    await device.applications.carryOut(request(keyedBox, 'open', 'holder', { amount: 30_000, label: '01' }));
+    const positions = await device.applications.recordedPositions();
+    const held = (await device.applications.tokens()).find((token) => token.meaning === 'position');
+    expect(held).toBeDefined();
+    expect(tokenStake(held as HeldToken, positions)).toEqual({ template: 'Keyed strongbox', holds: { kind: 'amount', satoshis: 30_000n, places: 1 } });
+  }, 60_000);
 });

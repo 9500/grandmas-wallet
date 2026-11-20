@@ -6,11 +6,12 @@
 // token; a fungible token is shown by its category and in raw units, and nothing names it; an amount with a
 // fraction is refused, not rounded; "Max" fills the whole balance; a
 // plain address is refused before anything is built, with what to ask the receiver for; a token address gives the
-// review with what goes, the token change and the fee; a token that controls something says what, and cannot be
-// sent until the user ticks that they understand; the Receive screen shows the address in its token form first, and
+// review with what goes, the token change and the fee; a token that controls something names its template and what
+// its position holds now (or, where the record names no script, that the application shows it, at the record's page),
+// and cannot be sent until the user ticks that they understand; the Receive screen shows the address in its token form first, and
 // its switch shows the same address in the plain form, in the text, the copy button and the code. Screenshots, for a phone and a desktop, go to docs/screens/:
-// wallet-send-token-choice, wallet-send-token-review, wallet-send-token-controls, wallet-send-token-plain-address
-// and wallet-receive-token.
+// wallet-send-token-choice, wallet-send-token-review, wallet-send-token-controls, wallet-send-token-application,
+// wallet-send-token-plain-address and wallet-receive-token.
 //
 // usage (from the repository's root):   npx tsx scripts/token-send-check.ts [--headed] [--no-screens]
 // It takes a few seconds after the build. Port 8192 must be free.
@@ -130,11 +131,14 @@ try {
   check(!(await page.locator('#token-amount').isVisible()), 'an NFT is sent whole: no amount is asked for');
   await page.locator('#token-to').fill(tokenAddress);
   await page.getByRole('button', { name: 'Review' }).click();
-  await page.getByText('This token gives its holder more than itself').waitFor();
+  await page.getByText('It controls a position of "Example lending (test network)".').waitFor();
   const controls = await textOf(page, '.controls');
-  check(controls.includes('It controls a position of the template "Example lending (test network)", which holds 0.59957301 BCH'), 'the review says what the token controls, with what it holds');
-  check(controls.includes('Whoever receives it controls that from then on'), 'and that whoever receives it controls that from then on');
-  check(controls.includes('It can make new tokens of its category'), 'and what its minting capability lets its holder do');
+  check(/Holds now\s*0\.59957301 BCH/.test(controls), 'the review names the template and shows what the position holds now');
+  check(controls.includes('I understand that whoever receives this token gets what it controls'), 'and the tick says that whoever receives the token gets what it controls');
+  const about = page.getByRole('button', { name: 'About what this token controls' });
+  await about.click();
+  check(await page.getByText(/A record in this wallet's backup ties this token to a position of the template\..*It can make new tokens of its category/).first().isVisible(), 'the "?" says where that comes from, and what the minting capability lets its holder do');
+  await about.click();
   const send = page.getByRole('button', { name: 'Send', exact: true });
   check(await send.isDisabled(), 'the button to send stays disabled until the user ticks');
   await page.getByRole('checkbox', { name: /I understand/ }).check();
@@ -145,6 +149,22 @@ try {
   await send.click();
   await page.locator('.card.good').waitFor();
   check((await textOf(page, '.card.good')).includes('Example key'), 'once sent, the screen says what went');
+
+  // ---------------------------------------------------------------- a key whose record names no script, and one whose position is emptied
+  await page.goto(`http://localhost:${PORT}/fixtures.html?show=send-token&nft=ticket`);
+  await page.locator('#token-to').fill(tokenAddress);
+  await page.getByRole('button', { name: 'Review' }).click();
+  await page.getByText('It controls a position of "Example cloakroom (test network)".').waitFor();
+  const ticket = await textOf(page, '.controls');
+  check(/The application shows what it holds:\s*cloakroom\.example\.org\/coats/.test(ticket), 'for a key whose record names no script, the application shows what it holds, at the page the record names');
+  check((await page.locator('.controls a.application-page').getAttribute('href')) === 'https://cloakroom.example.org/coats/', 'and the page is a link');
+  check(await page.getByRole('button', { name: 'Send', exact: true }).isDisabled(), 'it too is sent only once ticked');
+  await shoot(page, 'wallet-send-token-application');
+  await page.goto(`http://localhost:${PORT}/fixtures.html?show=send-token&nft=spent`);
+  await page.locator('#token-to').fill(tokenAddress);
+  await page.getByRole('button', { name: 'Review' }).click();
+  await page.getByText('It controls a position of "Example money box (test network)".').waitFor();
+  check(/Holds now\s*Nothing/.test(await textOf(page, '.controls')), 'for an emptied position, it says that it holds nothing now');
 
   // ---------------------------------------------------------------- receiving a token
   await page.goto(`http://localhost:${PORT}/fixtures.html?show=receive`);
