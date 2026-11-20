@@ -248,7 +248,7 @@ const steps = async (): Promise<void> => {
     await phone.page.goto(`${WALLET}apps`);
     const position = phone.page.getByTestId('position-open').filter({ has: phone.page.locator(`.token-id [title="${kept.category}"]`) });
     await position.waitFor({ state: 'visible', timeout: 180_000 * patience });
-    await position.getByRole('button', { name: 'Empty a savings jar' }).click();
+    await position.getByRole('button', { name: 'Empty a savings jar', exact: true }).click();
     const review = phone.page.locator('.request-card').filter({ hasText: 'Check and carry out' }).first();
     await review.waitFor({ state: 'visible', timeout: 120_000 * patience });
     const carry = review.getByRole('button', { name: 'Carry it out' });
