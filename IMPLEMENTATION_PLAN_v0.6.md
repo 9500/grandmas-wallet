@@ -114,6 +114,8 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 
 **Tests:** PR19, PR20. **Done when** the runs' records are committed. **Push.**
 
+A release is checked with `node deploy/check-public.mjs <configuration> --expect <commit>` and then `npx tsx scripts/page-smoke.ts <configuration>`, which goes through the start screens of the public pages and needs no coins. `docs/walkthrough.md` is the hand course of this version; the second design's is at the tag `design-2`. The invitations kept in `docs/xo-invitations.md` are the second design's.
+
 The owner decided on 20 November 2026 that the pages of this version are served at the public addresses, in place of the second design's, whose release is kept so that it can be put back. Whether `main` moves to this version is decided separately.
 
 **State on 20 November 2026:** the template, the two pages and their packages are changed, and both courses ran on the local node through the engine without a browser (`docs/runs/stage-17-jar-local-node.md`, `docs/runs/stage-17-loan-local-node.md` on the branch `design-3`), and again after the declaration was removed from the wallet. Both courses then ran in browsers on the local node, with the new phone's requests recorded (`docs/runs/stage-17-jar-browser-local-node.md`, `docs/runs/stage-17-loan-browser-local-node.md`; pictures in `docs/screens/live-*.png`): PR19 and PR20 pass there. Six defects the courses showed were corrected, among them what the wallet's review said about an application's own NFTs. Still open: the positions of the second design on chipnet, and the chipnet runs G and H, which close PR19 and PR20.
