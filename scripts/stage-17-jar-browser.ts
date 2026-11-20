@@ -16,7 +16,8 @@
 // usage (from the repository's root, with the local node running and the pages built: deploy/preview.sh build):
 //   npx tsx scripts/stage-17-jar-browser.ts [local] [--screens] [--headed] [--until <step>] [--from 5|7|8|9] [--ports <base>]
 // on chipnet, with the public pages and backup stores, paid from the key in .chipnet/funder-design-2.json:
-//   npx tsx scripts/stage-17-jar-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 5|7|8|9]
+//   npx tsx scripts/stage-17-jar-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 5|7|8|9] [--record-only]
+// --record-only writes the record again from what the run kept, and runs nothing.
 //
 // The pages, a relay and two backup stores are served on this machine on ports of the run's own (see
 // scripts/browser-course.ts; 8301 to 8304, 8311 and 8312 unless --ports says otherwise). The run makes the blocks
@@ -39,7 +40,9 @@ import { type LedgerTransaction, addressOf, chainClock, chainHeight, ledgerSecti
 import { type RequestLog, controllerLabels, flat, localPayerLocking, lockingOf, openFolds, recordRequests, requestsSection, textOf, walletKept, walletPlaces } from './browser-live.js';
 
 const until = Number(argument('until') ?? '99');
-const from = Number(argument('from') ?? '1');
+/** Only the record is written again, from what the run kept and the chain as it is now: nothing is run, and the run's log and requests are kept. */
+const recordOnly = process.argv.includes('--record-only');
+const from = Number(argument('from') ?? (recordOnly ? '9' : '1'));
 if (![1, 5, 7, 8, 9].includes(from)) throw new Error('A run continues from step 5, 7, 8 or 9.');
 const theCourse = course({ directory: 'stage-17-jar-browser', continuing: from > 1, until });
 const { work, started, lines, log, mine, passTime, prepare, device, watchPage, close, shot, state, begin, elsewhere, keepStorage } = theCourse;
@@ -61,6 +64,11 @@ interface Kept {
   continued: string[];
   /** The names of the pictures taken. */
   screens: string[];
+  /** The outcome as last written to the record. */
+  outcome?: string;
+  /** How the run was started, and when: for a record written again. */
+  command?: string;
+  startedAt?: number;
   /** On chipnet: which release of the public pages each part of the run used. */
   served?: string[];
 }
@@ -246,7 +254,7 @@ const steps = async (): Promise<void> => {
   if (state.step < 8) {
     if (!begin('The jar\'s date passes; the new phone empties the jar from its own list, the jar page never opened')) return;
     const clock = await chainClock();
-    if (clock.median <= kept.unlockTime) log(`   ${passTime(kept.unlockTime - clock.tip + 120)}`);
+    if (!chipnet && clock.median <= kept.unlockTime) log(`   ${passTime(kept.unlockTime - clock.tip + 120)}`);
     // On chipnet the chain's clock passes the date by itself, as blocks come.
     if (chipnet && clock.median <= kept.unlockTime) log(`   the chain's median time is ${iso(clock.median)}; waiting for it to pass the jar's date ${iso(kept.unlockTime)}`);
     for (let attempt = 0; chipnet && attempt < 180 && (await chainClock()).median <= kept.unlockTime; attempt++) await wait(30_000);
@@ -313,6 +321,10 @@ const steps = async (): Promise<void> => {
 // ------------------------------------------------------------------ the record
 
 const writeRecord = async (outcome: string): Promise<void> => {
+  kept.outcome = outcome;
+  save();
+  // On chipnet the wallet is closed after the run (scripts/close-run-wallet.ts), which writes its line beside the profiles.
+  const closing = existsSync(`${work}closing.txt`) ? readFileSync(`${work}closing.txt`, 'utf8').trim() : '';
   // Every transaction of the run, read from the chain, and whose each coin is.
   const wallet = walletKept(work, ['old-phone', 'new-phone'], WALLET);
   const places = await walletPlaces(wallet);
@@ -323,7 +335,8 @@ const writeRecord = async (outcome: string): Promise<void> => {
   const funds = kept.fundsAddress === '' ? '' : lockingOf(kept.fundsAddress);
   const payer = localPayerLocking();
   // On chipnet the run's transactions are found from the run's own addresses.
-  const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, jarLocking, outside, funds, payer]);
+  // The funding address is not read: others use it too, and what it paid the run is found through the run's addresses.
+  const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, jarLocking, funds]);
   for (const entry of wallet.activity) label(entry.transactionId, `${entry.who === 'old-phone' ? 'The owner\'s phone' : 'The new phone'}: ${entry.what}`);
   const placeOf = (lockingBytecode: string): string | undefined =>
     lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === jarLocking ? 'the jar' : lockingBytecode === outside ? `the outside address the coins went back to (${addressOf(outside)})` : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === payer ? (chipnet ? 'the funding address (`scripts/chipnet-pay.ts`)' : 'the local payer (`scripts/local-pay.ts`)') : places.get(lockingBytecode);
@@ -347,7 +360,7 @@ const writeRecord = async (outcome: string): Promise<void> => {
     [
       `# Stage 17 in browsers on ${chipnet ? 'chipnet (run G)' : 'the local node'}: the Savings Jar from its template alone, through the loss of a phone (PR19)`,
       '',
-      `Written by \`scripts/stage-17-jar-browser.ts${process.argv.slice(2).length === 0 ? '' : ` ${process.argv.slice(2).join(' ')}`}\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the Savings Jar page is a second tab of the phone that uses it. ${chipnet ? pagesUsed([WALLET, RECOVERER, JAR], 'Blocks, the waiting period and the jar\'s date took their real time; the coins came from the funding address and went back to it.') : `The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${JAR}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. The run made the blocks and moved the chain's clock.`}${served} The wallet reads no recovery declaration: the Savings Jar reached it as its template of version 4, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
+      `Written by \`scripts/stage-17-jar-browser.ts${(kept.command ?? '') === '' ? '' : ` ${kept.command}`}\` on ${new Date(kept.startedAt ?? started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the Savings Jar page is a second tab of the phone that uses it. ${chipnet ? pagesUsed([WALLET, RECOVERER, JAR], 'Blocks, the waiting period and the jar\'s date took their real time; the coins came from the funding address and went back to it.') : `The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${JAR}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. The run made the blocks and moved the chain's clock.`}${served} The wallet reads no recovery declaration: the Savings Jar reached it as its template of version 4, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
       '',
       `Outcome: ${outcome}`,
       ...(kept.continued.length === 0 ? [] : ['', ...kept.continued]),
@@ -362,11 +375,12 @@ const writeRecord = async (outcome: string): Promise<void> => {
       '## Transactions and coins',
       '',
       chipnet
-        ? `Read from chipnet's server after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the wallet's addresses of both phones' seeds, its controller, the jar, the recoverer's balance and the funding address). The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`
+        ? `Read from chipnet's server after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the wallet's addresses of both phones' seeds, its controller, the jar and the recoverer's balance). The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`
         : `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, and in the node's pool. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
       '',
       ...ledgerSection(ledger, labelOf, placeOf),
       ...(kept.screens.length === 0 ? [] : ['## Pictures', '', `In \`docs/screens/\`, each at 390×844 (\`-phone\`) and 1280×800 (\`-desktop\`): ${kept.screens.map((name) => `\`${prefix}-${name}\``).join(', ')}.`, '']),
+      ...(closing === '' ? [] : ['## The wallet closed', '', closing, '']),
       '## Log',
       '',
       '```',
@@ -379,6 +393,15 @@ const writeRecord = async (outcome: string): Promise<void> => {
 };
 
 try {
+  if (!recordOnly && kept.command === undefined) {
+    kept.command = process.argv.slice(2).join(' ');
+    kept.startedAt = started;
+    save();
+  }
+  if (recordOnly) {
+    await writeRecord(kept.outcome ?? 'not known');
+    process.exit(0);
+  }
   if (from > 1) {
     const line = `The run was continued from step ${from} on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC with the same browser profiles; the line "continued from step ${from}" in the log marks where, and the times after it count from then.`;
     kept.continued.push(line);

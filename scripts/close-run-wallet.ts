@@ -12,8 +12,9 @@
 //
 // usage: npx tsx scripts/close-run-wallet.ts <directory under .chipnet/> [--destroy <category>]... [--send]
 //   Without --send the transaction is built and checked (this project's check and the node's testmempoolaccept)
-//   and nothing is sent. Prints one line for the run's record.
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+//   and nothing is sent. Prints one line for the run's record, and with --send writes it to closing.txt in the
+//   run's directory, where the run's record takes it from.
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { binToHex, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
@@ -134,6 +135,8 @@ try {
     const result = await server.broadcast(binToHex(built.encoded));
     if (!result.accepted) throw new Error(`the network refused the closing: ${result.reason}`);
     console.log(line);
+    // For the run's record, which names it under "The wallet closed".
+    writeFileSync(`${work}closing.txt`, `${line}\n`);
   }
 } finally {
   await server.disconnect();

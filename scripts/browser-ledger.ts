@@ -206,11 +206,13 @@ export const ledgerSection = (ledger: LedgerTransaction[], labelOf: (transaction
   }
   const inTotal = [...cameIn.values()].reduce((sum, value) => sum + value, 0n);
   lines.push('What came into the run, from coins no transaction of the run made:', '', ...[...cameIn].map(([place, value]) => `- ${sat(value)} from ${place}`), '');
-  // Where it went: every output of the run still unspent, by place.
+  // Where it went: every output that no transaction of the run spent, by place: still unspent, or spent since by a
+  // transaction that is not the run's (on chipnet, the funding address spends its change in its next payment).
+  const spentByRun = new Set(ledger.flatMap((transaction) => transaction.inputs.map((input) => input.outpoint)));
   const left = new Map<string, { value: bigint; coins: number; tokens: string[] }>();
   for (const transaction of ledger) {
     for (const output of transaction.outputs) {
-      if (!output.unspent) continue;
+      if (spentByRun.has(`${transaction.transactionId}:${output.index}`) || output.lockingBytecode.startsWith('6a')) continue;
       const place = placeOf(output.lockingBytecode) ?? `${addressOf(output.lockingBytecode)} (not named)`;
       const entry = left.get(place) ?? { value: 0n, coins: 0, tokens: [] };
       entry.value += output.valueSatoshis;
@@ -222,7 +224,7 @@ export const ledgerSection = (ledger: LedgerTransaction[], labelOf: (transaction
   const outTotal = [...left.values()].reduce((sum, entry) => sum + entry.value, 0n);
   const fees = ledger.reduce((sum, transaction) => sum + transaction.feeSatoshis, 0n);
   lines.push(
-    'Where every coin went: the outputs of the run that nothing has spent, by whose they are:',
+    'Where every coin went: the outputs that no transaction of the run spent, by whose they are (an output at the funding address may have been spent since by its next payment):',
     '',
     '| Where | Coins | Value | Tokens on them |',
     '| --- | --- | --- | --- |',

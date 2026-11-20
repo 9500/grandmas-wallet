@@ -22,7 +22,8 @@
 // usage (from the repository's root, with the local node running and the pages built: deploy/preview.sh build):
 //   npx tsx scripts/stage-17-loan-browser.ts [local] [--screens] [--headed] [--until <step>] [--from 7|9|10|11] [--ports <base>]
 // on chipnet, with the public pages and backup stores, paid from the key in .chipnet/funder-design-2.json:
-//   npx tsx scripts/stage-17-loan-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 7|9|10|11]
+//   npx tsx scripts/stage-17-loan-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 7|9|10|11] [--record-only]
+// --record-only writes the record again from what the run kept, and runs nothing.
 //
 // On chipnet the collateral is most of what the funding address holds: the run pays the owner's wallet all of it but a
 // small reserve, and borrows at the highest ratio from 125% down to the page's least, 115%, that the wallet can pay at
@@ -48,7 +49,9 @@ import { type LedgerTransaction, addressOf, chainHeight, chainServer, ledgerSect
 import { type RequestLog, controllerLabels, flat, localPayerLocking, lockingOf, openFolds, recordRequests, requestsSection, textOf, walletKept, walletPlaces } from './browser-live.js';
 
 const until = Number(argument('until') ?? '99');
-const from = Number(argument('from') ?? '1');
+/** Only the record is written again, from what the run kept and the chain as it is now: nothing is run, and the run's log and requests are kept. */
+const recordOnly = process.argv.includes('--record-only');
+const from = Number(argument('from') ?? (recordOnly ? '11' : '1'));
 if (![1, 7, 9, 10, 11].includes(from)) throw new Error('A run continues from step 7, 9, 10 or 11.');
 const theCourse = course({ directory: 'stage-17-loan-browser', continuing: from > 1, until });
 const { work, started, lines, log, pay, mine, prepare, device, watchPage, close, shot, state, begin, elsewhere, keepStorage } = theCourse;
@@ -75,6 +78,11 @@ interface Kept {
   facts: string[];
   continued: string[];
   screens: string[];
+  /** The outcome as last written to the record. */
+  outcome?: string;
+  /** How the run was started, and when: for a record written again. */
+  command?: string;
+  startedAt?: number;
 }
 const keptFile = `${work}loan.json`;
 const kept: Kept =
@@ -456,6 +464,10 @@ const steps = async (): Promise<void> => {
 // ------------------------------------------------------------------ the record
 
 const writeRecord = async (outcome: string): Promise<void> => {
+  kept.outcome = outcome;
+  save();
+  // On chipnet the wallet is closed after the run (scripts/close-run-wallet.ts), which writes its line beside the profiles.
+  const closing = existsSync(`${work}closing.txt`) ? readFileSync(`${work}closing.txt`, 'utf8').trim() : '';
   const wallet = walletKept(work, ['old-phone', 'new-phone'], WALLET);
   const places = await walletPlaces(wallet);
   const identity = wallet.identity;
@@ -465,7 +477,8 @@ const writeRecord = async (outcome: string): Promise<void> => {
   const payer = localPayerLocking();
   const deployerHex = chipnet ? '' : binToHex(deployerLocking);
   // On chipnet the run's transactions are found from the run's own addresses; Paryon's contracts are everybody's.
-  const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, outside, funds, payer]);
+  // The funding address is not read: others use it too, and what it paid the run is found through the run's addresses.
+  const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, funds]);
   const contracts = chipnet ? paryonContracts(DEPLOYMENT) : kept.deployment === undefined ? undefined : paryonContracts(kept.deployment);
   const paryonPlaces = new Map<string, string>();
   if (contracts !== undefined) {
@@ -497,7 +510,7 @@ const writeRecord = async (outcome: string): Promise<void> => {
     [
       `# Stage 17 in browsers on ${chipnet ? 'chipnet (run H)' : 'the local node'}: a ParyonUSD loan from its template alone, through the loss of a phone (PR20)`,
       '',
-      `Written by \`scripts/stage-17-loan-browser.ts${process.argv.slice(2).length === 0 ? '' : ` ${process.argv.slice(2).join(' ')}`}\` on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the loan page is a second tab of the phone that uses it. ${chipnet ? `${pagesUsed([WALLET, RECOVERER, LOAN], 'Blocks and the waiting period took their real time; the coins came from the funding address and went back to it.')}${served} The loan page used Paryon's own test deployment \`${DEPLOYMENT.name}\`, unchanged, and read the oracle's price.` : `The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${LOAN}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. Paryon's contracts as published (\`@paryonusd/contracts\` 1.1.0) were deployed on the local chain by the run (\`packages/paryon/src/local-deployment.ts\`, the price at $${(Number(PRICE) / 100).toFixed(2)}, periods of 10 blocks) and named to the loan page in its configuration; the oracle is not read for such a deployment. The run made the blocks and moved the chain's clock.`} The wallet reads no recovery declaration: the loan reached it as Paryon's template, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
+      `Written by \`scripts/stage-17-loan-browser.ts${(kept.command ?? '') === '' ? '' : ` ${kept.command}`}\` on ${new Date(kept.startedAt ?? started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the loan page is a second tab of the phone that uses it. ${chipnet ? `${pagesUsed([WALLET, RECOVERER, LOAN], 'Blocks and the waiting period took their real time; the coins came from the funding address and went back to it.')}${served} The loan page used Paryon's own test deployment \`${DEPLOYMENT.name}\`, unchanged, and read the oracle's price.` : `The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${LOAN}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. Paryon's contracts as published (\`@paryonusd/contracts\` 1.1.0) were deployed on the local chain by the run (\`packages/paryon/src/local-deployment.ts\`, the price at $${(Number(PRICE) / 100).toFixed(2)}, periods of 10 blocks) and named to the loan page in its configuration; the oracle is not read for such a deployment. The run made the blocks and moved the chain's clock.`} The wallet reads no recovery declaration: the loan reached it as Paryon's template, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
       '',
       `Outcome: ${outcome}`,
       ...(kept.continued.length === 0 ? [] : ['', ...kept.continued]),
@@ -513,11 +526,12 @@ const writeRecord = async (outcome: string): Promise<void> => {
       '## Transactions and coins',
       '',
       chipnet
-        ? `Read from chipnet's server after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the wallet's addresses of both phones' seeds, its controller, the recoverer's balance and the funding address). Paryon's contracts are named where the run's coins went into them. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`
+        ? `Read from chipnet's server after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the wallet's addresses of both phones' seeds, its controller and the recoverer's balance). Paryon's contracts are named where the run's coins went into them. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`
         : `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, and in the node's pool. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
       '',
       ...ledgerSection(ledger, labelOf, placeOf),
       ...(kept.screens.length === 0 ? [] : ['## Pictures', '', `In \`docs/screens/\`, each at 390×844 (\`-phone\`) and 1280×800 (\`-desktop\`): ${kept.screens.map((name) => `\`${prefix}-${name}\``).join(', ')}.`, '']),
+      ...(closing === '' ? [] : ['## The wallet closed', '', closing, '']),
       '## Log',
       '',
       '```',
@@ -530,6 +544,15 @@ const writeRecord = async (outcome: string): Promise<void> => {
 };
 
 try {
+  if (!recordOnly && kept.command === undefined) {
+    kept.command = process.argv.slice(2).join(' ');
+    kept.startedAt = started;
+    save();
+  }
+  if (recordOnly) {
+    await writeRecord(kept.outcome ?? 'not known');
+    process.exit(0);
+  }
   if (from > 1) {
     kept.continued.push(`The run was continued from step ${from} on ${new Date(started).toISOString().slice(0, 16).replace('T', ' ')} UTC with the same browser profiles; the line "continued from step ${from}" in the log marks where, and the times after it count from then.`);
     save();
