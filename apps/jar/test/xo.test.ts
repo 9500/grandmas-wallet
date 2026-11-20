@@ -129,6 +129,31 @@ describe('savings jars with a wallet that speaks xo_v1', () => {
     expect(device.chain.balanceOf(script.lockingBytecode)).toBe(0n);
   }, 60_000);
 
+  it('a request the network refuses because a coin was spent first ends with the wallet\'s code and words, is not kept and not asked again, and the wallet\'s coins are free for the next', async () => {
+    const { device, page, answer, proposals } = await setUp();
+    const { jars, sentToWallet } = page(memoryStore());
+    const unlockTime = Math.floor(device.chain.nowMs / 1000) + 3_600;
+    const { category } = await answer(jars.open(20_000n, unlockTime));
+    const before = await device.wallet.balance();
+    // The node's words, as a server passes them on.
+    const original = device.chain.broadcast;
+    device.chain.broadcast = async () => {
+      device.chain.broadcast = original;
+      return { accepted: false, reason: 'the transaction was rejected by network rules.\n\ntxn-mempool-conflict (code 18)' };
+    };
+    const refused = await answer(jars.deposit(category as string, 6_000n)).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(RequestRefusedError);
+    expect(refused).toMatchObject({ code: 'inputs-spent', message: expect.stringContaining('txn-mempool-conflict') as string });
+    expect(jars.pending()).toEqual([]);
+    await settle();
+    expect(proposals()).toEqual([]);
+    expect(sentToWallet.filter((message) => message.action === 'xo_action_request' && message.templateAction === 'deposit')).toHaveLength(1);
+    expect((await device.wallet.balance()).recoverable).toBe(before.recoverable);
+    // The same coins pay for the next request.
+    await answer(jars.deposit(category as string, 6_000n));
+    expect(device.chain.balanceOf(savingsJarScript(hexToBin(category as string), unlockTime).lockingBytecode)).toBe(26_000n);
+  }, 60_000);
+
   it('a request survives a reload of the page: sent again under its identifier, it gets the outcome the wallet stored, and nothing is done twice', async () => {
     const { device, page, answer, proposals } = await setUp();
     const store = memoryStore();

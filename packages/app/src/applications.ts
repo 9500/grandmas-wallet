@@ -233,6 +233,32 @@ const refuse = (message: string): never => {
 };
 
 /**
+ * What the nodes say when a transaction spends a coin that another transaction spent first, in the pool or in a
+ * block, or one that is not there: Bitcoin Cash Node's `txn-mempool-conflict` (code 18) and
+ * `bad-txns-inputs-missingorspent` (code 16), and the older wordings `missing-inputs`, `Missing inputs` and
+ * `bad-txns-inputs-spent`. The engine passes the node's refusal on as text inside its own messages
+ * (docs/xo-feedback-notes.md, 16 Nov 2026), so the refusals are told apart by their words. A conflict the engine
+ * finds among its own invitations is not one of them: nothing reached the network.
+ */
+const INPUTS_SPENT = /txn-mempool-conflict|inputs-missingorspent|missing[- ]inputs|inputs-spent/i;
+
+/** Whether a refusal of the network's says that one of the transaction's coins was spent first, or is not there. */
+export const inputsSpentRefusal = (message: string): boolean => INPUTS_SPENT.test(message);
+
+/**
+ * The network refused the action's transaction: another transaction spent one of its coins first, or a coin it names
+ * is not there. Nothing was sent, and the wallet's own coins in it are free again. The application may read its coins
+ * again and ask anew: the code says so (`ActionResult.code`).
+ */
+export class InputsSpentError extends Error {
+  readonly code = 'inputs-spent' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'InputsSpentError';
+  }
+}
+
+/**
  * The wallet refuses an action because of what it would leave behind (sections 12.3 and 12.5): something that would not
  * come back after the phone is lost, or something of which the wallet cannot tell. Refused before the user is asked.
  */
@@ -1730,6 +1756,10 @@ export class Applications {
     }
     try {
       await this.wallet.send(prepared);
+    } catch (error) {
+      // The key holder has put the refused transaction aside, so that the coins it named are free again.
+      if (error instanceof Error && inputsSpentRefusal(error.message)) throw new InputsSpentError(error.message);
+      throw error;
     } finally {
       // Whether or not the network took it, a signature that names these addresses has left the wallet.
       this.wallet.keep(plan.used);

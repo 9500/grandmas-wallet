@@ -1,5 +1,6 @@
 import {
   type ActionDetails,
+  type ActionErrorCode,
   type ActionRequest,
   type ActionResult,
   type Channel,
@@ -16,6 +17,7 @@ import {
   TEMPLATE_ANSWER,
   TEMPLATE_OFFER,
   XO_EXTENSION_VERSION,
+  isActionErrorCode,
   parseOffer,
   parseRequest,
   sameRequest,
@@ -47,6 +49,8 @@ export interface LedgerEntry extends ActionDetails {
   status: 'asked' | 'working' | 'done' | 'failed' | 'declined';
   result?: Record<string, unknown>;
   error?: string;
+  /** Why it failed, where the reason is one an application can act on (`ActionResult.code`). */
+  code?: ActionErrorCode;
 }
 
 export interface LedgerStorage {
@@ -206,6 +210,7 @@ export class WalletConnector {
       ok: entry.status === 'done',
       ...(entry.result === undefined ? {} : { result: entry.result }),
       ...(entry.error === undefined ? {} : { error: entry.error }),
+      ...(entry.code === undefined ? {} : { code: entry.code }),
     };
   }
 
@@ -375,6 +380,8 @@ export class WalletConnector {
     } catch (error) {
       entry.status = 'failed';
       entry.error = (error as Error).message;
+      const code = (error as { code?: unknown } | null)?.code;
+      if (isActionErrorCode(code)) entry.code = code;
     }
     this.persist();
     await this.send(application, this.outcome(entry));

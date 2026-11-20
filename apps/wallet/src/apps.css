@@ -186,6 +186,10 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .connection-reason { margin: 6px 0 0; }
 .connection-actions { margin-top: 8px; }
 .earlier-error { margin: 6px 0 0; overflow-wrap: anywhere; }
+.spent-first { margin: 0; }
+.spent-first > .info { margin-left: 6px; }
+.spent-first-why, .spent-first-said { display: block; }
+.spent-first-said { margin-top: 8px; overflow-wrap: anywhere; }
 
 /* Tokens */
 .tokens-loading { display: flex; gap: 10px; align-items: center; color: var(--muted); padding: 8px 0; }

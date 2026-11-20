@@ -49,7 +49,7 @@ import { Welcome } from './Welcome.js';
  * connection, `&held` with tokens that no record ties to a position, `&linked` as opened from an application's
  * connection link, `&templates` with a trusted template and one the user stopped trusting, `&offer` for an application
  * that offers its template, `&offer=pool` for one offered with an action this wallet refuses, `&request=tick`,
- * `backup`, `tied` or `unclear` for a request, and `&records` for the list of positions from records); a request for a
+ * `backup`, `tied`, `unclear` or `spent` (approved, then refused because another transaction spent one of its coins first) for a request, and `&records` for the list of positions from records); a request for a
  * decision on an action (`show=review` to borrow, `closing` to repay and close, `box-open` and `box-empty` for the
  * actions of a second template); the fields that take a scanned code (`show=scan`, and `&open` to show the scanner
  * already opened); the start (`show=welcome`), setting a wallet up with a recoverer's code (`show=setup-bank`,
@@ -639,6 +639,14 @@ const REQUESTS: Record<string, { entry: LedgerEntry; summary: TemplateSummary; p
   backup: { entry: requested('backup', moneyBox, 'open'), summary: moneyBox, preview: async () => openMoneyBox },
   tied: { entry: requested('tied', keyedPool, 'open'), summary: keyedPool, preview: async () => Promise.reject(new FindingRefusalError(findingOf(keyedPool, 'open'))) },
   unclear: { entry: requested('unclear', ruleBox, 'open'), summary: ruleBox, preview: async () => Promise.reject(new FindingRefusalError(findingOf(ruleBox, 'open'))) },
+  spent: { entry: requested('spent', template, 'close'), summary: template, preview: async () => closing },
+};
+/** `request=spent`: approved, and refused by the network because another transaction spent one of its coins first. */
+const SPENT_FIRST_ERROR =
+  'Transaction broadcast failed for transaction hash "98f2adfaf4599445e6bf06b7ad6bfafe571b1d73535141825e39356800357e1f" of invitation "7b853d9fccb242d7155e47ebc7d16d5e": Error: Failed to broadcast transaction: Error: Failed to request \'blockchain.transaction.broadcast\': the transaction was rejected by network rules.\n\ntxn-mempool-conflict (code 18)';
+const approveFixture = (entry: LedgerEntry) => async (): Promise<void> => {
+  if (entry.id !== 'spent') return;
+  Object.assign(entry, { status: 'failed', error: SPENT_FIRST_ERROR, code: 'inputs-spent' });
 };
 
 // The positions a record ties to tokens of the wallet's: confirmed, held under a template's name (its page named by
@@ -699,7 +707,7 @@ const appsOwner = {
   apps: {
     version: 0,
     connector: { ledger: asked === undefined ? [] : [asked.entry] },
-    proposals: asked === undefined ? [] : [{ entry: asked.entry, approve: async () => undefined, decline: async () => undefined }],
+    proposals: asked === undefined ? [] : [{ entry: asked.entry, approve: approveFixture(asked.entry), decline: async () => undefined }],
     asks: [],
     connections: params.has('connected') || asked !== undefined || params.get('offer') === 'pool' ? [{ uri: 'wiz://relay.example.org/?p=example', privateKey: '', pairing, name: 'Example app', addedAt: 1_795_000_000 }] : [],
     statuses: params.has('connected') || asked !== undefined || params.get('offer') === 'pool' ? { [pairing]: { state: 'connected', peerName: 'Example app' } } : {},

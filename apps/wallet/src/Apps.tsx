@@ -107,6 +107,9 @@ const Main = ({ owner, onView }: { owner: Owner; onView: (view: View) => void })
 };
 
 /** A card's title with its explanation behind a "?", and what goes on the other side. */
+/** An action the network refused because another transaction spent one of its coins first. */
+const SPENT_FIRST = 'Another transaction used one of its coins first. Nothing was sent.';
+
 const TitleInfo = ({ title, label, info, aside }: { title: string; label: string; info: ComponentChildren; aside?: ComponentChildren }) => (
   <div class="card-head">
     <h2 class="title-info">
@@ -421,7 +424,16 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
               {transactionId !== undefined && <Transaction id={transactionId} explorer={owner.session.environment.explorer} />}
             </>
           )}
-          {entry.status === 'failed' && (
+          {entry.status === 'failed' && entry.code === 'inputs-spent' && (
+            <p class="spent-first">
+              {SPENT_FIRST}
+              <Info label="What happened" wide>
+                <span class="spent-first-why">The network takes one transaction per coin. The application can ask again with the coins as they are now, and you decide again.</span>
+                {entry.error !== undefined && <span class="spent-first-said small muted">{entry.error}</span>}
+              </Info>
+            </p>
+          )}
+          {entry.status === 'failed' && entry.code !== 'inputs-spent' && (
             <>
               <p class="failure">{entry.error === undefined ? 'The wallet did not say why.' : plainRefusal(entry.error)}</p>
               {notStored && <NoBackup owner={owner}>A template is stored in your backup before its first action, and this wallet has no backup store it could reach. Set up recovery, then ask the application again.</NoBackup>}
@@ -802,7 +814,7 @@ const EarlierRequests = ({ owner }: { owner: Owner }) => {
                 </div>
                 <Pill {...(entry.status === 'done' ? { tone: 'good' as const } : entry.status === 'failed' ? { tone: 'bad' as const } : {})}>{entry.status === 'done' ? 'Done' : entry.status === 'failed' ? 'Failed' : 'Declined'}</Pill>
               </div>
-              {entry.status === 'failed' && entry.error !== undefined && <p class="small muted earlier-error">{plainRefusal(entry.error)}</p>}
+              {entry.status === 'failed' && entry.error !== undefined && <p class="small muted earlier-error">{entry.code === 'inputs-spent' ? SPENT_FIRST : plainRefusal(entry.error)}</p>}
             </li>
           );
         })}
