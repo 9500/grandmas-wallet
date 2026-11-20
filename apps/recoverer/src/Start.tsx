@@ -8,14 +8,14 @@ export const MODES: { mode: Mode; title: string; detail: string; name: string; p
   {
     mode: 'bank',
     title: 'I\'m a bank',
-    detail: 'A new customer\'s wallet is set up the moment their phone scans your code, from your own coins, with nobody saying yes on this page. You look after many wallets.',
+    detail: 'Each new wallet is created from your own coins as soon as the customer\'s phone scans your code. You don\'t approve each one. You look after many wallets.',
     name: 'Your bank\'s name, as customers\' wallets show it',
     placeholder: 'For example: Example Bank',
   },
   {
     mode: 'friend',
     title: 'I\'m helping someone I know',
-    detail: 'You set up a wallet for a person you know, from your own coins, and say yes on this page when their phone asks. If they lose their phone, you move the wallet to their new one.',
+    detail: 'You set up a wallet for a person you know, from your own coins. When their phone scans your code, this page asks you to approve before the wallet is created. If they lose their phone, you move the wallet to their new one.',
     name: 'Your name, as their wallet shows it',
     placeholder: 'For example: Anna',
   },
