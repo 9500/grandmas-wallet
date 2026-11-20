@@ -536,6 +536,14 @@ try {
     theCourse.note(`       continued from step ${from}`);
   }
   const deployment = await deploy();
+  if (chipnet && from === 1) {
+    // Before anything is set up: whether the funding address can pay for the loan at the page's prices as they are now.
+    // The first steps give the recoverer 400,000 sat, of which the wallet gets 100,000, and pay the wallet 50,000.
+    const balance = BigInt(/^(\d+) satoshis/.exec(theCourse.run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'balance']))?.[1] ?? '0');
+    const market = await chipnetMarket();
+    const holds = balance - 400_000n - 50_000n - 10_000n - RESERVE + 150_000n;
+    if (affordable(market, holds) === undefined) throw new Error(`The funding address holds ${balance} satoshis. Borrowing 100.00 PUSD at no less than 115% of ${formatPrice(market.lower)} needs about ${borrowPlan(DEBT, 115, market).total + 40_000n} satoshis in the wallet, which would hold about ${holds}. Nothing was set up or paid.`);
+  }
   await prepare(['wallet', 'recoverer', 'loan'], chipnet ? {} : { paryon: deployment });
   if (chipnet) {
     const now = await servedFrom([WALLET, RECOVERER, LOAN]);
