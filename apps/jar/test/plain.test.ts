@@ -1,6 +1,6 @@
 import { binToHex, decodeTransactionBch, encodeTransactionBch, hexToBin } from '@bitauth/libauth';
-import { smallestOutputValue } from '@grandmas-wallet/core';
-import { savingsJarScript } from '@grandmas-wallet/savings-jar';
+import { readTemplate, smallestOutputValue, templateLockingBytecode, templateUnlockingBytecode } from '@grandmas-wallet/core';
+import { savingsJarScript, savingsJarV4TemplateText, unlockTimeBytes } from '@grandmas-wallet/savings-jar';
 import { SimulatedChain, ordinaryWallet } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -170,6 +170,33 @@ describe('savings jars with an ordinary wallet', () => {
     await plain.withdraw(opened.category);
     expect(chain.balanceOf(script.lockingBytecode)).toBe(0n);
     expect((await scanWallet(chain, paths)).tokens).toHaveLength(1);
+  });
+
+  it('makes the jar the template of version 4 describes, so that both kinds of wallet use one contract: the jar\'s address and the date on the key as the template gives them, and a withdrawal with the key at input 0 and the jar unlocked as the template unlocks it', async () => {
+    const { chain, paths, plain, unlockTime } = setUp([60_000n]);
+    const opened = await plain.open(25_000n, unlockTime);
+    const { definition } = readTemplate(savingsJarV4TemplateText);
+    const values = { keyCategory: opened.category, unlockTime: BigInt(unlockTime) };
+    const jarAddress = binToHex(templateLockingBytecode(definition, 'savingsJarLockingScript', values));
+    const read = async (transactionId: string) => {
+      const transaction = decodeTransactionBch(hexToBin((await chain.getTransaction(transactionId)) as string));
+      if (typeof transaction === 'string') throw new Error(transaction);
+      return transaction;
+    };
+    const opening = await read(opened.transactionId);
+    expect(binToHex(opening.outputs[0]?.lockingBytecode ?? new Uint8Array())).toBe(jarAddress);
+    expect(binToHex(opening.outputs[1]?.token?.nft?.commitment ?? new Uint8Array())).toBe(binToHex(unlockTimeBytes(unlockTime)));
+
+    pass(chain, 3_700);
+    const emptied = await read(await plain.withdraw(opened.category));
+    // Input 0 spends the key, where the template's own input for it sits; the jar's coin after it, unlocked for a key there.
+    const [keyInput, jarInput] = emptied.inputs;
+    const spentKey = (await read(binToHex(keyInput?.outpointTransactionHash ?? new Uint8Array()))).outputs[keyInput?.outpointIndex ?? -1];
+    expect(binToHex(spentKey?.token?.category ?? new Uint8Array())).toBe(opened.category);
+    expect(binToHex(jarInput?.unlockingBytecode ?? new Uint8Array())).toBe(binToHex(templateUnlockingBytecode(definition, 'savingsJarLockingScript', 'savingsJarInput', values)));
+    // The simulated chain ran every input in the virtual machine before it took the transaction.
+    expect(chain.balanceOf(hexToBin(jarAddress))).toBe(0n);
+    expect((await scanWallet(chain, paths)).tokens.map((coin) => binToHex(coin.output.token?.category ?? new Uint8Array()))).toEqual([opened.category]);
   });
 
   it('sends nothing that the wallet altered on its way back, or that another wallet signed', async () => {
