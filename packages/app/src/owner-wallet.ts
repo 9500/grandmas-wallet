@@ -180,6 +180,8 @@ export interface WalletParts {
   quotePayItself(satoshis: bigint): Promise<bigint>;
   kept(): ApplicationsState | undefined;
   store(applications: ApplicationsState): void;
+  /** Whether a full pass of the search for coins has finished for every seed the wallet has had (section 7.7). */
+  fullySearched?(): boolean;
 }
 
 /** A viewing key as a device stores it. */
@@ -998,6 +1000,7 @@ export class OwnerWallet {
       },
       quotePayItself: async (satoshis) => (await this.quotePay([await selfPayment(satoshis)])).feeSatoshis,
       kept: () => this.state.applications,
+      fullySearched: () => this.state.fullySearched,
       store: (applications) => this.store({ applications }),
     };
   }

@@ -1,5 +1,7 @@
 import { type Output, binToHex, createVirtualMachineBch2026, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
 import {
+  type PositionRecordEntry,
+  type PositionToken,
   type RecordEntry,
   type Standing,
   type TemplateEntry,
@@ -40,6 +42,7 @@ import { type ApplicationInput, type AuthorityEntry, type BindingKind, type Read
 import type { ReservedAddress, Sent, TokenCoin, WalletParts } from './owner-wallet.js';
 import { type FoundPosition, type PositionStatus, type TokenOnChain, coinsAt, findPosition, valuesFrom } from './positions.js';
 import { type RecoveryArrangement, type StoreAt, writeRecord } from './recovery-flow.js';
+import { type PositionRecordCheck, checkPositionRecord, recordsDue, samePosition, sameRecord, sameNft } from './position-records.js';
 import { type PresentedTexts, type TemplateNames, type Verdict, checkTemplate, readPresented } from './template-check.js';
 import { type NameClaim, type TokenNaming, TokenNames } from './token-names.js';
 
@@ -105,6 +108,14 @@ export interface ApplicationsState {
   templates: KeptTemplate[];
   notes: TokenNote[];
   suggested?: SuggestedTemplate[];
+  /**
+   * Records of positions that this seed's actions left, each confirmed by a backup store before the action's
+   * signature left the wallet (section 10.5), and records of an earlier seed that the chain has borne out and
+   * that this seed has written again as its own (section 10.6).
+   */
+  positionRecords?: PositionRecordEntry[];
+  /** Records of positions that an earlier seed wrote: suggestions, until the chain bears them out (section 10.6). */
+  suggestedRecords?: PositionRecordEntry[];
 }
 
 /** What an application, or the user, asks for: an action of a template. */
@@ -130,16 +141,22 @@ export interface ApplicationAction {
   inputs?: Record<string, string>;
   /** The application that asks, by the name of its pairing. Absent when the user acts from the wallet itself. */
   application?: string;
+  /** The address of the application's page, where the request came from one. It goes into the position's record. */
+  page?: string;
 }
 
-/** The backup archive, as far as templates and token notes need it. */
+/** The backup archive, as far as templates, token notes and position records need it. */
 export interface ApplicationArchive {
   write(entry: RecordEntry): Promise<WriteResult>;
-  /** The templates and notes in the archive, each with whose it is: the current owner's, or an earlier one's. */
-  read(): Promise<{ templates: { entry: TemplateEntry; standing: Standing; withdrawn?: number }[]; tokenNotes: { entry: TokenNoteEntry; standing: Standing }[] }>;
+  /** The templates, notes and position records in the archive, each with whose it is: the current owner's, or an earlier one's. */
+  read(): Promise<{
+    templates: { entry: TemplateEntry; standing: Standing; withdrawn?: number }[];
+    tokenNotes: { entry: TokenNoteEntry; standing: Standing }[];
+    positions?: { entry: PositionRecordEntry; standing: Standing }[];
+  }>;
 }
 
-/** The archive in use of a recovery arrangement, for templates and token notes. */
+/** The archive in use of a recovery arrangement, for templates, token notes and position records. */
 export const applicationArchive = (options: {
   arrangement: () => RecoveryArrangement | undefined;
   storeAt: StoreAt;
@@ -158,7 +175,7 @@ export const applicationArchive = (options: {
       const { archive } = arrangement();
       const contents = await readArchive(hexToBin(archive.archiveId), hexToBin(archive.contentKey), archive.stores.map(options.storeAt));
       const assessment = assessArchive(contents, { network: options.seed.network, history: await readControllerHistory(options.chain, options.identity) });
-      return { templates: assessment.templates, tokenNotes: assessment.tokenNotes };
+      return { templates: assessment.templates, tokenNotes: assessment.tokenNotes, positions: assessment.positions };
     },
   };
 };
@@ -254,6 +271,11 @@ export interface ActionPreview {
   };
   /** The template will be stored in the backup before anything is signed. */
   firstUse: boolean;
+  /**
+   * The action leaves a position, or gives the wallet an NFT: its record will be stored in the backup before
+   * anything is signed, and the action is refused if no store confirms it (section 10.5).
+   */
+  recordsPosition?: boolean;
 }
 
 export interface ActionOutcome {
@@ -449,6 +471,11 @@ export class Applications {
        * and every transaction of its history into the key holder's store.
        */
       followUpTo?: number;
+      /**
+       * The check of a position record of an earlier seed against the chain (section 10.4). Only a record it
+       * finds to count is written again as this seed's own. Until the check is built, none counts.
+       */
+      checkRecord?: PositionRecordCheck;
     } = {},
   ) {}
 
@@ -469,6 +496,16 @@ export class Applications {
   /** The templates the user trusted on this device. */
   get templates(): KeptTemplate[] {
     return this.state.templates;
+  }
+
+  /** The records of positions this seed holds as its own: written before its actions were signed, or borne out by the chain. */
+  get positionRecords(): PositionRecordEntry[] {
+    return this.state.positionRecords ?? [];
+  }
+
+  /** Records of positions an earlier seed wrote, which the chain has not borne out yet. They are suggestions. */
+  get suggestedRecords(): PositionRecordEntry[] {
+    return this.state.suggestedRecords ?? [];
   }
 
   /** Templates the backup holds which this device does not trust: an earlier owner's, or ones the user stopped trusting. */
@@ -586,6 +623,58 @@ export class Applications {
     }
     if (application !== undefined && !kept.applications.includes(application)) kept = this.updateTemplate(kept.identifier, { applications: [...kept.applications, application] });
     return kept;
+  }
+
+  /** The NFTs among the wallet's tokens that a request names: what the action is about. */
+  private async named(request: Pick<ApplicationAction, 'tokens'>): Promise<PositionToken[]> {
+    const categories = new Set(request.tokens ?? []);
+    if (categories.size === 0) return [];
+    return (await this.wallet.tokenCoins()).flatMap(({ coin }) => {
+      const { token } = coin.utxo.output;
+      return token?.nft === undefined || !categories.has(hex(token.category)) ? [] : [{ category: hex(token.category), commitment: hex(token.nft.commitment), capability: token.nft.capability }];
+    });
+  }
+
+  /**
+   * The records an action leaves (section 10.2), from the template and the transaction as the wallet worked it
+   * out, less what this seed's records already hold: the same record, or, for an action on a position whose
+   * token the wallet already held, a record of the same position. Such an action, a payment into the position,
+   * has values of its own; the record that made the position holds what acting on it takes.
+   */
+  private async recordsOf(plan: Plan, request: ApplicationAction): Promise<PositionRecordEntry[]> {
+    const about = await this.named(request);
+    const due = recordsDue({
+      template: plan.template,
+      role: plan.role,
+      values: plan.values,
+      outputs: plan.outputs,
+      spent: plan.inputs.filter((input) => input.kind !== 'application').map((input) => input.coin.utxo.output),
+      about,
+      ...(request.page === undefined ? {} : { page: request.page }),
+    });
+    const kept = this.state.positionRecords ?? [];
+    const continues = (entry: PositionRecordEntry): boolean => about.some((token) => sameNft(token, entry.token));
+    return due.filter((entry) => !kept.some((known) => (continues(entry) ? samePosition(known, entry) : sameRecord(known, entry))));
+  }
+
+  /**
+   * Store the records of what an action leaves before anything is signed (section 10.5). Each has to be
+   * confirmed by a backup store; the device's own copy does not count.
+   * @throws NotStoredError when no store confirms one; nothing has been signed then
+   */
+  private async storeRecords(records: PositionRecordEntry[]): Promise<void> {
+    if (records.length === 0) return;
+    const { archive } = this.options;
+    if (archive === undefined) throw new NotStoredError('This wallet has no backup store. What an action leaves is recorded there before the action is signed, so that a new device can find it.');
+    for (const entry of records) {
+      const result = await archive.write(entry);
+      if (!safelyStored(result)) {
+        throw new NotStoredError(
+          `No backup store confirmed the record of what the action leaves: ${result.failed.map((failure) => `${failure.store}: ${failure.reason}`).join('; ') || 'none is configured'}. Nothing was signed. Try again when a store can be reached.`,
+        );
+      }
+      this.change({ positionRecords: [...(this.state.positionRecords ?? []), entry] });
+    }
   }
 
   /**
@@ -1176,6 +1265,7 @@ export class Applications {
     const walletFungibleIn = fungible(ours.map(({ coin }) => coin.utxo.output));
     const walletFungibleOut = fungible(toWallet.map(({ output }) => output));
     const tokensNet = [...new Set([...walletFungibleIn.keys(), ...walletFungibleOut.keys()])].map((category) => ({ category, amount: (walletFungibleOut.get(category) ?? 0n) - (walletFungibleIn.get(category) ?? 0n) })).filter(({ amount }) => amount !== 0n);
+    const records = await this.recordsOf(plan, request);
     return {
       template: summary,
       words: {
@@ -1205,6 +1295,7 @@ export class Applications {
         ...(plan.payItself === undefined ? {} : { payingItself: { feeSatoshis: await this.wallet.quotePayItself(plan.payItself) } }),
       },
       firstUse: kept?.stored !== true,
+      ...(records.length === 0 ? {} : { recordsPosition: true }),
     };
   }
 
@@ -1251,10 +1342,11 @@ export class Applications {
 
   /**
    * Carry out an action: the user has agreed to it. For a template that is new to the wallet this trusts
-   * the template, and stores it in the backup before anything is signed.
+   * the template, and stores it in the backup before anything is signed; so too the record of each position
+   * the action leaves (section 10.5).
    *
    * @param onStage - `recorded`: the backup holds the template. `sent`: the transaction is on the network.
-   * @throws NotStoredError when no backup store confirms a new template; ActionRefusedError; InsufficientFundsError
+   * @throws NotStoredError when no backup store confirms a new template or the record of a position; ActionRefusedError; InsufficientFundsError
    */
   async carryOut(request: ApplicationAction, onStage: (stage: 'recorded' | 'sent') => void = () => undefined): Promise<ActionOutcome> {
     this.wallet.requireUsable();
@@ -1273,6 +1365,9 @@ export class Applications {
     await this.wallet.hold(plan.reserved);
     let prepared: PreparedTransaction;
     try {
+      // What the action leaves is recorded, from the transaction worked out, before anything is signed. What the
+      // key holder builds is then checked to be that very transaction.
+      await this.storeRecords(await this.recordsOf(plan, request));
       await this.follow(plan);
       prepared = await this.wallet.prepare({
         template: identifier,
@@ -1351,7 +1446,7 @@ export class Applications {
   async readBackup(): Promise<{ suggested: number; notes: number }> {
     const { archive } = this.options;
     if (archive === undefined) return { suggested: 0, notes: 0 };
-    const { templates, tokenNotes } = await archive.read();
+    const { templates, tokenNotes, positions = [] } = await archive.read();
     const same = (a: Pick<TemplateNames, 'identifier' | 'contentHash'>, b: Pick<TemplateNames, 'identifier' | 'contentHash'>): boolean => a.identifier === b.identifier && a.contentHash === b.contentHash;
     let suggested = [...(this.state.suggested ?? [])];
     for (const { entry, standing, withdrawn } of templates) {
@@ -1388,7 +1483,45 @@ export class Applications {
     }
     this.change({ suggested, notes });
     await this.tellWithdrawals();
+    await this.takeRecords(archive, positions);
     return { suggested: this.suggestions.length, notes: notes.length };
+  }
+
+  /**
+   * Take in the position records the backup holds (section 10.6). This seed's own are kept as its own. Those
+   * of an earlier seed are suggestions: each is written again, with the values of the earlier record, as this
+   * seed's own only once the chain has borne it out, and a store has confirmed it. A record that does not
+   * count yet stays a suggestion, and is checked again the next time the backup is read.
+   */
+  private async takeRecords(archive: ApplicationArchive, read: { entry: PositionRecordEntry; standing: Standing }[]): Promise<void> {
+    const own = [...(this.state.positionRecords ?? [])];
+    let suggested = [...(this.state.suggestedRecords ?? [])];
+    for (const { entry, standing } of read) {
+      if (standing === 'current owner') {
+        if (!own.some((known) => sameRecord(known, entry))) own.push(entry);
+        suggested = suggested.filter((known) => !sameRecord(known, entry));
+      } else if (!own.some((known) => sameRecord(known, entry)) && !suggested.some((known) => sameRecord(known, entry))) {
+        suggested.push(entry);
+      }
+    }
+    this.change({ positionRecords: own, suggestedRecords: suggested });
+    const check = this.options.checkRecord ?? checkPositionRecord;
+    for (const entry of suggested) {
+      const trusted = this.state.templates.find((template) => template.identifier === entry.templateIdentifier);
+      let counts = false;
+      try {
+        counts = (await check(entry, this.wallet, trusted === undefined ? undefined : readTemplate(trusted.text))).counts;
+      } catch {
+        // A check that cannot be made leaves the record a suggestion.
+      }
+      if (!counts) continue;
+      const confirmed = await archive.write(entry).then(safelyStored, () => false);
+      if (!confirmed) continue;
+      this.change({
+        positionRecords: [...(this.state.positionRecords ?? []), entry],
+        suggestedRecords: (this.state.suggestedRecords ?? []).filter((known) => !sameRecord(known, entry)),
+      });
+    }
   }
 
   /**

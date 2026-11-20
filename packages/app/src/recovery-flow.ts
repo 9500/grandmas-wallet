@@ -1,6 +1,7 @@
 import { binToHex, hash160, hexToBin, sha256, utf8ToBin } from '@bitauth/libauth';
 import {
   type ArchiveStore,
+  type PositionRecordEntry,
   type RecordEntry,
   type RecoveryStatus,
   type Sent as SentToRecoverer,
@@ -11,6 +12,7 @@ import {
   readArchive,
   readViewingKeyRecord,
   recoveryStatus,
+  peekRecordEntry,
   safelyStored,
   signRecord,
   signViewingKeyRecord,
@@ -133,7 +135,7 @@ export interface RecoveryArrangement {
   change?: PreparedChange;
   /** Set on the old device once it has handed the wallet to a new seed: this device no longer owns it. */
   movedTo?: string;
-  /** The earlier archives whose templates, notes and labels are all in the archive in use, by identifier. */
+  /** The earlier archives whose templates, notes, position records and labels are all in the archive in use, by identifier. */
   copiedArchives?: string[];
 }
 
@@ -749,19 +751,33 @@ export const writeRecord = async (options: {
   archiveOf(options.arrangement.archive, options.storeAt).write({ type: 'record', signed: signRecord(options.entry, { network: options.seed.network, identity: options.identity }, options.seed.controllerKey) });
 
 /**
- * After a recovery or a move to a new seed (section 10.6): the templates, notes and labels of the earlier
- * archives are copied into the archive in use, which the earlier device's content key does not read. They
- * stay what they were, records signed by an earlier owner. Nothing is removed from an earlier archive, and
- * the access to it is kept; an archive counts as copied only when every one of its stores answered and
- * every record was confirmed in the new one. An unfinished copy is continued by calling this again.
+ * Whether the action a position record was written for was sent (section 10.2): `sent`; `never sent`, so
+ * that the record is not copied; `cannot tell`, and the record is copied as the harmless suggestion it is;
+ * or `not yet known`, and the copy is left unfinished and continued later.
+ */
+export type ActionSent = 'sent' | 'never sent' | 'cannot tell' | 'not yet known';
+
+/** Says whether a record's action was sent, with the template texts the earlier archive holds, by identifier. */
+export type WhetherSent = (entry: PositionRecordEntry, templateText: (identifier: string) => string | undefined) => Promise<ActionSent>;
+
+/**
+ * After a recovery or a move to a new seed (section 10.6): the templates, notes, position records and labels
+ * of the earlier archives are copied into the archive in use, which the earlier device's content key does not
+ * read. They stay what they were, records signed by an earlier owner: suggestions. Nothing is removed from an
+ * earlier archive, and the access to it is kept; an archive counts as copied only when every one of its stores
+ * answered and every record was confirmed in the new one. An unfinished copy is continued by calling this again.
+ *
+ * A position record of an action that was never sent is not copied: `whetherSent` says which those are.
+ * Without it, every record is copied.
  *
  * @returns the arrangement to keep, how many records were copied this time, and what is unfinished and why
  */
 export const copyEarlierArchives = async (options: {
   arrangement: RecoveryArrangement;
   storeAt: StoreAt;
+  whetherSent?: WhetherSent;
 }): Promise<{ arrangement: RecoveryArrangement; copied: number; unfinished: string[] }> => {
-  const { arrangement, storeAt } = options;
+  const { arrangement, storeAt, whetherSent } = options;
   const done = new Set(arrangement.copiedArchives ?? []);
   const unfinished: string[] = [];
   const target = archiveOf(arrangement.archive, storeAt);
@@ -774,8 +790,29 @@ export const copyEarlierArchives = async (options: {
     const contents = await contentsOf(earlier, storeAt);
     let complete = contents.answered.length === earlier.stores.length && contents.problems.length === 0;
     if (!complete) unfinished.push(`An earlier archive could not be read in full: ${contents.problems.join('; ') || 'a store did not answer'}.`);
+    // The templates the earlier archive holds, to work out the script a position record names.
+    const templates = new Map<string, string>();
+    for (const { blob } of contents.blobs) {
+      const entry = blob.type === 'record' ? peekRecordEntry(blob.signed) : undefined;
+      if (entry?.kind === 'template') templates.set(entry.identifier, entry.text);
+    }
     for (const { blob } of contents.blobs) {
       if (blob.type !== 'record' || present.has(messageHash(blob.signed))) continue;
+      const entry = peekRecordEntry(blob.signed);
+      if (entry?.kind === 'position' && whetherSent !== undefined) {
+        let sent: ActionSent;
+        try {
+          sent = await whetherSent(entry, (identifier) => templates.get(identifier));
+        } catch {
+          sent = 'not yet known';
+        }
+        if (sent === 'never sent') continue;
+        if (sent === 'not yet known') {
+          complete = false;
+          unfinished.push('Whether the action of a position record was sent cannot be told yet: the wallet has not finished looking for its coins.');
+          continue;
+        }
+      }
       const result = await target.write(blob);
       if (safelyStored(result)) {
         copied += 1;

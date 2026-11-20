@@ -310,7 +310,7 @@ const NoBackup = ({ owner, children }: { owner: Owner; children: ComponentChildr
   </Notice>
 );
 
-const needsBackup = (preview: ActionPreview | undefined): boolean => preview?.firstUse === true && kept('arrangement') === undefined;
+const needsBackup = (preview: ActionPreview | undefined): boolean => (preview?.firstUse === true || preview?.recordsPosition === true) && kept('arrangement') === undefined;
 
 const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entry: LedgerEntry; proposal: Proposal | undefined; onDismiss: () => void }) => {
   const { apps } = owner;

@@ -1,6 +1,6 @@
 import { binToHex } from '@bitauth/libauth';
 import type { RecoveryStatus } from '@grandmas-wallet/archive';
-import { type Balance, type OwnerWallet, type Sent, checkRecovery, copyEarlierArchives, makeChange } from '@grandmas-wallet/app';
+import { type Balance, type OwnerWallet, type Sent, actionSent, checkRecovery, copyEarlierArchives, makeChange } from '@grandmas-wallet/app';
 import type { SeedKeys } from '@grandmas-wallet/core';
 import { Button, Card, Frame, Info, Loading, More, type NavItem, Notice, plainError, recheckChain, useEvery, useRoute, useToast } from '@grandmas-wallet/ui';
 import type { JSX } from 'preact';
@@ -240,15 +240,16 @@ const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: O
     }
   });
 
-  // After a takeover or a move to a new seed, what the earlier archives hold about applications (templates and
-  // token notes) is copied into the archive in use, which the earlier phone cannot read (section 10.6), and then
-  // read: a template an earlier owner stored is offered, and a note is a hint.
+  // After a takeover or a move to a new seed, what the earlier archives hold about applications (templates, token
+  // notes and position records) is copied into the archive in use, which the earlier phone cannot read (section
+  // 10.6), and then read: a template an earlier owner stored is offered, a note is a hint, and a position record is
+  // a suggestion until the chain bears it out. A record of an action that was never sent is not copied.
   useEvery(20_000, async () => {
     const arrangement = kept('arrangement');
     if (arrangement === undefined || arrangement.movedTo !== undefined) return;
     const done = new Set(arrangement.copiedArchives ?? []);
     if (arrangement.earlierArchives.every((earlier) => done.has(earlier.archiveId))) return;
-    const copied = await copyEarlierArchives({ arrangement, storeAt: session.storeAt });
+    const copied = await copyEarlierArchives({ arrangement, storeAt: session.storeAt, whetherSent: actionSent(wallet.parts) });
     // Only what was copied is taken over: the arrangement may have changed meanwhile.
     const current = kept('arrangement');
     if (current !== undefined) keep('arrangement', { ...current, copiedArchives: [...new Set([...(current.copiedArchives ?? []), ...(copied.arrangement.copiedArchives ?? [])])] });

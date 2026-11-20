@@ -10,6 +10,7 @@ import {
   OwnerWallet,
   RECOVERY_PROFILE,
   RECOVERY_PROFILE_VERSION,
+  actionSent,
   applicationArchive,
   copyEarlierArchives,
   kitTemplates,
@@ -106,8 +107,9 @@ const assemble = (chain: SimulatedChain, wallet: OwnerWallet, backend: KeyBacken
     const next = new KeyBackend(chain, seed);
     let kept: OwnerWalletState | undefined;
     const taken = await OwnerWallet.takeOver({ backend: next, chain, seed, identity, earlierViewingKeys: [seedOf(seedIndex).viewingKey], save: (stored) => (kept = stored) });
-    // The new device starts an archive of its own and copies the earlier one's records into it (section 10.6).
-    const copied = await copyEarlierArchives({ arrangement: { archive: newArchive(STORES), earlierArchives: [arrangement.archive], earlierViewingKeyRecords: [] }, storeAt });
+    // The new device starts an archive of its own and copies the earlier one's records into it (section 10.6),
+    // leaving out a position record of an action that was never sent.
+    const copied = await copyEarlierArchives({ arrangement: { archive: newArchive(STORES), earlierArchives: [arrangement.archive], earlierViewingKeyRecords: [] }, storeAt, whetherSent: actionSent(taken.parts) });
     return assemble(chain, taken, next, seedIndex + 1, stores, copied.arrangement, () => kept as OwnerWalletState, options);
   };
   return { chain, wallet, applications, backend, stores, arrangement, state, identity, receive, recover, takeOver };
