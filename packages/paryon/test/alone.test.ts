@@ -138,7 +138,10 @@ const openLoan = async (debt: bigint, collateral: bigint) => {
   const expectedKey = createLoanKey({ contracts, factory, defining: asSpent(created, await spent(device, created), 0), changeTo: created.outputs[0]?.lockingBytecode as Uint8Array });
 
   const thread = utxoOf(first(recorded.borrowing));
-  const movedOutcome = await device.applications.carryOut(asked(movePeriodRequestAlone(alone.names, contracts, { borrowing: thread, lockHeight: LOCK_HEIGHT, page: PAGE })));
+  const moving = asked(movePeriodRequestAlone(alone.names, contracts, { borrowing: thread, lockHeight: LOCK_HEIGHT, page: PAGE }));
+  // The Borrowing contract's minting NFT goes on with the new period in its commitment: carried on, not destroyed.
+  expect((await device.applications.preview(moving)).figures.tokensDestroyed).toEqual([]);
+  const movedOutcome = await device.applications.carryOut(moving);
   const moved = await decoded(device, movedOutcome.transactionId);
 
   const choice = { borrowing: at(movedOutcome.transactionId, moved, 0), price: utxoOf(PRICE), enforcer: at(made.transactionId, created, 2), proof: at(made.transactionId, created, 3), debt, collateral, startingInterest: 0 };

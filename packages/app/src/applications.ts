@@ -599,6 +599,50 @@ const tokenMoved = (token: NonNullable<Output['token']>): NonNullable<MovedOutpu
 const moved = (output: Output): MovedOutput => ({ satoshis: output.valueSatoshis, ...(output.token === undefined ? {} : { token: tokenMoved(output.token) }) });
 const sameToken = (a: Output['token'], b: Output['token']): boolean =>
   a !== undefined && b !== undefined && hex(a.category) === hex(b.category) && a.amount === b.amount && a.nft?.capability === b.nft?.capability && hex(a.nft?.commitment ?? new Uint8Array()) === hex(b.nft?.commitment ?? new Uint8Array());
+/** An NFT as the wallet's figures show it: its category and, where it has one, its capability and commitment, as hex. */
+export interface NftShown {
+  category: string;
+  nft?: { capability: string; commitment: string } | undefined;
+}
+
+/**
+ * Whether the NFT of an input can be the one on an output of the same transaction: of the same category, and changed
+ * no more than its capability lets it be. A minting NFT may become any NFT of its category; a mutable one may take
+ * another commitment, and may give up being mutable; one without a capability stays as it is.
+ */
+export const nftCanBecome = (from: NftShown, to: NftShown): boolean => {
+  if (from.nft === undefined || to.nft === undefined || from.category !== to.category) return false;
+  if (from.nft.capability === 'minting') return true;
+  if (from.nft.capability === 'mutable') return to.nft.capability === 'mutable' || to.nft.capability === 'none';
+  return to.nft.capability === 'none' && to.nft.commitment === from.nft.commitment;
+};
+
+/**
+ * NFTs of a transaction's inputs matched to those of its outputs, each used once: first those that go on unchanged,
+ * then those changed as their capability allows. What is left over on either side was destroyed, or made now.
+ * @returns the inputs no output carries on, and the outputs no input explains
+ */
+export const matchNfts = <T extends NftShown, U extends NftShown>(inputs: T[], outputs: U[]): { notCarriedOn: T[]; notExplained: U[] } => {
+  const free = outputs.map(() => true);
+  const used = inputs.map(() => false);
+  const unchanged = (from: NftShown, to: NftShown): boolean => from.category === to.category && from.nft?.capability === to.nft?.capability && from.nft?.commitment === to.nft?.commitment;
+  // In the second pass the least capable go first, so that a minting NFT, which can become any NFT of its category,
+  // does not take the output another input can only become.
+  const rank: Record<string, number> = { none: 0, mutable: 1, minting: 2 };
+  const order = inputs.map((_, index) => index);
+  for (const rule of [unchanged, nftCanBecome]) {
+    if (rule === nftCanBecome) order.sort((a, b) => (rank[inputs[a]?.nft?.capability ?? ''] ?? 3) - (rank[inputs[b]?.nft?.capability ?? ''] ?? 3));
+    order.forEach((index) => {
+      const input = inputs[index] as T;
+      if (used[index] === true || input.nft === undefined) return;
+      const found = outputs.findIndex((output, at) => free[at] === true && rule(input, output));
+      if (found === -1) return;
+      free[found] = false;
+      used[index] = true;
+    });
+  }
+  return { notCarriedOn: inputs.filter((input, index) => input.nft !== undefined && used[index] !== true), notExplained: outputs.filter((output, at) => output.nft !== undefined && free[at] === true) };
+};
 const sameOutput = (a: Output, b: Output): boolean =>
   hex(a.lockingBytecode) === hex(b.lockingBytecode) && a.valueSatoshis === b.valueSatoshis && (a.token === undefined ? b.token === undefined : sameToken(a.token, b.token));
 const inputBytes = (unlocking: Uint8Array): number => 32 + 4 + (unlocking.length < 0xfd ? 1 : 3) + unlocking.length + 4;
@@ -1530,12 +1574,14 @@ export class Applications {
         const wallet = burned.nft === undefined ? walletIn.some((token) => hex(token.category) === hex(burned.category) && token.nft === undefined) : walletIn.some((token) => sameToken(token, burned));
         return { name: outputName(identifier), token: tokenMoved(burned), how: 'data output' as const, wallet };
       });
-    const carried = plan.outputs.flatMap(({ output }) => (output.token === undefined ? [] : [output.token]));
-    for (const input of theirs) {
-      const nft = input.coin.utxo.output.token;
-      if (nft?.nft !== undefined && !carried.some((token) => hex(token.category) === hex(nft.category) && token.nft?.capability === nft.nft?.capability && hex(token.nft?.commitment ?? new Uint8Array()) === hex(nft.nft?.commitment ?? new Uint8Array()))) {
-        destroyed.push({ name: definition.inputs?.[input.inputIdentifier ?? '']?.name ?? input.inputIdentifier ?? 'Input', token: tokenMoved({ ...nft, amount: 0n }), how: 'not carried on', wallet: false });
-      }
+    // An NFT of the application's coins is carried on where an output holds it unchanged, or changed as its
+    // capability allows: a contract that keeps its state in a mutable or minting NFT changes the commitment.
+    // A token on a data output is matched too: it is shown above, as destroyed there.
+    const carried = plan.outputs.flatMap(({ output }) => (output.token === undefined ? [] : [tokenMoved(output.token)]));
+    const nftInputs = plan.inputs.flatMap((input) => (input.coin.utxo.output.token?.nft === undefined ? [] : [{ ...tokenMoved(input.coin.utxo.output.token), input }]));
+    for (const { input } of matchNfts(nftInputs, carried).notCarriedOn) {
+      const nft = input.coin.utxo.output.token as NonNullable<Output['token']>;
+      if (input.kind === 'application') destroyed.push({ name: definition.inputs?.[input.inputIdentifier ?? '']?.name ?? input.inputIdentifier ?? 'Input', token: tokenMoved({ ...nft, amount: 0n }), how: 'not carried on', wallet: false });
     }
     const fungibleOut = fungible(plan.outputs.map(({ output }) => output));
     for (const [category, amount] of fungible(plan.inputs.map(({ coin }) => coin.utxo.output))) {

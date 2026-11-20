@@ -1,4 +1,4 @@
-import { type ActionPreview, type MovedOutput, type TemplateSummary, thisWalletRefuses } from '@grandmas-wallet/app';
+import { type ActionPreview, type MovedOutput, type TemplateSummary, matchNfts, thisWalletRefuses } from '@grandmas-wallet/app';
 import { InsufficientFundsError } from '@grandmas-wallet/core';
 import { Amount, Choice, Icon, Info, KeyValues, More, Notice, Sat, Status, formatBch, formatSatoshis, formatTime, plainError, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
@@ -218,8 +218,10 @@ export const ways = (figures: ActionPreview['figures']): { out: Way; back: Way }
   const nftsOf = (outputs: MovedOutput[]): Moving[] => outputs.flatMap((output) => (output.token?.nft === undefined ? [] : [output.token]));
   const spent = nftsOf(figures.tokensSpent);
   const arriving = nftsOf(figures.toWallet);
-  // An NFT that goes to others and that neither the wallet nor the application's coins brought is made now from the wallet's coin.
-  const made = without(without(nftsOf(figures.toOthers), nftsOf(figures.applicationInputs)), spent);
+  // An NFT that goes to others and that neither the wallet nor the application's coins brought, unchanged or changed
+  // as its capability allows, and that no minting NFT among them can have made, is made now from the wallet's coin.
+  const brought = [...nftsOf(figures.applicationInputs), ...spent];
+  const made = matchNfts(brought, nftsOf(figures.toOthers)).notExplained.filter((token) => !brought.some((input) => input.category === token.category && input.nft?.capability === 'minting'));
   return {
     out: { satoshis: into > 0n ? into : 0n, fungible: figures.tokensNet.filter((entry) => entry.amount < 0n).map((entry) => ({ category: entry.category, amount: -entry.amount })), nfts: [...without(spent, arriving), ...made] },
     back: { satoshis: into < 0n ? -into : 0n, fungible: figures.tokensNet.filter((entry) => entry.amount > 0n), nfts: without(arriving, spent) },
