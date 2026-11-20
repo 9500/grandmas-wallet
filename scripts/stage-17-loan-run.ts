@@ -504,7 +504,12 @@ try {
 
     // 3. Borrow: the page names the thread, the price, the key waiting in Paryon's contract and its proof.
     const opened = await once('100.00 PUSD are borrowed', async () => {
-      const state = await readParyonState(server, contracts());
+      // The page reads Paryon's coins from its server: it waits until the server lists the thread it just brought up to date.
+      const moved = facts.steps['the Borrowing thread is brought up to date']?.transactionIds[0];
+      const state = await until('the Borrowing thread brought up to date, at the server', async () => {
+        const read = await readParyonState(server, contracts());
+        return moved === undefined || read.borrowing.some((thread) => hex(thread.transactionHash) === moved) ? read : undefined;
+      });
       // The thread in the latest period, the one just brought up to date; of those, the one that can lend the most.
       const [thread] = state.borrowing.slice().sort((a, b) => b.period - a.period || (b.supply > a.supply ? 1 : b.supply < a.supply ? -1 : 0));
       const [price] = state.price.slice().sort((a, b) => (b.state.price > a.state.price ? 1 : -1));
