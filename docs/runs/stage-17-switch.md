@@ -78,3 +78,7 @@ $ node deploy/check-public.mjs deploy/config/production.json --expect 1db8029
 ```
 
 The stores then run from the main checkout again, on the same data. It was not tried this time. To come back to the third design, run the installer from the design-3 checkout as above.
+
+## Since then
+
+On 20 November 2026 at 23:04 UTC the pages were released again, from commit `b67f221`, with the same installer and the same check from outside (all pages at `b67f221` of `design-3`, both stores answering, `scripts/page-smoke.ts` without an error). The one change to the pages: the loan page takes one of Paryon's manage function coins at random rather than always the first, after run H's first closing was refused as a conflict over such a coin ([run H](stage-17-loan-browser-chipnet.md)). The stores held 117 files each by then, the 94 of the copy and the records the runs wrote. The way back above is unchanged.
