@@ -2,7 +2,7 @@ import { type Output, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
 import { type RecordedPosition, ActionRefusedError } from '@grandmas-wallet/app';
 import { ADDRESS_KIND, takeNumber, walletAddress } from '@grandmas-wallet/core';
 import { strongboxTemplate, templateText } from '@grandmas-wallet/testing';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { type Device, deviceWith, hex, keyedBox, presentation, request, seedOf, strongbox } from './support/applications.js';
 
@@ -83,6 +83,35 @@ describe('carrying out an action of a template the wallet has never seen', () =>
     expect(after.recoverable).toBe(before.recoverable + 30_000n - outcome.sent.feeSatoshis);
     expect(await positionOf(device, category)).toMatchObject({ status: 'closed', satoshis: 0n });
     expect(hex(after.tokens[0]?.utxo.output.lockingBytecode ?? new Uint8Array())).not.toBe(hex(before.tokens[0]?.utxo.output.lockingBytecode ?? new Uint8Array()));
+  });
+});
+
+describe('one action right after another', () => {
+  it('the next action, and the list of positions, wait until the key holder lists what the action before left the wallet', async () => {
+    const device = await deviceWith([100_000n]);
+    // As the XO engine does: what a transaction it sent leaves the wallet is listed only once its server has taken
+    // the transaction into its pool and said so, a moment later. Here, a second and a half.
+    const listCoins = device.backend.coins.bind(device.backend);
+    const sendTransaction = device.backend.send.bind(device.backend);
+    const unlisted = new Map<string, number>();
+    vi.spyOn(device.backend, 'send').mockImplementation(async (prepared) => {
+      const sent = await sendTransaction(prepared);
+      unlisted.set(prepared.transactionId, Date.now() + 1_500);
+      return sent;
+    });
+    vi.spyOn(device.backend, 'coins').mockImplementation(async () => (await listCoins()).filter((coin) => (unlisted.get(hex(coin.utxo.transactionHash)) ?? 0) <= Date.now()));
+    const first = await device.applications.carryOut(request(keyedBox, 'open', 'holder', { amount: 30_000, label: '01' }));
+    const category = first.tokens[0]?.category as string;
+    // The only coin the wallet has to pay with now is the change of the first action, not yet listed.
+    expect((await device.wallet.parts.ownCoins()).length).toBe(0);
+    const started = Date.now();
+    const second = await device.applications.carryOut(request(keyedBox, 'add', 'holder', { amount: 5_000 }, { about: { category, spent: false } }));
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_000);
+    const spent = decodeTransactionBch(hexToBin((await device.chain.getTransaction(second.transactionId)) as string));
+    if (typeof spent === 'string') throw new Error(spent);
+    expect(spent.inputs.map((input) => hex(input.outpointTransactionHash))).toEqual([first.transactionId]);
+    // Listed right after the second action: the position, with both payments in it.
+    expect((await device.applications.recordedPositions()).map(({ token, status, satoshis }) => [token.category, status, satoshis])).toEqual([[category, 'open', 35_000n]]);
   });
 });
 

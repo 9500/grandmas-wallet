@@ -1712,8 +1712,8 @@ export class Applications {
   }
 
   /**
-   * Before an action is worked out, wait until the key holder lists what the action sent just before left the wallet:
-   * its change, and the tokens it gave the wallet. The key holder spends only coins it lists, and it learns of them
+   * Before an action is worked out, and before the wallet's tokens and positions are listed, wait until the key holder
+   * lists what the action sent just before left the wallet: its change, and the tokens it gave the wallet. The key holder spends only coins it lists, and it learns of them
    * from its server a moment after the transaction is sent, when the server has taken the transaction into its
    * pool; the wallet cannot hand them to it sooner. This is a wait for the server, never for a block: after half a
    * minute from the sending, the action is worked out with what is listed.
@@ -1889,6 +1889,7 @@ export class Applications {
    * @throws when the chain cannot be read: the list is then not to be taken as empty
    */
   async recordedPositions(options: { template?: string; categories?: Set<string>; trusting?: ReadTemplate } = {}): Promise<RecordedPosition[]> {
+    await this.awaitOwnOutputs();
     const check = this.options.checkRecord ?? checkPositionRecord;
     const records: { entry: PositionRecordEntry; standing: RecordedPosition['standing'] }[] = [];
     for (const [list, standing] of [
@@ -2036,6 +2037,7 @@ export class Applications {
    * does. Where that template is not trusted on this device, the token is listed as incomplete, with the reason.
    */
   async tokens(): Promise<HeldToken[]> {
+    await this.awaitOwnOutputs();
     const records = [...this.positionRecords, ...this.suggestedRecords];
     const held: HeldToken[] = [];
     for (const { coin, place } of await this.wallet.tokenCoins()) {
