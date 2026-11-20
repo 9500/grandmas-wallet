@@ -202,7 +202,7 @@ export const scanWallet = async (chain: PlainChain, paths: WalletPaths, skip: Re
 /**
  * The jars whose keys the wallet holds: every token it holds with no capability and no fungible amount,
  * whose commitment reads as a date, and whose jar address (from its category and that date) has a history
- * on chain. The same rule this project's wallet follows from the template's recovery declaration.
+ * on chain. An ordinary wallet keeps no record of its jars; the key's category and date are enough to find them.
  */
 export const findJars = async (chain: PlainChain, scan: Pick<Scan, 'tokens'>, skip: ReadonlySet<string> = new Set()): Promise<PlainJar[]> => {
   const candidates = new Map<string, { key: Coin; category: string; unlockTime: number; script: SavingsJarScript }>();

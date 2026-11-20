@@ -6,7 +6,7 @@ import { Amount, Button, Card, Field, Info, KeyValues, Loading, Notice, PageHead
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
-import { ActionReview, Hex, Part, RefusalView, TemplateView, TypedValue, plainRefusal, refusalOf } from './ActionReview.js';
+import { ActionReview, Hex, Part, RefusalView, TemplateView, plainRefusal, refusalOf } from './ActionReview.js';
 import { type BackupState, type Refusal, type TokenList, BACKUP_UNREACHABLE, approval, consentOf, needsStore, refusalOf as refusalShown, tokenList } from './review-gate.js';
 import { type ApplicationsPart, type PositionsAsk, relayOf } from './connections.js';
 import type { Owner } from './OwnerApp.js';
@@ -14,7 +14,7 @@ import { CONNECTION_ADDRESS } from './scan.js';
 import { CameraIcon, ScanDialog } from './Scanner.js';
 import { chooseToken } from './token-choice.js';
 import { type Connection, keep, kept } from './session.js';
-import { NameSource, TokenAmount, TokenNamesContext } from './token-words.js';
+import { TokenAmount } from './token-words.js';
 import './apps.css';
 
 /**
@@ -23,7 +23,7 @@ import './apps.css';
  * shows about one comes from the application's template, and its name for itself is marked as unverified.
  */
 
-type View = { at: 'main' } | { at: 'act'; token?: HeldToken; position?: RecordedPosition; action: TokenAction } | { at: 'trust'; identifier: string } | { at: 'template'; identifier: string };
+type View = { at: 'main' } | { at: 'act'; position: RecordedPosition; action: TokenAction } | { at: 'trust'; identifier: string } | { at: 'template'; identifier: string };
 
 /** Requests the user decided while the page has been open: their outcome stays on the screen until dismissed. */
 const followed = new Set<string>();
@@ -49,20 +49,17 @@ export const Apps = ({ owner }: { owner: Owner }) => {
     setView({ at: 'main' });
     window.scrollTo(0, 0);
   };
-  // What the templates the user trusts call the tokens, for every figure on this screen.
-  const names = useMemo(() => apps.applications.names(), [apps.version]);
+  if (view.at === 'act') return <ActOnToken owner={owner} position={view.position} action={view.action} onBack={back} />;
+  if (view.at === 'trust') return <TrustSuggested owner={owner} identifier={view.identifier} onBack={back} />;
+  if (view.at === 'template') return <TemplatePage owner={owner} identifier={view.identifier} onBack={back} />;
   return (
-    <TokenNamesContext.Provider value={names}>
-      {view.at === 'act' ? (
-        <ActOnToken owner={owner} {...(view.token === undefined ? {} : { token: view.token })} {...(view.position === undefined ? {} : { position: view.position })} action={view.action} onBack={back} />
-      ) : view.at === 'trust' ? (
-        <TrustSuggested owner={owner} identifier={view.identifier} onBack={back} />
-      ) : view.at === 'template' ? (
-        <TemplatePage owner={owner} identifier={view.identifier} onBack={back} />
-      ) : (
-        <Main owner={owner} onView={(next) => { setView(next); window.scrollTo(0, 0); }} />
-      )}
-    </TokenNamesContext.Provider>
+    <Main
+      owner={owner}
+      onView={(next) => {
+        setView(next);
+        window.scrollTo(0, 0);
+      }}
+    />
   );
 };
 
@@ -370,7 +367,7 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
     if (entry.status !== 'asked' || summary === undefined) return;
     applications.preview(actionOf(entry)).then(setPreview, (error: unknown) => setRefusal(refusalShown(error, refusalOf(error))));
   }, [keyOf(entry)]);
-  const gate = approval({ ...(preview === undefined ? {} : { preview }), refused: summary === undefined || refusal !== undefined, violation: summary?.verdict.statement === 'violation' && !summary.trusted, backup, ticked });
+  const gate = approval({ ...(preview === undefined ? {} : { preview }), refused: summary === undefined || refusal !== undefined, backup, ticked });
 
   const name = nameOf(apps, entry.application);
   const asker = (withName: boolean) => (
@@ -469,7 +466,6 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
             </div>
           </Notice>
         )}
-        {summary?.verdict.statement === 'violation' && !summary.trusted && <Notice tone="bad">This wallet does not take in a template with a violation. You can only decline.</Notice>}
         {gate.blocked === 'no backup' && <NoBackup owner={owner}>This wallet has no backup store yet. A template is stored there before its first action, so that a new phone can operate what is made with it. Set up recovery first.</NoBackup>}
         {gate.blocked === 'backup unreachable' && <Unreachable busy={task.busy !== undefined} onRetry={() => void checkBackup()} />}
         <TaskStatus task={task} />
@@ -527,7 +523,6 @@ const OfferCard = ({ owner, offer }: { owner: Owner; offer: Offer }) => {
       return [undefined, refusalOf(error)];
     }
   }, [apps.version]);
-  const violation = summary?.verdict.statement === 'violation';
   const trust = () =>
     task.run('trust', async () => {
       await offer.accept();
@@ -548,10 +543,9 @@ const OfferCard = ({ owner, offer }: { owner: Owner; offer: Offer }) => {
             <TemplateView summary={summary} showActions={!summary.trusted} />
           </Part>
         )}
-        {violation && <Notice tone="bad">This wallet does not take in a template with a violation. You can only decline.</Notice>}
         <TaskStatus task={task} name="trust" />
         <div class="actions decide">
-          {summary !== undefined && !violation && (
+          {summary !== undefined && (
             <Button task={task} name="trust" onClick={() => void trust()}>
               {summary.trusted ? 'Allow' : 'Trust this template'}
             </Button>
@@ -633,16 +627,25 @@ const TemplatePage = ({ owner, identifier, onBack }: { owner: Owner; identifier:
   const task = useTask();
   const [confirming, setConfirming] = useState(false);
   const [tokens, setTokens] = useState<HeldToken[] | undefined>();
+  const [open, setOpen] = useState<HeldToken[]>([]);
   useEffect(() => {
     applications.tokens().then(
-      (held) => setTokens(held.filter((token) => token.template?.identifier === identifier && token.meaning !== 'unknown')),
+      (held) => setTokens(held.filter((token) => token.template?.identifier === identifier && token.meaning === 'position')),
       () => setTokens([]),
     );
   }, []);
+  // The tokens of its positions that are open, as the records and the chain say: named when the user is about to stop trusting it.
+  useEffect(() => {
+    if (tokens === undefined || tokens.length === 0) return;
+    applications.recordedPositions({ template: identifier }).then(
+      (positions) => setOpen(tokens.filter((token) => positions.some((position) => position.status === 'open' && position.token.outpoint === token.outpoint))),
+      () => setOpen([]),
+    );
+  }, [tokens]);
   const summary = useMemo((): TemplateSummary | undefined => {
     if (kept === undefined) return undefined;
     try {
-      return applications.describe({ identifier: kept.identifier, contentHash: kept.contentHash, ...(kept.declaration === undefined ? {} : { declaration: kept.declaration.contentHash }) });
+      return applications.describe({ identifier: kept.identifier, contentHash: kept.contentHash });
     } catch {
       return undefined;
     }
@@ -664,8 +667,7 @@ const TemplatePage = ({ owner, identifier, onBack }: { owner: Owner; identifier:
       </div>
     );
   }
-  const tokenName = (token: HeldToken): string => token.names?.nft?.named?.name ?? token.names?.fungible?.named?.name ?? `Token ${token.category.slice(0, 8)}…`;
-  const open = (tokens ?? []).filter((token) => token.position?.status === 'open');
+  const tokenName = (token: HeldToken): string => token.tokenName ?? `Token ${token.category.slice(0, 8)}…`;
   const stop = () =>
     task.run('stop', async () => {
       const { name, backupTold } = await apps.stopTrusting(identifier);
@@ -810,13 +812,6 @@ const EarlierRequests = ({ owner }: { owner: Owner }) => {
 
 // ------------------------------------------------------------------ tokens and positions
 
-const STATUS: Record<string, { label: string; tone?: 'good' | 'warn' }> = {
-  open: { label: 'Open', tone: 'good' },
-  closed: { label: 'Closed' },
-  ambiguous: { label: 'Unclear', tone: 'warn' },
-  incomplete: { label: 'Cannot be worked out', tone: 'warn' },
-};
-
 const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void }) => {
   const { apps } = owner;
   const [tokens, setTokens] = useState<HeldToken[] | undefined>();
@@ -833,8 +828,7 @@ const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void 
   useEffect(() => {
     void read();
   }, [apps.version, count]);
-  const declared = (identifier: string): boolean => apps.applications.templates.some((template) => template.identifier === identifier && template.declaration !== undefined);
-  const list = tokens === undefined ? undefined : tokenList(recorded, tokens, declared);
+  const list = tokens === undefined ? undefined : tokenList(recorded, tokens);
   const empty = list !== undefined && list.positions.length + list.held.length + list.unconfirmed.length + list.tokens.length === 0;
   return (
     <Card cls="tokens-card">
@@ -919,11 +913,26 @@ const SendToken = ({ owner, choice }: { owner: Owner; choice: string }) => (
   </div>
 );
 
+/** The line for what is done through the application, with why behind a "?", and its page as a link where there is one. */
+const ThroughApplication = ({ why, label, page }: { why: ComponentChildren; label: string; page?: string | undefined }) => (
+  <>
+    <div class="small elsewhere-line">
+      Open the application to do this{' '}
+      <Info label={label}>{why}</Info>
+    </div>
+    {page !== undefined && (
+      <a class="small application-page" href={page} target="_blank" rel="noopener noreferrer">
+        {page.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+      </a>
+    )}
+  </>
+);
+
 /**
  * A position from a record (sections 10.4 and 13.3): the token by the template's name for the output that made it and
  * the template's name, what its script holds, and the actions the script offers, each carried out by the wallet or
  * through the application's page. A token whose record names no script is shown under the template's name, with no
- * word on whether the position is open.
+ * word on whether the position is open: what it controls is shown and operated by the application's page.
  */
 export const PositionRow = ({ owner, position, onView }: { owner: Owner; position: RecordedPosition; onView: (view: View) => void }) => {
   const actions = owner.apps.applications.offeredActions(position);
@@ -950,7 +959,11 @@ export const PositionRow = ({ owner, position, onView }: { owner: Owner; positio
         {status === 'open' && <Pill tone="good">Open</Pill>}
         {status === 'closed' && <Pill>Closed</Pill>}
       </div>
-      {status !== 'held' && (
+      {status === 'held' ? (
+        <div class="token-body">
+          <ThroughApplication label="Why this needs the application" page={position.page} why="What this token controls is shown and operated by the application's page, not by this wallet." />
+        </div>
+      ) : (
         <div class="token-body">
           {status === 'closed' ? (
             <p>It holds nothing now.</p>
@@ -976,15 +989,7 @@ export const PositionRow = ({ owner, position, onView }: { owner: Owner; positio
                   ) : (
                     <div>
                       <div class="token-action-name">{action.name}</div>
-                      <div class="small elsewhere-line">
-                        Open the application to do this{' '}
-                        <Info label={`Why "${action.name}" needs the application`}>{action.needsApplication}</Info>
-                      </div>
-                      {action.page !== undefined && (
-                        <a class="small application-page" href={action.page} target="_blank" rel="noopener noreferrer">
-                          {action.page.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-                        </a>
-                      )}
+                      <ThroughApplication label={`Why "${action.name}" needs the application`} page={action.page} why={action.needsApplication} />
                     </div>
                   )}
                 </li>
@@ -1000,42 +1005,25 @@ export const PositionRow = ({ owner, position, onView }: { owner: Owner; positio
   );
 };
 
-/** What a position holds, read from the chain as the template's declaration says, in the template's words. */
-export const PositionState = ({ state }: { state: NonNullable<NonNullable<HeldToken['position']>['state']> }) => (
-  <div class="position-state">
-    <div class="small muted">In the template's words, read from the chain:</div>
-    <KeyValues
-      entries={state.map((entry) => [
-        <>
-          {entry.name}
-          {entry.description !== '' && <small>{entry.description}</small>}
-        </>,
-        <TypedValue type={entry.type} value={entry.value} />,
-      ])}
-    />
-  </div>
-);
-
+/**
+ * A token that no record lists as a position: by the template's name for it where a record ties it to a template the
+ * user trusts; one whose template is not trusted here, with the way to trust it where the backup holds it; and one of
+ * unknown meaning. Each is held, swept and can be sent.
+ */
 export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldToken; onView: (view: View) => void }) => {
-  const status = token.meaning === 'position' ? token.position?.status : token.meaning;
-  const shown = status === undefined ? undefined : STATUS[status];
   const suggestion = token.meaning === 'incomplete' && token.template !== undefined ? owner.apps.applications.suggestions.find((candidate) => candidate.identifier === token.template?.identifier) : undefined;
-  const position = token.position;
-  const usable = token.place === 'address';
-  // A name only where a template the user trusts gives one: the NFT's, else the amount's.
-  const naming = token.capability === undefined ? token.names?.fungible : token.names?.nft;
-  const name = naming?.named?.name;
-  const title = name ?? (token.meaning === 'unknown' ? 'A token of unknown meaning' : (token.template?.name ?? 'A token'));
+  const title = token.meaning === 'unknown' ? 'A token of unknown meaning' : (token.tokenName ?? token.template?.name ?? 'A token');
+  const of = token.meaning === 'position' && token.tokenName !== undefined ? token.template?.name : undefined;
   return (
     <li class="token">
       <div class="token-head">
         <div>
           <div class="token-title">
             {title}
-            {name !== undefined && token.meaning !== 'unknown' && token.template !== undefined && <span class="token-of"> · {token.template.name}</span>}
+            {of !== undefined && <span class="token-of"> · {of}</span>}
           </div>
           <div class="small muted token-id">
-            {token.capability === undefined ? <TokenAmount amount={token.amount} naming={token.names?.fungible} /> : token.capability === 'none' ? 'NFT' : `NFT, ${token.capability}`} · <Hex value={token.category} />
+            {token.capability === undefined ? <TokenAmount amount={token.amount} /> : token.capability === 'none' ? 'NFT' : `NFT, ${token.capability}`} · <Hex value={token.category} />
             {token.commitment !== '' && (
               <>
                 {' '}
@@ -1045,52 +1033,23 @@ export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldTo
             {token.capability !== undefined && token.amount > 0n && (
               <>
                 {' '}
-                · with <TokenAmount amount={token.amount} naming={token.names?.fungible} />
+                · with <TokenAmount amount={token.amount} />
               </>
             )}
           </div>
-          {naming !== undefined && <NameSource naming={naming} />}
         </div>
-        {shown !== undefined && <Pill {...(shown.tone === undefined ? {} : { tone: shown.tone })}>{shown.label}</Pill>}
+        {token.meaning === 'incomplete' && <Pill tone="warn">Template not trusted</Pill>}
       </div>
-
-      {token.meaning === 'position' && position !== undefined && (
-        <div class="token-body">
-          {position.status === 'open' && (
-            <p>
-              Holds <Amount satoshis={position.satoshis} exact />
-              {position.coins > 1 && <span class="muted"> in {position.coins} coins</span>}
-            </p>
-          )}
-          {position.status === 'closed' && <p>It holds nothing now.</p>}
-          {position.status === 'ambiguous' && <p>The wallet cannot tell which coin on the chain this token controls, and picks none.</p>}
-          {position.note !== undefined && position.note !== 'It holds nothing now.' && <p class="small muted">{position.note}</p>}
-          {position.status === 'open' && (position.state ?? []).length > 0 && <PositionState state={position.state ?? []} />}
-          {(token.actions ?? []).length > 0 && (
-            <ul class="token-actions">
-              {(token.actions ?? []).map((action) => (
-                <li class={action.needsApplication === undefined ? undefined : 'through-application'}>
-                  <div>
-                    {action.needsApplication !== undefined && <div class="token-action-name">{action.name}</div>}
-                    <div class="small muted">{action.description !== '' ? action.description : 'An action of the template.'}</div>
-                    {action.needsApplication !== undefined && <div class="small needs-application">Only from the application's own page. {action.needsApplication}</div>}
-                  </div>
-                  {action.needsApplication === undefined && (
-                    <Button small kind="secondary" disabled={!usable} onClick={() => onView({ at: 'act', token, action })}>
-                      {action.name}
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
 
       {token.meaning === 'incomplete' && (
         <div class="token-body">
-          {token.reason !== undefined && <p class="small">{token.reason}</p>}
-          <p class="small muted">The token is safe: it is held and swept like any other.</p>
+          <div class="small token-line">
+            What it controls can't be shown here.{' '}
+            <Info label="Why it can't be shown">
+              <span>{token.reason ?? 'The template that made it is not trusted on this phone.'}</span>
+              <span>The token is safe: the wallet holds it and moves it in a sweep or a recovery like any other coin.</span>
+            </Info>
+          </div>
           {suggestion !== undefined && (
             <div>
               <Button small kind="secondary" onClick={() => onView({ at: 'trust', identifier: suggestion.identifier })}>
@@ -1103,12 +1062,16 @@ export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldTo
 
       {token.meaning === 'unknown' && (
         <div class="token-body">
-          <p class="small muted">No template this phone trusts says what it stands for. It is safe: the wallet holds it and moves it in a sweep or a recovery like any other coin.</p>
-          {token.reason !== undefined && <p class="small muted">{token.reason}</p>}
+          <div class="small muted token-line">
+            Nothing here says what it stands for.{' '}
+            <Info label="About this token">
+              <span>{token.reason ?? 'No record of this wallet ties it to a position.'}</span>
+              <span>It is safe: the wallet holds it and moves it in a sweep or a recovery like any other coin.</span>
+            </Info>
+          </div>
         </div>
       )}
 
-      {token.noteRefused !== undefined && <p class="small muted">{token.noteRefused}</p>}
       {token.place === 'earlier' && <Notice tone="warn">This token is at an address of an earlier phone, where that phone's words could still move it. It is moved to this phone's addresses first, with the other coins at earlier addresses; until then it cannot be used here.</Notice>}
       {token.place === 'vault' && <Notice>This token is at a vault address. It is moved to an ordinary address of the wallet before it can be used here.</Notice>}
       <SendToken owner={owner} choice={token.capability === undefined ? `fungible:${token.category}` : `nft:${token.outpoint}`} />
@@ -1159,19 +1122,15 @@ const valueOf = (wanted: Wanted, text: string, network: Owner['session']['networ
 type Acting = { at: 'form' } | { at: 'review'; request: ApplicationAction; preview: ActionPreview } | { at: 'refused'; refusal: Refusal } | { at: 'done'; outcome: ActionOutcome } | { at: 'failed'; refusal: Refusal; notStored: boolean };
 
 /**
- * An action the user starts from the wallet's own list, on a token a declaration explains or on a position from a
- * record: the values the user types where the action needs them, then the same review as for a request, with its
- * tick and its backup check; a refusal in place of the review.
+ * An action the user starts from the wallet's own list, on a position from a record: the values the user types where
+ * the action needs them, then the same review as for a request, with its tick and its backup check; a refusal in place
+ * of the review.
  */
-const ActOnToken = ({ owner, token, position, action, onBack }: { owner: Owner; token?: HeldToken; position?: RecordedPosition; action: TokenAction; onBack: () => void }) => {
+const ActOnToken = ({ owner, position, action, onBack }: { owner: Owner; position: RecordedPosition; action: TokenAction; onBack: () => void }) => {
   const { applications } = owner.apps;
-  // What the user gives: the library says which values neither the token nor the chain supplies.
+  // What the user gives: the library says which values neither the record nor the wallet supplies.
   const wanted: Wanted[] = action.asks ?? [];
-  // A value the position holds now, as the template reads it from the chain, is where the user starts from.
-  const [prefilled] = useState<Record<string, string>>(() =>
-    Object.fromEntries(wanted.flatMap((item) => token?.position?.state?.filter((entry) => entry.variable === item.variable).map((entry) => [item.variable, entry.value]) ?? [])),
-  );
-  const [values, setValues] = useState<Record<string, string>>(prefilled);
+  const [values, setValues] = useState<Record<string, string>>({});
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [acting, setActing] = useState<Acting>({ at: 'form' });
   const [ticked, setTicked] = useState(false);
@@ -1179,8 +1138,6 @@ const ActOnToken = ({ owner, token, position, action, onBack }: { owner: Owner; 
   const [backup, checkBackup] = useBackup(applications, preview);
   const gate = approval({ ...(preview === undefined ? {} : { preview }), refused: false, backup, ticked });
   const task = useTask();
-  const target = position ?? token;
-  const templateName = position?.template.name ?? token?.template?.name;
 
   const review = () =>
     task.run('review', async () => {
@@ -1192,9 +1149,9 @@ const ActOnToken = ({ owner, token, position, action, onBack }: { owner: Owner; 
         else found[item.variable] = value.problem;
       }
       setProblems(found);
-      if (Object.keys(found).length > 0 || target === undefined) return;
+      if (Object.keys(found).length > 0) return;
       try {
-        const request = applications.actionOn(target, action.action, variables);
+        const request = applications.actionOn(position, action.action, variables);
         setTicked(false);
         setActing({ at: 'review', request, preview: await applications.preview(request) });
       } catch (error) {
@@ -1220,12 +1177,12 @@ const ActOnToken = ({ owner, token, position, action, onBack }: { owner: Owner; 
 
   return (
     <div class="stack">
-      <PageHead title={action.name}>{action.description !== '' ? action.description : `An action of the template "${templateName ?? ''}".`}</PageHead>
+      <PageHead title={action.name}>{action.description !== '' ? action.description : `An action of the template "${position.template.name ?? ''}".`}</PageHead>
       <div class="grid two">
         <div class="stack">
           {acting.at === 'form' && wanted.length > 0 && (
             <Card title="What the action needs">
-              <p class="small muted card-lead">The template asks for these values.{Object.keys(prefilled).length > 0 && ' Where the position holds a value now, the field starts with it.'}</p>
+              <p class="small muted card-lead">The template asks for these values.</p>
               {wanted.map((item) => (
                 <Field label={item.name} id={`value-${item.variable}`} hint={hintOf(item)} error={problems[item.variable]}>
                   {item.type === 'satoshis' ? (
@@ -1324,29 +1281,17 @@ const ActOnToken = ({ owner, token, position, action, onBack }: { owner: Owner; 
           <Card flat>
             <div class="stack-s token-aside">
               <h3>The token</h3>
-              {position !== undefined ? (
-                <p class="small">
-                  {position.tokenName ?? 'A token'}
-                  {position.template.name !== undefined && <span class="muted"> · {position.template.name}</span>}
-                  <br />
-                  <Hex value={position.token.category} />
-                </p>
-              ) : (
-                <p class="small">
-                  {token?.template?.name ?? 'A token'} · <Hex value={token?.category ?? ''} />
-                </p>
-              )}
-              {token?.position?.status === 'open' && (
-                <p class="small">
-                  Holds <Amount satoshis={token.position.satoshis} exact />
-                </p>
-              )}
-              {position !== undefined && position.status !== 'held' && position.satoshis !== undefined && (
+              <p class="small">
+                {position.tokenName ?? 'A token'}
+                {position.template.name !== undefined && <span class="muted"> · {position.template.name}</span>}
+                <br />
+                <Hex value={position.token.category} />
+              </p>
+              {position.status !== 'held' && position.satoshis !== undefined && (
                 <p class="small">
                   Holds <Amount satoshis={position.satoshis} exact />
                 </p>
               )}
-              {token?.position?.status === 'open' && (token.position.state ?? []).length > 0 && <PositionState state={token.position.state ?? []} />}
               <p class="small muted">From the wallet itself. No application is asked.</p>
             </div>
           </Card>
@@ -1373,8 +1318,7 @@ const TrustSuggested = ({ owner, identifier, onBack }: { owner: Owner; identifie
   const trust = () =>
     task.run('trust', async () => {
       if (suggestion === undefined) return;
-      const { contentHash, declaration } = suggestion;
-      const kept = await applications.trust({ identifier, contentHash, ...(declaration === undefined ? {} : { declaration }) }, undefined);
+      const kept = await applications.trust({ identifier, contentHash: suggestion.contentHash }, undefined);
       await applications.storeNow(kept.identifier);
       // The earlier owner's position records of this template can now be checked against the chain (section 10.6).
       // One that cannot be checked now stays a suggestion and is checked the next time the backup is read.
@@ -1398,10 +1342,9 @@ const TrustSuggested = ({ owner, identifier, onBack }: { owner: Owner; identifie
                 <TemplateView summary={summary} showActions />
               </Part>
             )}
-            {summary?.verdict.statement === 'violation' && <Notice tone="bad">This wallet does not take in a template with a violation.</Notice>}
             <TaskStatus task={task} />
             <div class="actions decide">
-              {summary !== undefined && summary.verdict.statement !== 'violation' && (
+              {summary !== undefined && (
                 <Button task={task} name="trust" onClick={() => void trust()}>
                   Trust this template
                 </Button>

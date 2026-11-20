@@ -66,11 +66,12 @@ const setUp = async () => {
 };
 
 describe('savings jars with a wallet that speaks xo_v1', () => {
-  it('the page works with what this wallet announces, and says why it cannot with another network, or with a wallet of the earlier version only', () => {
+  it('the page works with what this wallet announces, version 2, and says why it cannot with another network, or with a wallet of another version', () => {
     const offered = walletAnnouncement('chipnet');
+    expect(offered).toEqual({ version: 2, network: 'chipnet', bindings: ['receive', 'change', 'return', 'lasting'] });
     expect(xoProblem(offered, 'chipnet')).toBeUndefined();
     expect(xoProblem(offered, 'regtest')).toContain('Your wallet is on chipnet; this page is on regtest');
-    expect(xoProblem({ version: 1, network: 'chipnet', profiles: ['recoverable-app-v1'], bindings: ['receive', 'change', 'return', 'lasting'] }, 'chipnet')).toMatch(/only the earlier version/);
+    expect(xoProblem({ version: 1, network: 'chipnet', bindings: ['receive', 'change', 'return', 'lasting'] }, 'chipnet')).toMatch(/another version of XO requests/);
   });
 
   it('opens a jar, lists it, takes a payment in, refuses to empty it before its date in the wallet\'s words, empties it after, and lists the empty jar with its key kept', async () => {
@@ -92,7 +93,7 @@ describe('savings jars with a wallet that speaks xo_v1', () => {
     // The template went along only once the wallet said it did not have it, alone; the page sent no transaction.
     const requests = sentToWallet.filter((message) => message.action === 'xo_action_request');
     expect(requests.filter((message) => message.definition !== undefined).map((message) => message.definition)).toEqual([{ template: JAR_TEMPLATE.texts.template }]);
-    expect(requests.every((message) => message.template.declaration === undefined && message.page === PAGE)).toBe(true);
+    expect(requests.every((message) => Object.keys(message.template).sort().join() === 'contentHash,identifier' && message.page === PAGE)).toBe(true);
     // The wallet's record of the jar keeps the page's address.
     expect(device.applications.positionRecords.map(({ token, applicationPage }) => [token?.category, applicationPage])).toEqual([[category, PAGE]]);
 

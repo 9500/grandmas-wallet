@@ -87,7 +87,7 @@ const readTemplateRun = () => {
 };
 
 /**
- * Run E, steps 2 and 3 (`scripts/run-e-template.ts`): the same loan through the wallet from the Paryon template,
+ * Run E, steps 2 and 3 (`scripts/run-e-template.ts` at the tag `design-2`): the same loan through the wallet from the Paryon template,
  * and through the loss of the device. The transactions themselves are checked on the simulated chain against
  * Paryon's recorded outputs in `packages/paryon/test/applications.test.ts`.
  */
@@ -130,7 +130,7 @@ const BROWSER_NAME = 'stage-9-browser-chipnet.md';
 const browserRecorded = existsSync(new URL(`../docs/runs/${BROWSER_NAME}`, import.meta.url)) && /^Outcome: every step was carried out/m.test(readFileSync(new URL(`../docs/runs/${BROWSER_NAME}`, import.meta.url), 'utf8'));
 
 /**
- * The same loan in browsers (`scripts/browser-run-loan.ts chipnet --local-pages`): the wallet page driven by the
+ * The same loan in browsers (`scripts/browser-run-loan.ts chipnet --local-pages` at the tag `design-2`): the wallet page driven by the
  * loan page of this project over WizardConnect, and after the loss of the phone, the new phone's wallet page alone.
  */
 describe('a ParyonUSD loan in browsers on chipnet, from the loan page, as recorded', () => {

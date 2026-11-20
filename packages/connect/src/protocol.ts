@@ -18,14 +18,12 @@
  */
 
 export const XO_EXTENSION = 'xo_v1';
-/** The version a wallet announces as `version`, which the pages of the second design check for. */
-export const XO_EXTENSION_VERSION = 1;
 /**
- * The versions this software speaks. Version 2 (proposal section 14.2) needs no recovery declaration: a request
- * says which position it is about and whether it spends the token, names the application's coins by outpoint,
- * and may name the application's page; a positions request of version 2 is answered from the wallet's records.
+ * The version of the requests (proposal section 14.2). An application needs nothing but its XO template: a request
+ * says which position it is about and whether it spends the token, names the application's coins by outpoint, and
+ * may name the application's page; a positions request is answered from the wallet's records.
  */
-export const XO_EXTENSION_VERSIONS = [1, 2] as const;
+export const XO_EXTENSION_VERSION = 2;
 
 export const ACTION_REQUEST = 'xo_action_request';
 export const ACTION_RESPONSE = 'xo_action_response';
@@ -38,19 +36,16 @@ export const TEMPLATE_ANSWER = 'xo_template_answer';
 
 /**
  * A template as a request names it: by its XO identifier and by the SHA-256 of its text, so that both sides
- * mean the same bytes. The recovery declaration that belongs to it is named by the hash of its text.
+ * mean the same bytes.
  */
 export interface TemplateName {
   identifier: string;
   contentHash: string;
-  declaration?: string;
 }
 
-/** The texts a request names: the template, its recovery declaration, and any file the declaration refers to. */
+/** The text a request names: the template, as its author wrote it. */
 export interface TemplateTexts {
   template: string;
-  declaration?: string;
-  references?: string[];
 }
 
 /**
@@ -60,19 +55,9 @@ export interface TemplateTexts {
 export interface XoAdvertisement {
   version: number;
   network: string;
-  /** The recovery profiles the wallet reads, such as `recoverable-app-v1`. */
-  profiles: string[];
   /** The kinds of output the wallet fills with an address of its own: `receive`, `change`, `return`, `lasting`. */
   bindings: string[];
-  /**
-   * Every version of the requests the wallet answers, where it speaks more than the one in `version`. An
-   * application of version 2 looks for 2 here; one of version 1 reads `version` and `profiles` as before.
-   */
-  versions?: number[];
 }
-
-/** Whether a wallet's announcement says that it answers requests of the given version. */
-export const speaks = (offered: XoAdvertisement, version: number): boolean => offered.version === version || (offered.versions ?? []).includes(version);
 
 export type ParameterValue = string | number;
 
@@ -95,22 +80,17 @@ export interface ActionDetails {
   /** The variable the wallet fills with the category of the tokens the action creates. The wallet supplies the coin that defines it. */
   creates?: string;
   /**
-   * Version 1: the categories of the wallet's tokens the action is about, as the template's recovery declaration
-   * describes them. A request of version 2 says `about` instead.
-   */
-  spends?: string[];
-  /**
-   * Version 2: which position the action is about, by the category of the wallet's token, and whether the action
-   * spends that token. Paying into a position is about its token and does not spend it.
+   * Which position the action is about, by the category of the wallet's token, and whether the action spends that
+   * token. Paying into a position is about its token and does not spend it.
    */
   about?: { category: string; spent: boolean };
-  /** Version 2: the address of the application's page, which the wallet keeps in the position's record. */
+  /** The address of the application's page, which the wallet keeps in the position's record. */
   page?: string;
   /**
    * The application's own coins the action is to spend, by template input, as `<transaction id>:<output index>`:
    * which of the contracts its users share the application chose, and, for a position at a script many users
-   * share, the coin that is the position. The wallet reads each from the chain; in version 1 it checks it against
-   * the template's declaration, in version 2 it finds which of the template's scripts the coin is at.
+   * share, the coin that is the position. The wallet reads each from the chain and finds which of the template's
+   * scripts the coin is at.
    */
   inputs?: Record<string, string>;
 }
@@ -157,30 +137,13 @@ export interface PositionsRequest extends Envelope {
   id: string;
   /** The template's identifier. */
   template: string;
-  /** 2 for an answer made from the wallet's records (section 14.2); absent for the answer of version 1. */
+  /** The version of the requests the application speaks. */
   version?: number;
-}
-
-/** A token of the application's template that the wallet holds, and where its position stands on chain. */
-export interface ReportedPosition {
-  /** The token's category and commitment, as hex. */
-  category: string;
-  commitment: string;
-  /** The authority entry of the template's declaration the token stands for. */
-  authority: string;
-  /** `open`, `closed` when the position is no longer there, `incomplete` when it cannot be worked out, `ambiguous`. */
-  status: string;
-  /** What the position holds now. */
-  satoshis: string;
-  /** The position's locking bytecode, as hex, when it can be worked out. */
-  lockingBytecode?: string;
-  /** The actions the template offers the token's holder. */
-  actions: string[];
 }
 
 /**
  * A token of the application's template that the wallet holds and that a record of the wallet's ties to the
- * template (version 2, proposal section 14.2). A token without a record is not reported.
+ * template (proposal section 14.2). A token without a record is not reported.
  */
 export interface RecordedPositionReport {
   /** The NFT, as hex. */
@@ -207,9 +170,8 @@ export interface PositionsResponse extends Envelope {
   id: string;
   /** Whether the user trusted the template in a session with this application. If not, nothing is reported whatever the wallet holds. */
   trusted: boolean;
-  /** 2 when the answer is made from the wallet's records. */
-  version?: number;
-  positions: ReportedPosition[] | RecordedPositionReport[];
+  version: number;
+  positions: RecordedPositionReport[];
   /** Set if the wallet could not read the chain just now. The list is then not to be taken as empty. */
   error?: string;
 }
@@ -246,29 +208,27 @@ export class ProtocolError extends Error {
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isText = (value: unknown, maximum = 200): value is string => typeof value === 'string' && value.length > 0 && value.length <= maximum;
 const isHash = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
-const isTemplateName = (value: unknown): value is TemplateName =>
-  isObject(value) && isHash(value['identifier']) && isHash(value['contentHash']) && (value['declaration'] === undefined || isHash(value['declaration']));
+const isTemplateName = (value: unknown): value is TemplateName => isObject(value) && isHash(value['identifier']) && isHash(value['contentHash']);
 
 /**
- * Read a wallet's advertisement from a session's extensions.
+ * Read a wallet's advertisement from a session's extensions: the version of the requests, the network and the
+ * kinds of output the wallet fills.
  * @returns `undefined` if the wallet does not offer XO requests
- * @throws ProtocolError if it offers a version this software does not know
+ * @throws ProtocolError if it offers another version than this software's
  */
 export const readAdvertisement = (extensions: unknown): XoAdvertisement | undefined => {
   if (!isObject(extensions) || extensions[XO_EXTENSION] === undefined) return undefined;
   const offered = extensions[XO_EXTENSION];
   if (!isObject(offered) || typeof offered['version'] !== 'number') throw new ProtocolError('The wallet\'s XO advertisement cannot be read.');
   if (offered['version'] !== XO_EXTENSION_VERSION) {
-    throw new ProtocolError(`The wallet speaks version ${offered['version']} of XO requests; this application knows version ${XO_EXTENSION_VERSION}.`);
+    throw new ProtocolError(`The wallet speaks version ${offered['version']} of XO requests; this application speaks version ${XO_EXTENSION_VERSION}. Update the wallet and connect again.`);
   }
-  const { profiles, bindings, versions } = offered;
-  if (!isText(offered['network']) || !Array.isArray(profiles) || !Array.isArray(bindings)) throw new ProtocolError('The wallet\'s XO advertisement cannot be read.');
+  const { bindings } = offered;
+  if (!isText(offered['network']) || !Array.isArray(bindings)) throw new ProtocolError('The wallet\'s XO advertisement cannot be read.');
   return {
     version: offered['version'],
     network: offered['network'],
-    profiles: profiles.filter((item): item is string => isText(item, 60)),
     bindings: bindings.filter((item): item is string => isText(item, 40)),
-    ...(Array.isArray(versions) ? { versions: versions.filter((item): item is number => Number.isInteger(item) && item > 0 && item < 100) } : {}),
   };
 };
 
@@ -287,12 +247,10 @@ const readValues = (values: unknown, what: string): Record<string, ParameterValu
 const LARGEST_TEXT = 400_000;
 const isLongText = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= LARGEST_TEXT;
 
+/** The template a request or an offer sends. Anything else beside it is not taken. */
 const readTexts = (definition: unknown): TemplateTexts => {
   if (!isObject(definition) || !isLongText(definition['template'])) throw new ProtocolError('The template sent with the request cannot be read.');
-  const { declaration, references } = definition;
-  if (declaration !== undefined && !isLongText(declaration)) throw new ProtocolError('The recovery declaration sent with the request cannot be read.');
-  if (references !== undefined && (!Array.isArray(references) || references.length > 8 || !references.every(isLongText))) throw new ProtocolError('The files sent with the request cannot be read.');
-  return { template: definition['template'], ...(declaration === undefined ? {} : { declaration }), ...(references === undefined ? {} : { references: references as string[] }) };
+  return { template: definition['template'] };
 };
 
 /**
@@ -301,13 +259,12 @@ const readTexts = (definition: unknown): TemplateTexts => {
  */
 export const parseRequest = (message: unknown): ActionRequest => {
   if (!isObject(message) || message['action'] !== ACTION_REQUEST) throw new ProtocolError('Not a request.');
-  const { time, sequence, id, template, definition, templateAction, role, variables, bindings, creates, spends, inputs, about, page } = message;
+  const { time, sequence, id, template, definition, templateAction, role, variables, bindings, creates, inputs, about, page } = message;
   if (typeof time !== 'number' || typeof sequence !== 'number' || !isText(id, 80) || !isText(templateAction, 80) || !isText(role, 80)) {
     throw new ProtocolError('The request is missing something or has a field of the wrong kind.');
   }
   if (!isTemplateName(template)) throw new ProtocolError('The request does not name its template by identifier and content hash.');
   if (creates !== undefined && !isText(creates, 80)) throw new ProtocolError('The request names the variable of a new token in a form this wallet does not accept.');
-  if (spends !== undefined && (!Array.isArray(spends) || spends.length > 8 || !spends.every(isHash))) throw new ProtocolError('The request names the tokens it spends in a form this wallet does not accept.');
   const bound = bindings === undefined ? undefined : readValues(bindings, 'bindings');
   const named = inputs === undefined ? undefined : readValues(inputs, 'inputs');
   if (named !== undefined && (Object.keys(named).length > 16 || !Object.values(named).every((outpoint) => typeof outpoint === 'string' && /^[0-9a-f]{64}:\d{1,5}$/.test(outpoint)))) {
@@ -321,14 +278,13 @@ export const parseRequest = (message: unknown): ActionRequest => {
     time,
     sequence,
     id,
-    template: { identifier: template.identifier, contentHash: template.contentHash, ...(template.declaration === undefined ? {} : { declaration: template.declaration }) },
+    template: { identifier: template.identifier, contentHash: template.contentHash },
     ...(definition === undefined ? {} : { definition: readTexts(definition) }),
     templateAction,
     role,
     variables: readValues(variables, 'values'),
     ...(bound === undefined ? {} : { bindings: bound as Record<string, string> }),
     ...(creates === undefined ? {} : { creates }),
-    ...(spends === undefined ? {} : { spends: spends as string[] }),
     ...(named === undefined ? {} : { inputs: named as Record<string, string> }),
     ...(about === undefined ? {} : { about: { category: (about as { category: string }).category, spent: (about as { spent: boolean }).spent } }),
     ...(page === undefined ? {} : { page: page as string }),
@@ -348,7 +304,7 @@ export const parseOffer = (message: unknown): TemplateOffer => {
     action: TEMPLATE_OFFER,
     time,
     id,
-    template: { identifier: template.identifier, contentHash: template.contentHash, ...(template.declaration === undefined ? {} : { declaration: template.declaration }) },
+    template: { identifier: template.identifier, contentHash: template.contentHash },
     definition: readTexts(definition),
   };
 };
@@ -365,11 +321,9 @@ const sameValues = (a: Record<string, ParameterValue> = {}, b: Record<string, Pa
 export const sameRequest = (a: ActionDetails, b: ActionDetails): boolean =>
   a.template.identifier === b.template.identifier &&
   a.template.contentHash === b.template.contentHash &&
-  a.template.declaration === b.template.declaration &&
   a.templateAction === b.templateAction &&
   a.role === b.role &&
   a.creates === b.creates &&
-  (a.spends ?? []).join() === (b.spends ?? []).join() &&
   a.about?.category === b.about?.category &&
   a.about?.spent === b.about?.spent &&
   a.page === b.page &&

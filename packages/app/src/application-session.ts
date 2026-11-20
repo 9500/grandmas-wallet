@@ -1,18 +1,6 @@
-import {
-  type LedgerEntry,
-  type LedgerStorage,
-  type Offer,
-  type Proposal,
-  type RecordedPositionReport,
-  type ReportedPosition,
-  type XoAdvertisement,
-  WalletConnector,
-  XO_EXTENSION_VERSION,
-  XO_EXTENSION_VERSIONS,
-} from '@grandmas-wallet/connect';
+import { type LedgerEntry, type LedgerStorage, type Offer, type Proposal, type RecordedPositionReport, type XoAdvertisement, WalletConnector, XO_EXTENSION_VERSION } from '@grandmas-wallet/connect';
 
-import { type ApplicationAction, type Applications, type HeldToken, type RecordedPosition } from './applications.js';
-import { BINDING_KINDS, RECOVERY_PROFILE } from './declaration.js';
+import { type ApplicationAction, type Applications, type RecordedPosition, BINDING_KINDS } from './applications.js';
 
 /**
  * A session with an application (proposal section 14): what the wallet announces, and how a request that
@@ -23,17 +11,11 @@ import { BINDING_KINDS, RECOVERY_PROFILE } from './declaration.js';
  * transaction, the tokens the wallet received, and the tokens of its own template that the wallet holds.
  */
 
-/**
- * What the wallet announces under `xo_v1`. It names no template and no application. It answers requests of
- * version 1, with the recovery profile the pages of the second design check for, and of version 2, which need
- * no declaration (section 14.2).
- */
+/** What the wallet announces under `xo_v1` (section 14.2). It names no template and no application. */
 export const walletAnnouncement = (network: string): XoAdvertisement => ({
   version: XO_EXTENSION_VERSION,
   network,
-  profiles: [RECOVERY_PROFILE],
   bindings: [...BINDING_KINDS],
-  versions: [...XO_EXTENSION_VERSIONS],
 });
 
 /** A request as it was recorded, as the action it asks for. */
@@ -45,26 +27,14 @@ export const actionOf = (entry: LedgerEntry): ApplicationAction => ({
   variables: entry.variables,
   ...(entry.bindings === undefined ? {} : { bindings: entry.bindings }),
   ...(entry.creates === undefined ? {} : { creates: entry.creates }),
-  ...(entry.spends === undefined ? {} : { tokens: entry.spends }),
   ...(entry.inputs === undefined ? {} : { inputs: entry.inputs }),
   ...(entry.about === undefined ? {} : { about: entry.about }),
   ...(entry.page === undefined ? {} : { page: entry.page }),
   application: entry.application,
 });
 
-/** A token of an application's template, as that application is told about it. */
-const reported = (token: HeldToken): ReportedPosition => ({
-  category: token.category,
-  commitment: token.commitment,
-  authority: token.authority ?? '',
-  status: token.position?.status ?? 'incomplete',
-  satoshis: String(token.position?.satoshis ?? 0n),
-  ...(token.position?.lockingBytecode === undefined ? {} : { lockingBytecode: token.position.lockingBytecode }),
-  actions: (token.actions ?? []).map(({ action }) => action),
-});
-
 /**
- * A position of an application's template as a positions request of version 2 is answered (section 14.2): the
+ * A position of an application's template as a positions request is answered (section 14.2): the
  * token and the value of the coin that holds it; for a position at a script of its own, the script's values and
  * whether it is open, closed or not confirmed; for one at a script many users share, only that the token is held.
  */
@@ -96,21 +66,16 @@ export const applicationConnector = (
 ): WalletConnector =>
   new WalletConnector({
     has: (template) => applications.has(template),
-    // Reading what was sent refuses a text that is not the one named, and a declaration of an unknown profile.
+    // Reading what was sent refuses a text that is not the one named, and a template this wallet cannot run.
     check: (template, texts) => void applications.describe(template, texts),
     execute: async (entry, stage, consent) => {
       const outcome = await applications.carryOut(actionOf(entry), stage, consent.tokensLeave === true ? { tokensLeave: true } : {});
       return { transactionId: outcome.transactionId, tokens: outcome.tokens };
     },
-    positions: async (templateIdentifier, application, version) => {
-      if (version === 2) {
-        const recorded = await applications.positionsFromRecords(templateIdentifier, application);
-        if (recorded === undefined && applications.mayAllow(templateIdentifier, application)) options.onPositionsAsked?.(templateIdentifier, application);
-        return recorded?.map(reportedFromRecord);
-      }
-      const held = await applications.positions(templateIdentifier, application);
-      if (held === undefined && applications.mayAllow(templateIdentifier, application)) options.onPositionsAsked?.(templateIdentifier, application);
-      return held?.map(reported);
+    positions: async (templateIdentifier, application) => {
+      const recorded = await applications.positionsFromRecords(templateIdentifier, application);
+      if (recorded === undefined && applications.mayAllow(templateIdentifier, application)) options.onPositionsAsked?.(templateIdentifier, application);
+      return recorded?.map(reportedFromRecord);
     },
     onProposals: options.onProposals,
     trustedWith: (template, application) => applications.has(template) && !applications.mayAllow(template.identifier, application),

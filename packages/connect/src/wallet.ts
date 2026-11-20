@@ -4,7 +4,6 @@ import {
   type ActionResult,
   type Channel,
   type RecordedPositionReport,
-  type ReportedPosition,
   type TemplateName,
   type TemplateTexts,
   ACTION_REQUEST,
@@ -16,6 +15,7 @@ import {
   ProtocolError,
   TEMPLATE_ANSWER,
   TEMPLATE_OFFER,
+  XO_EXTENSION_VERSION,
   parseOffer,
   parseRequest,
   sameRequest,
@@ -86,7 +86,7 @@ export interface Offer {
 }
 
 export interface WalletConnectorOptions {
-  /** Whether the wallet has the template a request names: the same identifier, text and recovery declaration. */
+  /** Whether the wallet has the template a request names: the same identifier and text. */
   has(template: TemplateName): boolean;
   /**
    * Check that the texts an application sent are what its request names, without taking them in.
@@ -100,11 +100,11 @@ export interface WalletConnectorOptions {
    */
   execute(entry: LedgerEntry, stage: (stage: 'recorded' | 'sent') => void, consent: ApprovalConsent): Promise<Record<string, unknown>>;
   /**
-   * The tokens of a template the wallet holds, for the application that asks: as the template's declaration
-   * finds them (version 1), or as the wallet's records tie them to the template (version 2).
+   * The tokens of a template the wallet holds, for the application that asks, as the wallet's records tie them to
+   * the template.
    * @returns `undefined` when the user has not trusted the template in a session with that application
    */
-  positions(templateIdentifier: string, application: string, version?: number): Promise<ReportedPosition[] | RecordedPositionReport[] | undefined>;
+  positions(templateIdentifier: string, application: string): Promise<RecordedPositionReport[] | undefined>;
   /** Called when a request needs the user's decision, and again whenever the list of open proposals changes. */
   onProposals(proposals: Proposal[]): void;
   /**
@@ -211,20 +211,19 @@ export class WalletConnector {
 
   /** Say which tokens of a template the wallet holds. Only a template the user trusted with this application gets an answer other than none. */
   private async report(application: string, channel: Channel, message: unknown): Promise<void> {
-    const { id, template, version } = (message ?? {}) as { id?: unknown; template?: unknown; version?: unknown };
+    const { id, template } = (message ?? {}) as { id?: unknown; template?: unknown };
     if (typeof id !== 'string' || typeof template !== 'string') return;
-    const fromRecords = version === 2;
-    let positions: ReportedPosition[] | RecordedPositionReport[] | undefined;
+    let positions: RecordedPositionReport[] | undefined;
     let error: string | undefined;
     try {
-      positions = await this.options.positions(template, application, fromRecords ? 2 : 1);
+      positions = await this.options.positions(template, application);
     } catch (problem) {
       // Not being able to read the chain is not the same as holding nothing, and must not look like it.
       error = (problem as Error).message || 'The wallet could not read its positions.';
     }
     const trusted = positions !== undefined || error !== undefined;
     // An error is reported only for a template the application may ask about: otherwise it would say whether the wallet has the template.
-    await channel.send({ action: POSITIONS, time: this.now(), id, trusted, ...(fromRecords ? { version: 2 } : {}), positions: positions ?? [], ...(error === undefined ? {} : { error }) }).catch(() => undefined);
+    await channel.send({ action: POSITIONS, time: this.now(), id, trusted, version: XO_EXTENSION_VERSION, positions: positions ?? [], ...(error === undefined ? {} : { error }) }).catch(() => undefined);
   }
 
   private announceOffers(): void {
@@ -262,7 +261,7 @@ export class WalletConnector {
       await answer(id, true);
       return;
     }
-    const same = this.offered.find(({ offer }) => offer.application === application && offer.template.identifier === template.identifier && offer.template.contentHash === template.contentHash && offer.template.declaration === template.declaration);
+    const same = this.offered.find(({ offer }) => offer.application === application && offer.template.identifier === template.identifier && offer.template.contentHash === template.contentHash);
     if (same !== undefined) {
       // Asked again while the user decides: the answer will go to this identifier too.
       if (!same.ids.includes(id)) same.ids.push(id);

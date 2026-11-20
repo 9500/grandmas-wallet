@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type ArchiveStore,
   type Blob,
+  type RecordEntry,
   Archive,
   MemoryStore,
   assessArchive,
@@ -37,7 +38,11 @@ const TEMPLATE_ID = 'e1'.repeat(32);
 const DECLARATION = '{"authority":[{"name":"jar key","finds":"companion"}]}';
 const MESSAGE = 'aa'.repeat(32);
 
-/** A wallet with an archive on two stores: its viewing-key record, a template, a token note, a label, and the recoverer's receipt. */
+/**
+ * A wallet with an archive on two stores: its viewing-key record, a template, a token note, a label, and the
+ * recoverer's receipt. The template's record and the token note are as the second design wrote them: the template
+ * with a recovery declaration beside it, the note with the declaration's entry.
+ */
 const start = async () => {
   const made = setup();
   const archiveId = generateArchiveId();
@@ -46,14 +51,14 @@ const start = async () => {
   const archive = new Archive(archiveId, contentKey, [...stores]);
   const owning = { network: 'testnet' as const, identity: made.identity };
   const viewingKey = signViewingKeyRecord(made.seedA);
-  const template = signRecord(templateEntry(TEMPLATE_ID, TEMPLATE_TEXT, DECLARATION), owning, made.seedA.controllerKey);
+  const template = signRecord({ ...templateEntry(TEMPLATE_ID, TEMPLATE_TEXT), declaration: { contentHash: contentHashOf(DECLARATION), text: DECLARATION } } as RecordEntry, owning, made.seedA.controllerKey);
   const receipt = signReceipt(
     { network: 'testnet', identity: made.identity, answers: MESSAGE, viewingKeyRecords: [viewingKeyRecordHash(viewingKey)], recoveryKeyHash: hex(credential.recoveryKey.keyHash) },
     credential.recoveryKey,
   );
   await archive.write({ type: 'viewing-key', signed: viewingKey });
   const written = await archive.write({ type: 'record', signed: template });
-  await archive.write({ type: 'record', signed: signRecord({ kind: 'token-note', category: 'c7'.repeat(32), templateIdentifier: TEMPLATE_ID, authority: 'jar key' }, owning, made.seedA.controllerKey) });
+  await archive.write({ type: 'record', signed: signRecord({ kind: 'token-note', category: 'c7'.repeat(32), templateIdentifier: TEMPLATE_ID, authority: 'jar key' } as RecordEntry, owning, made.seedA.controllerKey) });
   await archive.write({ type: 'record', signed: signRecord({ kind: 'label', subject: 'c7'.repeat(32), name: 'Holiday jar' }, owning, made.seedA.controllerKey) });
   await archive.write({ type: 'receipt', signed: receipt });
   /** @param kept - the hash of the latest receipt the reader kept; `null` for a reader that kept none */
@@ -193,18 +198,19 @@ describe('who can make a record that counts', () => {
     expect(assessed.templates).toHaveLength(1);
   });
 
-  it('a template is stored: by whom it was signed, and whether it is trusted', async () => {
+  it('a template is stored: by whom it was signed, and whether it is trusted; the declaration a record of the second design holds beside it stays in the record and is not read', async () => {
     const { written, seedA, read } = await start();
     expect(written.confirmedBy).toEqual(['store one', 'store two']);
     expect(safelyStored(written)).toBe(true);
     const assessed = await read();
     const standing = templateStanding(assessed, TEMPLATE_ID, contentHashOf(TEMPLATE_TEXT));
     expect(standing).toEqual({ stored: true, trusted: true, signedBy: [hex(seedA.controllerKey.keyHash)], text: TEMPLATE_TEXT });
-    expect(assessed.templates[0]?.entry.declaration).toEqual({ contentHash: contentHashOf(DECLARATION), text: DECLARATION });
+    expect(assessed.templates[0]?.entry).toEqual({ kind: 'template', identifier: TEMPLATE_ID, contentHash: contentHashOf(TEMPLATE_TEXT), text: TEMPLATE_TEXT });
+    expect(assessed.templates[0]?.entry).not.toHaveProperty('declaration');
     // The same identifier with another text is another template.
     expect(templateStanding(assessed, TEMPLATE_ID, contentHashOf(`${TEMPLATE_TEXT} `)).stored).toBe(false);
     expect(templateStanding(assessed, 'e2'.repeat(32), contentHashOf(TEMPLATE_TEXT)).stored).toBe(false);
-    expect(assessed.tokenNotes[0]).toMatchObject({ entry: { category: 'c7'.repeat(32), templateIdentifier: TEMPLATE_ID, authority: 'jar key' }, standing: 'current owner' });
+    expect(assessed.tokenNotes[0]).toMatchObject({ entry: { kind: 'token-note', category: 'c7'.repeat(32), templateIdentifier: TEMPLATE_ID }, standing: 'current owner' });
     expect(assessed.notices).toEqual([]);
   });
 });

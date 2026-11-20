@@ -8,8 +8,6 @@ import {
   type TemplateNames,
   Applications,
   OwnerWallet,
-  RECOVERY_PROFILE,
-  RECOVERY_PROFILE_VERSION,
   actionSent,
   applicationArchive,
   copyEarlierArchives,
@@ -19,12 +17,12 @@ import {
 } from '@grandmas-wallet/app';
 import { deriveSeedKeys, p2pkhLockingBytecode, readTemplate, textHash } from '@grandmas-wallet/core';
 import { credentialKeys } from '@grandmas-wallet/enrollment';
-import { KeyBackend, SimulatedChain, bondDeclaration, bondTemplate, strongboxDeclaration, strongboxTemplate, templateText } from '@grandmas-wallet/testing';
+import { KeyBackend, SimulatedChain, bondTemplate, keyedStrongboxTemplate, strongboxTemplate, templateText } from '@grandmas-wallet/testing';
 import { recovererOf } from './recoverer.js';
 
 /**
  * What the tests of applications share: a wallet on the simulated chain with a backup archive on stores in
- * memory, and the two templates made for the tests as an application would present them.
+ * memory, and templates made for the tests as an application would present them: the template alone.
  */
 
 export const WORDS = [
@@ -37,20 +35,18 @@ const numbers = walletTemplateNumbers();
 export const seedOf = (index: number) => deriveSeedKeys(WORDS[index] as string, 'testnet', numbers);
 export const hex = binToHex;
 
-/** A template with its declaration, as an application presents it: the texts, and the names a request gives them. */
-export const presentation = (template: unknown, declaration?: object): { names: TemplateNames; texts: PresentedTexts } => {
+/** A template as an application presents it: its text, and the names a request gives it. */
+export const presentation = (template: unknown): { names: TemplateNames; texts: PresentedTexts } => {
   const text = templateText(template);
   const read = readTemplate(text);
-  const declarationText =
-    declaration === undefined ? undefined : JSON.stringify({ profile: RECOVERY_PROFILE, version: RECOVERY_PROFILE_VERSION, template: { identifier: read.identifier, contentHash: read.contentHash }, ...declaration });
-  return {
-    names: { identifier: read.identifier, contentHash: read.contentHash, ...(declarationText === undefined ? {} : { declaration: textHash(declarationText) }) },
-    texts: { template: text, ...(declarationText === undefined ? {} : { declaration: declarationText }) },
-  };
+  return { names: { identifier: read.identifier, contentHash: read.contentHash }, texts: { template: text } };
 };
 
-export const strongbox = presentation(strongboxTemplate, strongboxDeclaration);
-export const bond = presentation(bondTemplate, bondDeclaration);
+/** The Strongbox: its key is not an input of its own, and taking everything out names the key's input by number. */
+export const strongbox = presentation(strongboxTemplate);
+/** The keyed strongbox: its key is an input of its own, so the wallet empties the box by itself. */
+export const keyedBox = presentation(keyedStrongboxTemplate);
+export const bond = presentation(bondTemplate);
 
 /** A request as an application would make it. */
 export const request = (presented: { names: TemplateNames; texts: PresentedTexts }, action: string, role: string, variables: Record<string, string | number> = {}, more: Partial<ApplicationAction> = {}): ApplicationAction => ({

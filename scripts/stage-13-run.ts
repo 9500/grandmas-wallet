@@ -10,9 +10,10 @@
 // wallet empties it by itself, with no application asked. At the end the wallet is closed and every coin is back
 // at the address that paid for the run.
 //
-// What did not run without a declaration: the withdrawal itself is worked out by the wallet's route for
-// applications as stage 7 built it, which still takes the jar's values and finds its coins through the template's
-// recovery declaration. Stage 14 replaces that route. The log says which steps used it.
+// The run of record (docs/runs/stage-13-local-node.md) sent the jar's template of version 3 with its recovery
+// declaration, and the withdrawal was worked out through the declaration; that script is at the tag `design-2`.
+// Since stage 14 the wallet reads no declaration: this script sends the template of version 4 alone, and the
+// withdrawal is worked out from the template and the record.
 //
 // Each part is a process of its own with an empty engine state, as a device session would be. What the run knows
 // between parts is in .local-runs/stage-13-local.json; the stores are directories beside it. A run that stops is
@@ -28,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 
 import { type Output, binToHex, generateBip39Mnemonic, hexToBin } from '@bitauth/libauth';
 import { type ArchiveStore, type PositionRecordEntry, blobIdOf } from '@grandmas-wallet/archive';
-import { type ChainReader, type KeyPair, type Utxo, buildTransaction, checkBeforeSending, deriveCredentialKeys, deriveSeedKeys, keyPairFromPrivateKey, p2pkhInput, p2pkhLockingBytecode, readControllerHistory, readTemplate, textHash } from '@grandmas-wallet/core';
+import { type ChainReader, type KeyPair, type Utxo, buildTransaction, checkBeforeSending, deriveCredentialKeys, deriveSeedKeys, keyPairFromPrivateKey, p2pkhInput, p2pkhLockingBytecode, readControllerHistory, readTemplate } from '@grandmas-wallet/core';
 import { Engine, XO_SUPPORTED_NETWORKS } from '@xo-cash/engine';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
@@ -52,7 +53,7 @@ import {
   walletTemplateNumbers,
 } from '../packages/app/src/index.js';
 // The application's own definitions. The wallet's code has none of them: they reach it as texts.
-import { savingsJarDeclarationText, savingsJarScript, savingsJarTemplateText, unlockTimeBytes } from '../packages/savings-jar/src/index.js';
+import { savingsJarScript, savingsJarV4TemplateText as savingsJarTemplateText, unlockTimeBytes } from '../packages/savings-jar/src/index.js';
 // @ts-expect-error a plain script: the engine's settings for the local chain, and the node's RPC
 import { regtestServers, rpc, mine, BURN } from '../spikes/xo-engine/regtest.mjs';
 
@@ -130,7 +131,7 @@ if (phase === undefined) {
     [
       '# Stage 13 run on the local node: a position found again from its record (PR03)',
       '',
-      'Written by the run itself (`scripts/stage-13-run.ts`). The owner\'s wallet, the recoverer and the new device, each on the unmodified XO engine, against the local node in regtest mode with the public networks\' relay rules. Each part ran in a process of its own with an empty engine state. The Savings Jar reached the wallet as its template and recovery declaration, as texts; every transaction of the jar is an invitation of that template, built and signed by the engine, and was compared with what the wallet\'s own code had worked out before it was sent. The backup stores are two directories of the run, read and written as a store server\'s are.',
+      'Written by the run itself (`scripts/stage-13-run.ts`). The owner\'s wallet, the recoverer and the new device, each on the unmodified XO engine, against the local node in regtest mode with the public networks\' relay rules. Each part ran in a process of its own with an empty engine state. The Savings Jar reached the wallet as its template alone, as a text; every transaction of the jar is an invitation of that template, built and signed by the engine, and was compared with what the wallet\'s own code had worked out before it was sent. The backup stores are two directories of the run, read and written as a store server\'s are.',
       '',
       `- Wallet identity: \`${facts.identity}\``,
       `- Jar key (token category): \`${facts.jar?.category}\`; the jar's date: ${new Date((facts.jar?.unlockTime ?? 0) * 1000).toISOString()}`,
@@ -278,8 +279,8 @@ const stores = new Map(STORES.map((name) => [name, fileStore(name)]));
 const storeAt = (name: string): ArchiveStore => stores.get(name) as ArchiveStore;
 
 const jarTemplate = readTemplate(savingsJarTemplateText);
-const jarNames = { identifier: jarTemplate.identifier, contentHash: jarTemplate.contentHash, declaration: textHash(savingsJarDeclarationText) };
-const jarTexts = { template: savingsJarTemplateText, declaration: savingsJarDeclarationText };
+const jarNames = { identifier: jarTemplate.identifier, contentHash: jarTemplate.contentHash };
+const jarTexts = { template: savingsJarTemplateText };
 const medianTime = async (height: number): Promise<number> => {
   const times = await Promise.all(Array.from({ length: 11 }, (_, back) => server.headerTime(Math.max(height - back, 0))));
   return times.sort((a, b) => a - b)[5] as number;
@@ -496,9 +497,9 @@ try {
       await once('the new device empties the jar by itself', async () => {
         await dateHasPassed();
         // The action the wallet's own list offers at the position, for the token the record names.
-        const withdraw = applications.actionOn({ category: position.token.category, template: position.template }, 'withdraw');
+        const withdraw = applications.actionOn(position, 'withdraw');
         const preview = await applications.preview(withdraw);
-        note(`Before emptying, the wallet's own figures: ${preview.figures.fromApplication.satoshis} satoshis from the jar's ${preview.figures.fromApplication.coins} coin, a fee of ${preview.figures.feeSatoshis}, the key and the savings to the wallet; the position is ${preview.notConfirmed === undefined ? 'confirmed' : `not confirmed (${preview.notConfirmed})`}. The withdrawal's values and the jar's coin were worked out by the route of stage 7, through the template's recovery declaration.`);
+        note(`Before emptying, the wallet's own figures: ${preview.figures.fromApplication.satoshis} satoshis from the jar's ${preview.figures.fromApplication.coins} coin, a fee of ${preview.figures.feeSatoshis}, the key and the savings to the wallet; the position is ${preview.notConfirmed === undefined ? 'confirmed' : `not confirmed (${preview.notConfirmed})`}. The withdrawal's values came from the record, and the jar's coin from the record's script.`);
         const outcome = await applications.carryOut(withdraw);
         record('empty the jar', outcome.sent, 'carried out by the new device by itself, from its list of positions; no application was asked. The key and the savings to addresses of the new seed');
         if (outcome.tokens[0]?.category !== category) throw new Error('the key did not come back');

@@ -5,7 +5,7 @@ import {
   type Channel,
   type LedgerEntry,
   type Proposal,
-  type ReportedPosition,
+  type RecordedPositionReport,
   type TemplateName,
   type TemplateTexts,
   type XoMessage,
@@ -29,10 +29,10 @@ import { pairingOf } from '../src/wizard.js';
  * checks about a template is tested with the wallet (`test/applications-session.test.ts`).
  */
 const hash = (seed: string): string => seed.repeat(32);
-const TEXTS: TemplateTexts = { template: `${hash('aa')}\nSample application`, declaration: 'how its tokens lead to positions' };
-const TEMPLATE: TemplateName = { identifier: hash('a1'), contentHash: hash('aa'), declaration: hash('ad') };
+const TEXTS: TemplateTexts = { template: `${hash('aa')}\nSample application` };
+const TEMPLATE: TemplateName = { identifier: hash('a1'), contentHash: hash('aa') };
 const OTHER: TemplateName = { identifier: hash('b1'), contentHash: hash('bb') };
-const POSITION: ReportedPosition = { category: hash('c1'), commitment: '01', authority: 'key', status: 'open', satoshis: '5000', actions: ['withdraw'] };
+const POSITION: RecordedPositionReport = { category: hash('c1'), commitment: '01', capability: 'none', satoshis: '1000', status: 'open', lockingScript: 'jar', variables: { key: hash('c1') } };
 
 /** What the application asks for. */
 const ask = (variables: ActionDetails['variables'] = { amount: '5000' }, more: Partial<ActionDetails> = {}): ActionDetails => ({
@@ -104,10 +104,10 @@ const setup = (options: { fail?: boolean; storage?: ReturnType<typeof temporaryL
 };
 
 describe('announcing the extension', () => {
-  const offered = { version: 1, network: 'chipnet', profiles: ['recoverable-app-v1'], bindings: ['receive', 'change', 'return', 'lasting'] };
+  const offered = { version: 2, network: 'chipnet', bindings: ['receive', 'change', 'return', 'lasting'] };
 
-  it('reads what a wallet offers: the profiles and the kinds of output, and no list of templates', () => {
-    expect(readAdvertisement({ chunk: {}, [XO_EXTENSION]: { ...offered, templates: [TEMPLATE] } })).toEqual(offered);
+  it('reads what a wallet offers: the version, the network and the kinds of output, and nothing else', () => {
+    expect(readAdvertisement({ chunk: {}, [XO_EXTENSION]: { ...offered, templates: [TEMPLATE], profiles: ['recoverable-app-v1'], versions: [1, 2] } })).toEqual(offered);
   });
 
   it('finds nothing in a wallet that does not offer the extension', () => {
@@ -115,8 +115,9 @@ describe('announcing the extension', () => {
     expect(readAdvertisement(undefined)).toBeUndefined();
   });
 
-  it('refuses a version it does not know rather than guessing', () => {
-    expect(() => readAdvertisement({ [XO_EXTENSION]: { ...offered, version: 2 } })).toThrow(ProtocolError);
+  it('refuses another version rather than guessing, the earlier one included', () => {
+    expect(() => readAdvertisement({ [XO_EXTENSION]: { ...offered, version: 1, profiles: ['recoverable-app-v1'], versions: [1, 2] } })).toThrow(ProtocolError);
+    expect(() => readAdvertisement({ [XO_EXTENSION]: { ...offered, version: 3 } })).toThrow(ProtocolError);
     expect(() => readAdvertisement({ [XO_EXTENSION]: 'yes' })).toThrow(ProtocolError);
   });
 });
@@ -143,11 +144,11 @@ describe('a request from an application', () => {
   it('is carried out after the user approves, with progress reported', async () => {
     const { dapp, executed, proposals } = setup({ trusted: true });
     const stages: string[] = [];
-    const result = dapp.request(ask({ amount: '5000', unlockTime: 1_900_000_000 }, { bindings: { holder: 'receive' }, creates: 'key', spends: [hash('c1')] }), TEXTS, (stage) => stages.push(stage));
+    const result = dapp.request(ask({ amount: '5000', unlockTime: 1_900_000_000 }, { bindings: { holder: 'receive' }, creates: 'key', about: { category: hash('c1'), spent: false }, page: 'https://jar.example/' }), TEXTS, (stage) => stages.push(stage));
     await settle();
     expect(executed).toHaveLength(0);
-    expect(proposals().map(({ entry }) => [entry.application, entry.templateAction, entry.role, entry.variables, entry.bindings, entry.creates, entry.spends])).toEqual([
-      ['application', 'deposit', 'saver', { amount: '5000', unlockTime: 1_900_000_000 }, { holder: 'receive' }, 'key', [hash('c1')]],
+    expect(proposals().map(({ entry }) => [entry.application, entry.templateAction, entry.role, entry.variables, entry.bindings, entry.creates, entry.about, entry.page])).toEqual([
+      ['application', 'deposit', 'saver', { amount: '5000', unlockTime: 1_900_000_000 }, { holder: 'receive' }, 'key', { category: hash('c1'), spent: false }, 'https://jar.example/'],
     ]);
     await proposals()[0]?.approve();
     expect(await result).toEqual({ transactionId: 'tx-1' });
@@ -177,7 +178,9 @@ describe('a request from an application', () => {
     await expect(dapp.request(ask({ nested: { a: 1 } as unknown as string }))).rejects.toThrow('does not accept');
     await expect(dapp.request({ ...ask(), role: '' })).rejects.toThrow('missing something');
     await expect(dapp.request({ ...ask(), template: { identifier: 'sample', contentHash: hash('aa') } })).rejects.toThrow('does not name its template');
-    await expect(dapp.request(ask(undefined, { spends: ['the key'] }))).rejects.toThrow('tokens it spends');
+    await expect(dapp.request(ask(undefined, { about: { category: 'the key', spent: true } }))).rejects.toThrow('position it is about');
+    await expect(dapp.request(ask(undefined, { page: 'javascript:alert(1)' }))).rejects.toThrow('application\'s page');
+    await expect(dapp.request(ask(undefined, { inputs: { factory: 'the factory' } }))).rejects.toThrow('names coins');
     expect(proposals()).toEqual([]);
   });
 });
@@ -254,20 +257,20 @@ describe('a template the wallet does not have', () => {
 describe('positions', () => {
   it('are reported for a template the user trusted with this application, without asking the user', async () => {
     const { dapp, proposals } = setup({ trusted: true });
-    expect(await dapp.positions(TEMPLATE.identifier)).toEqual({ trusted: true, positions: [POSITION] });
+    expect(await dapp.recordedPositions(TEMPLATE.identifier)).toEqual({ trusted: true, positions: [POSITION] });
     expect(proposals()).toEqual([]);
   });
 
   it('are not said to be none when the wallet could not read them', async () => {
     const { dapp } = setup({ trusted: true, unreadable: true });
-    await expect(dapp.positions(TEMPLATE.identifier)).rejects.toThrow('could not read what it holds: The network could not be reached.');
+    await expect(dapp.recordedPositions(TEMPLATE.identifier)).rejects.toThrow('could not read what it holds: The network could not be reached.');
   });
 
   it('are not said to be none when the wallet does not answer', async () => {
     const wires = link();
     const dapp = new DappRequests();
     dapp.attach(wires.dapp);
-    await expect(dapp.positions(TEMPLATE.identifier, 2, 5)).rejects.toBeInstanceOf(WalletSilentError);
+    await expect(dapp.recordedPositions(TEMPLATE.identifier, 2, 5)).rejects.toBeInstanceOf(WalletSilentError);
     // Asked twice, as the same question.
     expect(wires.sentToWallet.map((message) => (message as { id?: string }).id)).toEqual([expect.any(String), expect.any(String)]);
     expect(new Set(wires.sentToWallet.map((message) => (message as { id?: string }).id)).size).toBe(1);
@@ -286,21 +289,21 @@ describe('positions', () => {
       await send(message);
     };
     void connector;
-    expect((await dapp.positions(TEMPLATE.identifier, 3, 5)).positions).toHaveLength(1);
+    expect((await dapp.recordedPositions(TEMPLATE.identifier, 3, 5)).positions).toHaveLength(1);
     expect(lost).toBe(1);
   });
 
   it('are not reported for a template the wallet does not trust, or trusts with another application', async () => {
     const { dapp } = setup();
-    expect(await dapp.positions(TEMPLATE.identifier)).toEqual({ trusted: false, positions: [] });
-    expect(await dapp.positions(OTHER.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await dapp.recordedPositions(TEMPLATE.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await dapp.recordedPositions(OTHER.identifier)).toEqual({ trusted: false, positions: [] });
     const second = setup({ trusted: true });
     const wires = link();
     second.connector.attach('another application', wires.wallet);
     const other = new DappRequests();
     other.attach(wires.dapp);
-    expect(await other.positions(TEMPLATE.identifier)).toEqual({ trusted: false, positions: [] });
-    expect(await second.dapp.positions(TEMPLATE.identifier)).toEqual({ trusted: true, positions: [POSITION] });
+    expect(await other.recordedPositions(TEMPLATE.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await second.dapp.recordedPositions(TEMPLATE.identifier)).toEqual({ trusted: true, positions: [POSITION] });
   });
 });
 
@@ -344,7 +347,8 @@ describe('requests delivered more than once', () => {
     await proposals()[0]?.approve();
     await first;
     await expect(dapp.request(ask({ amount: '900000' }), undefined, undefined, 'request-1')).rejects.toThrow('different request');
-    await expect(dapp.request(ask(undefined, { spends: [hash('c1')] }), undefined, undefined, 'request-1')).rejects.toThrow('different request');
+    await expect(dapp.request(ask(undefined, { about: { category: hash('c1'), spent: true } }), undefined, undefined, 'request-1')).rejects.toThrow('different request');
+    await expect(dapp.request(ask(undefined, { inputs: { factory: `${hash('f0')}:1` } }), undefined, undefined, 'request-1')).rejects.toThrow('different request');
     await expect(dapp.request(ask(undefined, { bindings: { holder: 'lasting' } }), undefined, undefined, 'request-1')).rejects.toThrow('different request');
     await expect(dapp.request(ask(undefined, { creates: 'key' }), undefined, undefined, 'request-1')).rejects.toThrow('different request');
     expect(executed).toHaveLength(1);

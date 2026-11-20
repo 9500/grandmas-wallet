@@ -3,8 +3,7 @@ import { binToHex } from '@bitauth/libauth';
 import type { ParyonContracts } from './deployment.js';
 
 /**
- * The XO template of a ParyonUSD loan for this project's wallet, and its recovery declaration, for one
- * deployment of ParyonUSD.
+ * The XO template of a ParyonUSD loan, for one deployment of ParyonUSD.
  *
  * Every script in the template is one of Paryon's contracts as published (`@paryonusd/contracts` 1.1.0), built
  * with the deployment's parameters: the template carries each contract's redeem bytecode whole, so that the
@@ -302,113 +301,6 @@ export const paryonTemplateSource = (contracts: ParyonContracts) => {
       startingInterest: { ...view('Starting interest', 'Interest per 10,000,000 per period, as two bytes.'), type: 'bytes' },
       interestManagerConfiguration: { ...view('Interest manager', 'Who may change the loan\'s interest, and within which limits, as five bytes.'), type: 'bytes' },
       repayAmount: { ...view('Repayment', 'PUSD repaid, in cents.'), type: 'token_amount' },
-    },
-  };
-};
-
-/**
- * The recovery declaration (proposal section 13.3), without the lines that bind it to the template's text;
- * `freeze` adds those.
- *
- * - The loan key is made by the borrowing transaction's output `keyOutput`. Its loan is found through the
- *   sidecar: an unspent coin at the sidecar's script with an NFT of the key's category. The loan is the output
- *   just before it, which must be at the Loan contract and carry a token of Paryon's category: only Paryon's
- *   contracts can put one there, so a look-alike sidecar made by a key holder is not taken for a loan.
- * - Paryon's shared contracts (the price, the manage function, the borrowing contract, the factory) are inputs
- *   the wallet finds at their scripts when no page names them, or checks when a page does.
- * - What a recovered wallet can do from its own token list: close the loan (every value comes from the chain)
- *   and change its collateral (the user gives the new amount). A repayment that leaves the loan open needs the
- *   loan's new record worked out with Paryon's arithmetic, which only the page does.
- */
-export const paryonDeclarationSource = (contracts: ParyonContracts) => {
-  const P = binToHex(contracts.paryonCategory);
-  const F = binToHex(contracts.loanKeyFactoryCategory);
-  const loanInputs = {
-    priceInput: { lockingScript: 'priceContract', token: { category: P, capability: 'mutable' } },
-  };
-  return {
-    authority: {
-      loanKey: {
-        token: 'keyOutput',
-        position: {
-          companion: { lockingScript: 'sidecarContract', tokenCategory: 'token.category', commitment: '01' },
-          relative: -1,
-          genuine: { lockingScript: 'loanContract', variables: {}, tokenCategory: P },
-        },
-        state: { debt: 'position.commitment[1..7]', collateral: 'position.valueSatoshis' },
-        actions: ['manage', 'repay', 'close'],
-      },
-    },
-    actions: {
-      createKey: { creates: 'keyCategory', inputs: { factoryInput: { lockingScript: 'loanKeyFactoryContract', token: { category: F, capability: 'minting' } } } },
-      movePeriod: {
-        inputs: { periodBorrowingInput: { lockingScript: 'borrowingContract', token: { category: P, capability: 'minting' } } },
-        variables: { borrowingSupply: 'input.periodBorrowingInput.tokenAmount' },
-      },
-      borrow: {
-        inputs: {
-          borrowingInput: { lockingScript: 'borrowingContract', token: { category: P, capability: 'minting' } },
-          ...loanInputs,
-          enforcerInput: { lockingScript: 'originEnforcerContract', token: { capability: 'minting' } },
-          proofInput: { lockingScript: 'originProofContract', token: { category: F, capability: 'none' } },
-        },
-        outputs: { keyHolder: 'receive', tokensHolder: 'receive' },
-        variables: {
-          keyCategory: 'input.enforcerInput.category',
-          borrowingSupply: 'input.borrowingInput.tokenAmount',
-          borrowingCommitment: 'input.borrowingInput.commitment',
-          priceCommitment: 'input.priceInput.commitment',
-        },
-      },
-      manage: {
-        spends: 'loanKey',
-        position: 'loanInput',
-        companion: 'sidecarInput',
-        inputs: { ...loanInputs, manageInput: { lockingScript: 'manageContract', token: { category: P, capability: 'none', commitment: '02' } } },
-        outputs: { keyHolder: 'return' },
-        variables: {
-          keyCategory: 'token.category',
-          keySatoshis: 'token.valueSatoshis',
-          priceCommitment: 'input.priceInput.commitment',
-          loanCommitment: 'position.commitment',
-          interestManagerConfiguration: 'position.commitment[22..27]',
-        },
-      },
-      repay: {
-        spends: 'loanKey',
-        position: 'loanInput',
-        companion: 'sidecarInput',
-        inputs: { ...loanInputs, repayInput: { lockingScript: 'manageContract', token: { category: P, capability: 'none', commitment: '02' } } },
-        outputs: { keyHolder: 'return' },
-        variables: {
-          keyCategory: 'token.category',
-          keySatoshis: 'token.valueSatoshis',
-          priceCommitment: 'input.priceInput.commitment',
-          interestManagerConfiguration: 'position.commitment[22..27]',
-        },
-        // The loan's new record holds the debt less the repayment, as Paryon's contracts write it.
-        fromApplication: ['loanCommitment'],
-      },
-      close: {
-        spends: 'loanKey',
-        position: 'loanInput',
-        companion: 'sidecarInput',
-        inputs: { ...loanInputs, repayInput: { lockingScript: 'manageContract', token: { category: P, capability: 'none', commitment: '02' } } },
-        outputs: { keyHolder: 'receive' },
-        variables: {
-          keyCategory: 'token.category',
-          keySatoshis: 'token.valueSatoshis',
-          priceCommitment: 'input.priceInput.commitment',
-          loanCommitment: 'position.commitment',
-          repayAmount: 'position.commitment[1..7]',
-          interestManagerConfiguration: 'position.commitment[22..27]',
-        },
-      },
-    },
-    // What a wallet that trusts the template may call its tokens. PUSD amounts are in cents.
-    tokens: {
-      pusd: { kind: 'fungible', category: P, name: 'ParyonUSD', symbol: 'PUSD', decimals: 2 },
-      loanKey: { kind: 'nft', authority: 'loanKey', name: 'Loan key' },
     },
   };
 };

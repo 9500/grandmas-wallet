@@ -2,10 +2,10 @@ import { type ActionPreview, type MovedOutput, type TemplateSummary, thisWalletR
 import { InsufficientFundsError } from '@grandmas-wallet/core';
 import { Amount, Choice, Icon, Info, KeyValues, More, Notice, Sat, Status, formatBch, formatSatoshis, formatTime, plainError, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
-import { useContext, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 
 import { type Refusal, leavingLine, leavingWords } from './review-gate.js';
-import { TokenNamesContext, amountText, rawUnits } from './token-words.js';
+import { rawUnits } from './token-words.js';
 
 /**
  * What the user sees before deciding on an action of an application's template. At the top, a picture of the
@@ -43,53 +43,12 @@ export const Part = ({ title, note, info, children, cls }: { title: string; note
   </section>
 );
 
-const RULES: Record<1 | 2 | 3 | 'names', string> = {
-  1: 'Rule 1: authority is a token',
-  2: 'Rule 2: the wallet\'s parts are the wallet\'s business',
-  3: 'Rule 3: the token leads to the position',
-  names: 'The names it gives tokens',
-};
-
-/** What the wallet can say about a template: verified, not verified, or a violation found. */
-export const Statement = ({ verdict, subject }: { verdict: TemplateSummary['verdict']; subject?: string }) => {
-  const prefix = subject === undefined ? '' : `${subject} `;
-  if (verdict.statement === 'verified') {
-    return (
-      <Status tone="good" title={subject === undefined ? 'Verified' : `${prefix}verified`}>
-        <p>{verdict.basis}</p>
-      </Status>
-    );
-  }
-  if (verdict.statement === 'not verified') {
-    return (
-      <Status tone={subject === undefined ? undefined : 'warn'} title={subject === undefined ? 'Not verified' : `${prefix}not verified`}>
-        {verdict.reasons.map((reason) => (
-          <p>{reason}</p>
-        ))}
-      </Status>
-    );
-  }
-  return (
-    <Status tone="bad" title={`${verdict.violations.length === 1 ? 'A violation found' : `${verdict.violations.length} violations found`}${subject === undefined ? '' : ` in the ${subject.toLowerCase()}`}`}>
-      <ul class="violations">
-        {verdict.violations.map((violation) => (
-          <li>
-            <div class="violation-rule">{RULES[violation.rule]}</div>
-            <div class="violation-what">{violation.what}</div>
-            <div>{violation.consequence}</div>
-          </li>
-        ))}
-      </ul>
-    </Status>
-  );
-};
-
 /**
- * What the wallet found about the actions of a template that comes with no declaration (section 14.3): the actions this
- * wallet refuses, because they would tie money to the phone alone or because it cannot tell. Nothing where there are none.
+ * What the wallet found about the actions of a template (section 14.3): the actions this wallet refuses, because they
+ * would tie money to the phone alone or because it cannot tell. Nothing where there are none.
  */
 export const Findings = ({ summary }: { summary: TemplateSummary }) => {
-  const refused = (summary.findings ?? []).filter(thisWalletRefuses);
+  const refused = summary.findings.filter(thisWalletRefuses);
   // An action offered in several roles is named once.
   const tied = [...new Set(refused.filter(({ finding }) => finding === 'does not come back').map(({ name }) => name))];
   const unclear = [...new Set(refused.filter(({ finding }) => finding === 'cannot tell').map(({ name }) => name))].filter((name) => !tied.includes(name));
@@ -114,17 +73,16 @@ export const Findings = ({ summary }: { summary: TemplateSummary }) => {
 };
 
 /** A template: its own name and description, what the wallet can say about it, and what it can ask for. */
-export const TemplateView = ({ summary, showActions, standing = true }: { summary: TemplateSummary; showActions?: boolean; standing?: boolean }) => (
+export const TemplateView = ({ summary, showActions }: { summary: TemplateSummary; showActions?: boolean }) => (
   <div class="stack-s">
     <div>
       <div class="template-name">{summary.name}</div>
       {summary.description !== '' && <p class="template-description">{summary.description}</p>}
     </div>
+    {/* A template is judged action by action: the wallet says what it found, and once a token of it has led to its
+        position after a recovery, that it has come back (section 14.3). */}
     <Findings summary={summary} />
-    {/* A template that comes with no declaration is judged action by action: the wallet says what it found, and once a
-        token of it has led to its position after a recovery, that it has come back (section 14.3). */}
-    {standing && summary.findings === undefined && <Statement verdict={summary.verdict} />}
-    {summary.findings !== undefined && summary.cameBack === true && (
+    {summary.cameBack === true && (
       <Status tone="good" title="It has come back once">
         <p>A token made with it led to its position after a recovery. This is no audit of its contracts.</p>
       </Status>
@@ -147,7 +105,6 @@ export const TemplateView = ({ summary, showActions, standing = true }: { summar
         entries={[
           ['Identifier', <span class="mono">{summary.identifier}</span>],
           ['Content hash', <span class="mono">{summary.contentHash}</span>],
-          ['Recovery declaration', summary.declaration === undefined ? <span class="muted">none</span> : <span class="mono">{summary.declaration}</span>],
         ]}
       />
     </More>
@@ -176,15 +133,12 @@ export const TheirWords = ({ words }: { words: ActionPreview['words'] }) => (
   </Part>
 );
 
-/** A token that moves, in words: named where a template the user trusts names it. */
+/** A token that moves, in words: an amount in raw units, or an NFT, and its category. */
 export const TokenWords = ({ token }: { token: NonNullable<MovedOutput['token']> }) => {
-  const names = useContext(TokenNamesContext);
-  const fungible = token.amount > 0n ? names.fungible(token.category) : undefined;
-  const amount = fungible?.named?.decimals === undefined ? rawUnits(token.amount) : `${amountText(token.amount, fungible)} (${rawUnits(token.amount)})`;
-  const nft = token.nft === undefined ? undefined : names.nft(token.category)?.named?.name;
+  const amount = rawUnits(token.amount);
   return (
     <span class="token-words">
-      {token.nft === undefined ? `${amount} of token ` : `${nft === undefined ? '' : `"${nft}", `}${token.nft.capability === 'none' ? 'NFT' : `NFT (${token.nft.capability})`} of token `}
+      {token.nft === undefined ? `${amount} of token ` : `${token.nft.capability === 'none' ? 'NFT' : `NFT (${token.nft.capability})`} of token `}
       <Hex value={token.category} />
       {token.nft !== undefined && token.nft.commitment !== '' && (
         <>
@@ -274,23 +228,17 @@ export const ways = (figures: ActionPreview['figures']): { out: Way; back: Way }
 
 const empty = (way: Way): boolean => way.satoshis === 0n && way.fungible.length === 0 && way.nfts.length === 0;
 
-/** A token as a small chip: its amount in its decimals where a template the user trusts names it, else raw units, with its category. */
-const TokenChip = ({ category, amount, nft, sign }: { category: string; amount?: bigint; nft?: Moving['nft']; sign?: '+' | '−' }) => {
-  const names = useContext(TokenNamesContext);
-  const fungible = amount === undefined ? undefined : names.fungible(category);
-  const nftName = nft === undefined ? undefined : names.nft(category)?.named?.name;
-  const named = fungible?.named?.symbol !== undefined && fungible.named.decimals !== undefined;
-  return (
-    <span class={`chip${nft === undefined ? '' : ' nft'}`}>
-      <span class="chip-dot" aria-hidden="true" />
-      <span class="chip-text">
-        {sign}
-        {nft === undefined ? amountText(amount ?? 0n, fungible) : (nftName ?? (nft.capability === 'none' ? 'NFT' : `NFT (${nft.capability})`))}
-      </span>
-      {(nft !== undefined ? nftName === undefined : !named) && <Hex value={category} head={4} tail={4} />}
+/** A token as a small chip: an amount in raw units, or an NFT, with its category. */
+const TokenChip = ({ category, amount, nft, sign }: { category: string; amount?: bigint; nft?: Moving['nft']; sign?: '+' | '−' }) => (
+  <span class={`chip${nft === undefined ? '' : ' nft'}`}>
+    <span class="chip-dot" aria-hidden="true" />
+    <span class="chip-text">
+      {sign}
+      {nft === undefined ? rawUnits(amount ?? 0n) : nft.capability === 'none' ? 'NFT' : `NFT (${nft.capability})`}
     </span>
-  );
-};
+    <Hex value={category} head={4} tail={4} />
+  </span>
+);
 
 const WayItems = ({ way }: { way: Way }) =>
   empty(way) ? (
@@ -463,18 +411,12 @@ export const TokensLeaving = ({ leaving, tick }: { leaving: NonNullable<ActionPr
   );
 };
 
-/** The standing of the template where it asks for care, and what else does: tokens destroyed, paying itself first, a time. */
+/** What asks for care: tokens that leave the wallet, a template taken in now, tokens destroyed, paying itself first, a time. */
 const Cautions = ({ preview, summary, tick }: { preview: ActionPreview; summary: TemplateSummary; tick?: Tick | undefined }) => {
   const { figures } = preview;
   return (
     <>
       {(preview.tokensLeaving ?? []).length > 0 && <TokensLeaving leaving={preview.tokensLeaving ?? []} tick={tick} />}
-      {/* A template that comes with no declaration is judged action by action: an action that comes back needs no more. */}
-      {summary.verdict.statement !== 'verified' && summary.findings === undefined && (
-        <div class={`standing ${summary.verdict.statement === 'violation' ? 'bad' : 'warn'}`}>
-          <Statement verdict={summary.verdict} subject="Template" />
-        </div>
-      )}
       <FirstUse summary={summary} firstUse={preview.firstUse} />
       {figures.tokensDestroyed.length > 0 && <Destroyed figures={figures} />}
       {figures.payingItself !== undefined && (
@@ -507,7 +449,6 @@ const Fold = ({ title, hint, cls, children }: { title: string; hint?: string; cl
 
 /** The wallet's own figures from the transaction it worked out, in full. The application cannot influence them. */
 export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) => {
-  const names = useContext(TokenNamesContext);
   const net = figures.getsSatoshis - figures.givesSatoshis;
   const into = figures.intoApplicationSatoshis;
   const rows: [ComponentChildren, ComponentChildren][] = [
@@ -535,7 +476,7 @@ export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) =
                   Of token <Hex value={entry.category} />
                 </small>
               </>,
-              <span class={`token-net ${entry.amount > 0n ? 'up' : 'down'}`}>{`${entry.amount > 0n ? '+' : '−'}${amountText(entry.amount, names.fungible(entry.category))}`}</span>,
+              <span class={`token-net ${entry.amount > 0n ? 'up' : 'down'}`}>{`${entry.amount > 0n ? '+' : '−'}${rawUnits(entry.amount)}`}</span>,
             ])}
           />
         </div>
@@ -620,10 +561,10 @@ export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) =
   );
 };
 
-/** The template folded away: its name and description, who vouches for it, its actions and identifiers. */
+/** The template folded away: its name and description, what the wallet found, its actions and identifiers. */
 const TheTemplate = ({ summary }: { summary: TemplateSummary }) => (
-  <Fold title="The template" hint={summary.verdict.statement === 'verified' ? 'Verified, and what that rests on' : 'What it is, and its identifiers'} cls="template-fold">
-    <TemplateView summary={summary} showActions={!summary.trusted} standing={summary.verdict.statement === 'verified'} />
+  <Fold title="The template" hint="What it is, and its identifiers" cls="template-fold">
+    <TemplateView summary={summary} showActions={!summary.trusted} />
   </Fold>
 );
 
@@ -676,13 +617,10 @@ export const RefusalView = ({ refusal, context }: { refusal: Refusal; context?: 
 
 /** What approving does to a template the wallet has not trusted or not yet stored. */
 export const FirstUse = ({ summary, firstUse }: { summary: TemplateSummary; firstUse: boolean }) => {
-  // A template with a violation is not taken in: approving is not offered, so nothing is said about it.
-  if ((summary.trusted && !firstUse) || (!summary.trusted && summary.verdict.statement === 'violation')) return null;
+  if (summary.trusted && !firstUse) return null;
   return (
     <Notice tone="wait">
-      {summary.replacesDeclaration === true
-        ? 'You trust this template on this phone with an earlier recovery declaration. This request comes with a new one. Approving takes the new one in its place and stores it in your backup first, before anything is signed; declining keeps the one you have.'
-        : summary.trusted
+      {summary.trusted
         ? 'You trust this template on this phone, and it is not in your backup yet. Approving stores it there first, before anything is signed.'
         : 'This wallet does not have this template yet. Approving trusts it on this phone, and stores it in your backup first, before anything is signed, so that a new phone can operate what is made with it.'}
     </Notice>

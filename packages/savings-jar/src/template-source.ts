@@ -1,8 +1,7 @@
 import { savingsJarBytecodeHex } from '@grandmas-wallet/contracts/savingsJar';
 
 /**
- * The XO template of the Savings Jar application: version 3 with its recovery declaration, which the wallets of
- * the second design read, and version 4 (below), which needs nothing beside it.
+ * The XO template of the Savings Jar application, in its version 4 (below), which a wallet takes alone.
  *
  * A jar holds savings until a date. Anyone can pay in. From the date on, whoever holds the jar's key token
  * can empty it. The template has no key and no secret: authority over a jar is its key token, which the
@@ -22,7 +21,11 @@ const action = (name: string, description: string, variables: string[], transact
   transaction,
 });
 
-export const savingsJarTemplateSource = {
+/**
+ * Version 3, which the second design used with a recovery declaration (at the tag `design-2`). It is no longer
+ * served; version 4 is made from it, so that the two give the same jar.
+ */
+const version3 = {
   $schema: 'https://libauth.org/schemas/wallet-template-v0.schema.json',
   ...view('Savings Jar', 'Savings kept until a date. Anyone can pay into a jar. From its date on, whoever holds the jar\'s key can empty it.'),
   version: '3',
@@ -114,56 +117,29 @@ export const savingsJarTemplateSource = {
  * Field order is that of version 3: a template's identifier depends on it.
  */
 export const savingsJarV4TemplateSource = {
-  ...savingsJarTemplateSource,
+  ...version3,
   version: '4',
   actions: {
-    ...savingsJarTemplateSource.actions,
+    ...version3.actions,
     withdraw: action('Empty a savings jar', 'Take everything out of the jar. Possible from the jar\'s date on. The key stays with you, so the jar can be used again.', ['keyCategory', 'unlockTime', 'unlockTimeBytes', 'keyHolder'], 'withdrawTransaction'),
   },
   transactions: {
-    ...savingsJarTemplateSource.transactions,
+    ...version3.transactions,
     withdrawTransaction: {
-      ...savingsJarTemplateSource.transactions.withdrawTransaction,
+      ...version3.transactions.withdrawTransaction,
       // The key first, at the place the jar's unlocking names; the jar's coins after it.
       inputs: [{ input: 'jarKeyInput', inputIndex: 0 }, { input: 'savingsJarInput' }],
     },
   },
   inputs: {
-    ...savingsJarTemplateSource.inputs,
+    ...version3.inputs,
     // The wallet's own coin with the key: no unlocking script here, its address's key signs it.
     jarKeyInput: { ...view('Jar key', 'The jar\'s key, spent and given back. It opens the jar.'), token: { category: '$(<keyCategory>)' } },
   },
   scripts: {
-    ...savingsJarTemplateSource.scripts,
+    ...version3.scripts,
     // The key is input 0 of the withdrawal.
     unlockSavingsJar: '<0>',
   },
-  variables: (({ keyInput: _keyInput, ...rest }) => rest)(savingsJarTemplateSource.variables),
-} as const;
-
-/**
- * The recovery declaration (proposal section 13.3), without the lines that bind it to the template's text;
- * `freeze` adds those.
- */
-export const savingsJarDeclarationSource = {
-  authority: {
-    jarKey: {
-      // The key's category and the date written on it give the jar's address. Nothing else is needed.
-      token: 'jarKeyOutput',
-      position: { lockingScript: 'savingsJarLockingScript', variables: { keyCategory: 'token.category', unlockTime: 'token.commitment' } },
-      actions: ['deposit', 'withdraw'],
-    },
-  },
-  actions: {
-    open: { creates: 'keyCategory', outputs: { keyHolder: 'receive' } },
-    deposit: { variables: { keyCategory: 'token.category', unlockTime: 'token.commitment' } },
-    withdraw: {
-      spends: 'jarKey',
-      position: 'savingsJarInput',
-      outputs: { keyHolder: 'receive' },
-      variables: { keyCategory: 'token.category', unlockTime: 'token.commitment', unlockTimeBytes: 'token.commitment', keyInput: 'token.inputIndex' },
-    },
-  },
-  // What a wallet that trusts the template may call the key.
-  tokens: { jarKey: { kind: 'nft', authority: 'jarKey', name: 'Jar key' } },
+  variables: (({ keyInput: _keyInput, ...rest }) => rest)(version3.variables),
 } as const;

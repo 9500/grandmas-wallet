@@ -3,7 +3,6 @@ import { type AccountCoin, type SpendableCoin, ADDRESS_KIND, INPUT_BYTES, Insuff
 
 import type { HeldToken } from './applications.js';
 import type { ReservedAddress, Sent, TokenCoin, WalletParts } from './owner-wallet.js';
-import type { TokenNaming } from './token-names.js';
 
 /**
  * Sending tokens (proposal section 8): an amount of a fungible token, or one NFT, to an address.
@@ -244,7 +243,6 @@ export type SendableToken =
       earlier: bigint;
       /** On coins that carry an NFT as well, which move whole with their NFT. */
       withNfts: bigint;
-      names?: TokenNaming;
     }
   | {
       kind: 'nft';
@@ -268,9 +266,43 @@ export const sendableTokens = (held: HeldToken[]): SendableToken[] => {
       entry.coins += 1;
     } else if (token.place === 'vault') entry.vault += token.amount;
     else entry.earlier += token.amount;
-    if (token.names?.fungible !== undefined) entry.names = token.names.fungible;
     fungible.set(token.category, entry);
   }
   const nfts = held.filter((token) => token.capability !== undefined).map((token): SendableToken => ({ kind: 'nft', key: `nft:${token.outpoint}`, token }));
   return [...[...fungible.values()].filter((entry) => entry.amount + entry.vault + entry.earlier > 0n), ...nfts];
+};
+
+/** An amount of raw units in a token's decimals, grouped by thousands: `10000` with 2 decimals is `100.00`. */
+export const formatUnits = (amount: bigint, decimals: number): string => {
+  const negative = amount < 0n;
+  const value = negative ? -amount : amount;
+  const scale = 10n ** BigInt(decimals);
+  const whole = (value / scale).toLocaleString('en-US');
+  const fraction = decimals === 0 ? '' : `.${(value % scale).toString().padStart(decimals, '0')}`;
+  return `${negative ? '−' : ''}${whole}${fraction}`;
+};
+
+/** The most a token output can carry. */
+export const LARGEST_TOKEN_AMOUNT = 9_223_372_036_854_775_807n;
+
+/**
+ * Read an amount a person typed, in a token's decimals (0 for raw units). Nothing is rounded: an amount with
+ * more decimals than the token has is refused.
+ *
+ * @returns the amount in raw units, or the reason it cannot be read
+ */
+export const parseUnits = (text: string, decimals: number): bigint | string => {
+  const cleaned = text.trim().replace(/[,\s_]/g, '');
+  if (cleaned === '') return 'Enter an amount.';
+  const match = /^(\d*)(?:\.(\d*))?$/.exec(cleaned);
+  if (match === null || (match[1] === '' && (match[2] ?? '') === '')) return decimals === 0 ? 'Enter a whole number.' : 'Enter the amount as a number, for example 12.50.';
+  const fraction = match[2] ?? '';
+  if (decimals === 0 && match[2] !== undefined && /[1-9]/.test(fraction)) return 'These tokens have no decimals: enter a whole number.';
+  if (fraction.length > decimals && /[1-9]/.test(fraction.slice(decimals))) {
+    return `These tokens have ${decimals === 1 ? 'one decimal' : `${decimals} decimals`}; the amount has more. Nothing is rounded.`;
+  }
+  const units = BigInt(match[1] === '' ? '0' : (match[1] as string)) * 10n ** BigInt(decimals) + BigInt(fraction.slice(0, decimals).padEnd(decimals, '0') || '0');
+  if (units <= 0n) return 'Enter an amount above zero.';
+  if (units > LARGEST_TOKEN_AMOUNT) return 'That is more than any token output can carry.';
+  return units;
 };

@@ -1,15 +1,15 @@
 import { type Output, binToHex, cashAddressToLockingBytecode, decodeTransactionBch, encodeLockingBytecodeP2sh32, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
-import { type HeldToken, DeclarationError, TokenNames, TokenSendError, checkTemplate, formatUnits, parseUnits, readDeclaration, sendableTokens } from '@grandmas-wallet/app';
-import { ADDRESS_KIND, InsufficientFundsError, buildTransaction, p2pkhInput, p2pkhLockingBytecode, readTemplate, smallestOutputValue, walletAddress } from '@grandmas-wallet/core';
-import { strongboxDeclaration, strongboxTemplate, testKey } from '@grandmas-wallet/testing';
+import { type HeldToken, type RecordedPosition, TokenSendError, formatUnits, parseUnits, sendableTokens } from '@grandmas-wallet/app';
+import { ADDRESS_KIND, InsufficientFundsError, buildTransaction, p2pkhInput, p2pkhLockingBytecode, smallestOutputValue, walletAddress } from '@grandmas-wallet/core';
+import { testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
 import { PlainAddressError, readAddress, tokenDestination } from '../packages/ui/src/address.js';
-import { type Device, deviceWith, presentation, request, seedOf, strongbox } from './support/applications.js';
+import { type Device, deviceWith, keyedBox, request, seedOf, strongbox } from './support/applications.js';
 
 /**
- * Acceptance tests TK01 to TK10 of the proposal: receiving and sending tokens, and their names (sections 8 and
- * 13.3). On the simulated chain, with the tests' own templates; no application is named.
+ * Acceptance tests TK01 to TK08 of the proposal: receiving and sending tokens, and what the wallet calls them
+ * (sections 8 and 13.3). On the simulated chain, with the tests' own templates; no application is named.
  */
 
 const hex = binToHex;
@@ -205,16 +205,21 @@ describe('sending NFTs', () => {
     expect(await device.applications.tokens()).toEqual([]);
   });
 
-  it('TK07: after a token that controls a position is sent, the wallet no longer lists it and offers nothing for it', async () => {
+  it('TK07: after a token that controls a position is sent, the wallet no longer lists it, reports no position for it, and refuses its actions', async () => {
     const device = await deviceWith([100_000n]);
-    await device.applications.carryOut(request(strongbox, 'open', 'holder', { amount: 30_000, label: '01' }));
+    await device.applications.carryOut(request(keyedBox, 'open', 'holder', { amount: 30_000, label: '01' }));
     const [key] = await device.applications.tokens();
-    expect(key).toMatchObject({ meaning: 'position', position: { status: 'open' } });
-    expect((await device.applications.positions(strongbox.names.identifier))?.length).toBe(1);
+    expect(key).toMatchObject({ meaning: 'position', tokenName: 'Strongbox key' });
+    const [position] = await device.applications.recordedPositions();
+    expect(position).toMatchObject({ status: 'open', token: { category: key?.category } });
+    expect(device.applications.offeredActions(position as RecordedPosition).map(({ action }) => action)).toEqual(['take', 'add']);
+    expect((await device.applications.positionsFromRecords(keyedBox.names.identifier))?.length).toBe(1);
     await device.wallet.sendTokens({ kind: 'nft', outpoint: key?.outpoint ?? '', to: payee });
     expect(await device.applications.tokens()).toEqual([]);
-    expect(await device.applications.positions(strongbox.names.identifier)).toEqual([]);
-    await expect(device.applications.preview(device.applications.actionOn(key as HeldToken, 'take'))).rejects.toThrow('holds no such token');
+    expect(await device.applications.recordedPositions()).toEqual([]);
+    expect(await device.applications.positionsFromRecords(keyedBox.names.identifier)).toEqual([]);
+    await expect(device.applications.preview(device.applications.actionOn(position as RecordedPosition, 'take'))).rejects.toThrow('holds no such token');
+    await expect(device.applications.preview(device.applications.actionOn(position as RecordedPosition, 'add', { amount: 1_000 }))).rejects.toThrow('holds no such token');
   });
 });
 
@@ -237,142 +242,44 @@ describe('recovery and tokens', () => {
   }, 60_000);
 });
 
-// ------------------------------------------------------------------ names
+// ------------------------------------------------------------------ what the wallet calls a token
 
-const CREDITS = 'c1'.repeat(32);
-/** The test template, with an output of credits of a fixed category, so that it deals in a category it names. */
-const creditsTemplate = {
-  ...strongboxTemplate,
-  name: 'Strongbox with credits',
-  outputs: { ...strongboxTemplate.outputs, creditsOutput: { name: 'Credits', description: 'Credits.', lockingScript: '$(<holder>)', valueSatoshis: '1000', token: { category: CREDITS, amount: '100', nft: null } } },
-};
-const named = (tokens: object, template: unknown = creditsTemplate, name?: string) => presentation(name === undefined ? template : { ...(template as object), name }, { ...strongboxDeclaration, tokens });
-
-describe('the template\'s names for its tokens', () => {
-  it('TK09: are read from the declaration, and refused when malformed; a declaration without them reads as before', () => {
-    const { texts } = named({ credits: { kind: 'fungible', category: CREDITS, name: 'Club credits', symbol: 'CRD', decimals: 2 }, key: { kind: 'nft', authority: 'boxKey', name: 'Box key' } });
-    expect(readDeclaration(texts.declaration as string).declaration.tokens).toEqual({
-      credits: { kind: 'fungible', category: CREDITS, name: 'Club credits', symbol: 'CRD', decimals: 2 },
-      key: { kind: 'nft', authority: 'boxKey', name: 'Box key' },
-    });
-    expect(readDeclaration(strongbox.texts.declaration as string).declaration.tokens).toBeUndefined();
-    const read = (tokens: object) => () => readDeclaration(named(tokens).texts.declaration as string);
-    expect(read({ a: { kind: 'fungible', category: CREDITS, name: 'Credits', decimals: 2 } })).toThrow('no symbol');
-    expect(read({ a: { kind: 'fungible', category: CREDITS, name: 'Credits', symbol: 'CRD' } })).toThrow('decimals');
-    expect(read({ a: { kind: 'fungible', category: CREDITS, name: 'Credits', symbol: 'CRD', decimals: 19 } })).toThrow('decimals');
-    expect(read({ a: { kind: 'nft', authority: 'boxKey', name: 'Key', decimals: 0 } })).toThrow('gives decimals to NFTs');
-    expect(read({ a: { kind: 'nft', category: CREDITS, authority: 'boxKey', name: 'Key' } })).toThrow('not both');
-    expect(read({ a: { kind: 'nft', name: 'Key' } })).toThrow('either a category or an authority entry');
-    expect(read({ a: { kind: 'coin', category: CREDITS, name: 'Key' } })).toThrow('neither "fungible" nor "nft"');
-    expect(read({ a: { kind: 'nft', category: 'C1'.repeat(32), name: 'Key' } })).toThrow('64 hexadecimal digits');
-    expect(read({ a: { kind: 'nft', authority: 'boxKey', name: 'Key‮yek' } })).toThrow('no name a wallet can show');
-    expect(read({ a: { kind: 'nft', authority: 'boxKey', name: ' Key' } })).toThrow('no name a wallet can show');
-    expect(read({ a: { kind: 'fungible', category: CREDITS, name: 'Credits', symbol: 'C R D', decimals: 2 } })).toThrow('symbol');
-    expect(read([])).toThrow(DeclarationError);
-  });
-
-  it('TK09: a description that does not match the template is a violation, and such a template is not taken in', async () => {
-    const verdict = (tokens: object) => {
-      const { texts } = named(tokens);
-      return checkTemplate(readTemplate(texts.template), readDeclaration(texts.declaration as string));
-    };
-    expect(verdict({ credits: { kind: 'fungible', category: CREDITS, name: 'Credits', symbol: 'CRD', decimals: 2 }, key: { kind: 'nft', authority: 'boxKey', name: 'Box key' } }).statement).toBe('not verified');
-    const violations = (tokens: object): string[] => {
-      const found = verdict(tokens);
-      return found.statement === 'violation' ? found.violations.map((violation) => `${violation.rule}: ${violation.what}`) : [];
-    };
-    // A category the template never deals in: a name for someone else's tokens.
-    expect(violations({ other: { kind: 'fungible', category: 'ab'.repeat(32), name: 'Dollars', symbol: 'USD', decimals: 2 } })).toEqual([expect.stringMatching(/^names: .*"Dollars", and the template deals in no token of that category/)]);
-    expect(violations({ credits: { kind: 'nft', category: CREDITS, name: 'Credit card' } })).toEqual([expect.stringMatching(/deals in no NFT of that category/)]);
-    expect(violations({ key: { kind: 'nft', authority: 'lockerKey', name: 'Key' } })).toEqual([expect.stringMatching(/authority entry "lockerKey", which it does not have/)]);
-    expect(violations({ key: { kind: 'fungible', authority: 'boxKey', name: 'Key', symbol: 'K', decimals: 0 } })).toEqual([expect.stringMatching(/an authority token is an NFT/)]);
-    expect(violations({ a: { kind: 'nft', authority: 'boxKey', name: 'Key' }, b: { kind: 'nft', authority: 'boxKey', name: 'Other key' } })).toEqual([expect.stringMatching(/describes the same tokens twice; "b"/)]);
-    const device = await deviceWith([100_000n]);
-    const lying = named({ other: { kind: 'fungible', category: 'ab'.repeat(32), name: 'Dollars', symbol: 'USD', decimals: 2 } });
-    await expect(device.applications.trust(lying.names, lying.texts)).rejects.toThrow('the names it gives tokens');
-  });
-
-  it('TK10: names come only from templates the user trusts, say which template gives them, and are not used when two trusted templates disagree', async () => {
+describe('what the wallet calls a token (section 13.3)', () => {
+  it('an NFT a record ties to a template the user trusts by the template\'s name for its output; any other token by its category, in raw units', async () => {
     const device = await deviceWith([100_000n]);
     const credits = mint(device, [{ to: await fresh(device), amount: 12_345n }]);
-    const described = { credits: { kind: 'fungible', category: credits, name: 'Club credits', symbol: 'CRD', decimals: 2 }, key: { kind: 'nft', authority: 'boxKey', name: 'Box key' } };
-    const template = { ...creditsTemplate, outputs: { ...creditsTemplate.outputs, creditsOutput: { ...creditsTemplate.outputs.creditsOutput, token: { ...creditsTemplate.outputs.creditsOutput.token, category: credits } } } };
-    const first = named(described, template, 'First box');
-    // Presented and not trusted: no name.
-    device.applications.describe(first.names, first.texts);
-    expect((await device.applications.tokens())[0]?.names).toBeUndefined();
-    // Trusted: the name, the symbol and the decimals, from that template.
-    await device.applications.carryOut(request(first, 'open', 'holder', { amount: 30_000, label: '01' }));
+    const art = mint(device, [{ to: await fresh(device), nft: { capability: 'none', commitment: '0102' } }]);
+    await device.applications.carryOut(request(strongbox, 'open', 'holder', { amount: 30_000, label: '01' }));
     const listed = await device.applications.tokens();
-    const units = listed.find((token) => token.category === credits);
-    expect(units?.names?.fungible).toEqual({ named: { name: 'Club credits', symbol: 'CRD', decimals: 2, from: [{ identifier: first.names.identifier, name: 'First box' }] } });
-    expect(formatUnits(units?.amount ?? 0n, 2)).toBe('123.45');
-    // The key is named through the authority entry it was found to be, whatever its own category.
-    const key = listed.find((token) => token.meaning === 'position');
-    expect(key?.names?.nft?.named?.name).toBe('Box key');
-    expect(key?.names?.fungible).toBeUndefined();
-    // A second trusted template that agrees adds itself as a source; one that disagrees makes the name unused.
-    const agreeing = named({ credits: described.credits }, template, 'Second box');
-    await device.applications.trust(agreeing.names, agreeing.texts);
-    expect(device.applications.names().fungible(credits)?.named?.from.map((source) => source.name)).toEqual(['First box', 'Second box']);
-    const other = named({ credits: { ...described.credits, name: 'Gold', symbol: 'GLD', decimals: 0 } }, template, 'Third box');
-    await device.applications.trust(other.names, other.texts);
-    const disputed = (await device.applications.tokens()).find((token) => token.category === credits)?.names?.fungible;
-    expect(disputed?.named).toBeUndefined();
-    expect(disputed?.disputed?.map((claim) => [claim.name, claim.decimals, claim.from.name])).toEqual([
-      ['Club credits', 2, 'First box'],
-      ['Club credits', 2, 'Second box'],
-      ['Gold', 0, 'Third box'],
-    ]);
-    // The key's own name is not disputed by the credits.
-    expect((await device.applications.tokens()).find((token) => token.meaning === 'position')?.names?.nft?.named?.name).toBe('Box key');
-    expect(TokenNames.none.fungible(credits)).toBeUndefined();
-  }, 60_000);
-
-  it('TK10: amounts are typed in the token\'s decimals and never rounded', () => {
-    expect(parseUnits('100', 2)).toBe(10_000n);
-    expect(parseUnits('1,234.5', 2)).toBe(123_450n);
-    expect(parseUnits('0.01', 2)).toBe(1n);
-    expect(parseUnits('.5', 2)).toBe(50n);
-    expect(parseUnits('2.50', 2)).toBe(250n);
-    expect(parseUnits('2.500', 2)).toBe(250n);
-    expect(parseUnits('2.505', 2)).toMatch('2 decimals; the amount has more. Nothing is rounded');
-    expect(parseUnits('0.001', 2)).toMatch('Nothing is rounded');
-    expect(parseUnits('12', 0)).toBe(12n);
-    expect(parseUnits('12.5', 0)).toMatch('no decimals');
-    expect(parseUnits('0', 2)).toMatch('above zero');
-    expect(parseUnits('', 2)).toMatch('Enter an amount');
-    expect(parseUnits('1e3', 2)).toMatch('as a number');
-    expect(parseUnits('-1', 2)).toMatch('as a number');
-    expect(parseUnits('9223372036854775808', 0)).toMatch('more than any token output');
-    expect(formatUnits(10_000n, 2)).toBe('100.00');
-    expect(formatUnits(5n, 2)).toBe('0.05');
-    expect(formatUnits(1_234_567n, 0)).toBe('1,234,567');
-    expect(formatUnits(1n, 8)).toBe('0.00000001');
+    const key = listed.find((token) => token.meaning === 'position') as HeldToken;
+    expect(key).toMatchObject({ tokenName: 'Strongbox key', template: { identifier: strongbox.names.identifier, name: 'Strongbox' } });
+    expect(listed.find((token) => token.category === credits)).toEqual({ category: credits, commitment: '', amount: 12_345n, place: 'address', outpoint: expect.any(String) as string, satoshis: 1_000n, meaning: 'unknown' });
+    expect(listed.find((token) => token.category === art)).toMatchObject({ meaning: 'unknown', capability: 'none', commitment: '0102' });
+    expect(listed.find((token) => token.category === art)).not.toHaveProperty('tokenName');
+    // A fungible balance to send carries no name and no decimals.
+    expect(sendableTokens(listed).find((token) => token.kind === 'fungible')).toEqual({ kind: 'fungible', key: `fungible:${credits}`, category: credits, amount: 12_345n, coins: 1, vault: 0n, earlier: 0n, withNfts: 0n });
+    // The name is the template's claim, shown only while the user trusts the template.
+    await device.applications.forget(strongbox.names.identifier);
+    const after = (await device.applications.tokens()).find((token) => token.category === key.category);
+    expect(after).toMatchObject({ meaning: 'incomplete', template: { name: 'Strongbox' } });
+    expect(after).not.toHaveProperty('tokenName');
+    expect(after?.reason).toMatch(/You stopped trusting that template/);
   });
 
-  it('TK10: a wallet that trusted a declaration keeps working with it, and takes a new one on the user\'s word when it is presented', async () => {
-    const device = await deviceWith([100_000n]);
-    const before = presentation(creditsTemplate, strongboxDeclaration);
-    await device.applications.carryOut(request(before, 'open', 'holder', { amount: 30_000, label: '01' }));
-    const after = named({ key: { kind: 'nft', authority: 'boxKey', name: 'Box key' } });
-    expect(after.names.identifier).toBe(before.names.identifier);
-    expect(after.names.declaration).not.toBe(before.names.declaration);
-    // Asked with the new declaration's name: the wallet asks for the texts.
-    expect(device.applications.has(after.names)).toBe(false);
-    // With the texts: shown as a template to be trusted again, and nothing is taken in by looking.
-    const summary = device.applications.describe(after.names, after.texts);
-    expect(summary).toMatchObject({ trusted: false, replacesDeclaration: true });
-    const key = (await device.applications.tokens()).find((token) => token.meaning === 'position') as HeldToken;
-    expect(key.names).toBeUndefined();
-    // The action the wallet offers from its own list goes on with the declaration it has.
-    const preview = await device.applications.preview(device.applications.actionOn(key, 'add', { amount: 1_000 }));
-    expect(preview.template.declaration).toBe(before.names.declaration);
-    // Approved with the new one: it takes the earlier one's place, is stored again first, and names the key.
-    const outcome = await device.applications.carryOut(request(after, 'add', 'holder', { amount: 1_000 }, { tokens: [key.category] }));
-    expect(outcome.transactionId).toMatch(/^[0-9a-f]{64}$/);
-    expect(device.applications.has(after.names)).toBe(true);
-    expect(device.applications.templates.find((template) => template.identifier === after.names.identifier)).toMatchObject({ declaration: { contentHash: after.names.declaration }, stored: true });
-    expect((await device.applications.tokens()).find((token) => token.meaning === 'position')?.names?.nft?.named?.name).toBe('Box key');
-  }, 60_000);
+  it('an amount a person types is read in raw units and never rounded', () => {
+    expect(parseUnits('12', 0)).toBe(12n);
+    expect(parseUnits('1,234', 0)).toBe(1_234n);
+    expect(parseUnits('12.5', 0)).toMatch('no decimals');
+    expect(parseUnits('12.0', 0)).toBe(12n);
+    expect(parseUnits('0', 0)).toMatch('above zero');
+    expect(parseUnits('', 0)).toMatch('Enter an amount');
+    expect(parseUnits('1e3', 0)).toMatch('whole number');
+    expect(parseUnits('-1', 0)).toMatch('whole number');
+    expect(parseUnits('9223372036854775807', 0)).toBe(9_223_372_036_854_775_807n);
+    expect(parseUnits('9223372036854775808', 0)).toMatch('more than any token output');
+    expect(formatUnits(1_234_567n, 0)).toBe('1,234,567');
+    // With decimals, should a registry give them later (section 22).
+    expect(parseUnits('2.505', 2)).toMatch('2 decimals; the amount has more. Nothing is rounded');
+    expect(formatUnits(10_000n, 2)).toBe('100.00');
+  });
 });

@@ -1,5 +1,5 @@
 import type { ActionDetails, DappRequests, RequestStage, XoAdvertisement } from '@grandmas-wallet/connect';
-import { speaks } from '@grandmas-wallet/connect';
+import { XO_EXTENSION_VERSION } from '@grandmas-wallet/connect';
 import {
   type BorrowingThread,
   type LoanCoins,
@@ -80,7 +80,7 @@ export const STAGE_WORDS: Record<RequestStage, string> = {
 export const xoProblem = (offered: XoAdvertisement | undefined, network: string): string | undefined => {
   if (offered === undefined) return 'Your wallet does not carry out actions of a template itself (xo_v1). Paryon\'s contracts take only wallets that do, or an ordinary wallet through Paryon\'s own site; this page works with the first kind only.';
   if (offered.network !== network) return `Your wallet is on ${offered.network}; this page is on ${network}. Switch the wallet to ${network} and connect again.`;
-  if (!speaks(offered, 2)) return 'Your wallet answers only the earlier version of XO requests, whose templates came with a recovery declaration. This page sends its template alone. Update the wallet and connect again.';
+  if (offered.version !== XO_EXTENSION_VERSION) return 'Your wallet speaks another version of XO requests than this page. Update the wallet and connect again.';
   if (!offered.bindings.includes('receive') || !offered.bindings.includes('return')) return 'Your wallet does not give the kinds of address this page\'s template asks for.';
   return undefined;
 };

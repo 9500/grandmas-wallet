@@ -60,7 +60,7 @@ export const Home = ({ owner }: { owner: Owner }) => {
               <KeyValues entries={rows} />
               {balance.tokens.length > 0 && (
                 <p class="small muted">
-                  Tokens: {balance.tokens.map((coin) => shorten(binToHex(coin.utxo.output.token?.category ?? new Uint8Array()), 6, 4)).join(', ')}. The Applications screen lists them, with their names where a template you trust gives one; Send sends them.
+                  Tokens: {balance.tokens.map((coin) => shorten(binToHex(coin.utxo.output.token?.category ?? new Uint8Array()), 6, 4)).join(', ')}. The Applications screen lists them, with what each controls where a template you trust says so; Send sends them.
                 </p>
               )}
             </More>

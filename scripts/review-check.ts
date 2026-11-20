@@ -178,11 +178,11 @@ try {
 
   // ---------------------------------------------------------------- Send: a token
   await page.goto(at('show=send-token'));
-  await page.getByText('Example dollar').first().waitFor();
+  await page.getByText('Fungible tokens').first().waitFor();
   const plain = ((await page.getByTestId('fixture-plain-address').textContent()) ?? '').trim();
   const amountInfo = page.getByRole('button', { name: 'About this token\'s units' });
   await amountInfo.click();
-  check((await (await bubbleOf(amountInfo)).innerText()).includes('Name from the template "Example lending (test network)", which you trust.'), 'where a token\'s name comes from is behind the "?" beside its amount');
+  check((await (await bubbleOf(amountInfo)).innerText()).includes('In whole units'), 'that a token\'s amount is typed in whole units is behind the "?" beside it');
   await amountInfo.click();
   const addressInfo = page.getByRole('button', { name: 'About token addresses' });
   await addressInfo.click();
@@ -192,7 +192,7 @@ try {
   await feesInfo.click();
   check((await (await bubbleOf(feesInfo)).innerText()).includes('never from a token\'s coin'), 'where the fee comes from is behind the "?" beside the Bitcoin Cash for fees');
   await feesInfo.click();
-  await page.locator('#token-amount').fill('12.50');
+  await page.locator('#token-amount').fill('1250');
   await page.locator('#token-to').fill(plain);
   await page.getByRole('button', { name: 'Review' }).click();
   await page.getByText('Not a token address').waitFor();
@@ -224,8 +224,8 @@ try {
 
   // ---------------------------------------------------------------- the review of an action
   for (const [show, name, cautions] of [
-    ['review', 'wallet-review-borrow', ['Template not verified', 'A token is destroyed']],
-    ['closing', 'wallet-review-close', ['Template not verified', '3 tokens are destroyed']],
+    ['review', 'wallet-review-borrow', ['A token is destroyed']],
+    ['closing', 'wallet-review-close', ['3 tokens are destroyed']],
     ['box-open', 'wallet-review-box-open', ['This wallet does not have this template yet', 'It first pays itself']],
   ] as const) {
     await page.goto(at(`show=${show}`));

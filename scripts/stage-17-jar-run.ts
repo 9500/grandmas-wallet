@@ -301,7 +301,7 @@ const sentAs = async (transactionId: string): Promise<{ transactionId: string; b
 };
 /** No declaration anywhere: what the wallet keeps of each template, and what the backup holds. */
 const noDeclaration = async (applications: Applications, where: string): Promise<string> => {
-  const kept = applications.templates.filter((template) => template.declaration !== undefined || template.identifier !== jarNames.identifier);
+  const kept = applications.templates.filter((template) => 'declaration' in template || template.identifier !== jarNames.identifier);
   if (kept.length > 0) throw new Error(`${where} keeps a template with a declaration, or another template`);
   return `${where} keeps ${applications.templates.length} template, the jar's of version 4, with no declaration`;
 };
@@ -376,10 +376,10 @@ try {
       note(`Before the opening the page asked the wallet which jars of its template it holds (version 2): ${before.trusted ? 'trusted' : 'not trusted with this page yet, so nothing is reported'}.`);
       const outcome = await link.approve(page.open(30_000n, unlockTime), {
         seen: (preview) =>
-          note(`The wallet showed the page's request with its own figures: it gives ${preview.figures.givesSatoshis} satoshis, ${preview.figures.intoApplicationSatoshis} go into the jar, the fee is ${preview.figures.feeSatoshis}; it would store the template (${preview.firstUse}) and the record of the position it leaves (${preview.recordsPosition === true}) in the backup before anything is signed; the template is shown with ${preview.template.declaration === undefined ? 'no declaration' : 'a declaration'}.`),
+          note(`The wallet showed the page's request with its own figures: it gives ${preview.figures.givesSatoshis} satoshis, ${preview.figures.intoApplicationSatoshis} go into the jar, the fee is ${preview.figures.feeSatoshis}; it would store the template (${preview.firstUse}) and the record of the position it leaves (${preview.recordsPosition === true}) in the backup before anything is signed; the template is shown with ${'declaration' in preview.template ? 'a declaration' : 'no declaration'}.`),
       });
       const requests = link.sent.filter((message) => message.action === 'xo_action_request');
-      if (requests.some((message) => message.template.declaration !== undefined || message.definition?.declaration !== undefined)) throw new Error('the page sent a declaration');
+      if (requests.some((message) => 'declaration' in message.template || (message.definition !== undefined && 'declaration' in message.definition))) throw new Error('the page sent a declaration');
       const [asked] = requests;
       note(`The page's request, as it travelled: ${JSON.stringify({ templateAction: asked?.templateAction, role: asked?.role, variables: asked?.variables, page: asked?.page, template: asked?.template })}; it was sent ${requests.length} times, the second time with the template's text alone, after the wallet said it did not have it. No declaration was named or sent.`);
       (facts.jar as { category?: string }).category = outcome.category as string;
@@ -498,7 +498,7 @@ try {
         note(`The new device read the record from a store. It is the earlier seed's, a suggestion; with the template not yet trusted here the jar is listed as ${describePosition(before)}.`);
         const [suggested] = applications.suggestions;
         if (suggested === undefined || suggested.identifier !== jarNames.identifier) throw new Error('the backup did not hold the jar\'s template');
-        if (suggested.declaration !== undefined || suggested.texts.declaration !== undefined) throw new Error('the backup held a declaration');
+        if ('declaration' in suggested || 'declaration' in suggested.texts) throw new Error('the backup held a declaration');
         note('The backup held the template of version 4 as the earlier owner stored it, with no declaration.');
         await applications.trust(suggested, undefined);
         note(`The user trusted the template "${suggested.name}" the earlier owner stored, on the user's word.`);
@@ -537,7 +537,7 @@ try {
         if (withdraw.page !== undefined || withdraw.application !== undefined || withdraw.presented !== undefined) throw new Error('the action came with something of an application\'s');
         note(`The action the wallet made from its own list: ${JSON.stringify(withdraw)}.`);
         const preview = await applications.preview(withdraw);
-        note(`Before emptying, the wallet's own figures: ${preview.figures.fromApplication.satoshis} satoshis from the jar's ${preview.figures.fromApplication.coins} coin, a fee of ${preview.figures.feeSatoshis}, the key and the savings to the wallet (${preview.figures.toWallet.map(({ kind }) => kind).join(', ')}); the position is ${preview.notConfirmed === undefined ? 'confirmed' : `not confirmed (${preview.notConfirmed})`}; the earliest time ${preview.figures.notBefore}. Every value came from the record (the jar's two values and the date as written on the key) or from the wallet itself (the key's address, the key at input 0); the template is shown with ${preview.template.declaration === undefined ? 'no declaration' : 'a declaration'}.`);
+        note(`Before emptying, the wallet's own figures: ${preview.figures.fromApplication.satoshis} satoshis from the jar's ${preview.figures.fromApplication.coins} coin, a fee of ${preview.figures.feeSatoshis}, the key and the savings to the wallet (${preview.figures.toWallet.map(({ kind }) => kind).join(', ')}); the position is ${preview.notConfirmed === undefined ? 'confirmed' : `not confirmed (${preview.notConfirmed})`}; the earliest time ${preview.figures.notBefore}. Every value came from the record (the jar's two values and the date as written on the key) or from the wallet itself (the key's address, the key at input 0); the template is shown with ${'declaration' in preview.template ? 'a declaration' : 'no declaration'}.`);
         const outcome = await applications.carryOut(withdraw);
         record('empty the jar', outcome.sent, 'carried out by the new device by itself, from its list of positions; no page, no session, no request. The key at input 0, the jar\'s coin after it; the key and the savings to addresses of the new seed');
         if (outcome.tokens[0]?.category !== category) throw new Error('the key did not come back');

@@ -33,10 +33,9 @@ describe('the approving button of a review', () => {
     expect(consentOf({ tick: false }, true)).toEqual({});
   });
 
-  it('is not there where the wallet refuses, for a template with a violation, or while the action is worked out', () => {
+  it('is not there where the wallet refuses, or while the action is worked out', () => {
     expect(approval({ refused: true, backup: 'answers', ticked: true })).toMatchObject({ shown: false, enabled: false, blocked: 'refused' });
     expect(approval({ preview: preview({ tokensLeaving: [leavingKey] }), refused: true, backup: 'answers', ticked: true })).toMatchObject({ shown: false, tick: false });
-    expect(approval({ preview: preview(), refused: false, violation: true, backup: 'answers', ticked: false })).toMatchObject({ shown: false, blocked: 'violation' });
     expect(approval({ refused: false, backup: 'checking', ticked: false })).toMatchObject({ shown: false, blocked: 'working out' });
   });
 
@@ -139,15 +138,12 @@ describe('the wallet\'s screens on the wallet', () => {
     const token = (outpoint: string): HeldToken => ({ category: 'cd'.repeat(32), commitment: '', amount: 0n, place: 'address', outpoint, satoshis: 1_000n, meaning: 'unknown' });
     const position = (outpoint: string, status: RecordedPosition['status'], template = 'bare'): RecordedPosition =>
       ({ token: { ...token(outpoint), capability: 'none' }, template: { identifier: template }, status, record: { kind: 'position', templateIdentifier: template, values: {} }, standing: 'own' }) as RecordedPosition;
-    const list = tokenList(
-      [position('a:0', 'open'), position('b:0', 'closed'), position('c:0', 'held'), position('d:0', 'unconfirmed'), position('e:0', 'open', 'declared')],
-      ['a:0', 'b:0', 'c:0', 'd:0', 'e:0', 'f:0'].map(token),
-      (identifier) => identifier === 'declared',
-    );
-    expect(list.positions.map(({ token: { outpoint } }) => outpoint)).toEqual(['a:0', 'b:0']);
+    const list = tokenList([position('a:0', 'open'), position('b:0', 'closed'), position('c:0', 'held'), position('d:0', 'unconfirmed'), position('e:0', 'open', 'other')], ['a:0', 'b:0', 'c:0', 'd:0', 'e:0', 'f:0', 'g:0'].map(token));
+    // Every recorded position is listed from its record, whatever its template.
+    expect(list.positions.map(({ token: { outpoint } }) => outpoint)).toEqual(['a:0', 'b:0', 'e:0']);
     expect(list.held.map(({ token: { outpoint } }) => outpoint)).toEqual(['c:0']);
     expect(list.unconfirmed.map(({ token: { outpoint } }) => outpoint)).toEqual(['d:0']);
-    // A token with no record, and one a declared template explains, are listed as tokens.
-    expect(list.tokens.map(({ outpoint }) => outpoint)).toEqual(['e:0', 'f:0']);
+    // A token that no record lists as a position is listed as a token, and only it.
+    expect(list.tokens.map(({ outpoint }) => outpoint)).toEqual(['f:0', 'g:0']);
   });
 });

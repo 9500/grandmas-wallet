@@ -8,7 +8,7 @@ import { type Device, deviceWith, presentation, request } from './support/applic
 
 /**
  * Acceptance tests PR08 and PR09 of the proposal (stage 15 of the plan): what an action leaves behind (section 12.3),
- * and what this wallet does with it (section 12.5). Every template here comes with no recovery declaration.
+ * and what this wallet does with it (section 12.5). Every template here comes alone.
  *
  * - The keyed pool: opening a pool puts coins at a script that takes a key the engine makes for the wallet under the
  *   template; trading pays someone and leaves nothing behind.
@@ -42,12 +42,11 @@ describe('what an action leaves behind', () => {
 
     // The template is not refused whole: shown, it names the finding of each action.
     const summary = device.applications.describe(pool.names, pool.texts);
-    expect(summary.verdict.statement).not.toBe('violation');
-    expect(summary.findings?.map(({ action, finding }) => [action, finding])).toEqual([
+    expect(summary.findings.map(({ action, finding }) => [action, finding])).toEqual([
       ['open', 'does not come back'],
       ['trade', 'comes back'],
     ]);
-    expect(summary.findings?.[0]?.outputs).toEqual([{ output: 'poolOutput', name: 'Pool', lockingScript: 'poolLockingScript', scriptName: 'Pool', keys: ['poolKey'] }]);
+    expect(summary.findings[0]?.outputs).toEqual([{ output: 'poolOutput', name: 'Pool', lockingScript: 'poolLockingScript', scriptName: 'Pool', keys: ['poolKey'] }]);
 
     // Opening a pool would put coins at a script only this device's key unlocks: refused, before the user is asked.
     const opening = request(pool, 'open', 'provider', { amount: 30_000 });

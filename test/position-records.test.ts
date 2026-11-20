@@ -2,7 +2,7 @@ import { binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
 import { type ArchiveStore, type MemoryStore, type PositionRecordEntry, type RecordEntry, assessArchive, positionEntry, readArchive } from '@grandmas-wallet/archive';
 import { type PositionRecordCheck, Applications, NotStoredError, actionSent, applicationArchive, copyEarlierArchives } from '@grandmas-wallet/app';
 import { readControllerHistory, readTemplate, templateLockingBytecode } from '@grandmas-wallet/core';
-import { clubDeclaration, clubTemplate, strongboxDeclaration, strongboxTemplate } from '@grandmas-wallet/testing';
+import { clubTemplate, strongboxTemplate } from '@grandmas-wallet/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type Device, STORES, bond, deviceWith, presentation, request, seedOf, strongbox } from './support/applications.js';
@@ -101,9 +101,9 @@ describe('position records: written before anything is signed', () => {
     const real = archiveOf(device);
     const watched = new Applications(device.wallet.parts, { archive: { read: real.read, write: async (entry) => (written.push(entry), real.write(entry)) } });
     unreachable(device, true);
-    const [key] = await watched.tokens();
+    const [key] = await watched.recordedPositions();
     if (key === undefined) throw new Error('no key');
-    const take = watched.actionOn(key, 'take');
+    const take = watched.actionOn(key, 'take', { keyInput: 1 });
     expect((await watched.preview(take)).recordsPosition).toBeUndefined();
     const taken = await watched.carryOut(take);
     // Everything came back to the wallet: the key, and the box's coins.
@@ -245,7 +245,8 @@ describe('position records: what is copied after a recovery', () => {
 describe('what a position record holds', () => {
   it('an address that is one of a script\'s own values stays in the record, so that the script can be made again; no other address of the wallet\'s is kept', async () => {
     const device = await deviceWith([100_000n]);
-    const posted = await device.applications.carryOut(request(bond, 'post', 'poster', { amount: 20_000, serial: '07' }));
+    // The marker carries a token of the key's category beside the bond: made from the wallet's coin, it goes there with the user's tick.
+    const posted = await device.applications.carryOut(request(bond, 'post', 'poster', { amount: 20_000, serial: '07' }, { bindings: { refundTo: 'lasting' } }), undefined, { tokensLeave: true });
     const category = posted.tokens[0]?.category as string;
     const records = device.applications.positionRecords;
     // The return address, a vault address of the wallet's that the marker carries, is one of the bond's own values.
@@ -270,11 +271,11 @@ describe('what a position record holds', () => {
 
   it('a record is due only where a token of the wallet\'s takes part: joining a club writes the locker\'s record with the card, and none for the door every member shares', async () => {
     const device = await deviceWith([200_000n]);
-    const club = presentation(clubTemplate, clubDeclaration);
+    const club = presentation(clubTemplate);
     const definition = readTemplate(club.texts.template).definition;
     const doorAt = templateLockingBytecode(definition, 'doorLockingScript', {});
     device.chain.adopt([{ transactionId: 'd0'.repeat(32), index: 2, output: { lockingBytecode: doorAt, valueSatoshis: 1000n, token: { category: hexToBin('c1'.repeat(32)), amount: 1_000_000n, nft: { capability: 'minting', commitment: hexToBin('0700ffff') } } } }]);
-    const joined = await device.applications.carryOut(request(club, 'join', 'member', { credits: 30_000, deposit: 20_000 }));
+    const joined = await device.applications.carryOut(request(club, 'join', 'member', { credits: 30_000, deposit: 20_000, doorCredits: 1_000_000, doorState: '0700ffff', doorNumber: 7 }, { inputs: { doorInput: `${'d0'.repeat(32)}:2` } }));
     const card = joined.tokens.find((token) => token.capability === 'none')?.category as string;
     // The transaction pays the door and the locker, both scripts the member follows. Only the locker holds the card's category.
     expect(device.applications.positionRecords.map(({ lockingScriptIdentifier, variables, token }) => ({ lockingScriptIdentifier, variables, token }))).toEqual([
@@ -302,7 +303,7 @@ describe('what a position record holds', () => {
     const opened = await device.applications.carryOut(open('01'));
     const category = opened.tokens[0]?.category as string;
     unreachable(device, true);
-    const add = { ...request(strongbox, 'add', 'holder', { amount: 5_000 }), tokens: [category] };
+    const add = request(strongbox, 'add', 'holder', { amount: 5_000 }, { about: { category, spent: false } });
     expect((await device.applications.preview(add)).recordsPosition).toBeUndefined();
     await device.applications.carryOut(add);
     expect(device.applications.positionRecords).toHaveLength(1);
@@ -331,10 +332,7 @@ describe('what a position record holds', () => {
   it('an NFT an action gives the wallet at a script the wallet does not follow has a record that names no script', async () => {
     // The same box, at a script the template marks as one the holder need not follow, as an application whose
     // contracts every user shares does.
-    const shared = presentation(
-      { ...strongboxTemplate, lockingScripts: { boxLockingScript: { ...strongboxTemplate.lockingScripts.boxLockingScript, roles: { holder: { ...strongboxTemplate.lockingScripts.boxLockingScript.roles.holder, relevant: false } } } } },
-      strongboxDeclaration,
-    );
+    const shared = presentation({ ...strongboxTemplate, lockingScripts: { boxLockingScript: { ...strongboxTemplate.lockingScripts.boxLockingScript, roles: { holder: { ...strongboxTemplate.lockingScripts.boxLockingScript.roles.holder, relevant: false } } } } });
     const device = await deviceWith([100_000n]);
     const opened = await device.applications.carryOut(request(shared, 'open', 'holder', { amount: 30_000, label: '0a' }, { page: 'https://application.example/' }));
     const category = opened.tokens[0]?.category as string;

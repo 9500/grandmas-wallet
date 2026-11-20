@@ -3,7 +3,7 @@ import { Applications, type ApplicationsState, applicationArchive, applicationCo
 import { type Channel, type Offer, type XoMessage, DappRequests, RequestRefusedError } from '@grandmas-wallet/connect';
 import { describe, expect, it } from 'vitest';
 
-import { type Device, bond, deviceWith, request, seedOf, strongbox } from './support/applications.js';
+import { type Device, bond, deviceWith, keyedBox, request, seedOf, strongbox } from './support/applications.js';
 
 /**
  * The templates a wallet keeps: an application offers its template without an action, for a wallet that holds
@@ -56,16 +56,16 @@ const unreachable = (device: Device, value: boolean): void => {
 };
 
 describe('a template offered without an action', () => {
-  it('AP16: is shown to the user, and trusted with that application only on their word; the token the wallet holds then leads to its position', async () => {
+  it('AP16: is shown to the user, and trusted with that application only on their word; the token the wallet holds then leads to its position through its record', async () => {
     const device = await deviceWith([100_000n, 60_000n]);
     const { tokens } = await device.applications.carryOut(open);
-    // The wallet holds the token and, as after receiving it from someone else, does not have the template.
-    device.wallet.parts.store({ templates: [], notes: [] });
-    expect((await device.applications.tokens())[0]).toMatchObject({ meaning: 'unknown' });
+    // The wallet holds the token and its record, and no longer has the template.
+    device.wallet.parts.store({ ...(device.wallet.parts.kept() as ApplicationsState), templates: [] });
+    expect((await device.applications.tokens())[0]).toMatchObject({ meaning: 'incomplete' });
 
     const { connect, offers } = session(device);
     const page = connect('page');
-    expect(await page.dapp.positions(strongbox.names.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await page.dapp.recordedPositions(strongbox.names.identifier)).toEqual({ trusted: false, positions: [] });
     const answer = page.dapp.offerTemplate(strongbox.names, strongbox.texts);
     await settle();
     // Nothing is answered, and nothing trusted, until the user decides.
@@ -78,10 +78,11 @@ describe('a template offered without an action', () => {
     expect(offers()).toEqual([]);
     // Trusted, with this application, and in the backup at once: a token already depends on it.
     expect(device.applications.templates).toMatchObject([{ name: 'Strongbox', applications: ['page'], stored: true }]);
-    expect(await page.dapp.positions(strongbox.names.identifier)).toMatchObject({ trusted: true, positions: [{ category: tokens[0]?.category, status: 'open', satoshis: '30000' }] });
+    expect(await page.dapp.recordedPositions(strongbox.names.identifier)).toMatchObject({ trusted: true, positions: [{ category: tokens[0]?.category, status: 'open', satoshis: '1000', variables: { boxKey: tokens[0]?.category } }] });
+    expect((await device.applications.recordedPositions())[0]).toMatchObject({ status: 'open', satoshis: 30_000n });
     // Offered again, it is answered at once; another application is told nothing by that.
     expect(await page.dapp.offerTemplate(strongbox.names, strongbox.texts)).toBe(true);
-    expect(await connect('other').dapp.positions(strongbox.names.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await connect('other').dapp.recordedPositions(strongbox.names.identifier)).toEqual({ trusted: false, positions: [] });
   }, 60_000);
 
   it('AP16: is not trusted when the user declines, and is refused when the text is not the one named', async () => {
@@ -93,7 +94,7 @@ describe('a template offered without an action', () => {
     await offers()[0]?.decline();
     expect(await answer).toBe(false);
     expect(device.applications.templates).toEqual([]);
-    await expect(page.dapp.offerTemplate(strongbox.names, bond.texts)).rejects.toBeInstanceOf(RequestRefusedError);
+    await expect(page.dapp.offerTemplate(strongbox.names, keyedBox.texts)).rejects.toBeInstanceOf(RequestRefusedError);
     expect(offers()).toEqual([]);
   });
 
@@ -115,7 +116,7 @@ describe('a template the user stops trusting', () => {
   it('BK11: leaves its tokens in the wallet, is no longer answered for, and is not trusted again by reading the backup; trusted again, it is', async () => {
     const device = await deviceWith([100_000n, 60_000n]);
     const { tokens } = await device.applications.carryOut({ ...open, application: 'page' });
-    expect(await device.applications.positions(strongbox.names.identifier, 'page')).toHaveLength(1);
+    expect(await device.applications.positionsFromRecords(strongbox.names.identifier, 'page')).toHaveLength(1);
 
     expect(await device.applications.forget(strongbox.names.identifier)).toEqual({ name: 'Strongbox', backupTold: true });
     expect(device.applications.templates).toEqual([]);
@@ -123,7 +124,7 @@ describe('a template the user stops trusting', () => {
     const [token] = await device.applications.tokens();
     expect(token).toMatchObject({ category: tokens[0]?.category, meaning: 'incomplete' });
     expect(token?.reason).toContain('You stopped trusting that template');
-    expect(await device.applications.positions(strongbox.names.identifier, 'page')).toBeUndefined();
+    expect(await device.applications.positionsFromRecords(strongbox.names.identifier, 'page')).toBeUndefined();
     expect(device.applications.has(strongbox.names)).toBe(false);
 
     // Reading the backup, here or on a device that starts from it, does not bring the trust back.
@@ -138,7 +139,8 @@ describe('a template the user stops trusting', () => {
     await restored.trust(strongbox.names, undefined);
     expect(restored.templates).toMatchObject([{ name: 'Strongbox', stored: false, renewal: 1 }]);
     expect(await restored.storeNow(strongbox.names.identifier)).toBe(true);
-    expect((await restored.tokens())[0]).toMatchObject({ meaning: 'position', position: { status: 'open' } });
+    expect((await restored.tokens())[0]).toMatchObject({ meaning: 'position', tokenName: 'Strongbox key' });
+    expect((await restored.recordedPositions())[0]).toMatchObject({ status: 'open', standing: 'own' });
     const later = afresh(device);
     await later.readBackup();
     expect(later.templates).toMatchObject([{ name: 'Strongbox', stored: true, renewal: 1 }]);

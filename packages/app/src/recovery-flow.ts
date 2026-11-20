@@ -738,7 +738,7 @@ export const finishMove = async (options: {
 // ------------------------------------------------------------------ records in the archive (section 10)
 
 /**
- * Write a template, a token note or a label to the archive in use, signed with this seed's controller key.
+ * Write a record (a template, its withdrawal, a position record or a label) to the archive in use, signed with this seed's controller key.
  * The result says which stores confirmed it; something may come to depend on the record only if one did.
  */
 export const writeRecord = async (options: {

@@ -1,24 +1,21 @@
 import { type Output, binToHex, decodeTransactionBch, encodeTransactionBch, hexToBin } from '@bitauth/libauth';
-import type { ApplicationAction, HeldToken } from '@grandmas-wallet/app';
-import { buildTransaction, p2pkhInput, p2pkhLockingBytecode, readTemplate, textHash } from '@grandmas-wallet/core';
-import { WITHDRAW_SEQUENCE, savingsJarDeclarationText, savingsJarScript, savingsJarTemplateText, unlockTimeBytes } from '@grandmas-wallet/savings-jar';
+import { type ApplicationAction, type RecordedPosition, TickNeededError } from '@grandmas-wallet/app';
+import { buildTransaction, p2pkhInput, p2pkhLockingBytecode, readTemplate } from '@grandmas-wallet/core';
+import { WITHDRAW_SEQUENCE, savingsJarScript, savingsJarV4TemplateText, unlockTimeBytes } from '@grandmas-wallet/savings-jar';
 import { testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it, vi } from 'vitest';
 
-import { type Device, deviceWith } from './support/applications.js';
+import { type Device, deviceWith, finishCopying } from './support/applications.js';
 
 /**
- * Acceptance tests of the proposal for the Savings Jar (SJ01, SJ04 to SJ06) and AP10, on the simulated
- * chain. The wallet learns of the jar from its template and recovery declaration, as it would from any
- * application; the tests reach the jar through the wallet's general handling of templates.
+ * Acceptance tests of the proposal for the Savings Jar (SJ01, SJ04 to SJ06), on the simulated chain. The wallet
+ * learns of the jar from its template alone, as it would of any application, and finds the jar again from its own
+ * record; the tests reach the jar through the wallet's general handling of templates.
  */
 
 const hex = binToHex;
-const read = readTemplate(savingsJarTemplateText);
-const jar = {
-  names: { identifier: read.identifier, contentHash: read.contentHash, declaration: textHash(savingsJarDeclarationText) },
-  texts: { template: savingsJarTemplateText, declaration: savingsJarDeclarationText },
-};
+const read = readTemplate(savingsJarV4TemplateText);
+const jar = { names: { identifier: read.identifier, contentHash: read.contentHash }, texts: { template: savingsJarV4TemplateText } };
 const now = (device: Device): number => Math.floor(device.chain.nowMs / 1000);
 /** The request the application's page makes to open a jar. */
 const open = (unlockTime: number, savedSatoshis: number): ApplicationAction => ({
@@ -28,10 +25,11 @@ const open = (unlockTime: number, savedSatoshis: number): ApplicationAction => (
   role: 'saver',
   variables: { unlockTime, unlockTimeBytes: hex(unlockTimeBytes(unlockTime)), savedSatoshis },
 });
-const jarOf = async (device: Device): Promise<HeldToken> => {
-  const [token] = await device.applications.tokens();
-  if (token === undefined) throw new Error('the wallet holds no key');
-  return token;
+/** The jar, as the wallet lists it from its record. */
+const jarOf = async (device: Device): Promise<RecordedPosition> => {
+  const [position, ...others] = await device.applications.recordedPositions();
+  if (position === undefined || others.length > 0) throw new Error('the wallet lists no jar, or more than one');
+  return position;
 };
 /** A wallet with a jar of 40,000 satoshis that opens in an hour. */
 const withJar = async () => {
@@ -39,7 +37,7 @@ const withJar = async () => {
   const unlockTime = now(device) + 3_600;
   const opened = await device.applications.carryOut(open(unlockTime, 40_000));
   const key = await jarOf(device);
-  const script = savingsJarScript(hexToBin(key.category), unlockTime);
+  const script = savingsJarScript(hexToBin(key.token.category), unlockTime);
   return { device, unlockTime, opened, key, script };
 };
 const pass = (device: Device, seconds: number): void => {
@@ -47,21 +45,13 @@ const pass = (device: Device, seconds: number): void => {
 };
 
 describe('a savings jar', () => {
-  it('opening one creates one key and sends it to the wallet; the jar\'s address follows from the key alone', async () => {
+  it('opening one creates one key and sends it to the wallet, with a record of the jar; the jar is at the address its key and date give', async () => {
     const { device, unlockTime, opened, key, script } = await withJar();
-    expect(opened.tokens).toEqual([{ category: key.category, commitment: hex(unlockTimeBytes(unlockTime)), capability: 'none', satoshis: '1000' }]);
-    expect(key).toMatchObject({ meaning: 'position', template: { name: 'Savings Jar' }, authority: 'jarKey', amount: 0n, position: { status: 'open', satoshis: 40_000n, coins: 1, lockingBytecode: hex(script.lockingBytecode) } });
-    expect(key?.names?.nft?.named?.name).toBe('Jar key');
-    expect(key.actions?.map(({ action }) => action)).toEqual(['deposit', 'withdraw']);
+    expect(opened.tokens).toEqual([{ category: key.token.category, commitment: hex(unlockTimeBytes(unlockTime)), capability: 'none', satoshis: '1000' }]);
+    expect(key).toMatchObject({ status: 'open', standing: 'own', template: { name: 'Savings Jar' }, tokenName: 'Jar key', satoshis: 40_000n, coins: 1, lockingBytecode: hex(script.lockingBytecode) });
+    expect(key.record).toMatchObject({ lockingScriptIdentifier: 'savingsJarLockingScript', variables: { keyCategory: key.token.category, unlockTime: String(unlockTime) } });
+    expect(device.applications.offeredActions(key).map(({ action }) => action)).toEqual(['withdraw']);
     expect(device.chain.balanceOf(script.lockingBytecode)).toBe(40_000n);
-  });
-
-  it('a jar whose date and key disagree is not opened: the key would not lead to the jar', async () => {
-    const device = await deviceWith([100_000n]);
-    const unlockTime = now(device) + 3_600;
-    const crooked = { ...open(unlockTime, 40_000), variables: { unlockTime, unlockTimeBytes: hex(unlockTimeBytes(unlockTime + 1)), savedSatoshis: 40_000 } };
-    await expect(device.applications.carryOut(crooked)).rejects.toThrow('would not lead to what the action pays in');
-    expect(await device.applications.tokens()).toEqual([]);
   });
 
   it('SJ01: withdrawing with the key before the time is refused; after the time without the key is refused; with both it is accepted', async () => {
@@ -95,7 +85,7 @@ describe('a savings jar', () => {
     expect(device.chain.balanceOf(script.lockingBytecode)).toBe(0n);
     expect((await device.wallet.balance()).recoverable).toBe(before + 40_000n - outcome.sent.feeSatoshis);
     expect(outcome.sent.feeSatoshis).toBe(BigInt(outcome.sent.bytes));
-    expect(outcome.tokens[0]?.category).toBe(key.category);
+    expect(outcome.tokens[0]?.category).toBe(key.token.category);
   });
 
   it('SJ05: a third party cannot empty a jar, with a token of its own or without, and cannot alter a withdrawal', async () => {
@@ -141,34 +131,41 @@ describe('a savings jar', () => {
     expect(device.chain.balanceOf(thiefAt)).toBeLessThan(21_000n);
   });
 
-  it('SJ06: after a withdrawal the key is still in the wallet, and what someone pays in later can be withdrawn; a withdrawal that would not return the key is refused', async () => {
+  it('SJ06: after a withdrawal the key is still in the wallet, and what someone pays in later can be withdrawn; a withdrawal that would not return the key is shown and carried out only with the user\'s tick', async () => {
     const { device, key, script } = await withJar();
     pass(device, 3_700);
     await device.applications.carryOut(device.applications.actionOn(key, 'withdraw'));
-    expect(await jarOf(device)).toMatchObject({ category: key.category, place: 'address', position: { status: 'closed', satoshis: 0n } });
+    expect(await jarOf(device)).toMatchObject({ token: { category: key.token.category, place: 'address' }, status: 'closed', satoshis: 0n });
     // Someone pays into the jar again: anyone can, with an ordinary payment to its address.
     device.chain.fund(script.lockingBytecode, 12_000n);
     device.chain.fund(script.lockingBytecode, 3_000n);
     const again = await jarOf(device);
-    expect(again.position).toMatchObject({ status: 'open', satoshis: 15_000n, coins: 2 });
+    expect(again).toMatchObject({ status: 'open', satoshis: 15_000n, coins: 2 });
     const before = (await device.wallet.balance()).recoverable;
     const outcome = await device.applications.carryOut(device.applications.actionOn(again, 'withdraw'));
     expect((await device.wallet.balance()).recoverable).toBe(before + 15_000n - outcome.sent.feeSatoshis);
-    expect((await jarOf(device)).category).toBe(key.category);
+    expect((await jarOf(device)).token.category).toBe(key.token.category);
 
-    // The same template with a withdrawal that lets the key go. The contract would allow it; the wallet does not.
-    const source = JSON.parse(savingsJarTemplateText) as { transactions: { withdrawTransaction: { outputs: unknown[] } } };
+    // The same template with a withdrawal that lets the key go. The contract allows it; the wallet shows that the key
+    // ends, and carries it out only with the user's tick (decision 30).
+    const source = JSON.parse(savingsJarV4TemplateText) as { transactions: { withdrawTransaction: { outputs: unknown[] } } };
     source.transactions.withdrawTransaction.outputs = [];
     const lossyText = JSON.stringify(source);
     const lossy = readTemplate(lossyText);
-    const declaration = JSON.stringify({ ...(JSON.parse(savingsJarDeclarationText) as object), template: { identifier: lossy.identifier, contentHash: lossy.contentHash } });
-    const names = { identifier: lossy.identifier, contentHash: lossy.contentHash, declaration: textHash(declaration) };
+    const names = { identifier: lossy.identifier, contentHash: lossy.contentHash };
     const other = await deviceWith([100_000n]);
     const unlockTime = now(other) - 10;
-    await other.applications.carryOut({ ...open(unlockTime, 20_000), template: names, presented: { template: lossyText, declaration } });
+    await other.applications.carryOut({ ...open(unlockTime, 20_000), template: names, presented: { template: lossyText } });
     const lossyKey = await jarOf(other);
-    await expect(other.applications.carryOut(other.applications.actionOn(lossyKey, 'withdraw'))).rejects.toThrow('would not return the token it spends');
-    expect((await jarOf(other)).position).toMatchObject({ status: 'open', satoshis: 20_000n });
+    const withdraw = other.applications.actionOn(lossyKey, 'withdraw');
+    expect((await other.applications.preview(withdraw)).tokensLeaving).toEqual([{ token: { category: lossyKey.token.category, commitment: lossyKey.token.commitment, capability: 'none' }, how: 'ends' }]);
+    const broadcasts = other.chain.broadcasts;
+    await expect(other.applications.carryOut(withdraw)).rejects.toBeInstanceOf(TickNeededError);
+    expect(other.chain.broadcasts).toBe(broadcasts);
+    expect(await jarOf(other)).toMatchObject({ status: 'open', satoshis: 20_000n });
+    await other.applications.carryOut(withdraw, undefined, { tokensLeave: true });
+    expect(other.chain.balanceOf(savingsJarScript(hexToBin(lossyKey.token.category), unlockTime).lockingBytecode)).toBe(0n);
+    expect((await other.wallet.balance()).tokens).toEqual([]);
   });
 
   it('anyone can pay into a jar, and the wallet can too, from its key', async () => {
@@ -176,7 +173,7 @@ describe('a savings jar', () => {
     const outcome = await device.applications.carryOut(device.applications.actionOn(key, 'deposit', { savedSatoshis: 7_000 }));
     expect(outcome.tokens).toEqual([]);
     expect(device.chain.balanceOf(script.lockingBytecode)).toBe(47_000n);
-    expect((await jarOf(device)).position).toMatchObject({ satoshis: 47_000n, coins: 2 });
+    expect(await jarOf(device)).toMatchObject({ satoshis: 47_000n, coins: 2 });
   });
 
   it('SJ04: the device is lost with a jar open; the new device finds the jar from the swept key and empties it, with the application\'s site not consulted', async () => {
@@ -186,15 +183,17 @@ describe('a savings jar', () => {
     const taken = await device.takeOver();
     await taken.wallet.search();
     const swept = await taken.wallet.sweepEarlier();
-    expect(swept.tokens).toEqual([{ category: key.category, meaning: 'unknown' }]);
+    expect(swept.tokens).toEqual([{ category: key.token.category, meaning: 'unknown' }]);
+    await finishCopying(taken);
     // The new phone has only what the backup holds. No application is asked for anything.
-    expect(await taken.applications.readBackup()).toEqual({ suggested: 1, notes: 1 });
+    expect(await taken.applications.readBackup()).toEqual({ suggested: 1, notes: 0 });
     const [suggested] = taken.applications.suggestions;
     expect(suggested).toMatchObject({ name: 'Savings Jar', identifier: jar.names.identifier });
     if (suggested === undefined) throw new Error('no suggestion');
     await taken.applications.trust(suggested, undefined);
+    await taken.applications.confirmRecords();
     const found = await jarOf(taken);
-    expect(found).toMatchObject({ category: key.category, place: 'address', meaning: 'position', position: { status: 'open', satoshis: 40_000n } });
+    expect(found).toMatchObject({ token: { category: key.token.category, place: 'address' }, standing: 'own', status: 'open', satoshis: 40_000n });
     // The waiting period of the recovery was shorter than the jar's: the date still holds.
     if (now(taken) < unlockTime) await expect(taken.applications.carryOut(taken.applications.actionOn(found, 'withdraw'))).rejects.toThrow('non-final');
     pass(taken, 3_700);
@@ -207,30 +206,7 @@ describe('a savings jar', () => {
     // Someone pays in again, and that is withdrawn too.
     taken.chain.fund(script.lockingBytecode, 9_000n);
     const second = await taken.applications.carryOut(taken.applications.actionOn(await jarOf(taken), 'withdraw'));
-    expect(second.tokens[0]?.category).toBe(key.category);
+    expect(second.tokens[0]?.category).toBe(key.token.category);
     expect(taken.chain.balanceOf(script.lockingBytecode)).toBe(0n);
   }, 60_000);
-
-  it('AP10: with the application\'s site unavailable, a position stays operable from its token and template', async () => {
-    const { device, key } = await withJar();
-    pass(device, 3_700);
-    // From here on nothing of the application takes part: no session, no request, no page. The wallet works
-    // from the key it holds, the template it kept and the chain.
-    const held = await jarOf(device);
-    expect(held.actions).toEqual([
-      // The amount is the user's to give; the wallet asks for it in the template's words.
-      { action: 'deposit', role: 'saver', name: 'Pay into a savings jar', description: expect.stringContaining('Add savings') as string, asks: [{ variable: 'savedSatoshis', name: 'Amount to save', description: 'Satoshis to put into the jar.', type: 'satoshis' }] },
-      { action: 'withdraw', role: 'saver', name: 'Empty a savings jar', description: expect.stringContaining('Take everything out') as string },
-    ]);
-    const deposit = device.applications.actionOn(held, 'deposit', { savedSatoshis: 5_000 });
-    expect(deposit.presented).toBeUndefined();
-    expect(deposit.application).toBeUndefined();
-    await device.applications.carryOut(deposit);
-    const preview = await device.applications.preview(device.applications.actionOn(await jarOf(device), 'withdraw'));
-    expect(preview.words.action.name).toBe('Empty a savings jar');
-    expect(preview.figures.fromApplication).toEqual({ satoshis: 45_000n, coins: 2 });
-    const outcome = await device.applications.carryOut(device.applications.actionOn(await jarOf(device), 'withdraw'));
-    expect(outcome.tokens[0]?.category).toBe(key.category);
-    expect((await jarOf(device)).position).toMatchObject({ status: 'closed', satoshis: 0n });
-  });
 });

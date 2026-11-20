@@ -38,7 +38,9 @@ export interface NamedText {
 
 /**
  * A template the user trusted, kept whole and as the text it arrived in: its identifier depends on the
- * order of its fields, and a registry or the application's site may not exist later.
+ * order of its fields, and a registry or the application's site may not exist later. A record of the second
+ * design may also hold the recovery declaration that came with the template; it stays in the signed text and is
+ * not read.
  */
 export interface TemplateEntry {
   kind: 'template';
@@ -46,10 +48,6 @@ export interface TemplateEntry {
   identifier: string;
   contentHash: string;
   text: string;
-  /** The recovery declaration that came with the template (section 13.3). */
-  declaration?: NamedText;
-  /** Anything else the template or its declaration refers to. */
-  references?: NamedText[];
   /**
    * How many times the user had stopped trusting the template before this record was written. Absent for
    * none. A withdrawal does not reach a record with a higher number: that is how trust given again is told
@@ -71,13 +69,15 @@ export interface TemplateWithdrawalEntry {
   renewal: number;
 }
 
-/** Which template made a token, and which authority entry of its declaration the token stands for. */
+/**
+ * Which template made a token, as the second design noted it when an action created one. No longer written; read as
+ * a hint of which template to show for the token (section 10.4).
+ */
 export interface TokenNoteEntry {
   kind: 'token-note';
   /** Token category, in the byte order shown by explorers. */
   category: string;
   templateIdentifier: string;
-  authority: string;
 }
 
 /** A name the user gave to something. */
@@ -147,12 +147,10 @@ export const contentHashOf = (text: string): string => binToHex(sha256.hash(utf8
 const named = (text: string): NamedText => ({ contentHash: contentHashOf(text), text });
 
 /** A template record for a template as the text it arrived in. */
-export const templateEntry = (identifier: string, text: string, declaration?: string, references: string[] = [], renewal = 0): TemplateEntry => ({
+export const templateEntry = (identifier: string, text: string, renewal = 0): TemplateEntry => ({
   kind: 'template',
   identifier,
   ...named(text),
-  ...(declaration === undefined ? {} : { declaration: named(declaration) }),
-  ...(references.length === 0 ? {} : { references: references.map(named) }),
   ...(renewal === 0 ? {} : { renewal }),
 });
 
@@ -250,13 +248,12 @@ const parseEntry = (value: unknown): RecordEntry => {
     case 'position':
       return positionEntryOf(value);
     case 'template': {
+      // Whatever a record of the second design holds beside the template stays in its signed text, unread.
       const whole = namedText(value, 'template');
       return {
         kind: 'template',
         identifier: isHash(value['identifier']) ? value['identifier'] : fail('The template record has no identifier.'),
         ...whole,
-        ...(value['declaration'] === undefined ? {} : { declaration: namedText(value['declaration'], 'declaration') }),
-        ...(value['references'] === undefined ? {} : { references: Array.isArray(value['references']) ? value['references'].map((entry) => namedText(entry, 'reference')) : fail('The template record\'s references are not a list.') }),
         ...(value['renewal'] === undefined ? {} : { renewal: count(value['renewal'], 'renewal') }),
       };
     }
@@ -272,7 +269,6 @@ const parseEntry = (value: unknown): RecordEntry => {
         kind: 'token-note',
         category: isHash(value['category']) ? value['category'] : fail('The token note names no token category.'),
         templateIdentifier: isHash(value['templateIdentifier']) ? value['templateIdentifier'] : fail('The token note names no template.'),
-        authority: text(value['authority'], 'authority entry'),
       };
     case 'label':
       return { kind: 'label', subject: text(value['subject'], 'subject'), name: text(value['name'], 'name') };

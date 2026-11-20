@@ -160,9 +160,67 @@ describe('a ParyonUSD loan from the template alone (PR20)', () => {
   const DEBT = 200_00n;
   const COLLATERAL = collateralAtRatio(DEBT, STORED_PRICE, 125n);
 
-  it('the template sent is the frozen one, with no declaration', () => {
+  it('PY02: the template sent is the frozen one, alone; it holds no key', () => {
     expect(alone.texts).toEqual({ template: paryonChipnetTemplateText });
     expect(alone.names.identifier).toBe('aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be');
+    expect(paryonChipnetTemplateText).not.toContain('private_key');
+  });
+
+  it('PY02: a wallet without a coin that can define the key pays itself first, and the key is made with what is left over at output 0', async () => {
+    const device = await deviceWith([10_000_000n], { outputIndex: 1 });
+    device.chain.adopt([...recorded.borrowing, ...recorded.price, ...recorded.loanKeyFactory, ...recorded.manage].map((entry) => ({ transactionId: entry.transactionId, index: entry.index, output: outputOf(entry) })));
+    const request = asked(createKeyRequestAlone(alone.names, { factory: utxoOf(first(recorded.loanKeyFactory)), page: PAGE }));
+    const preview = await device.applications.preview(request);
+    expect(preview.figures.payingItself?.feeSatoshis).toBeGreaterThan(0n);
+    const made = await device.applications.carryOut(request, undefined, TICKED);
+    const created = await decoded(device, made.transactionId);
+    // Output 0 is the wallet's: Paryon's contract leaves that place to whoever makes the key.
+    expect(created.outputs[0]?.token).toBeUndefined();
+    expect(created.outputs).toHaveLength(4);
+  });
+
+  it('PY02: the wallet\'s own figures for the borrowing: what leaves the wallet, what goes into the loan, the fee to Paryon, the tokens it gets', async () => {
+    const device = await loanDevice(COLLATERAL + 10_000_000n);
+    const made = await device.applications.carryOut(asked(createKeyRequestAlone(alone.names, { factory: utxoOf(first(recorded.loanKeyFactory)), page: PAGE })), undefined, TICKED);
+    const created = await decoded(device, made.transactionId);
+    const preview = await device.applications.preview(asked(borrowRequestAlone(alone.names, { borrowing: utxoOf(first(recorded.borrowing)), price: utxoOf(PRICE), enforcer: at(made.transactionId, created, 2), proof: at(made.transactionId, created, 3), debt: DEBT, collateral: COLLATERAL, startingInterest: 0, page: PAGE })));
+    expect(preview.words.action.name).toBe('Borrow PUSD');
+    expect(preview.figures.applicationInputs.map(({ name }) => name)).toEqual(['Paryon\'s borrowing contract', 'Paryon\'s price contract', 'The new loan key', 'The loan key\'s proof of origin']);
+    expect(preview.figures.toOthers.map(({ name }) => name)).toEqual(['Paryon\'s borrowing contract', 'Paryon\'s price contract', 'The loan', 'The loan\'s sidecar', 'Borrowing fee']);
+    expect(preview.figures.toWallet.map(({ kind, token }) => [kind, token?.nft?.capability ?? (token === undefined ? 'none' : 'tokens')])).toEqual([['receive', 'minting'], ['receive', 'tokens'], ['left over', 'none']]);
+    expect(preview.figures.tokensNet).toEqual([{ category: hex(contracts.paryonCategory), amount: DEBT }]);
+    // The collateral and the fee go into the application. Of the 4,000 satoshis of Paryon's coins the transaction
+    // spends, 3,000 stay with Paryon's coins and the key's 1,000 come to the wallet.
+    const fee = preview.figures.toOthers.find(({ name }) => name === 'Borrowing fee')?.satoshis ?? 0n;
+    expect(preview.figures.intoApplicationSatoshis).toBe(COLLATERAL + fee - 1_000n);
+    expect(preview.figures.tokensDestroyed).toEqual([{ name: 'The loan key\'s proof of origin', token: { category: hex(contracts.loanKeyFactoryCategory), amount: 0n, nft: { capability: 'none', commitment: '' } }, how: 'not carried on', wallet: false }]);
+    expect(preview.recordsPosition).toBe(true);
+  });
+
+  it('PY02: a borrowing refused before anything is sent: too little collateral, a tampered value, a coin of Paryon\'s named for another input; an address the page gives for the key is not used', async () => {
+    const device = await loanDevice(COLLATERAL + 10_000_000n);
+    const made = await device.applications.carryOut(asked(createKeyRequestAlone(alone.names, { factory: utxoOf(first(recorded.loanKeyFactory)), page: PAGE })), undefined, TICKED);
+    const created = await decoded(device, made.transactionId);
+    const choice = { borrowing: utxoOf(first(recorded.borrowing)), price: utxoOf(PRICE), enforcer: at(made.transactionId, created, 2), proof: at(made.transactionId, created, 3), debt: DEBT, startingInterest: 0, page: PAGE };
+    const refused = async (request: ApplicationAction, reason: RegExp): Promise<void> => {
+      const before = device.chain.broadcasts;
+      await expect(device.applications.preview(request)).rejects.toThrow(reason);
+      await expect(device.applications.carryOut(request)).rejects.toBeInstanceOf(ActionRefusedError);
+      expect(device.chain.broadcasts).toBe(before);
+    };
+    // One satoshi below what the contract takes at the stored price.
+    await refused(asked(borrowRequestAlone(alone.names, { ...choice, collateral: minimumCollateral(DEBT, STORED_PRICE) - 1n })), /contract, "Paryon's borrowing contract" at input 0, does not accept/);
+    // The loan's record says another debt than is borrowed; the fee is too small.
+    const honest = borrowRequestAlone(alone.names, { ...choice, collateral: COLLATERAL });
+    const tampered = { ...honest, variables: { ...honest.variables, loanCommitment: hex(Uint8Array.of(0x01, 0x10, ...hexToBin(String(honest.variables['loanCommitment'])).slice(2))) } };
+    await refused(asked(tampered), /does not accept the transaction the wallet worked out/);
+    await refused(asked({ ...honest, variables: { ...honest.variables, borrowingFee: '1000' } }), /does not accept/);
+    // Paryon's manage function, named where the price contract is spent: its own contract refuses the transaction.
+    await refused(asked({ ...honest, inputs: { ...honest.inputs, priceInput: `${first(recorded.manage).transactionId}:${first(recorded.manage).index}` } }), /does not accept/);
+    // The page's address for the key is not used: the request names a kind, and the wallet puts its own there.
+    const own = await device.applications.preview(asked({ ...honest, variables: { ...honest.variables, keyHolder: '76a914' + '11'.repeat(20) + '88ac' } }));
+    expect(own.figures.toWallet[0]?.kind).toBe('receive');
+    expect(own.figures.toOthers.map(({ lockingBytecode }) => lockingBytecode)).not.toContain('76a914' + '11'.repeat(20) + '88ac');
   });
 
   it('a key made with the user\'s tick, the Borrowing thread moved on, a loan of 200 PUSD: each from the page\'s requests, each the builders\' transaction byte for byte; one record, written when the key arrives', async () => {
@@ -206,7 +264,9 @@ describe('a ParyonUSD loan from the template alone (PR20)', () => {
     const { device, keyCategory, borrowed } = await openLoan(DEBT, COLLATERAL);
     // Add collateral: the page names the loan, its sidecar, the price and the manage function, and the key's coin value.
     const manage = manageRequestAlone(alone.names, { ...(await coinsOf(device, keyCategory)), collateral: COLLATERAL + 100_000n });
-    expect(manage).toMatchObject({ about: { category: keyCategory, spent: true }, bindings: { keyHolder: 'return' }, page: PAGE, variables: { keyCategory, keySatoshis: '1000' } });
+    // The key's category is said once, as what the action is about: the wallet takes the value from there.
+    expect(manage).toMatchObject({ about: { category: keyCategory, spent: true }, bindings: { keyHolder: 'return' }, page: PAGE, variables: { keySatoshis: '1000' } });
+    expect(manage.variables).not.toHaveProperty('keyCategory');
     const managing = await device.applications.preview(asked(manage));
     expect(managing.tokensLeaving).toBeUndefined();
     expect(managing.figures.toWallet.map(({ kind }) => kind)).toEqual(['return', 'left over']);
@@ -265,7 +325,7 @@ describe('a ParyonUSD loan from the template alone (PR20)', () => {
     expect((await device.wallet.balance()).tokens.some((coin) => hex(coin.utxo.output.token?.category ?? new Uint8Array()) === hex(contracts.paryonCategory))).toBe(false);
   });
 
-  it('refused before anything is sent: a look-alike sidecar, the key\'s category missing, the key not returned, too much collateral taken out, a coin at no script of the template', async () => {
+  it('refused before anything is sent: a look-alike sidecar, a request about no key that names none, the key not returned, too much collateral taken out, a coin at no script of the template', async () => {
     const { device, keyCategory } = await openLoan(DEBT, COLLATERAL);
     const coins = await coinsOf(device, keyCategory);
     const refused = async (request: ApplicationAction, reason: RegExp): Promise<void> => {
@@ -279,10 +339,11 @@ describe('a ParyonUSD loan from the template alone (PR20)', () => {
     device.chain.adopt([lookAlike]);
     const manage = manageRequestAlone(alone.names, { ...coins, collateral: COLLATERAL + 1_000n });
     await refused(asked({ ...manage, inputs: { ...manage.inputs, sidecarInput: `${lookAlike.transactionId}:1` } }), /The application's own contract, .* does not accept the transaction the wallet worked out/);
-    // Without the key's category the output that carries the key names a category no input of the template names:
-    // the wallet would make a new one, and Paryon's price contract holds the place such a coin has to take.
-    const { keyCategory: _category, ...withoutCategory } = manage.variables;
-    await refused(asked({ ...manage, variables: withoutCategory }), /input 0, where the coin that defines a new token category has to be/);
+    // A request that says neither which key the action is about nor the key's category: the output that carries the
+    // key names a category no input of the template names, so the wallet would make a new one, and Paryon's price
+    // contract holds the place such a coin has to take.
+    const { about: _about, ...aboutNothing } = manage;
+    await refused(asked({ ...aboutNothing, bindings: { keyHolder: 'receive' } }), /input 0, where the coin that defines a new token category has to be/);
     // Managing sends the key back to where it was: a request that asks for it at a fresh address is refused by Paryon's contract.
     await refused(asked({ ...manage, bindings: { keyHolder: 'receive' } }), /does not accept/);
     // Taking out so much collateral that the loan falls below 110%: Paryon's manage function refuses it.

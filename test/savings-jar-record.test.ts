@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /**
- * The runs of the Savings Jar through this project's wallet on the XO engine (`scripts/run-d.ts`) write
+ * The runs of the Savings Jar through this project's wallet on the XO engine (`scripts/run-d.ts` at the tag `design-2`) write
  * their own records. These tests do not repeat a run: they read its record and check that it is of the
  * complete course, with every transaction named and every fee exactly the size.
  */

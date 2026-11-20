@@ -44,11 +44,6 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .template-description { color: var(--ink); margin: 2px 0 0; }
 
 .status-body p { margin-bottom: 0; }
-.violations { list-style: none; padding: 0; margin: 4px 0 0; }
-.violations > li { padding: 8px 0 0; margin: 0; color: var(--ink); }
-.violations > li + li { border-top: 1px solid var(--line); margin-top: 8px; }
-.violation-rule { font-weight: 650; color: var(--bad); font-size: 14px; }
-.violation-what { margin: 2px 0; }
 
 /* The template's words, set apart as someone else's. */
 .quote { border-left: 3px solid var(--line); padding: 2px 0 2px 14px; }
@@ -144,9 +139,6 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .headline-tokens .chips { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 
 /* What asks for care, in view. */
-.standing { padding: 12px 14px; border-radius: var(--r-s); background: var(--warn-soft); }
-.standing.bad { background: var(--bad-soft); }
-.standing .status-body { color: var(--ink); font-size: 14px; }
 .destroyed-warning strong { font-weight: 650; }
 .destroyed-list { list-style: none; margin: 2px 0 0; padding: 0; }
 .destroyed-list > li { margin: 0; padding: 8px 0 0; border-top: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); }
@@ -203,12 +195,12 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .token-head .pill { flex: none; }
 .token-title { font-weight: 650; }
 .token-of { font-weight: 400; color: var(--muted); }
-.token-head .name-source { margin-top: 2px; }
-.token-head .raw-units { color: var(--muted); font-size: 12px; }
 .token-send { display: flex; justify-content: flex-end; margin-top: -4px; }
 .token-id { overflow-wrap: anywhere; }
 .token-body { display: flex; flex-direction: column; gap: 6px; }
 .token-body p { margin: 0; }
+/* A short line about a token, with what lies behind it under a "?". */
+.token-line { display: flex; align-items: center; gap: 6px; }
 .token-actions { list-style: none; margin: 4px 0 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-s); }
 .token-actions > li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; padding: 10px 12px; margin: 0; }
 .token-actions > li + li { border-top: 1px solid var(--line); }
@@ -217,15 +209,9 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 
 .token-aside p { margin: 0; }
 
-/* What a position holds, in the template's words */
-.position-state { padding: 4px 12px; border-radius: var(--r-s); background: var(--sunken); }
-.position-state > .small { padding-top: 6px; }
-.position-state .kv > div { padding: 8px 0; }
-
 /* An action only the application's page can carry out */
 .token-actions > li.through-application { align-items: flex-start; }
 .token-action-name { font-weight: 600; }
-.needs-application { margin-top: 4px; color: var(--ink); }
 
 /* Tokens in a review */
 .moved-note { margin: -2px 0 6px; }

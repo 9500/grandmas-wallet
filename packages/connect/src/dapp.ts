@@ -4,7 +4,6 @@ import {
   type ActionResult,
   type Channel,
   type RecordedPositionReport,
-  type ReportedPosition,
   type TemplateTexts,
   ACTION_REQUEST,
   ACTION_RESPONSE,
@@ -14,6 +13,7 @@ import {
   POSITIONS_REQUEST,
   TEMPLATE_ANSWER,
   TEMPLATE_OFFER,
+  XO_EXTENSION_VERSION,
   type TemplateName,
 } from './protocol.js';
 
@@ -83,7 +83,7 @@ export class DappRequests {
    * Ask the wallet to carry out an action of the application's template. The request names the template;
    * the texts are sent only when the wallet answers that it does not have it.
    *
-   * @param texts - the template, its recovery declaration and what that refers to, as the request names them
+   * @param texts - the template, as the request names it
    * @param id - to continue a request made before, for example after the page was loaded again
    * @throws RequestRefusedError
    */
@@ -101,28 +101,17 @@ export class DappRequests {
   }
 
   /**
-   * Ask which tokens of a template the wallet holds. A wallet in which the user has not trusted the template
-   * with this application says so and reports nothing.
+   * Ask which tokens of a template the wallet holds, answered from the wallet's records (proposal section 14.2):
+   * each token a record ties to the template, with where its position stands. A token without a record is not
+   * reported. A wallet in which the user has not trusted the template with this application says so and reports
+   * nothing.
    *
    * The question is asked again a few times if no answer comes: a relay may deliver messages out of order,
    * and the session then discards the older one.
    *
    * @throws WalletSilentError if the wallet does not answer; RequestRefusedError if it could not read the chain
    */
-  positions(templateIdentifier: string, attempts = 4, intervalMs = 7_000): Promise<{ trusted: boolean; positions: ReportedPosition[] }> {
-    return this.askPositions(templateIdentifier, 1, attempts, intervalMs) as Promise<{ trusted: boolean; positions: ReportedPosition[] }>;
-  }
-
-  /**
-   * Ask which tokens of a template the wallet holds, answered from the wallet's records (version 2, proposal
-   * section 14.2): each token a record ties to the template, with where its position stands. A token without a
-   * record is not reported. Asked again, and refused, as `positions` is.
-   */
   recordedPositions(templateIdentifier: string, attempts = 4, intervalMs = 7_000): Promise<{ trusted: boolean; positions: RecordedPositionReport[] }> {
-    return this.askPositions(templateIdentifier, 2, attempts, intervalMs) as Promise<{ trusted: boolean; positions: RecordedPositionReport[] }>;
-  }
-
-  private askPositions(templateIdentifier: string, version: 1 | 2, attempts: number, intervalMs: number): Promise<{ trusted: boolean; positions: unknown[] }> {
     const { channel } = this;
     if (channel === undefined) return Promise.reject(new Error('No wallet is connected.'));
     const id = newId();
@@ -140,13 +129,13 @@ export class DappRequests {
         }
         asked += 1;
         // Each asking carries the current time; the wallet answers every one, and the first answer is taken.
-        (this.channel ?? channel).send({ action: POSITIONS_REQUEST, time: this.now(), id, template: templateIdentifier, ...(version === 2 ? { version } : {}) }).catch(() => undefined);
+        (this.channel ?? channel).send({ action: POSITIONS_REQUEST, time: this.now(), id, template: templateIdentifier, version: XO_EXTENSION_VERSION }).catch(() => undefined);
       };
       const timer = setInterval(ask, intervalMs);
       this.listing.set(id, (answer) => {
         finish();
         if (answer.error !== undefined) reject(new RequestRefusedError(`Your wallet could not read what it holds: ${answer.error}`));
-        else resolve({ trusted: answer.trusted, positions: answer.positions });
+        else resolve({ trusted: answer.trusted, positions: answer.positions as RecordedPositionReport[] });
       });
       ask();
     });

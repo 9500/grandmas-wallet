@@ -19,7 +19,7 @@ export const needsTick = (preview: Pick<ActionPreview, 'tokensLeaving'>): boolea
 export type BackupState = 'none' | 'checking' | 'answers' | 'unreachable';
 
 /** Why the approving button is not there, or does not work yet. */
-export type Blocked = 'working out' | 'refused' | 'violation' | 'no backup' | 'checking backup' | 'backup unreachable' | 'tick';
+export type Blocked = 'working out' | 'refused' | 'no backup' | 'checking backup' | 'backup unreachable' | 'tick';
 
 export interface Gate {
   /** The approving button is on the screen. */
@@ -33,16 +33,15 @@ export interface Gate {
 
 /**
  * The approving button of a review. It is not offered while the action is being worked out, where the wallet
- * refuses it, for a template with a violation, without a backup store, or while no backup store answers; it is
- * offered and does not work until the user ticks, where tokens leave the wallet.
+ * refuses it, without a backup store, or while no backup store answers; it is offered and does not work until the
+ * user ticks, where tokens leave the wallet.
  */
-export const approval = (state: { preview?: Pick<ActionPreview, 'firstUse' | 'recordsPosition' | 'tokensLeaving'>; refused: boolean; violation?: boolean; backup: BackupState; ticked: boolean }): Gate => {
+export const approval = (state: { preview?: Pick<ActionPreview, 'firstUse' | 'recordsPosition' | 'tokensLeaving'>; refused: boolean; backup: BackupState; ticked: boolean }): Gate => {
   const { preview } = state;
   const tick = preview !== undefined && !state.refused && needsTick(preview);
   const off = (blocked: Blocked): Gate => ({ shown: false, enabled: false, tick, blocked });
   if (state.refused) return off('refused');
   if (preview === undefined) return off('working out');
-  if (state.violation === true) return off('violation');
   if (needsStore(preview)) {
     if (state.backup === 'none') return off('no backup');
     if (state.backup === 'unreachable') return off('backup unreachable');
@@ -116,26 +115,27 @@ export const leavingWords = (leaving: TokenLeaving[]): { title: string; tick: st
 export interface TokenList {
   /** Positions whose record the chain confirms: open or closed. */
   positions: RecordedPosition[];
-  /** Tokens whose record names no script: under the template's name, with no word on whether the position is open. */
+  /**
+   * Tokens whose record names no script: under the template's name, with no word on whether the position is open.
+   * What they control is the application's to show, at the page the record names.
+   */
   held: RecordedPosition[];
   /** Positions whose record the chain does not confirm: listed apart. */
   unconfirmed: RecordedPosition[];
-  /** Every other token: one with no record, and one a template with a declaration explains. Each can be sent. */
+  /** Every other token: one that no record lists as a position. Each can be sent. */
   tokens: HeldToken[];
 }
 
 /**
  * The wallet's tokens as the Applications screen lists them (sections 10.4 and 17): positions from records, those not
- * confirmed apart, and every other token as a token. A template with a declaration (the second design) keeps its own
- * way of showing its tokens, so its records are left to it.
+ * confirmed apart, and every other token as a token.
  */
-export const tokenList = (recorded: RecordedPosition[], tokens: HeldToken[], declared: (templateIdentifier: string) => boolean): TokenList => {
-  const fromRecords = recorded.filter((position) => !declared(position.template.identifier));
-  const listed = new Set(fromRecords.map((position) => position.token.outpoint));
+export const tokenList = (recorded: RecordedPosition[], tokens: HeldToken[]): TokenList => {
+  const listed = new Set(recorded.map((position) => position.token.outpoint));
   return {
-    positions: fromRecords.filter(({ status }) => status === 'open' || status === 'closed'),
-    held: fromRecords.filter(({ status }) => status === 'held'),
-    unconfirmed: fromRecords.filter(({ status }) => status === 'unconfirmed'),
+    positions: recorded.filter(({ status }) => status === 'open' || status === 'closed'),
+    held: recorded.filter(({ status }) => status === 'held'),
+    unconfirmed: recorded.filter(({ status }) => status === 'unconfirmed'),
     tokens: tokens.filter((token) => !listed.has(token.outpoint)),
   };
 };

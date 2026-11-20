@@ -41,11 +41,6 @@
 .token-unit input { padding-right: 76px; }
 .token-unit span { max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.stack-xs { display: flex; flex-direction: column; gap: 4px; }
-.raw-units { color: var(--muted); font-size: 13px; font-weight: 400; white-space: nowrap; }
-.name-source { display: block; }
-.name-source.disputed { color: color-mix(in srgb, var(--warn) 70%, var(--ink)); }
-.info-bubble .name-source { color: var(--ink); font-size: 14px; }
 .plain-refusal strong, .controls strong { font-weight: 650; }
 .token-review .kv dd strong { font-weight: 650; }
 .controls .choice { margin-top: 4px; }

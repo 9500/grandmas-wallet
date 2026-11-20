@@ -39,7 +39,7 @@ const fail = (message: string): never => {
   throw new TemplateError(message);
 };
 
-/** SHA-256 of a text's bytes, as hex: the name a template, a declaration or a file it refers to is bound by. */
+/** SHA-256 of a text's bytes, as hex: the name a template is bound by. */
 export const textHash = (text: string): string => binToHex(sha256.hash(utf8ToBin(text)));
 
 /**

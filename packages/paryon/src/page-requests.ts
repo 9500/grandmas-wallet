@@ -3,13 +3,23 @@ import type { Utxo } from '@grandmas-wallet/core';
 
 import { borrowingFee, repaymentAllowed } from './amounts.js';
 import { type ParyonContracts, periodAt } from './deployment.js';
-import { type BorrowChoice, openingState } from './requests.js';
-import { NO_INTEREST_MANAGER, decodeBorrowingPeriod, decodeLoanState, decodePriceState, encodeBorrowingPeriod, encodeInterestManagerConfiguration, encodeInterestRate, encodeLoanState } from './state.js';
+import {
+  type InterestManagerConfiguration,
+  type LoanState,
+  NO_INTEREST_MANAGER,
+  decodeBorrowingPeriod,
+  decodeLoanState,
+  decodePriceState,
+  encodeBorrowingPeriod,
+  encodeInterestManagerConfiguration,
+  encodeInterestRate,
+  encodeLoanState,
+  newLoanState,
+} from './state.js';
 
 /**
- * What the loan's page asks of a wallet of this project in version 2 of `xo_v1` (proposal sections 14.2 and 15.3):
- * an action of the Paryon template, with no recovery declaration named or sent. What the declaration told the
- * wallet, the page now says itself:
+ * What the loan's page asks of a wallet of this project in `xo_v1` (proposal sections 14.2 and 15.3): an action of
+ * the Paryon template, which is all the wallet is sent. What the wallet cannot know of Paryon, the page says itself:
  *
  * - **Paryon's coins.** Every coin of Paryon's an action spends is named by outpoint, for the template input it is
  *   spent as: the shared contracts (factory, Borrowing thread, price, manage function), the key waiting in the
@@ -19,10 +29,10 @@ import { NO_INTEREST_MANAGER, decodeBorrowingPeriod, decodeLoanState, decodePric
  *   before the user is asked, which refuse a coin that does not belong.
  * - **The values read from those coins:** the Borrowing thread's supply and period, the price, the loan's record
  *   and its interest manager, the debt to repay.
- * - **The key.** Which loan an action is about, by its key's category, and that the action spends the key; and the
- *   key's category as a value, since an output names it and no input of the template does: without it the wallet
- *   would read the action as one that makes a new category. Borrowing gives the category of the key waiting in
- *   Paryon's contract, which the page names, so the wallet carries it on.
+ * - **The key.** Which loan an action is about, by its key's category, and that the action spends the key. The
+ *   wallet takes the key's category from that for the variable an output names it by (section 13.3); the page does
+ *   not repeat it. Borrowing gives the category of the key waiting in Paryon's contract, which the page names, so
+ *   the wallet carries it on.
  * - **The key's coin.** What it holds, which Paryon's contracts require an action to repeat: the wallet's answer to
  *   a positions request gives it (`satoshis`), and the page sends it back.
  * - **Where the key goes.** Back to the script it left (`return`) where Paryon requires it, when managing and
@@ -32,13 +42,13 @@ import { NO_INTEREST_MANAGER, decodeBorrowingPeriod, decodeLoanState, decodePric
  * Amounts go as decimal text, so that no number loses digits on the way.
  */
 
-/** The template as a request of version 2 names it: by identifier and content hash, with no declaration. */
+/** The template as a request names it: by identifier and content hash. */
 export interface TemplateNamesAlone {
   identifier: string;
   contentHash: string;
 }
 
-/** The details of an `xo_action_request` of version 2, as `packages/connect` sends them. */
+/** The details of an `xo_action_request`, as `packages/connect` sends them. */
 export interface LoanRequestAlone {
   template: TemplateNamesAlone;
   templateAction: 'createKey' | 'movePeriod' | 'borrow' | 'manage' | 'repay' | 'close';
@@ -50,6 +60,25 @@ export interface LoanRequestAlone {
   inputs?: Record<string, string>;
   page?: string;
 }
+
+export interface BorrowChoice {
+  borrowing: Utxo;
+  price: Utxo;
+  /** The origin enforcer and the origin proof a loan key's creation left: outputs 2 and 3 of that transaction. */
+  enforcer: Utxo;
+  proof: Utxo;
+  /** PUSD cents. */
+  debt: bigint;
+  /** Satoshis the loan holds. */
+  collateral: bigint;
+  /** Per 10,000,000 per period. */
+  startingInterest: number;
+  interestManager?: InterestManagerConfiguration;
+}
+
+/** The loan's record when it is opened, as `Borrowing.cash` writes it. */
+export const openingState = (choice: Pick<BorrowChoice, 'borrowing' | 'debt' | 'startingInterest' | 'interestManager'>): LoanState =>
+  newLoanState(choice.debt, decodeBorrowingPeriod(commitmentOf(choice.borrowing, 'Borrowing thread')), choice.startingInterest, choice.interestManager ?? NO_INTEREST_MANAGER);
 
 const outpoint = (utxo: Utxo): string => `${binToHex(utxo.transactionHash)}:${utxo.index}`;
 const commitmentOf = (utxo: Utxo, what: string): Uint8Array => {
@@ -136,7 +165,6 @@ const onLoan = (coins: LoanCoins, functionInput: 'manageInput' | 'repayInput') =
     about: { category: coins.keyCategory, spent: true },
     inputs: { priceInput: outpoint(coins.price), loanInput: outpoint(coins.loan), sidecarInput: outpoint(coins.sidecar), [functionInput]: outpoint(coins.manageFunction) },
     variables: {
-      keyCategory: coins.keyCategory,
       keySatoshis: String(coins.keySatoshis),
       priceCommitment: binToHex(commitmentOf(coins.price, 'price thread')),
       // Who may change the loan's interest, as the loan's record holds it (bytes 22 to 27).

@@ -1,4 +1,4 @@
-// The wallet page's screens for a template that comes with no declaration, in a real browser, from the fixtures page:
+// The wallet page's screens for a template that comes alone, in a real browser, from the fixtures page:
 // no chain, no coins. The page is built as for the public site, with its fixtures page added, and served with the
 // content security policy of deploy/serve.mjs.
 //
@@ -115,7 +115,7 @@ try {
   const tickBox = leaving.locator('label.choice');
   const target = await box(tickBox);
   check(target.height >= 44 && target.width >= PHONE.width - 120, `the tick is a box a thumb can hit: the whole line, ${Math.round(target.width)} by ${Math.round(target.height)} px`);
-  check((await card.getByText('Not verified', { exact: true }).count()) === 0, 'an action of a template without a declaration that comes back has no word on the template beyond the review');
+  check((await card.getByText('Not verified', { exact: true }).count()) === 0, 'an action that comes back has no word on the template beyond the review');
   await fitsPhone(page, 'the tick');
   await shoot(page, 'apps-tick-review');
   await tickBox.tap();

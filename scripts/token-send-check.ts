@@ -3,8 +3,8 @@
 // security policy of deploy/serve.mjs.
 //
 // Checked: the Send screen opens on the token another screen chose, with the choice between Bitcoin Cash and a
-// token; a token named by a trusted template shows its name, its amount in its decimals and where the name comes
-// from; an amount with more decimals than the token has is refused, not rounded; "Max" fills the whole balance; a
+// token; a fungible token is shown by its category and in raw units, and nothing names it; an amount with a
+// fraction is refused, not rounded; "Max" fills the whole balance; a
 // plain address is refused before anything is built, with what to ask the receiver for; a token address gives the
 // review with what goes, the token change and the fee; a token that controls something says what, and cannot be
 // sent until the user ticks that they understand; the Receive screen shows the address in its token form first, and
@@ -81,13 +81,16 @@ try {
 
   // ---------------------------------------------------------------- an amount of a named token
   await page.goto(`http://localhost:${PORT}/fixtures.html?show=send-token`);
-  await page.getByText('Example dollar').first().waitFor();
+  await page.getByText('Fungible tokens').first().waitFor();
   check((await page.getByRole('button', { name: 'A token' }).getAttribute('aria-pressed')) === 'true', 'the Send screen opens on "A token", the token another screen chose');
-  check(await page.getByRole('radio', { name: /Example dollar/ }).isChecked(), 'with that token chosen among the tokens');
-  check((await textOf(page, '.token-picker .choice')).includes('250.00 EXD'), 'its balance is in its own decimals, "250.00 EXD"');
+  const chosen = page.locator('.token-picker .choice', { has: page.locator('input:checked') });
+  check((await chosen.count()) === 1, 'with that token chosen among the tokens');
+  const choice = (await chosen.innerText()).replace(/\s+/g, ' ');
+  check(choice.includes('25,000 units') && choice.includes('a1d53b'), 'it is shown by its category, its balance in raw units, "25,000 units"');
+  check(!(await page.getByText('Example dollar').first().isVisible().catch(() => false)) && !choice.includes('EXD'), 'and no template names it');
   const units = page.getByRole('button', { name: 'About this token\'s units' });
   await units.click();
-  check(await page.getByText('Name from the template "Example lending (test network)", which you trust.').first().isVisible(), 'and the "?" beside its amount says which trusted template the name comes from');
+  check(await page.getByText('In whole units, up to 25,000 units.').first().isVisible(), 'the "?" beside its amount says it is typed in whole units');
   await units.click();
   const tokenAddress = await textOf(page, '[data-testid="fixture-token-address"]');
   const plainAddress = await textOf(page, '[data-testid="fixture-plain-address"]');
@@ -95,15 +98,15 @@ try {
   check(decoded.every((entry) => typeof entry !== 'string') && (decoded[0] as { tokenSupport: boolean }).tokenSupport && !(decoded[1] as { tokenSupport: boolean }).tokenSupport, 'the fixture offers the same script as a token address and as a plain one');
   await shoot(page, 'wallet-send-token-choice');
 
-  await page.locator('#token-amount').fill('12.505');
+  await page.locator('#token-amount').fill('12.5');
   await page.locator('#token-to').fill(tokenAddress);
   await page.getByRole('button', { name: 'Review' }).click();
-  await page.locator('.field-error', { hasText: 'Nothing is rounded' }).waitFor();
-  check(!(await page.getByText('Check and send').isVisible()), 'an amount with more decimals than the token has is refused, not rounded');
+  await page.locator('.field-error', { hasText: 'enter a whole number' }).waitFor();
+  check(!(await page.getByText('Check and send').isVisible()), 'an amount with a fraction is refused, not rounded');
   await page.getByRole('button', { name: 'Max', exact: true }).click();
-  check((await page.locator('#token-amount').inputValue()) === '250.00', '"Max" fills the whole balance, 250.00');
+  check((await page.locator('#token-amount').inputValue()) === '25000', '"Max" fills the whole balance, 25000');
 
-  await page.locator('#token-amount').fill('12.50');
+  await page.locator('#token-amount').fill('1250');
   await page.locator('#token-to').fill(plainAddress);
   await page.getByRole('button', { name: 'Review' }).click();
   await page.getByText('Not a token address').waitFor();
@@ -115,8 +118,8 @@ try {
   await page.getByRole('button', { name: 'Review' }).click();
   await page.getByText('Check and send').waitFor();
   const review = await textOf(page, '.token-review');
-  check(review.includes('12.50 EXD') && review.includes('(1,250 units)'), 'the review says what goes: "12.50 EXD", with the raw units beside');
-  check(review.includes('Comes back as token change') && review.includes('237.50 EXD'), 'and what comes back as token change, "237.50 EXD"');
+  check(review.includes('1,250') && review.includes('units'), 'the review says what goes, in raw units: 1,250');
+  check(review.includes('Comes back as token change') && review.includes('23,750 units'), 'and what comes back as token change, "23,750 units"');
   check(/Network fee.*sat/.test(review) && review.includes('Leaves the wallet'), 'and the fee, and the Bitcoin Cash that leaves the wallet');
   check(await page.getByRole('button', { name: 'Send', exact: true }).isEnabled(), 'an amount of tokens needs no tick before it is sent');
   await shoot(page, 'wallet-send-token-review');
@@ -132,7 +135,6 @@ try {
   check(controls.includes('It controls a position of the template "Example lending (test network)", which holds 0.59957301 BCH'), 'the review says what the token controls, with what it holds');
   check(controls.includes('Whoever receives it controls that from then on'), 'and that whoever receives it controls that from then on');
   check(controls.includes('It can make new tokens of its category'), 'and what its minting capability lets its holder do');
-  check(controls.includes('Debt') && controls.includes('Collateral'), 'with the figures the Applications screen shows');
   const send = page.getByRole('button', { name: 'Send', exact: true });
   check(await send.isDisabled(), 'the button to send stays disabled until the user ticks');
   await page.getByRole('checkbox', { name: /I understand/ }).check();

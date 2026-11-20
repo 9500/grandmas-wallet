@@ -1,15 +1,15 @@
 /**
- * Two application templates made for the tests, with their recovery declarations. They stand for
- * applications the wallet has never seen: nothing in the wallet's code knows them.
+ * Application templates made for the tests. They stand for applications the wallet has never seen: nothing in the
+ * wallet's code knows them, and none comes with anything beside it (proposal section 13.3).
  *
  * - **Strongbox**: coins held at a script that opens for whoever spends the box's key token in the same
  *   transaction. The box's address follows from the key alone.
  * - **Bond**: coins that can only go back to an address fixed when the bond was posted. The bond's
- *   address does not follow from its key; it is found through a companion coin.
+ *   address does not follow from its key; a companion coin beside it carries the key's category and the address.
  * - **Club**: a door every member shares, a contract that hands out the club's fungible credits; joining
  *   makes a member card and a locker with a deposit. Using the locker burns credits. It has what a shared
- *   contract brings: an input the wallet finds on chain or a page names, values read from it, places in the
- *   transaction fixed by the template, fungible tokens the wallet pays with, and tokens sent to a data output.
+ *   contract brings: an input a page names, values read from it, places in the transaction fixed by the template,
+ *   fungible tokens the wallet pays with, and tokens sent to a data output.
  *
  * Their scripts are written here in CashAssembly, so the tests need no compiler.
  */
@@ -74,22 +74,6 @@ export const strongboxTemplate = {
     holder: { ...view('Key holder', 'Where the key token goes: an address of the wallet.'), type: 'locking_script' },
     label: { ...view('Label', 'A few bytes written on the key.'), type: 'bytes' },
     keyInput: { ...view('Key input', 'The number of the input that spends the key.'), type: 'integer' },
-  },
-} as const;
-
-/** The declaration of the Strongbox template, as an object; `declarationText` binds it to the template's text. */
-export const strongboxDeclaration = {
-  authority: {
-    boxKey: {
-      token: 'keyOutput',
-      position: { lockingScript: 'boxLockingScript', variables: { boxKey: 'token.category' } },
-      actions: ['add', 'take'],
-    },
-  },
-  actions: {
-    open: { creates: 'boxKey', outputs: { holder: 'receive' } },
-    add: { variables: { boxKey: 'token.category' } },
-    take: { spends: 'boxKey', position: 'boxInput', outputs: { holder: 'receive' }, variables: { boxKey: 'token.category', label: 'token.commitment', keyInput: 'token.inputIndex' } },
   },
 } as const;
 
@@ -163,29 +147,6 @@ export const bondTemplate = {
     holder: { ...view('Key holder', 'Where the key token goes: an address of the wallet.'), type: 'locking_script' },
     serial: { ...view('Serial', 'A few bytes written on the key.'), type: 'bytes' },
     keyInput: { ...view('Key input', 'The number of the input that spends the key.'), type: 'integer' },
-  },
-} as const;
-
-export const bondDeclaration = {
-  authority: {
-    bondKey: {
-      token: 'keyOutput',
-      position: {
-        companion: { lockingScript: 'companionLockingScript', variables: { bondKey: 'token.category' }, tokenCategory: 'token.category' },
-        relative: -1,
-        genuine: { lockingScript: 'bondLockingScript', variables: { bondKey: 'token.category', refundTo: 'companion.commitment' } },
-      },
-      actions: ['redeem'],
-    },
-  },
-  actions: {
-    post: { creates: 'bondKey', outputs: { holder: 'receive', refundTo: 'lasting' } },
-    redeem: {
-      spends: 'bondKey',
-      position: 'bondInput',
-      outputs: { holder: 'return' },
-      variables: { bondKey: 'token.category', serial: 'token.commitment', keyInput: 'token.inputIndex', refundTo: 'companion.commitment', amount: 'position.valueSatoshis' },
-    },
   },
 } as const;
 
@@ -285,37 +246,11 @@ export const clubTemplate = {
   },
 } as const;
 
-export const clubDeclaration = {
-  authority: {
-    card: {
-      token: 'cardOutput',
-      position: { lockingScript: 'lockerLockingScript', variables: { memberKey: 'token.category' } },
-      actions: ['use'],
-    },
-  },
-  actions: {
-    join: {
-      creates: 'memberKey',
-      inputs: { doorInput: { lockingScript: 'doorLockingScript', token: { category: 'c1'.repeat(32), capability: 'minting' } } },
-      outputs: { holder: 'receive', creditsHolder: 'receive' },
-      variables: { doorCredits: 'input.doorInput.tokenAmount', doorState: 'input.doorInput.commitment', doorNumber: 'input.doorInput.commitment[0..2]' },
-    },
-    use: {
-      spends: 'card',
-      position: 'lockerInput',
-      inputs: { doorInput: { lockingScript: 'doorLockingScript', token: { category: 'c1'.repeat(32), capability: 'minting' } } },
-      outputs: { holder: 'return' },
-      variables: { memberKey: 'token.category', keyInput: 'token.inputIndex', doorCredits: 'input.doorInput.tokenAmount', doorState: 'input.doorInput.commitment' },
-    },
-  },
-} as const;
-
 /*
- * Templates that come with no recovery declaration, as the third design has them (proposal section 13.3). The
- * wallet works from the template, the request and its own records alone.
+ * Variants of the templates above.
  *
- * - The Strongbox as it is, without its declaration: the key is not an input of its own, and the take names the
- *   input that spends the key by a number (`keyInput`) that the request gives.
+ * - The Strongbox as it is: the key is not an input of its own, and the take names the input that spends the key by
+ *   a number (`keyInput`) that the request gives.
  * - **Keyed strongbox**: the Strongbox with its key as an input of its own, at index 0, and that index in the
  *   box's unlocking as a constant, as the Savings Jar of the trial of stage 11 has it.
  * - **Club with lockers**: the Club, with each of its scripts naming its unlocking and the locker offering its
@@ -414,7 +349,7 @@ export const cloakroomTemplate = {
 } as const;
 
 /*
- * Templates for the findings of section 12.3 (stage 15), with no declaration:
+ * Templates for the findings of section 12.3 (stage 15):
  *
  * - **Keyed pool**: a pool opened by a key the engine makes for the wallet under the template, as a liquidity pool that
  *   is opened by a key hash is. Opening one puts coins at a script that takes a key of the device; trading with it pays

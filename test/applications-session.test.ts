@@ -1,12 +1,15 @@
+import { hexToBin } from '@bitauth/libauth';
 import { applicationConnector, walletAnnouncement } from '@grandmas-wallet/app';
-import { type ActionDetails, type Channel, type Proposal, type TemplateTexts, type XoMessage, DappRequests, XO_EXTENSION, readAdvertisement } from '@grandmas-wallet/connect';
+import { textHash } from '@grandmas-wallet/core';
+import { type ActionDetails, type Channel, type Proposal, type XoMessage, DappRequests, XO_EXTENSION, readAdvertisement } from '@grandmas-wallet/connect';
 import { describe, expect, it } from 'vitest';
 
-import { type Device, bond, deviceWith, hex, presentationHash, seedOf, strongbox } from './support/applications.js';
+import { type Device, deviceWith, hex, keyedBox, seedOf, strongbox } from './support/applications.js';
 
 /**
- * Acceptance tests AP01, AP03, AP05 and AP06 of the proposal: a session between an application and the
- * wallet, with the wallet's own handling of templates behind the messages. The connection is a pair of
+ * Acceptance tests AP01, AP03 and AP05 of the proposal: a session between an application and the wallet, with the
+ * wallet's own handling of templates behind the messages. Positions requests are answered from the wallet's records
+ * (PR18 has them after a recovery). The connection is a pair of
  * queues in memory; everything that crosses it is kept.
  */
 
@@ -60,23 +63,25 @@ const secretsOf = (device: Device): string[] => {
 };
 
 describe('a session with an application', () => {
-  it('the wallet announces the profiles it reads and the kinds of output it fills, and names no template', () => {
+  it('the wallet announces version 2 and the kinds of output it fills, and names no template and no profile', () => {
     const announced = walletAnnouncement('chipnet');
-    expect(announced).toEqual({ version: 1, network: 'chipnet', profiles: ['recoverable-app-v1'], bindings: ['receive', 'change', 'return', 'lasting'], versions: [1, 2] });
+    expect(announced).toEqual({ version: 2, network: 'chipnet', bindings: ['receive', 'change', 'return', 'lasting'] });
     expect(readAdvertisement({ [XO_EXTENSION]: announced })).toEqual(announced);
   });
 
-  it('AP01: an unknown template is shown as not verified and trusted only on the user\'s word', async () => {
+  it('AP01: an unknown template is shown with what the wallet can see of it, and trusted only on the user\'s word', async () => {
     const { device, connect, proposals } = await session();
     const { dapp } = connect('first application');
     const result = dapp.request(open(strongbox), strongbox.texts);
     await settle();
     const [proposal] = proposals();
     if (proposal === undefined) throw new Error('no proposal');
-    // What the user is shown: the template's own words about itself, and what the wallet can say about it.
+    // What the user is shown: the template's own words about itself, and what each of its actions would leave behind.
     expect(proposal.entry.templateKnown).toBe(false);
     const shown = device.applications.describe(proposal.entry.template, proposal.entry.definition);
-    expect(shown).toMatchObject({ name: 'Strongbox', trusted: false, verdict: { statement: 'not verified' } });
+    expect(shown).toMatchObject({ name: 'Strongbox', trusted: false });
+    expect(shown).not.toHaveProperty('verdict');
+    expect(shown.findings.map(({ finding }) => finding)).toEqual(['comes back', 'comes back', 'comes back']);
     expect(shown.actions.map(({ name }) => name)).toEqual(['Open a strongbox', 'Put coins in', 'Take everything out']);
     // Nothing is trusted, stored or sent before the user agrees.
     expect(device.applications.templates).toEqual([]);
@@ -98,29 +103,16 @@ describe('a session with an application', () => {
     expect(device.applications.templates).toEqual([]);
   });
 
-  it('AP01: a template, a declaration or a file referred to that is not the one the request names by hash is refused', async () => {
+  it('AP01: a template that is not the one the request names by hash is refused', async () => {
     const { device, connect, proposals } = await session();
     const { dapp } = connect('first application');
     // Another template under the name of the first.
-    await expect(dapp.request(open(strongbox), bond.texts)).rejects.toThrow('not the one the request names');
-    // The right template with another declaration than the one named.
-    const altered = (strongbox.texts.declaration as string).replace('"take"', '"add"');
-    await expect(dapp.request(open(strongbox), { ...strongbox.texts, declaration: altered })).rejects.toThrow('recovery declaration sent with the request is not the one the request names');
-    // A declaration that is named correctly and is for another template.
-    const borrowed: TemplateTexts = { template: strongbox.texts.template, declaration: bond.texts.declaration as string };
-    await expect(dapp.request({ ...open(strongbox), template: { ...strongbox.names, declaration: presentationHash(borrowed.declaration as string) } }, borrowed)).rejects.toThrow('for another template');
-    // A file that the declaration does not refer to, and a declaration without a file it refers to.
-    await expect(dapp.request(open(strongbox), { ...strongbox.texts, references: ['terms of use'] })).rejects.toThrow('not one the recovery declaration refers to');
-    const referring = JSON.stringify({ ...(JSON.parse(strongbox.texts.declaration as string) as object), references: [presentationHash('terms of use')] });
-    const withReference = { ...open(strongbox), template: { ...strongbox.names, declaration: presentationHash(referring) } };
-    await expect(dapp.request(withReference, { template: strongbox.texts.template, declaration: referring, references: ['other terms'] })).rejects.toThrow('not one the recovery declaration refers to');
-    await expect(dapp.request(withReference, { template: strongbox.texts.template, declaration: referring })).rejects.toThrow('refers to was not sent');
+    await expect(dapp.request(open(strongbox), keyedBox.texts)).rejects.toThrow('not the one the request names');
+    // The same template as another text: the same identifier, another content hash.
+    const spaced = JSON.stringify(JSON.parse(strongbox.texts.template), undefined, 1);
+    await expect(dapp.request(open(strongbox), { template: spaced })).rejects.toThrow('not the one the request names');
     expect(proposals()).toEqual([]);
     expect(device.applications.templates).toEqual([]);
-    // With the file it names, the same request is taken on.
-    void dapp.request(withReference, { template: strongbox.texts.template, declaration: referring, references: ['terms of use'] });
-    await settle();
-    expect(proposals()).toHaveLength(1);
   });
 
   it('AP01: a later text under the same identifier does not replace the template the user trusted without the user\'s word', async () => {
@@ -130,29 +122,21 @@ describe('a session with an application', () => {
     await settle();
     await proposals()[0]?.approve();
     await first;
-    // The same template comes again with another declaration. It is shown as a template to be trusted again, and
-    // does not take the place of the one the user trusted unless the user approves.
-    const altered = (strongbox.texts.declaration as string).replace('"actions":["add","take"]', '"actions":["take"]');
-    expect(altered).not.toBe(strongbox.texts.declaration);
-    const names = { ...strongbox.names, declaration: presentationHash(altered) };
-    const texts = { template: strongbox.texts.template, declaration: altered };
-    const again = dapp.request({ ...open(strongbox), template: names }, texts);
+    // The same template comes again as another text: the same identifier, another content hash. The wallet does not
+    // have it; it is shown as a template to be trusted, and the one the user trusted stays as it was.
+    const text = JSON.stringify(JSON.parse(strongbox.texts.template), undefined, 1);
+    const later = { identifier: strongbox.names.identifier, contentHash: textHash(text) };
+    expect(later.contentHash).not.toBe(strongbox.names.contentHash);
+    expect(device.applications.has(later)).toBe(false);
+    const again = dapp.request({ ...open(strongbox), template: later }, { template: text });
     await settle();
     expect(proposals()).toHaveLength(1);
-    expect(device.applications.describe(names, texts)).toMatchObject({ trusted: false, replacesDeclaration: true });
+    expect(device.applications.describe(later, { template: text })).toMatchObject({ trusted: false });
     await proposals()[0]?.decline();
     await expect(again).rejects.toThrow('declined');
     expect(device.applications.templates).toHaveLength(1);
-    expect(device.applications.templates[0]?.declaration?.contentHash).toBe(strongbox.names.declaration);
-    // Asked again and approved: the new declaration takes the earlier one's place.
-    const approved = dapp.request({ ...open(strongbox), template: names }, texts);
-    await settle();
-    await proposals()[0]?.approve();
-    await approved;
-    expect(device.applications.templates).toHaveLength(1);
-    expect(device.applications.templates[0]?.declaration?.contentHash).toBe(names.declaration);
+    expect(device.applications.templates[0]?.contentHash).toBe(strongbox.names.contentHash);
   });
-
   it('AP03: a request that is repeated, or asked again after a reconnect, is carried out once; the same id with other content is refused', async () => {
     const { device, connector, connect, proposals } = await session();
     const first = connect('first application');
@@ -176,68 +160,69 @@ describe('a session with an application', () => {
     const { device, connect, proposals } = await session();
     // The user already deals with another application.
     const other = connect('another application');
-    const posted = other.dapp.request({ template: bond.names, templateAction: 'post', role: 'poster', variables: { amount: 20_000, serial: '07' } }, bond.texts);
+    const elsewhere = other.dapp.request(open(strongbox), strongbox.texts);
     await settle();
     await proposals()[0]?.approve();
-    await posted;
+    const { tokens: otherTokens } = (await elsewhere) as { tokens: { category: string }[] };
 
     const { dapp, sentToDapp } = connect('first application');
-    const opened = dapp.request(open(strongbox), strongbox.texts);
+    const opened = dapp.request(open(keyedBox), keyedBox.texts);
     await settle();
     await proposals()[0]?.approve();
     const { transactionId, tokens } = (await opened) as { transactionId: string; tokens: { category: string }[] };
-    const held = await dapp.positions(strongbox.names.identifier);
+    const held = await dapp.recordedPositions(keyedBox.names.identifier);
     expect(held.positions).toHaveLength(1);
-    const taken = dapp.request({ template: strongbox.names, templateAction: 'take', role: 'holder', variables: {}, spends: [tokens[0]?.category ?? ''] }, strongbox.texts);
+    const taken = dapp.request({ template: keyedBox.names, templateAction: 'take', role: 'holder', variables: {}, about: { category: tokens[0]?.category ?? '', spent: true } }, keyedBox.texts);
     await settle();
     await proposals()[0]?.approve();
     const second = (await taken) as { transactionId: string };
-    await dapp.positions(bond.names.identifier);
-    await dapp.positions(strongbox.names.identifier);
+    await dapp.recordedPositions(strongbox.names.identifier);
+    await dapp.recordedPositions(keyedBox.names.identifier);
 
     const everything = JSON.stringify(sentToDapp);
     for (const secret of secretsOf(device)) expect(everything).not.toContain(secret);
     // Nothing about the other application: neither its template nor its tokens.
-    expect(everything).not.toContain(bond.names.identifier);
-    expect(everything).not.toContain(bond.names.contentHash);
-    const bondKey = (await device.applications.tokens()).find((token) => token.template?.name === 'Bond');
-    expect(everything).not.toContain(bondKey?.category);
-    // Every address it was told appears in a transaction of its own.
+    expect(everything).not.toContain(strongbox.names.identifier);
+    expect(everything).not.toContain(strongbox.names.contentHash);
+    expect(everything).not.toContain(otherTokens[0]?.category);
+    // Every address it was told appears in a transaction of its own. The answers to a positions request name a
+    // script by the template's name and its values, not by its address: the application is told no address at all.
     const mine = new Set<string>();
     for (const id of [transactionId, second.transactionId]) {
       const raw = (await device.chain.getTransaction(id)) as string;
       for (const match of raw.matchAll(/aa20[0-9a-f]{64}87/g)) mine.add(match[0]);
     }
     const told = [...everything.matchAll(/aa20[0-9a-f]{64}87/g)].map((match) => match[0]);
-    expect(told.length).toBeGreaterThan(0);
     for (const address of told) expect(mine.has(address)).toBe(true);
+    expect(told).toEqual([]);
   });
 
-  it('AP06: a positions request is answered from the chain for a template trusted in a session with this application, and refused otherwise', async () => {
+  it('a positions request is answered from the records for a template trusted in a session with this application, and refused otherwise', async () => {
     const { device, connect, proposals } = await session();
     const first = connect('first application');
-    const opened = first.dapp.request(open(strongbox), strongbox.texts);
+    const opened = first.dapp.request(open(keyedBox), keyedBox.texts);
     await settle();
     await proposals()[0]?.approve();
     const { tokens } = (await opened) as { tokens: { category: string }[] };
 
-    // Trusted in a session with this application: answered, from the chain.
-    const answer = await first.dapp.positions(strongbox.names.identifier);
-    expect(answer).toMatchObject({ trusted: true, positions: [{ category: tokens[0]?.category, authority: 'boxKey', status: 'open', satoshis: '30000', actions: ['add', 'take'] }] });
-    // Someone pays into the box behind the wallet's back; the next answer shows it.
-    device.chain.fund(Uint8Array.from(Buffer.from(answer.positions[0]?.lockingBytecode ?? '', 'hex')), 4_000n);
-    expect((await first.dapp.positions(strongbox.names.identifier)).positions[0]?.satoshis).toBe('34000');
+    // Trusted in a session with this application: answered, from the record and the chain.
+    const answer = await first.dapp.recordedPositions(keyedBox.names.identifier);
+    expect(answer).toMatchObject({ trusted: true, positions: [{ category: tokens[0]?.category, status: 'open', satoshis: '1000', lockingScript: 'boxLockingScript', variables: { boxKey: tokens[0]?.category } }] });
+    // Someone pays into the box behind the wallet's back; the position is still open, its record unchanged.
+    const position = (await device.applications.recordedPositions())[0];
+    device.chain.fund(hexToBin(position?.lockingBytecode ?? ''), 4_000n);
+    expect((await device.applications.recordedPositions())[0]).toMatchObject({ status: 'open', satoshis: 34_000n });
 
     // Trusted with another application: refused, and nothing is said about what the wallet holds.
     const second = connect('another application');
-    expect(await second.dapp.positions(strongbox.names.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await second.dapp.recordedPositions(keyedBox.names.identifier)).toEqual({ trusted: false, positions: [] });
     // Not trusted at all: refused in the same way.
-    expect(await first.dapp.positions(bond.names.identifier)).toEqual({ trusted: false, positions: [] });
-    expect(await second.dapp.positions(bond.names.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await first.dapp.recordedPositions(strongbox.names.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await second.dapp.recordedPositions(strongbox.names.identifier)).toEqual({ trusted: false, positions: [] });
     expect(proposals()).toEqual([]);
   });
 
-  it('AP06: a template trusted without this application is answered for only once the user allows it', async () => {
+  it('a template trusted without this application is answered for only once the user allows it', async () => {
     const device = await deviceWith([100_000n, 60_000n]);
     const asked: [string, string][] = [];
     let proposals: Proposal[] = [];
@@ -251,23 +236,56 @@ describe('a session with an application', () => {
     };
     // A token made in a session with one application; then the template is known to the device without the other.
     const first = connect('first application');
-    const opened = first.request(open(strongbox), strongbox.texts);
+    const opened = first.request(open(keyedBox), keyedBox.texts);
     await settle();
     await proposals[0]?.approve();
     const { tokens } = (await opened) as { tokens: { category: string }[] };
     const later = connect('a later session');
 
     // Not trusted at all: refused, and the user is not asked, so that nothing hints at it.
-    expect(await later.positions(bond.names.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(await later.recordedPositions(strongbox.names.identifier)).toEqual({ trusted: false, positions: [] });
     expect(asked).toEqual([]);
     // Trusted, but not with this application: refused, and the user is asked.
-    expect(await later.positions(strongbox.names.identifier)).toEqual({ trusted: false, positions: [] });
-    expect(asked).toEqual([[strongbox.names.identifier, 'a later session']]);
+    expect(await later.recordedPositions(keyedBox.names.identifier)).toEqual({ trusted: false, positions: [] });
+    expect(asked).toEqual([[keyedBox.names.identifier, 'a later session']]);
     // Only the user's word lets it see the tokens.
-    expect(() => device.applications.allow(bond.names.identifier, 'a later session')).toThrow(/does not trust/);
-    device.applications.allow(strongbox.names.identifier, 'a later session');
-    expect(await later.positions(strongbox.names.identifier)).toMatchObject({ trusted: true, positions: [{ category: tokens[0]?.category, status: 'open', satoshis: '30000' }] });
-    expect(device.applications.mayAllow(strongbox.names.identifier, 'a later session')).toBe(false);
+    expect(() => device.applications.allow(strongbox.names.identifier, 'a later session')).toThrow(/does not trust/);
+    device.applications.allow(keyedBox.names.identifier, 'a later session');
+    expect(await later.recordedPositions(keyedBox.names.identifier)).toMatchObject({ trusted: true, positions: [{ category: tokens[0]?.category, status: 'open', satoshis: '1000' }] });
+    expect(device.applications.mayAllow(keyedBox.names.identifier, 'a later session')).toBe(false);
     expect(asked).toHaveLength(1);
+  });
+
+  it('a template kept with a recovery declaration by the second design: the declaration is not read, and a request without one finds the template', async () => {
+    const { device, connect, proposals } = await session();
+    // The device kept the template with a declaration beside it, as the second design did.
+    device.wallet.parts.store({
+      templates: [{ identifier: keyedBox.names.identifier, contentHash: keyedBox.names.contentHash, text: keyedBox.texts.template, name: 'Keyed strongbox', trustedAt: 1, applications: ['first application'], stored: true, declaration: { contentHash: 'dd'.repeat(32), text: '{"profile":"recoverable-app-v1"}' } } as never],
+      notes: [],
+    });
+    expect(device.applications.has(keyedBox.names)).toBe(true);
+    const { dapp, sentToWallet } = connect('first application');
+    const result = dapp.request(open(keyedBox), keyedBox.texts);
+    await settle();
+    await proposals()[0]?.approve();
+    await result;
+    // The request was taken at once, without the page sending the template again.
+    const requests = sentToWallet.filter((message) => message.action === 'xo_action_request');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.definition).toBeUndefined();
+    expect(device.applications.templates).toHaveLength(1);
+  });
+
+  it('a page that still sends a declaration beside its template: only the template is taken', async () => {
+    const { device, connect, proposals } = await session();
+    const { dapp } = connect('first application');
+    const result = dapp.request({ ...open(strongbox), template: { ...strongbox.names, declaration: 'ee'.repeat(32) } as never }, { ...strongbox.texts, declaration: '{"profile":"recoverable-app-v1"}' } as never);
+    await settle();
+    expect(proposals()[0]?.entry.template).toEqual(strongbox.names);
+    expect(proposals()[0]?.entry.definition).toEqual(strongbox.texts);
+    await proposals()[0]?.approve();
+    await result;
+    expect(device.applications.templates).toMatchObject([{ identifier: strongbox.names.identifier, contentHash: strongbox.names.contentHash }]);
+    expect(device.applications.templates[0]).not.toHaveProperty('declaration');
   });
 });

@@ -1,7 +1,7 @@
 import { type TransactionCommon, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
 import { type MemoryStore, type PositionRecordEntry, positionEntry } from '@grandmas-wallet/archive';
 import { type RecordedPosition, ActionRefusedError, NeedsApplicationError, TickNeededError, applicationArchive, applicationConnector, walletAnnouncement } from '@grandmas-wallet/app';
-import { type ActionDetails, type Channel, type Proposal, DappRequests, XO_EXTENSION, readAdvertisement, speaks } from '@grandmas-wallet/connect';
+import { type ActionDetails, type Channel, type Proposal, DappRequests, XO_EXTENSION, readAdvertisement } from '@grandmas-wallet/connect';
 import { ADDRESS_KIND, p2pkhLockingBytecode, readTemplate, takeNumber, templateLockingBytecode, walletAddress } from '@grandmas-wallet/core';
 import { cloakroomTemplate, keyedStrongboxTemplate, lockerClubTemplate, strongboxTemplate, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
@@ -10,7 +10,7 @@ import { type Device, deviceWith, finishCopying, presentation, request, seedOf }
 
 /**
  * Acceptance tests PR13 to PR18 and PR22 of the proposal (the first part of stage 14 of the plan): an application
- * from its template alone. Every template here comes with no recovery declaration. The wallet carries out its
+ * from its template alone. Every template here comes alone, with nothing beside it. The wallet carries out its
  * actions from three things: the template as its author wrote it for XO, the request, and the wallet's own
  * position records (section 13.3).
  *
@@ -363,10 +363,8 @@ describe('an application from its template alone, after a recovery', () => {
     });
     expect((await taken.applications.tokens()).map(({ category }) => category).sort()).toEqual([box, ticket, stray].sort());
 
-    // The wallet announces version 2 beside version 1, for the pages of the second design.
-    const announced = readAdvertisement({ [XO_EXTENSION]: walletAnnouncement('chipnet') });
-    expect(announced !== undefined && speaks(announced, 2) && speaks(announced, 1)).toBe(true);
-    expect(announced?.profiles).toEqual(['recoverable-app-v1']);
+    // The wallet announces version 2, and nothing of a declaration.
+    expect(readAdvertisement({ [XO_EXTENSION]: walletAnnouncement('chipnet') })).toEqual({ version: 2, network: 'chipnet', bindings: ['receive', 'change', 'return', 'lasting'] });
 
     // The templates came from the backup: no application is answered until the user allows it.
     const { dapp } = connectTo(taken, 'an application');
@@ -382,12 +380,12 @@ describe('an application from its template alone, after a recovery', () => {
       ],
     });
     expect(await dapp.recordedPositions(cloakroom.names.identifier)).toEqual({ trusted: true, positions: [{ category: ticket, commitment: '01', capability: 'none', satoshis: '1000', status: 'held' }] });
-    // The token without a record is answered for under no template; the pages of the second design are answered as before.
+    // The token without a record is answered for under no template.
     expect(JSON.stringify(await dapp.recordedPositions(keyedBox.names.identifier))).not.toContain(stray);
-    expect((await dapp.positions(keyedBox.names.identifier)).positions).toEqual([]);
 
-    // The template whose token led to its position through a confirmed record has come back once; the verdict is as it was.
-    expect(taken.applications.describe(keyedBox.names)).toMatchObject({ cameBack: true, verdict: { statement: 'not verified' } });
+    // The template whose token led to its position through a confirmed record has come back once; it is not called verified.
+    expect(taken.applications.describe(keyedBox.names)).toMatchObject({ cameBack: true });
+    expect(taken.applications.describe(keyedBox.names)).not.toHaveProperty('verdict');
     expect(taken.applications.describe(cloakroom.names)).not.toHaveProperty('cameBack');
   }, 60_000);
 
@@ -467,5 +465,30 @@ describe('a token category an action carries on, and one it makes', () => {
     const made = request(mint, 'draw', 'holder', {}, { inputs: { mintInput: `${drawn.transactionId}:0` } });
     const making = await device.applications.preview(made);
     expect(making.tokensLeaving).toEqual([{ token: expect.objectContaining({ capability: 'minting' }) as object, how: 'leaves', made: true, to: 'Mint' }]);
+  });
+
+  it('the category of the token the action is about is the value of a variable an output names as its token\'s category and no input does: the request need not repeat it, unless it says the action makes one', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    const MINT = 'f1'.repeat(32);
+    const mintAt = templateLockingBytecode(definitionOf(mint), 'mintLockingScript', {});
+    // The mint, and a badge of its category that the wallet already holds.
+    device.chain.adopt([
+      { transactionId: 'f0'.repeat(32), index: 0, output: { lockingBytecode: mintAt, valueSatoshis: 1000n, token: { category: hexToBin(MINT), amount: 0n, nft: { capability: 'minting', commitment: new Uint8Array() } } } },
+      { transactionId: 'f2'.repeat(32), index: 0, output: { lockingBytecode: hexToBin(addressOf(device, change, 0)), valueSatoshis: 1000n, token: { category: hexToBin(MINT), amount: 0n, nft: { capability: 'none', commitment: hexToBin('01') } } } },
+    ]);
+    await device.wallet.search({ passes: ['quick'] });
+    const about = { category: MINT, spent: false };
+    // About the badge, with no value for `badge`: the badge's category is the value, and nothing new is made.
+    const draw = request(mint, 'draw', 'holder', {}, { about, inputs: { mintInput: `${'f0'.repeat(32)}:0` } });
+    const preview = await device.applications.preview(draw);
+    expect(preview.tokensLeaving).toBeUndefined();
+    expect(preview.words.values.find(({ name }) => name === 'Badge')?.value).toBe(MINT);
+    // A request that says the action makes the category in `badge` gets a new one, from the wallet's coin.
+    const making = await device.applications.preview(request(mint, 'draw', 'holder', {}, { about, creates: 'badge', inputs: { mintInput: `${'f0'.repeat(32)}:0` } }));
+    expect(making.tokensLeaving).toEqual([{ token: expect.objectContaining({ capability: 'minting' }) as object, how: 'leaves', made: true, to: 'Mint' }]);
+    expect(making.tokensLeaving?.[0]?.token.category).not.toBe(MINT);
+    const drawn = await device.applications.carryOut(draw);
+    expect(drawn.tokens).toEqual([expect.objectContaining({ category: MINT, commitment: '01' })]);
+    expect(hex((await transactionOf(device, drawn.transactionId)).inputs[0]?.outpointTransactionHash as Uint8Array)).toBe('f0'.repeat(32));
   });
 });

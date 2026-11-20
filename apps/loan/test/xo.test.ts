@@ -127,11 +127,11 @@ const setUp = async (satoshis = 70_000_000n) => {
 
 describe('the loan page with a wallet that carries out actions itself (PY02)', () => {
   it('works only with such a wallet, of version 2, on its own network, that gives the addresses the template asks for', () => {
-    const both = { version: 1, network: 'chipnet', profiles: ['recoverable-app-v1'], bindings: ['receive', 'change', 'return', 'lasting'], versions: [1, 2] };
+    const both = { version: 2, network: 'chipnet', bindings: ['receive', 'change', 'return', 'lasting'] };
     expect(xoProblem(undefined, 'chipnet')).toMatch(/does not carry out actions/);
     expect(xoProblem({ ...both, network: 'mainnet' }, 'chipnet')).toMatch(/on mainnet/);
     expect(xoProblem({ ...both, bindings: ['receive'] }, 'chipnet')).toMatch(/kinds of address/);
-    expect(xoProblem({ version: 1, network: 'chipnet', profiles: ['recoverable-app-v1'], bindings: ['receive', 'change', 'return', 'lasting'] }, 'chipnet')).toMatch(/only the earlier version/);
+    expect(xoProblem({ ...both, version: 1 }, 'chipnet')).toMatch(/another version of XO requests/);
     expect(xoProblem(both, 'chipnet')).toBeUndefined();
   });
 
@@ -150,7 +150,7 @@ describe('the loan page with a wallet that carries out actions itself (PY02)', (
     const made = await answer(loans.createKey(), true, true);
     const requests = sentToWallet.filter((message) => message.action === 'xo_action_request');
     expect(requests.slice(0, 2).map((message) => message.definition)).toEqual([undefined, { template: LOAN_TEMPLATE.texts.template }]);
-    expect(requests.every((message) => message.template.declaration === undefined && message.page === PAGE)).toBe(true);
+    expect(requests.every((message) => Object.keys(message.template).sort().join() === 'contentHash,identifier' && message.page === PAGE)).toBe(true);
     expect(requests.at(-1)).toMatchObject({ templateAction: 'createKey', creates: 'keyCategory', inputs: { factoryInput: expect.stringMatching(/^[0-9a-f]{64}:\d+$/) as string } });
     expect(keys.get().map((key) => key.transactionId)).toEqual([made.transactionId]);
     const [key] = await loans.waitingKeys();
@@ -189,14 +189,17 @@ describe('the loan page with a wallet that carries out actions itself (PY02)', (
     expect(partRepayment(listed.loans[0] as never)).toBeUndefined();
 
     // More collateral: the page names the loan, its sidecar and Paryon's coins, and the amount; the key goes back where it was.
+    // The key's category is said once, as what the action is about: the wallet takes it from there.
     const added = await answer(loans.manage(key?.category as string, plan.collateral + 100_000n));
-    expect(sentToWallet.filter((message) => message.action === 'xo_action_request').at(-1)).toMatchObject({
+    const manageSent = sentToWallet.filter((message) => message.action === 'xo_action_request').at(-1);
+    expect(manageSent).toMatchObject({
       templateAction: 'manage',
       about: { category: key?.category, spent: true },
       bindings: { keyHolder: 'return' },
-      variables: { keyCategory: key?.category, keySatoshis: '1000', collateral: String(plan.collateral + 100_000n) },
+      variables: { keySatoshis: '1000', collateral: String(plan.collateral + 100_000n) },
       inputs: { priceInput: expect.any(String) as string, loanInput: `${opened.transactionId}:2`, sidecarInput: `${opened.transactionId}:3`, manageInput: expect.any(String) as string },
     });
+    expect(manageSent?.variables).not.toHaveProperty('keyCategory');
     const managed = await decoded(added.transactionId as string);
     expect(managed.outputs[1]?.valueSatoshis).toBe(plan.collateral + 100_000n);
     expect(binToHex(managed.outputs[4]?.lockingBytecode as Uint8Array)).toBe(binToHex(borrowed.outputs[5]?.lockingBytecode as Uint8Array));

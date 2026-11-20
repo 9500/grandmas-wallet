@@ -154,7 +154,7 @@ export const findLoan = async (chain: ParyonChain, contracts: ParyonContracts, k
 };
 
 /**
- * What an action on an open loan spends, as the loan's page names it in a request without a declaration
+ * What an action on an open loan spends, as the loan's page names it in a request
  * (`page-requests.ts`): the loan and its sidecar found from the key (`findLoan`), the price thread with the highest
  * price, which Paryon's contracts reckon the collateral at, and a manage function's coin. The key's coin is the
  * wallet's: what it holds comes from the wallet's answer to a positions request.

@@ -224,7 +224,7 @@ describe('over a WizardConnect session, through a relay', () => {
     const session = openDeskSession({ name: 'Anna', relays: [relay.url], onStatus: (status) => deskStatus.push(status) });
     closing.push(() => session.close());
     new SealedDesk({ particulars: () => ANNA, onSealed: (sealed) => received.push(sealed) }).attach(session.channel);
-    const application = openWalletLink({ uri: session.uri, privateKey: newLinkKey(), name: 'A wallet', offered: { version: 1, network: 'chipnet', profiles: [], bindings: [] }, onStatus: () => undefined });
+    const application = openWalletLink({ uri: session.uri, privateKey: newLinkKey(), name: 'A wallet', offered: { version: 2, network: 'chipnet', bindings: [] }, onStatus: () => undefined });
     closing.push(() => application.close());
     for (let attempt = 0; attempt < 100 && !deskStatus.some((status) => status.reason !== undefined); attempt++) await new Promise((done) => setTimeout(done, 50));
     expect(deskStatus.at(-1)).toMatchObject({ state: 'disconnected', reason: expect.stringContaining('does not offer') as unknown });

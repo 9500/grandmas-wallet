@@ -338,7 +338,7 @@ const sentAs = async (transactionId: string): Promise<{ transactionId: string; b
 };
 /** No declaration anywhere: what the wallet keeps of each template. */
 const noDeclaration = (applications: Applications, where: string): string => {
-  const kept = applications.templates.filter((kept) => kept.declaration !== undefined || kept.identifier !== template().names.identifier);
+  const kept = applications.templates.filter((kept) => 'declaration' in kept || kept.identifier !== template().names.identifier);
   if (kept.length > 0) throw new Error(`${where} keeps a template with a declaration, or another template`);
   return `${where} keeps ${applications.templates.length} template, Paryon's, with no declaration`;
 };
@@ -362,11 +362,11 @@ const thePage = (applications: Applications, wallet: OwnerWallet) => {
       tick,
       seen: (preview) =>
         note(
-          `${about}: the wallet showed the page's request with its own figures: it gives ${sat(preview.figures.givesSatoshis)}, gets ${sat(preview.figures.getsSatoshis)}, ${sat(preview.figures.intoApplicationSatoshis)} go into the application, the fee is ${sat(preview.figures.feeSatoshis)}; Paryon's coins spent: ${preview.figures.applicationInputs.map(({ name }) => `"${name}"`).join(', ')}; to the wallet: ${preview.figures.toWallet.map(({ kind }) => kind).join(', ')}${preview.figures.tokensNet.length === 0 ? '' : `; tokens ${preview.figures.tokensNet.map(({ amount: change }) => (change > 0n ? `+${change}` : String(change))).join(', ')}`}${preview.figures.tokensDestroyed.length === 0 ? '' : `; destroyed: ${preview.figures.tokensDestroyed.map(({ name, how, wallet }) => `"${name}" (${how}, ${wallet ? 'the wallet\'s' : 'the application\'s'})`).join(', ')}`}${preview.tokensLeaving === undefined ? '' : `; it asks for the user's tick: ${preview.tokensLeaving.map(({ how, made, to }) => `a token ${made === true ? 'made from the wallet\'s coin ' : ''}${how} to "${to ?? ''}"`).join(', ')}`}; it ${preview.recordsPosition === true ? 'records a position' : 'records nothing'}; the template is shown with ${preview.template.declaration === undefined ? 'no declaration' : 'a declaration'}.`,
+          `${about}: the wallet showed the page's request with its own figures: it gives ${sat(preview.figures.givesSatoshis)}, gets ${sat(preview.figures.getsSatoshis)}, ${sat(preview.figures.intoApplicationSatoshis)} go into the application, the fee is ${sat(preview.figures.feeSatoshis)}; Paryon's coins spent: ${preview.figures.applicationInputs.map(({ name }) => `"${name}"`).join(', ')}; to the wallet: ${preview.figures.toWallet.map(({ kind }) => kind).join(', ')}${preview.figures.tokensNet.length === 0 ? '' : `; tokens ${preview.figures.tokensNet.map(({ amount: change }) => (change > 0n ? `+${change}` : String(change))).join(', ')}`}${preview.figures.tokensDestroyed.length === 0 ? '' : `; destroyed: ${preview.figures.tokensDestroyed.map(({ name, how, wallet }) => `"${name}" (${how}, ${wallet ? 'the wallet\'s' : 'the application\'s'})`).join(', ')}`}${preview.tokensLeaving === undefined ? '' : `; it asks for the user's tick: ${preview.tokensLeaving.map(({ how, made, to }) => `a token ${made === true ? 'made from the wallet\'s coin ' : ''}${how} to "${to ?? ''}"`).join(', ')}`}; it ${preview.recordsPosition === true ? 'records a position' : 'records nothing'}; the template is shown with ${'declaration' in preview.template ? 'a declaration' : 'no declaration'}.`,
         ),
     })) as { transactionId: string; tokens: { category: string; capability: string; amount?: string }[] };
     const travelled = link.sent.filter((message) => message.action === 'xo_action_request');
-    if (travelled.some((message) => message.template.declaration !== undefined || message.definition?.declaration !== undefined)) throw new Error('the page sent a declaration');
+    if (travelled.some((message) => 'declaration' in message.template || (message.definition !== undefined && 'declaration' in message.definition))) throw new Error('the page sent a declaration');
     const last = travelled.at(-1);
     if (last?.page !== PAGE) throw new Error('the page\'s request did not carry its address');
     note(`${about}: the page's request, as it travelled: ${JSON.stringify({ templateAction: last.templateAction, variables: last.variables, ...(last.bindings === undefined ? {} : { bindings: last.bindings }), ...(last.about === undefined ? {} : { about: last.about }), ...(last.creates === undefined ? {} : { creates: last.creates }), inputs: last.inputs, page: last.page })}.`);
@@ -634,7 +634,7 @@ try {
         keep();
         const [suggested] = applications.suggestions;
         if (suggested === undefined || suggested.identifier !== template().names.identifier) throw new Error('the backup did not hold Paryon\'s template');
-        if (suggested.declaration !== undefined || suggested.texts.declaration !== undefined) throw new Error('the backup held a declaration');
+        if ('declaration' in suggested || 'declaration' in suggested.texts) throw new Error('the backup held a declaration');
         note(`The new device read the record of the key from a store, the earlier seed's, a suggestion; the backup held Paryon's template as the earlier owner stored it, with no declaration.`);
         await applications.trust(suggested, undefined);
         note(`The user trusted the template "${suggested.name}" the earlier owner stored, on the user's word.`);

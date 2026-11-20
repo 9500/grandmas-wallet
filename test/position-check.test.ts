@@ -2,7 +2,7 @@ import { binToHex, hexToBin } from '@bitauth/libauth';
 import { type ArchiveStore, type MemoryStore, type PositionRecordEntry, MemoryStore as Store, assessArchive, positionEntry, readArchive } from '@grandmas-wallet/archive';
 import { type RecordedPosition, ActionRefusedError, applicationArchive, checkPositionRecord } from '@grandmas-wallet/app';
 import { buildTransaction, p2pkhInput, p2pkhLockingBytecode, readControllerHistory, readTemplate, templateLockingBytecode } from '@grandmas-wallet/core';
-import { strongboxDeclaration, strongboxTemplate, testKey } from '@grandmas-wallet/testing';
+import { strongboxTemplate, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type Device, STORES, deviceWith, finishCopying, presentation, request, seedOf, strongbox } from './support/applications.js';
@@ -13,9 +13,7 @@ import { type Device, STORES, deviceWith, finishCopying, presentation, request, 
  * rule for a position that is not confirmed: the wallet carries out an action there only when its own figures
  * show that it gives nothing but the fee.
  *
- * Most templates here come with no recovery declaration, as design 3 has them. Where an action spends a
- * position, the declaration of the test template is still what lets the wallet carry it out: that route is
- * replaced in stage 14.
+ * Every template here comes alone, with nothing beside it.
  */
 
 const hex = binToHex;
@@ -63,9 +61,8 @@ const twinBox = presentation({
     spareHolder: { name: 'Spare holder', description: 'Who gets the second key.', type: 'locking_script' },
   },
 });
-/** The strongbox with a second script, the safe, that a later action moves the position to. With a declaration, for that action. */
-const movingBox = presentation(
-  {
+/** The strongbox with a second script, the safe, that a later action moves the position to. */
+const movingBox = presentation({
     ...strongboxTemplate,
     name: 'Moving strongbox',
     actions: {
@@ -85,15 +82,7 @@ const movingBox = presentation(
       safeLockingScript: { name: 'Safe', description: 'Opens for whoever spends the box\'s key.', lockingType: 'p2sh', lockingBytecode: 'safeBytecode', unlockingBytecode: 'unlockBox', state: { variables: ['boxKey'] }, roles: { holder: { balance: { satoshis: true }, selectable: false, actions: [] } } },
     },
     scripts: { ...strongboxTemplate.scripts, safeBytecode: '<"safe"> OP_DROP OP_UTXOTOKENCATEGORY <$(<boxKey> OP_REVERSEBYTES)> OP_EQUAL' },
-  },
-  {
-    authority: { boxKey: { ...strongboxDeclaration.authority.boxKey, actions: ['add', 'take', 'move'] } },
-    actions: {
-      ...strongboxDeclaration.actions,
-      move: { spends: 'boxKey', position: 'boxInput', outputs: { holder: 'receive' }, variables: { boxKey: 'token.category', label: 'token.commitment', keyInput: 'token.inputIndex', amount: 'position.valueSatoshis' } },
-    },
-  },
-);
+});
 
 const unreachable = (device: Device, value: boolean): void => {
   for (const store of device.stores.values()) store.unreachable = value;
@@ -198,7 +187,8 @@ describe('the check of a position record, and positions from records', () => {
     const [position] = await taken.applications.recordedPositions();
     expect(position).toMatchObject({ status: 'open', satoshis: 30_000n, coins: 1, standing: 'own', template: { identifier: strongbox.names.identifier, name: 'Strongbox' }, actions: ['take'], token: { category, commitment: '01', capability: 'none', place: 'address' } });
     // The wallet takes everything out by itself, with no application asked.
-    const outcome = await taken.applications.carryOut(taken.applications.actionOn({ category, template: position?.template }, 'take'));
+    // The key's input comes after the box's: the user gives its number, which the template asks for.
+    const outcome = await taken.applications.carryOut(taken.applications.actionOn(position as RecordedPosition, 'take', { keyInput: 1 }));
     expect(outcome.tokens).toEqual([expect.objectContaining({ category, commitment: '01' })]);
     expect(await taken.chain.listUnspent(boxAt(strongbox, category))).toEqual([]);
     expect(listed(await taken.applications.recordedPositions())).toEqual([{ status: 'closed', lockingBytecode: hex(boxAt(strongbox, category)), satoshis: 0n }]);
@@ -245,12 +235,11 @@ describe('the check of a position record, and positions from records', () => {
     expect(positions.map(({ status }) => status)).toEqual(['unconfirmed', 'unconfirmed']);
     expect(positions[0]?.reason).toMatch(/2 records count for this token and the scripts of more than one hold coins/);
 
-    const key = (await device.applications.tokens()).find((token) => token.category === category);
-    if (key === undefined) throw new Error('no key');
+    const key = positions.find((position) => position.lockingBytecode === hex(boxAt(strongbox, category))) as RecordedPosition;
     // Paying in: the wallet would give more than the fee.
     await refusedThere(device, device.applications.actionOn(key, 'add', { amount: 1_000 }));
     // Taking everything out: the wallet gives its key and the fee, and gets the key and the box's coins back.
-    const take = device.applications.actionOn(key, 'take');
+    const take = device.applications.actionOn(key, 'take', { keyInput: 1 });
     const preview = await device.applications.preview(take);
     expect(preview.notConfirmed).toMatch(/more than one hold coins/);
     expect(preview.figures.intoApplicationSatoshis).toBe(-30_000n);
@@ -264,9 +253,9 @@ describe('the check of a position record, and positions from records', () => {
     const opened = await device.applications.carryOut(request(movingBox, 'open', 'holder', { amount: 30_000, label: '01' }));
     const category = opened.tokens[0]?.category as string;
     expect(listed(await device.applications.recordedPositions())).toEqual([{ status: 'open', lockingBytecode: hex(boxAt(movingBox, category)), satoshis: 30_000n }]);
-    const key = (await device.applications.tokens()).find((token) => token.category === category);
-    if (key === undefined) throw new Error('no key');
-    const move = device.applications.actionOn(key, 'move');
+    const [box] = await device.applications.recordedPositions();
+    // The amount is the record's, the key's place the user's to give.
+    const move = device.applications.actionOn(box as RecordedPosition, 'move', { keyInput: 1 });
     expect((await device.applications.preview(move)).recordsPosition).toBe(true);
     await device.applications.carryOut(move);
     const [atBox, atSafe] = device.applications.positionRecords;
@@ -319,9 +308,9 @@ describe('the check of a position record, and positions from records', () => {
     const [key] = await taken.applications.tokens();
     expect(key).toMatchObject({ category, commitment: '01', meaning: 'unknown', place: 'address' });
     expect(await taken.applications.recordedPositions()).toEqual([]);
-    // The application asks: paying in is refused, taking everything out is carried out.
-    await refusedThere(taken, request(strongbox, 'add', 'holder', { amount: 5_000 }, { tokens: [category] }));
-    const outcome = await taken.applications.carryOut(request(strongbox, 'take', 'holder', {}, { tokens: [category] }));
+    // The application asks, naming the box's coin: paying in is refused, taking everything out is carried out.
+    await refusedThere(taken, request(strongbox, 'add', 'holder', { boxKey: category, amount: 5_000 }, { about: { category, spent: false } }));
+    const outcome = await taken.applications.carryOut(request(strongbox, 'take', 'holder', { label: '01', keyInput: 1 }, { about: { category, spent: true }, inputs: { boxInput: `${opened.transactionId}:0` } }));
     expect(outcome.tokens).toEqual([expect.objectContaining({ category, commitment: '01' })]);
     expect(await taken.chain.listUnspent(boxAt(strongbox, category))).toEqual([]);
     // The token can be sent, unchanged.

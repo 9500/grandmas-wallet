@@ -1,6 +1,6 @@
 import { binToHex, hexToBin } from '@bitauth/libauth';
 import type { ActionDetails, DappRequests, RecordedPositionReport, RequestStage, XoAdvertisement } from '@grandmas-wallet/connect';
-import { speaks } from '@grandmas-wallet/connect';
+import { XO_EXTENSION_VERSION } from '@grandmas-wallet/connect';
 import { unlockTimeBytes } from '@grandmas-wallet/savings-jar';
 
 import { type JarView, JAR_TEMPLATE, byDate, dateOnKey, jarLockingBytecode } from './jar.js';
@@ -65,7 +65,7 @@ export const STAGE_WORDS: Record<RequestStage, string> = {
  */
 export const xoProblem = (offered: XoAdvertisement, network: string): string | undefined => {
   if (offered.network !== network) return `Your wallet is on ${offered.network}; this page is on ${network}. Switch the wallet to ${network} and connect again.`;
-  if (!speaks(offered, 2)) return 'Your wallet answers only the earlier version of XO requests, whose templates came with a recovery declaration. This page sends its template alone. Update the wallet and connect again.';
+  if (offered.version !== XO_EXTENSION_VERSION) return 'Your wallet speaks another version of XO requests than this page. Update the wallet and connect again.';
   if (!offered.bindings.includes('receive')) return 'Your wallet does not give addresses for what an application sends it.';
   return undefined;
 };

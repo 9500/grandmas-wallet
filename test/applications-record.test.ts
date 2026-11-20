@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * Acceptance test AP15 of the proposal is a run on the local node through the XO engine
- * (`scripts/stage-7-run.ts`), which writes its own record. This test does not repeat the run: it reads the
+ * (`scripts/stage-7-run.ts` at the tag `design-2`), which writes its own record. This test does not repeat the run: it reads the
  * record and checks that it is of both templates, with every transaction named, built as an invitation of
  * the engine, and every fee exactly the size.
  */
