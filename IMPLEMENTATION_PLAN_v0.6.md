@@ -114,6 +114,8 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 
 **Tests:** PR19, PR20. **Done when** the runs' records are committed. **Push.**
 
+**State on 20 November 2026:** the template, the two pages and their packages are changed, and both courses ran on the local node through the engine without a browser (`docs/runs/stage-17-jar-local-node.md`, `docs/runs/stage-17-loan-local-node.md` on the branch `design-3`). Still open: the positions of the second design on chipnet, the courses in browsers, and the chipnet runs G and H.
+
 ## Stage 18 — For XO, and the documents
 
 - The notes for developer feedback are kept up to date in [docs/xo-feedback-notes.md](docs/xo-feedback-notes.md). The feedback itself is written by the owner.
