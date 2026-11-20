@@ -41,6 +41,7 @@ import {
 } from '@grandmas-wallet/core';
 
 import { TYPEABLE, actionShape, applicationInputs, offeredAt, paysTo, spendingInputs } from './action-shape.js';
+import { type ActionFinding, actionFinding, findingReason, templateFindings, thisWalletRefuses } from './findings.js';
 import { type ActionEntry, type ApplicationInput, type AuthorityEntry, type BindingKind, type ReadDeclaration, type RecoveryDeclaration, BINDING_KINDS, isCompanionPosition, readDeclaration } from './declaration.js';
 import type { ReservedAddress, Sent, TokenCoin, WalletParts } from './owner-wallet.js';
 import { type FoundPosition, type PositionStatus, type TokenOnChain, coinsAt, findPosition, valuesFrom } from './positions.js';
@@ -176,6 +177,8 @@ export interface ApplicationArchive {
     tokenNotes: { entry: TokenNoteEntry; standing: Standing }[];
     positions?: { entry: PositionRecordEntry; standing: Standing }[];
   }>;
+  /** Whether a store of the archive answers now. It says nothing about a later write, which is confirmed on its own. */
+  reachable?(): Promise<boolean>;
 }
 
 /** The archive in use of a recovery arrangement, for templates, token notes and position records. */
@@ -198,6 +201,12 @@ export const applicationArchive = (options: {
       const contents = await readArchive(hexToBin(archive.archiveId), hexToBin(archive.contentKey), archive.stores.map(options.storeAt));
       const assessment = assessArchive(contents, { network: options.seed.network, history: await readControllerHistory(options.chain, options.identity) });
       return { templates: assessment.templates, tokenNotes: assessment.tokenNotes, positions: assessment.positions };
+    },
+    reachable: async () => {
+      const current = options.arrangement();
+      if (current === undefined) return false;
+      const answers = await Promise.all(current.archive.stores.map((address) => options.storeAt(address).list(current.archive.archiveId).then(() => true, () => false)));
+      return answers.includes(true);
     },
   };
 };
@@ -222,6 +231,17 @@ const refuse = (message: string): never => {
   throw new ActionRefusedError(message);
 };
 
+/**
+ * The wallet refuses an action because of what it would leave behind (sections 12.3 and 12.5): something that would not
+ * come back after the phone is lost, or something of which the wallet cannot tell. Refused before the user is asked.
+ */
+export class FindingRefusalError extends ActionRefusedError {
+  constructor(readonly finding: ActionFinding) {
+    super(findingReason(finding));
+    this.name = 'FindingRefusalError';
+  }
+}
+
 /** What a template says about itself, and what the wallet can say about it. */
 export interface TemplateSummary extends TemplateNames {
   name: string;
@@ -240,6 +260,12 @@ export interface TemplateSummary extends TemplateNames {
    * Approving takes the presented one in its place, on the user's word, as for a template met for the first time.
    */
   replacesDeclaration?: boolean;
+  /**
+   * For a template that comes with no declaration: what each of its actions would leave behind (section 12.3), as the
+   * wallet names it when the template is shown (section 14.3). This wallet refuses the actions whose finding is not
+   * that they come back, and only those.
+   */
+  findings?: ActionFinding[];
 }
 
 export interface MovedOutput {
@@ -253,6 +279,11 @@ export type WalletOutputKind = BindingKind | 'left over' | 'token change';
 /** What an action comes to: the template's words, and the wallet's own figures from the transaction it worked out. */
 export interface ActionPreview {
   template: TemplateSummary;
+  /**
+   * For a template that comes with no declaration: what the action leaves behind (section 12.3), exposed so that
+   * another wallet could answer it otherwise. This wallet previews only actions whose finding it carries out.
+   */
+  finding?: ActionFinding;
   /** In the template's words. The application chose them. */
   words: {
     action: { name: string; description: string };
@@ -745,6 +776,7 @@ export class Applications {
       trusted: kept !== undefined,
       ...(kept?.cameBack === true ? { cameBack: true } : {}),
       ...(replaces === undefined ? {} : { replacesDeclaration: true }),
+      ...(declaration === undefined ? { findings: templateFindings(definition) } : {}),
     };
   }
 
@@ -881,6 +913,18 @@ export class Applications {
   }
 
   /**
+   * Whether a backup store answers now, for an action whose template or record has to be stored before it is signed
+   * (section 10.5). Where none does, this wallet does not offer the action for approval; where one does, the write is
+   * still confirmed on its own before anything is signed.
+   */
+  async backupAnswers(): Promise<boolean> {
+    const { archive } = this.options;
+    if (archive === undefined) return false;
+    if (archive.reachable === undefined) return true;
+    return archive.reachable().catch(() => false);
+  }
+
+  /**
    * Store a trusted template in the backup now, where a store can be reached, and not only before its first
    * action: a token that came from elsewhere may already depend on it.
    * @returns whether the backup holds it
@@ -960,8 +1004,20 @@ export class Applications {
    */
   private async plan(request: ApplicationAction, definingCoin?: AccountCoin): Promise<Plan> {
     const { template, declaration } = this.templateOf(request);
+    if (declaration === undefined) this.judge(template, request);
     const frame = declaration === undefined ? await this.frameAlone(request, template) : await this.frameDeclared(request, template, declaration.declaration);
     return this.complete(frame, request, definingCoin);
+  }
+
+  /**
+   * What the action would leave behind (section 12.3), for a template that comes with no declaration, and this wallet's
+   * answer to it (section 12.5): an action it refuses goes no further, and nothing of it is worked out, stored or signed.
+   * @throws FindingRefusalError where this wallet refuses
+   */
+  private judge(template: ReadTemplate, request: Pick<ApplicationAction, 'action' | 'role'>): ActionFinding | undefined {
+    const finding = actionFinding(template.definition, request.action, request.role);
+    if (finding !== undefined && thisWalletRefuses(finding)) throw new FindingRefusalError(finding);
+    return finding;
   }
 
   /** The first half of working an action out, for a template that comes with a recovery declaration (the second design). */
@@ -1818,8 +1874,10 @@ export class Applications {
     const tokensNet = [...new Set([...walletFungibleIn.keys(), ...walletFungibleOut.keys()])].map((category) => ({ category, amount: (walletFungibleOut.get(category) ?? 0n) - (walletFungibleIn.get(category) ?? 0n) })).filter(({ amount }) => amount !== 0n);
     const records = await this.recordsOf(plan, request);
     const notConfirmed = await this.onlyTakingOut(plan, request);
+    const finding = declaration === undefined ? actionFinding(definition, request.action, request.role) : undefined;
     return {
       template: summary,
+      ...(finding === undefined ? {} : { finding }),
       words: {
         action: { name: action?.name ?? request.action, description: action?.description ?? '' },
         outcome: templateWords(definition, transaction?.description, plan.values),
@@ -2430,7 +2488,7 @@ export class Applications {
    * the script offers the record's role, for a template that comes with no declaration. Each says what the user
    * is asked to type, or, where the action needs a coin or a value that only the application gives, that it is
    * done through the application, with the page the record names. An action that spends the position is not
-   * offered once it is closed.
+   * offered once it is closed, and one that only pays into it is not offered while it is not confirmed.
    */
   offeredActions(position: Pick<RecordedPosition, 'template' | 'record' | 'status'>): TokenAction[] {
     const kept = this.state.templates.find((template) => template.identifier === position.template.identifier);
@@ -2447,6 +2505,8 @@ export class Applications {
       const positionInputs = spendingInputs(definition, shape, script);
       const spendsPosition = positionInputs.length > 0;
       if (spendsPosition && position.status === 'closed') return [];
+      // At a position that is not confirmed, money can be taken out and none is paid in (section 10.4).
+      if (!spendsPosition && position.status === 'unconfirmed' && paysTo(definition, shape, script)) return [];
       const touches = spendsPosition || paysTo(definition, shape, script);
       const asks: NonNullable<TokenAction['asks']> = [];
       const missing: string[] = [];

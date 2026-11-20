@@ -17,6 +17,7 @@ export * from './declaration.js';
 export * from './positions.js';
 export * from './template-check.js';
 export * from './applications.js';
+export * from './findings.js';
 export * from './position-records.js';
 export * from './application-session.js';
 export * from './token-names.js';

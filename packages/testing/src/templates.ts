@@ -413,5 +413,77 @@ export const cloakroomTemplate = {
   },
 } as const;
 
+/*
+ * Templates for the findings of section 12.3 (stage 15), with no declaration:
+ *
+ * - **Keyed pool**: a pool opened by a key the engine makes for the wallet under the template, as a liquidity pool that
+ *   is opened by a key hash is. Opening one puts coins at a script that takes a key of the device; trading with it pays
+ *   someone and leaves nothing behind.
+ * - **Box with a rule**: the keyed strongbox, whose box the wallet follows by a rule the template gives as an
+ *   expression, which the engine does not evaluate yet. Putting coins in puts them where the wallet cannot tell
+ *   whether it would follow them; taking everything out leaves nothing behind.
+ */
+
+/** A pool that a key of the device opens: what is in it can be spent with that key alone. */
+export const keyedPoolTemplate = {
+  $schema: SCHEMA,
+  ...view('Keyed pool', 'Coins in a pool that the key of the device that opened it unlocks. Anyone can trade with it.'),
+  version: '1',
+  supported: ['BCH_2026_05'],
+  roles: { provider: view('Provider', 'Opens a pool, and trades.') },
+  start: [
+    { action: 'open', role: 'provider', generate: ['poolKey'] },
+    { action: 'trade', role: 'provider' },
+  ],
+  actions: {
+    open: {
+      ...view('Open a pool', 'Put coins in a pool that this device\'s key unlocks.'),
+      roles: { provider: { generate: ['poolKey'], requirements: { variables: ['amount'], secrets: ['poolKey'] } } },
+      requirements: { participants: [one('provider')] },
+      transaction: 'openTransaction',
+    },
+    trade: action('Trade', 'Pay for a trade. Nothing stays in a pool.', 'provider', ['amount', 'payee'], 'tradeTransaction'),
+  },
+  transactions: {
+    openTransaction: { ...view('Pool opened', 'A pool was opened with $(<amount>) satoshis.'), inputs: [], outputs: [{ output: 'poolOutput' }], version: 2, locktime: 0 },
+    tradeTransaction: { ...view('Traded', '$(<amount>) satoshis were paid for a trade.'), inputs: [], outputs: [{ output: 'paymentOutput' }], version: 2, locktime: 0 },
+  },
+  inputs: {},
+  outputs: {
+    poolOutput: { ...view('Pool', '$(<amount>) satoshis in the pool.'), lockingScript: 'poolLockingScript', valueSatoshis: '$(<amount>)' },
+    paymentOutput: { ...view('Payment', '$(<amount>) satoshis for the trade.'), lockingScript: '$(<payee>)', valueSatoshis: '$(<amount>)' },
+  },
+  lockingScripts: {
+    poolLockingScript: {
+      ...view('Pool', 'Unlocked by the key of the device that opened it.'),
+      lockingType: 'p2sh',
+      lockingBytecode: 'poolBytecode',
+      unlockingBytecode: 'unlockPool',
+      roles: { provider: { state: { secrets: ['poolKey'] }, balance: { satoshis: true }, selectable: false, actions: [] } },
+    },
+  },
+  scripts: {
+    poolBytecode: 'OP_DUP OP_HASH160 <$(<poolKey.public_key> OP_HASH160)> OP_EQUALVERIFY OP_CHECKSIG',
+    unlockPool: '<poolKey.schnorr_signature.all_outputs> <poolKey.public_key>',
+  },
+  variables: {
+    poolKey: { ...view('Pool key', 'The key that unlocks the pool.'), type: 'private_key' },
+    amount: { ...view('Amount', 'Satoshis.'), type: 'satoshis' },
+    payee: { ...view('Payee', 'Who is paid for a trade.'), type: 'locking_script' },
+  },
+} as const;
+
+/** The keyed strongbox, whose box the wallet follows by a rule given as an expression. */
+export const ruledBoxTemplate = {
+  ...keyedStrongboxTemplate,
+  ...view('Box with a rule', 'Coins kept in a box. Whoever holds the box\'s key token can take them out. Whether a wallet follows a box depends on what it holds.'),
+  lockingScripts: {
+    boxLockingScript: {
+      ...keyedStrongboxTemplate.lockingScripts.boxLockingScript,
+      roles: { holder: { ...keyedStrongboxTemplate.lockingScripts.boxLockingScript.roles.holder, relevant: '$(<amount> 10000 OP_GREATERTHAN)' } },
+    },
+  },
+} as const;
+
 /** A template as an application would send it: its text. */
 export const templateText = (template: unknown): string => JSON.stringify(template);

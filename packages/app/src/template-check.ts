@@ -278,8 +278,10 @@ const nameViolations = (template: XOTemplate, declaration: RecoveryDeclaration):
  */
 export const checkTemplate = (template: ReadTemplate, declaration: ReadDeclaration | undefined, evidence: { positionFound?: boolean } = {}): Verdict => {
   const violations: Violation[] = [];
-  // Rule 1: authority is a token. A key of the user's in an application's script cannot be replaced.
-  const keys = templateKeys(template.definition);
+  // Rule 1: authority is a token. A key of the user's in an application's script cannot be replaced. A template that
+  // comes with no declaration is judged action by action instead (section 12.3): what an action would put at a script
+  // that takes a key of the device is refused then, and the rest of the template is used (`findings.ts`).
+  const keys = declaration === undefined ? [] : templateKeys(template.definition);
   if (keys.length > 0) {
     violations.push({
       rule: 1,
@@ -290,7 +292,10 @@ export const checkTemplate = (template: ReadTemplate, declaration: ReadDeclarati
   if (declaration !== undefined) violations.push(...violationsOf(template.definition, declaration.declaration), ...nameViolations(template.definition, declaration.declaration));
   if (violations.length > 0) return { statement: 'violation', violations };
   if (declaration === undefined) {
-    return { statement: 'not verified', reasons: ['The template comes without a recovery declaration, so this wallet cannot tell how a token of it would lead to what the token controls.'] };
+    return {
+      statement: 'not verified',
+      reasons: ['This wallet works out what each of its actions would leave behind, and keeps a record of each position it makes.', 'Whether its contracts give authority to the token and to nothing else, a wallet cannot check.'],
+    };
   }
   if (evidence.positionFound !== true) {
     return {
