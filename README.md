@@ -6,7 +6,7 @@ Built for BCH Blaze 2026 on the XO stack.
 
 **Status:** a working demonstration on chipnet, the Bitcoin Cash test network. The wallet, the recoverer's page, two applications and the backup stores are built and have run through their whole course on chipnet, in scripts and in browsers. Nothing has been audited, the pages keep their keys unencrypted in the browser, and a phone watches for recovery requests only while the page is open. Use it with test coins only.
 
-This is the second design of the wallet (design 2), and `main` holds it. The first design, with its web demonstration and chipnet runs, is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1). The first design spent every coin together with the wallet's controller, which linked all of a wallet's activity and got in the way of applications; the second gives each address its own key and uses the controller only for recovery.
+`main` holds the second design of the wallet (design 2) as it was built and run, and the third design (design 3) starts from here. Nothing of design 3 is built yet. [Designs](#designs) says what each design is and why the third was started.
 
 ## Try it
 
@@ -28,6 +28,19 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 - **Applications arrive as templates.** The wallet's code names no application. It carries out a template's actions, shows its own figures before anything is signed, stores the template in the backup, and after a recovery finds what the owner holds in an application from the template and the chain alone.
 - **ParyonUSD as an XO template.** [A template](packages/paryon/frozen/paryon-loan-v1-chipnet-fast-periods-6.json) for Paryon's public loan contracts, used unchanged: making a loan key, borrowing, managing and closing are actions of it.
 - **Invitations.** [docs/xo-invitations.md](docs/xo-invitations.md) lists the invitations of three complete runs on chipnet, shows how to open one in XO's debug tool, and says how to produce them again. In the wallet and on the recoverer's page, developer mode saves the invitation of any transaction that browser sent.
+
+## Designs
+
+- **Design 1** is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1), with its web demonstration and chipnet runs. It spent every coin together with the wallet's controller, which linked all of a wallet's activity and got in the way of applications.
+- **Design 2** is at the tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2), and is what the pages under "Try it" run. It gives each address its own key and uses the controller only for recovery. After a recovery, the new phone finds what the owner holds in an application from the application's token, its template and the chain alone.
+- **Design 3** starts from design 2 and keeps its keys, addresses and controller. It changes how an application's position comes back after a recovery. Its architecture proposal is still to be written; until then the documents below describe design 2.
+
+### Why a third design
+
+- **The chain does not hold everything.** Design 2 finds a position again only when the values its script was made with are on chain, as they are for the Savings Jar and the ParyonUSD loan. It refuses the template of an application that keeps such values elsewhere, so the wallet cannot be used with that application at all.
+- **Such values have to be carried from the old phone to the new one.** XO's authors, asked about [the proposal for finding positions](docs/xo-position-recovery.md), pointed to state synchronisation for this. XO's own synchronisation is not implemented yet.
+- **The wallet already has a way to carry them.** Its backup is sealed, and the recoverer hands the new phone the access to it. In design 3 the wallet stores there, before an action is signed, what the XO engine keeps for each script of an application it follows. The new phone reads these records and follows the scripts again. The recoverer's part does not change, and it needs to know nothing about any application.
+- **The chain stays in use.** A record is checked against the chain, and a position that has no record, such as one whose token came from someone else, is still found from the chain. The records keep the engine's own fields, so that XO's synchronisation can take the store's place when it exists.
 
 ## What is where
 
