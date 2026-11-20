@@ -421,3 +421,51 @@ describe('an application from its template alone, after a recovery', () => {
     expect(await taken.chain.listUnspent(boxAt(keyedBox, key))).toEqual([]);
   }, 60_000);
 });
+
+describe('a token category an action carries on, and one it makes', () => {
+  /** A contract every holder shares, with a minting token, that gives out a badge of its own category. */
+  const mint = presentation({
+    $schema: 'https://libauth.org/schemas/wallet-template-v0.schema.json',
+    name: 'Mint',
+    description: 'A badge from a shared mint.',
+    version: '1',
+    supported: ['BCH_2026_05'],
+    roles: { holder: { name: 'Holder', description: 'Holds a badge.' } },
+    start: [{ action: 'draw', role: 'holder' }],
+    actions: {
+      draw: { name: 'Draw a badge', description: 'Get a badge from the mint.', roles: { holder: { requirements: { variables: ['badge', 'holder'] } } }, requirements: { participants: [{ role: 'holder', slots: { min: 1, max: 1 } }] }, transaction: 'drawTransaction' },
+    },
+    transactions: { drawTransaction: { name: 'Drawn', description: 'A badge was drawn.', inputs: [{ input: 'mintInput' }], outputs: [{ output: 'mintOutput' }, { output: 'badgeOutput' }], version: 2, locktime: 0 } },
+    inputs: { mintInput: { name: 'Mint', description: 'The shared mint.', unlockingScript: 'unlockMint' } },
+    outputs: {
+      mintOutput: { name: 'Mint', description: 'Put back.', lockingScript: 'mintLockingScript', valueSatoshis: '1000', token: { category: '$(<badge>)', amount: null, nft: { capability: 'minting', commitment: '' } } },
+      badgeOutput: { name: 'Badge', description: 'Yours.', lockingScript: '$(<holder>)', valueSatoshis: '1000', token: { category: '$(<badge>)', amount: null, nft: { capability: 'none', commitment: '01' } } },
+    },
+    lockingScripts: { mintLockingScript: { name: 'Mint', description: 'Shared.', lockingType: 'p2sh', lockingBytecode: 'mintBytecode', unlockingBytecode: 'unlockMint', roles: { holder: { relevant: false, selectable: false } } } },
+    scripts: { mintBytecode: 'OP_DROP OP_1', unlockMint: '<0>' },
+    variables: {
+      badge: { name: 'Badge', description: 'The badge\'s category.', type: 'token_category' },
+      holder: { name: 'Holder', description: 'Where the badge goes.', type: 'locking_script' },
+    },
+  });
+
+  it('a category on a coin the request names is carried on, not made now; without such a coin the wallet makes it from its own coin', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    const MINT = 'f1'.repeat(32);
+    const mintAt = templateLockingBytecode(definitionOf(mint), 'mintLockingScript', {});
+    device.chain.adopt([{ transactionId: 'f0'.repeat(32), index: 0, output: { lockingBytecode: mintAt, valueSatoshis: 1000n, token: { category: hexToBin(MINT), amount: 0n, nft: { capability: 'minting', commitment: new Uint8Array() } } } }]);
+    // The output names `badge` as its category and no input of the template does: by that alone the wallet would make
+    // a new category. The request names the mint, which carries the category, and gives it.
+    const draw = request(mint, 'draw', 'holder', { badge: MINT }, { inputs: { mintInput: `${'f0'.repeat(32)}:0` } });
+    const preview = await device.applications.preview(draw);
+    expect(preview.tokensLeaving).toBeUndefined();
+    const drawn = await device.applications.carryOut(draw);
+    expect(drawn.tokens).toEqual([expect.objectContaining({ category: MINT, commitment: '01' })]);
+    expect(hex((await transactionOf(device, drawn.transactionId)).inputs[0]?.outpointTransactionHash as Uint8Array)).toBe('f0'.repeat(32));
+    // With the request giving no category, the wallet makes one from its own coin, at input 0, and the minting token
+    // that goes to the mint is one made from the wallet's coin: the user's tick.
+    const made = request(mint, 'draw', 'holder', {}, { inputs: { mintInput: `${drawn.transactionId}:0` } });
+    const making = await device.applications.preview(made);
+    expect(making.tokensLeaving).toEqual([{ token: expect.objectContaining({ capability: 'minting' }) as object, how: 'leaves', made: true, to: 'Mint' }]);
+  });
+});

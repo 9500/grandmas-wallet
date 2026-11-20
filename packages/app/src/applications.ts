@@ -1489,8 +1489,14 @@ export class Applications {
     const bound: [string, BindingKind][] = [];
     const missing: string[] = [];
     const supplied = (variable: string): string | number | undefined => request.variables[variable];
-    // A category the request gives as that of the wallet's own token is not made now: a category is made only once.
-    const creating = shape.creating.filter((variable) => !(category !== undefined && String(supplied(variable) ?? '') === category));
+    // A category is made only once. One that the request gives as that of the wallet's own token, or of a token on a
+    // coin the request names, is not made now: the action carries it on, as a contract that mints from its own coin does.
+    const existing = new Set(category === undefined ? [] : [category]);
+    for (const outpoint of Object.values(request.inputs ?? {})) {
+      const token = (await this.namedOutput(outpoint))?.token;
+      if (token !== undefined) existing.add(hex(token.category));
+    }
+    const creating = shape.creating.filter((variable) => !existing.has(String(supplied(variable) ?? '')));
     let creates: string | undefined;
     for (const variable of shape.required) {
       const type = variableType(definition, variable) ?? '';
@@ -1641,6 +1647,15 @@ export class Applications {
     };
   }
 
+  /** The output a request names as `<transaction id>:<output index>`, as the chain has it; `undefined` where there is none. */
+  private async namedOutput(outpoint: string): Promise<Output | undefined> {
+    const [transactionId = '', index = ''] = outpoint.split(':');
+    if (!/^[0-9a-f]{64}$/.test(transactionId) || !/^\d{1,5}$/.test(index)) return undefined;
+    const text = await this.wallet.chain.getTransaction(transactionId);
+    const transaction = text === undefined ? undefined : decodeTransactionBch(hexToBin(text));
+    return transaction === undefined || typeof transaction === 'string' ? undefined : transaction.outputs[Number(index)];
+  }
+
   /**
    * A coin of the application's that a request names by outpoint, for a template that comes with no declaration.
    * The wallet reads it from the chain and does not take the request's word for what it holds. Which of the
@@ -1652,9 +1667,7 @@ export class Applications {
     const name = definition.inputs?.[input]?.name ?? input;
     const [transactionId = '', index = ''] = outpoint.split(':');
     if (!/^[0-9a-f]{64}$/.test(transactionId) || !/^\d{1,5}$/.test(index)) return refuse(`The request names the coin for "${name}" in a form this wallet does not read.`);
-    const text = await this.wallet.chain.getTransaction(transactionId);
-    const transaction = text === undefined ? undefined : decodeTransactionBch(hexToBin(text));
-    const output = transaction === undefined || typeof transaction === 'string' ? undefined : transaction.outputs[Number(index)];
+    const output = await this.namedOutput(outpoint);
     if (output === undefined) return refuse(`The coin the request names for "${name}" is not on chain.`);
     const unlocking = (definition.inputs?.[input] as { unlockingScript?: string } | undefined)?.unlockingScript;
     const scripts = Object.entries(definition.lockingScripts ?? {})
