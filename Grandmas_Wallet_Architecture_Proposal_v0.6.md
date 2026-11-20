@@ -36,7 +36,7 @@ What this version gives up, against version 0.4:
 
 - **Finding a position for a token that came from someone else.** There is no record for it. The token is held and can be sent.
 - **Operating a ParyonUSD loan with its page not opened.** The wallet no longer knows how to read Paryon's coins. The Savings Jar can still be emptied by the wallet alone.
-- **Names and decimals of fungible tokens from a template's declaration** (section 22).
+- **Names and decimals of fungible tokens from a template's declaration,** until the wallet reads a token registry (section 22).
 
 ## 1. Purpose and central design
 
@@ -1087,7 +1087,7 @@ Version 0.4 proposed a property in XO's schema for this, and until then a declar
 
 - **An NFT that a record ties to a position** is named after the template and the output that made it: "Jar key, Savings Jar". The name is the template's claim, shown only for a template the user trusts.
 - **A fungible token** is shown by its category, in raw units. A typed amount is in raw units too.
-- Where a name would come from in future (a field of XO's templates, or a registry such as BCMR, with what each tells a server about the wallet) is open (section 22).
+- Names and decimals are to come from a token registry (BCMR) once the wallet reads one (section 22). What a registry lookup tells a server about the wallet has to be settled then.
 
 **What becomes of the recovery declaration.** It is retired. The wallet of this version reads none, announces no profile for one (section 14.2), and stores none. The second design, with its declarations and the code that reads them, is at the tag `design-2`. [docs/xo-position-recovery.md](docs/xo-position-recovery.md), which proposed the declaration to XO's authors on 20 November 2026, stands as the record of that approach; what it asked of XO is no longer asked (section 13.6).
 
@@ -1798,7 +1798,7 @@ Each has a proposed answer, which implementation follows unless the owner says o
 | 7 | **Fees.** The rate; how the owner pays for a cancellation; how the recoverer pays for its own | One satoshi per byte; from the wallet's coins like a payment, with no coin kept apart. Decided by the owner on 18 November 2026: the recoverer pays its own, from its one balance, in the same transaction that spends the controller; nothing is kept apart for a wallet, and the owner's allowance is dropped. Amounts from measured sizes |
 | 20 | **The starting balance and the waiting period of a recoverer's new wallets** | The recoverer's own settings. The page proposes 10,000 satoshis and about a day; the least starting balance is what a cancellation costs |
 | 8 | **Messages with the recoverer:** enrollment, takeover, update, hand-over and receipts, and how the recoverer establishes who the user is | As in sections 9 and 11; the last is the recoverer's own process |
-| 9 | **Backup:** record formats; whether refusing an action without a stored template stays the default; no commitment on chain | Refusing stays the default. Decided by the owner on 20 November 2026: position records are kept on the backup stores, not written to the chain. A store has to confirm before signing every action that leaves a position. The owner first agreed to a narrower rule, a store only where the chain could not give the position back; without a declaration the wallet has no way to read a position from the chain, so the narrower rule has nothing left to rest on. **To be confirmed by the owner** |
+| 9 | **Backup:** record formats; whether refusing an action without a stored template stays the default; no commitment on chain | Refusing stays the default. Decided by the owner on 20 November 2026: position records are kept on the backup stores, not written to the chain. A store has to confirm before signing every action that leaves a position. The owner first agreed to a narrower rule, a store only where the chain could not give the position back; without a declaration the wallet has no way to read a position from the chain, so the narrower rule has nothing left to rest on. The owner confirmed the wider rule on the same day |
 | 10 | **Template extension:** wallet-bound outputs and the recovery declaration in XO's schema or beside the template | Withdrawn. Decided by the owner on 20 November 2026: the declaration is retired, an application needs only its XO template, and nothing is asked of XO's schema (section 13.3) |
 | 11 | **`xo_v1`:** a WizardConnect extension or a protocol of XO's | This project's extension, in its version 2 (section 14.2), until XO says how an invitation is meant to travel between an application and a wallet |
 | 12 | **Division of work between the engine and the wallet's own code** | Settled: section 13.2 |
@@ -1813,12 +1813,12 @@ Each has a proposed answer, which implementation follows unless the owner says o
 | 22 | **The finding "cannot tell" in this wallet** | Treated like "does not come back" |
 | 23 | **The position record:** its fields; whether token notes go on being written | The engine's own field names, with the token, the other values of the action and the address of the application's page; token notes are read and no longer written |
 | 24 | **When a record counts:** the check of section 10.4, and what happens where an application makes several NFTs of one category | Decided by the owner on 20 November 2026: the chain has to tie the record to a token the wallet holds; otherwise it is shown as not confirmed and nothing is paid in. Where the NFT cannot be told apart, the record does not count |
-| 25 | **What the wallet calls a token** now that no declaration names one | An NFT by its template and output. Fungible tokens by category and in raw units, until a source is chosen: a field of XO's templates, or a registry. **Not yet put to the owner**; it makes sending a token such as PUSD harder to read than in the second design |
+| 25 | **What the wallet calls a token** now that no declaration names one | An NFT by its template and output. Decided by the owner on 20 November 2026: fungible tokens by category and in raw units for now, and names and decimals from a token registry (BCMR) once the wallet reads one. Until then sending a token such as PUSD is harder to read than in the second design |
 | 26 | **XO's synchronisation in place of this project's stores** | When it exists and offers the three things of section 13.6 |
 | 27 | **A position that the application names** for a token without a record: one that came from someone else, one whose record is lost, one that someone else's transaction moved | Not in this version. The check of section 10.4 would apply to what the application names |
 | 28 | **Other ways of getting a recoverer:** a recoverer outside XO; a token as the recoverer's authority; a recoverer who uses an ordinary wallet; a viewing secret with a log on chain in place of the kit | Decided by the owner on 20 November 2026: not in this version. Section 9.8 states the role, so that the first can be built without changing the wallet. The others are in `docs/idea-viewing-secret-and-chain-log.md` |
 | 29 | **Keeping the declaration as an optional extra,** so that the wallet could manage a ParyonUSD loan with the page not opened | Decided by the owner on 20 November 2026: no. The loan page carries that knowledge, and a page can be served by anyone (section 15.3) |
-| 30 | **A token of the wallet's that an action does not return** | Carried out with the user's tick, as when such a token is sent. Proposed here |
+| 30 | **A token of the wallet's that an action does not return** | Decided by the owner on 20 November 2026: carried out with the user's tick, as when such a token is sent |
 | 31 | **Acting without the application** | Decided by the owner on 20 November 2026: not required. The wallet does it where an action needs nothing that only the application knows |
 
 The first engineering checkpoint of this version is a trial on the local node: a Savings Jar opened by one seed from its template alone, and followed and emptied by another seed from the record, with no declaration anywhere (stage 11 of the plan). The first checkpoint of the second design was the two address contracts passing AD01–AD13, because those tests establish that the recoverer's key never gains spending power and state the cost of the earlier seed exactly.

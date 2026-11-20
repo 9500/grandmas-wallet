@@ -137,17 +137,17 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 
 | No. | Decision | Needed by | Default |
 | --- | --- | --- | --- |
-| 9 | Where position records are kept; when a store has to confirm | Stage 12; the second part to be confirmed by the owner | On the backup stores; before every action that leaves a position |
+| 9 | Where position records are kept; when a store has to confirm | Decided, 20 November 2026 | On the backup stores; before every action that leaves a position |
 | 10 | Template extension and recovery declaration | Decided, 20 November 2026 | Withdrawn; the declaration is retired |
 | 11 | `xo_v1` | Stage 14 | This project's extension, version 2 |
 | 21 | What a wallet does when something does not come back | Decided, 20 November 2026 | Left to whoever builds the wallet; this wallet refuses |
 | 22 | The finding "cannot tell" in this wallet | Stage 15 | Treated like "does not come back" |
 | 23 | The position record's fields; token notes | Stage 11, for stage 12 | The engine's field names, the token, the action's other values, the page's address; token notes read and no longer written |
 | 24 | When a record counts; several NFTs of one category | Decided in principle, 20 November 2026; the detail in stage 13 | The chain ties it to a token the wallet holds; a record that cannot be told apart does not count |
-| 25 | What the wallet calls a token | Stage 16; not yet put to the owner | An NFT by its template and output; fungible tokens by category and in raw units |
+| 25 | What the wallet calls a token | Decided, 20 November 2026 | An NFT by its template and output; fungible tokens by category and in raw units, and from a token registry (BCMR) later |
 | 26 | XO's synchronisation in place of the stores | XO's word | When it exists and offers the three things of section 13.6 |
 | 27 | A position that the application names for a token without a record | Not in this version | — |
 | 28 | Other ways of getting a recoverer | Decided, 20 November 2026 | Not in this version |
 | 29 | The declaration as an optional extra | Decided, 20 November 2026 | No |
-| 30 | A token of the wallet's that an action does not return | Stage 14 | Carried out with the user's tick |
+| 30 | A token of the wallet's that an action does not return | Decided, 20 November 2026 | Carried out with the user's tick |
 | 31 | Acting without the application | Decided, 20 November 2026 | Not required; done where nothing is missing |
