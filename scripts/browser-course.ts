@@ -23,16 +23,32 @@
 // and a recoverer's page whose code offers no session (an older public page, or one that reaches no relay)
 // is given the links in the same way. On the local node the pages' sessions go through a relay on this machine
 // (packages/connect/test/memory-relay.ts) that the run starts, and that the pages' configuration names.
+//
+// Two kinds of wait, and nothing else:
+// - `see`, `valueOf`, `click`, `pageShows`, `untilPage`: something on a page that follows from a click or from a message
+//   between pages. At most PAGE_WAIT (20 seconds), on chipnet too. When it does not come, the course stops at once
+//   with what it expected, at which step, and a picture and the visible text of every open page of every profile,
+//   saved in the run's folder, their paths in the error.
+// - `chainShows`, `untilChain`: something that waits on the chain or a server (a coin arriving, a block, the waiting
+//   period of a recovery, a page reading the chain after it opens). Each has a limit of its own (LIMIT), says in the
+//   log what it waits for and until when, and says once a minute that it still waits.
+// `--within <minutes>` bounds the whole run (6 on the local node, 30 on chipnet): when it passes, the wait under way
+// stops the course, which keeps its state and says in which step it was.
+//
+// Each run pays from a key of its own (scripts/run-key.ts), kept in its folder as run-key.json: one payment from the
+// funding address gives it what the run needs, and at the end of a whole run what it holds goes back. A stopped run's
+// coins go back with `npx tsx scripts/run-key.ts return <the run's folder>`.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
 import { controllerScript } from '@grandmas-wallet/core';
-import { type BrowserContext, type Page, chromium } from 'playwright';
+import { type BrowserContext, type Locator, type Page, chromium } from 'playwright';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
 import { type MemoryRelay, startMemoryRelay } from '../packages/connect/test/memory-relay.js';
+import { runKey, runKeyLocking } from './run-key.js';
 
 export const root = fileURLToPath(new URL('..', import.meta.url));
 export const chipnet = process.argv[2] === 'chipnet';
@@ -49,21 +65,20 @@ export const localPages = !chipnet || process.argv.includes('--local-pages');
 const configName = chipnet ? (localPages ? 'local' : 'production') : 'local-regtest';
 type App = 'wallet' | 'recoverer' | 'jar' | 'loan';
 /** The ports of a run's pages and stores on the local node; on chipnet with the pages of this checkout, those of deploy/config/local.json. */
-const portBase = chipnet ? 8100 : Number(argument('ports') ?? '8300');
+let portBase = chipnet ? 8100 : Number(argument('ports') ?? '8300');
 if (!Number.isInteger(portBase) || portBase < 1024 || portBase > 65_000) throw new Error(`--ports takes a port number to count from, such as 8300, not ${argument('ports')}`);
-const PORTS: Record<App, number> = { wallet: portBase + 1, recoverer: portBase + 2, jar: portBase + 3, loan: portBase + 4 };
-const STORE_PORTS = [portBase + 11, portBase + 12] as const;
+let PORTS: Record<App, number> = { wallet: portBase + 1, recoverer: portBase + 2, jar: portBase + 3, loan: portBase + 4 };
+let STORE_PORTS = [portBase + 11, portBase + 12] as const;
 const fromFile = JSON.parse(readFileSync(`${root}deploy/config/${configName}.json`, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl: string; loanUrl?: string; stores: string[]; network: string; relays?: string[]; chain: string[] };
-export const config = chipnet
-  ? fromFile
-  : {
-      ...fromFile,
-      walletUrl: `http://localhost:${PORTS.wallet}/`,
-      recovererUrl: `http://localhost:${PORTS.recoverer}/`,
-      jarUrl: `http://localhost:${PORTS.jar}/`,
-      loanUrl: `http://localhost:${PORTS.loan}/`,
-      stores: STORE_PORTS.map((port) => `http://localhost:${port}`),
-    };
+const localConfig = (): typeof fromFile => ({
+  ...fromFile,
+  walletUrl: `http://localhost:${PORTS.wallet}/`,
+  recovererUrl: `http://localhost:${PORTS.recoverer}/`,
+  jarUrl: `http://localhost:${PORTS.jar}/`,
+  loanUrl: `http://localhost:${PORTS.loan}/`,
+  stores: STORE_PORTS.map((port) => `http://localhost:${port}`),
+});
+export let config = chipnet ? fromFile : localConfig();
 /**
  * The file in docs/runs/ the record is written to: the course's own, or the one `--record` names. A name that
  * is not a plain file name ending in `.md` is refused, so that a record never lands outside docs/runs/.
@@ -73,16 +88,120 @@ export const recordFile = (own: string): string => {
   if (!/^[a-z0-9][a-z0-9.-]*\.md$/.test(named)) throw new Error(`--record takes a file name in docs/runs/, such as no-waits-browser-chipnet.md, not ${named}`);
   return `${root}docs/runs/${named}`;
 };
-export const WALLET = config.walletUrl;
-export const RECOVERER = config.recovererUrl;
-export const JAR = config.jarUrl;
-export const LOAN = config.loanUrl ?? `http://localhost:${PORTS.loan}/`;
-/** On chipnet a block takes about a minute and may take several: every wait is given ten times as long. */
+export let WALLET = config.walletUrl;
+export let RECOVERER = config.recovererUrl;
+export let JAR = config.jarUrl;
+export let LOAN = config.loanUrl ?? `http://localhost:${PORTS.loan}/`;
+/**
+ * A course's own ports on the local node when `--ports` does not name them, so that two courses can run at once.
+ * Called before anything is served.
+ */
+export const defaultPorts = (base: number): void => {
+  if (chipnet || argument('ports') !== undefined) return;
+  portBase = base;
+  PORTS = { wallet: portBase + 1, recoverer: portBase + 2, jar: portBase + 3, loan: portBase + 4 };
+  STORE_PORTS = [portBase + 11, portBase + 12] as const;
+  config = localConfig();
+  WALLET = config.walletUrl;
+  RECOVERER = config.recovererUrl;
+  JAR = config.jarUrl;
+  LOAN = config.loanUrl ?? `http://localhost:${PORTS.loan}/`;
+};
+/** Kept for the earlier scripts that multiply their own waits; the courses of stage 17 do not use it. */
 export const patience = chipnet ? 10 : 1;
+
+// ------------------------------------------------------------------ the two kinds of wait
+
+const MINUTE = 60_000;
+/** Something on a page that follows from a click or a message between pages: seconds when it works, on chipnet too. */
+export const PAGE_WAIT = 20_000;
+/** How long each wait on the chain or a server may take. */
+export const LIMIT = {
+  /** An unconfirmed coin reaching a page. */
+  coin: MINUTE,
+  /** A page reading the chain or the backup stores after it opens or after a transaction: tokens, records, loans, receipts. */
+  read: MINUTE,
+  /** A block: on the local node the run makes it; on chipnet one comes about every minute, sometimes after several. */
+  block: chipnet ? 15 * MINUTE : MINUTE,
+  /** The header check of a page's engine after opening an account. */
+  header: chipnet ? 3 * MINUTE : MINUTE,
+  /** The waiting period of a recovery, once a block holds the request: on chipnet the chain's clock passes 512 seconds. */
+  waitingPeriod: chipnet ? 25 * MINUTE : MINUTE,
+  /** The new phone finding the wallet's coins and sweeping them. */
+  sweep: chipnet ? 5 * MINUTE : 2 * MINUTE,
+};
+const minutes = (milliseconds: number): string => (milliseconds < MINUTE ? `${Math.round(milliseconds / 1000)} s` : `${(milliseconds / MINUTE).toFixed(milliseconds % MINUTE === 0 ? 0 : 1)} min`);
+const clockAt = (at: number): string => new Date(at).toISOString().slice(11, 19);
+
+/** The course under way, for the waits: its log, its pictures of every page, its step and its bound. */
+let active: { log: (line: string) => void; capture: (why: string) => Promise<string[]>; step: () => number; deadline: number; within: number } | undefined;
+
+/** An error of a wait whose pictures are taken already. */
+class Stopped extends Error {
+  captured = true;
+}
+/** The error a failed wait stops the course with: what it expected, the step, and the pictures and texts of every page. */
+const stopped = async (expected: string, cause?: unknown): Promise<Error> => {
+  if (cause instanceof Stopped) return cause;
+  const bound = active !== undefined && Date.now() >= active.deadline;
+  const why = bound ? `the run's bound of ${active?.within} minutes passed in step ${active?.step()} while waiting for ${expected}` : `step ${active?.step() ?? '?'}: ${expected}`;
+  const files = (await active?.capture(why).catch(() => [])) ?? [];
+  const detail = cause instanceof Error && !/Timeout \d+ms exceeded/.test(cause.message) ? ` (${cause.message.split('\n')[0]})` : '';
+  return new Stopped(`${why}${detail}. What every page showed: ${files.length === 0 ? '(no page open)' : files.join(', ')}`);
+};
+/** What is left of the run's bound, at most `limit`; a bound that has passed stops the course. */
+const bounded = async (limit: number, expected: string): Promise<number> => {
+  if (active === undefined) return limit;
+  const left = active.deadline - Date.now();
+  if (left <= 0) throw await stopped(expected);
+  return Math.min(limit, left);
+};
+
+/** Kind 1: something on a page that follows from a click or a message, within PAGE_WAIT. */
+export const pageShows = async (locator: Locator, expected: string, state: 'visible' | 'hidden' = 'visible'): Promise<void> => {
+  const timeout = await bounded(PAGE_WAIT, expected);
+  await locator.first().waitFor({ state, timeout }).catch(async (error: unknown) => {
+    throw await stopped(`${expected}, not ${state === 'visible' ? 'shown' : 'gone'} within ${minutes(timeout)}`, error);
+  });
+};
+/** Kind 1, for a condition that is not one element: true within PAGE_WAIT. */
+export const untilPage = async (check: () => Promise<boolean>, expected: string): Promise<void> => {
+  const timeout = await bounded(PAGE_WAIT, expected);
+  const end = Date.now() + timeout;
+  while (!(await check().catch(() => false))) {
+    if (Date.now() > end) throw await stopped(`${expected}, not within ${minutes(timeout)}`);
+    await wait(200);
+  }
+};
+/**
+ * Kind 2: something that waits on the chain or a server, within `limit`. The log says what is waited for and until
+ * when, and once a minute that it still waits.
+ */
+export const untilChain = async (what: string, limit: number, check: () => Promise<boolean>, every = 1_000): Promise<void> => {
+  if (await check().catch(() => false)) return;
+  const begun = Date.now();
+  const timeout = await bounded(limit, what);
+  const end = begun + timeout;
+  active?.log(`   waiting for ${what}: at most ${minutes(limit)}${timeout < limit ? ` (the run's bound leaves ${minutes(timeout)})` : ''}, until ${clockAt(end)} UTC`);
+  let said = begun;
+  while (!(await check().catch(() => false))) {
+    if (Date.now() > end) throw await stopped(`${what}, not within ${minutes(timeout)}`);
+    if (Date.now() - said >= MINUTE) {
+      said = Date.now();
+      active?.log(`   still waiting for ${what}: ${minutes(Math.round((said - begun) / 1000) * 1000)} of at most ${minutes(timeout)}`);
+    }
+    await wait(every);
+  }
+  if (Date.now() - begun >= 3_000) active?.log(`   ${what}: after ${Math.round((Date.now() - begun) / 1000)} s`);
+};
+/** Kind 2 for an element: shown once the page has read the chain or a server, within `limit`. */
+export const chainShows = (locator: Locator, what: string, limit: number): Promise<void> => untilChain(what, limit, () => locator.first().isVisible());
 export const PHONE = { width: 390, height: 844 };
 export const DESKTOP = { width: 1280, height: 800 };
 const screens = `${root}docs/screens/`;
 
+const flatText = (text: string): string => text.replace(/\s+/g, ' ').trim();
+/** A pause, for scripts/browser-run.ts; the courses of stage 17 wait for what they expect instead. */
 export const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 export interface Device {
@@ -99,12 +218,18 @@ const EXTRA: Partial<Record<App, string[]>> = { loan: ['--connect', 'https://ora
  * @param directory - under `.local-runs/` on the local node, or `.chipnet/` with `-chipnet` added on chipnet: the profiles, the stores' data and the log
  * @param continuing - the log goes on from the lines a stopped run left
  * @param until - the last step to carry out
+ * @param ports - on the local node, the course's own first port when `--ports` names none
+ * @param need - what the run's key is given at the start, in satoshis
  */
-export const course = (options: { directory: string; continuing: boolean; until: number }) => {
+export const course = (options: { directory: string; continuing: boolean; until: number; ports?: number; need?: number }) => {
+  defaultPorts(options.ports ?? 8300);
   const directory = argument('directory') ?? options.directory;
   if (!/^[a-z0-9][a-z0-9-]*$/.test(directory)) throw new Error(`--directory takes a plain name, made a directory of the run's own, not ${directory}`);
   const work = chipnet ? `${root}.chipnet/${directory}-chipnet/` : `${root}.local-runs/${directory}/`;
   const started = Date.now();
+  const within = Number(argument('within') ?? (chipnet ? '30' : '6'));
+  if (!(within > 0)) throw new Error(`--within takes the run's bound in minutes, such as 6, not ${argument('within')}`);
+  const deadline = started + within * MINUTE;
 
   // ------------------------------------------------------------------ the log
 
@@ -120,22 +245,52 @@ export const course = (options: { directory: string; continuing: boolean; until:
     console.log(entry);
   };
   const log = (line: string): void => note(`${elapsed()}  ${line}`);
+  log(`the run's bound: ${within} minutes, until ${clockAt(deadline)} UTC (--within)`);
 
   // ------------------------------------------------------------------ the chain and the servers
 
   const run = (file: string, args: string[]): string => execFileSync(file, args, { cwd: root, encoding: 'utf8' }).trim();
-  const pay = (address: string, satoshis: number): string => run('npx', ['tsx', chipnet ? 'scripts/chipnet-pay.ts' : 'scripts/local-pay.ts', address, String(satoshis)]);
+  /** The run's own key, which pays everything the run pays (scripts/run-key.ts). */
+  const keyFile = `${work}run-key.json`;
+  const network = chipnet ? 'chipnet' : 'regtest';
+  /** At the start: the run's key is made and given what the run needs, in one payment from the funding address. Not again for a key that holds enough. */
+  const fundRunKey = (satoshis = options.need ?? 500_000): void => {
+    // A run from its first step gets a fresh key: one an earlier run left sends what it holds back first, and is kept aside.
+    if (!options.continuing && existsSync(keyFile)) {
+      log(`an earlier run's key: ${run('npx', ['tsx', 'scripts/run-key.ts', 'return', keyFile])}`);
+      renameSync(keyFile, `${work}run-key-${Date.now()}.json`);
+    }
+    if (existsSync(keyFile)) {
+      const holds = BigInt(/^(\d+) satoshis/.exec(run('npx', ['tsx', 'scripts/run-key.ts', 'balance', keyFile]))?.[1] ?? '0');
+      if (holds >= BigInt(satoshis)) {
+        log(`the run's key ${runKey(keyFile, network).address} holds ${holds} satoshis already (${work.slice(root.length)}run-key.json)`);
+        return;
+      }
+    }
+    log(`${run('npx', ['tsx', 'scripts/run-key.ts', 'fund', keyFile, String(satoshis), network])}; the key is kept in ${work.slice(root.length)}run-key.json`);
+  };
+  const pay = (address: string, satoshis: number): string => {
+    if (!existsSync(keyFile)) fundRunKey();
+    return run('npx', ['tsx', 'scripts/run-key.ts', 'pay', keyFile, address, String(satoshis)]);
+  };
+  /** What the run's key holds, in satoshis. */
+  const keyBalance = (): bigint => BigInt(/^(\d+) satoshis/.exec(run('npx', ['tsx', 'scripts/run-key.ts', 'balance', keyFile]))?.[1] ?? '0');
+  /** At the end of a whole run: what the run's key holds goes back to the funding address. */
+  const returnCoins = (): void => {
+    if (existsSync(keyFile)) log(run('npx', ['tsx', 'scripts/run-key.ts', 'return', keyFile]));
+  };
   /** On the local node the run makes the blocks; on chipnet they come by themselves. */
   const mine = (blocks = 1): void => {
     if (!chipnet) run('npx', ['tsx', 'scripts/local-pay.ts', 'mine', String(blocks)]);
   };
   /** On the local node the run moves the chain's clock; on chipnet the waiting period takes its time. */
   const passTime = (seconds: number): string => (chipnet ? 'the waiting period takes its real time' : run('npx', ['tsx', 'scripts/local-pay.ts', 'time', String(seconds)]));
-  /** An address outside every wallet of the run, to pay to: on chipnet the one the coins came from. */
+  /** An address outside every wallet of the run, to pay to: the funding address the coins came from (on the local node, the local payer's). */
   let outside: string | undefined;
   const elsewhere = (): string => {
     if (outside !== undefined) return outside;
-    if (chipnet) outside = run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'address']);
+    if (existsSync(keyFile)) outside = runKey(keyFile, network).funding;
+    else if (chipnet) outside = run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'address']);
     else {
       const made = lockingBytecodeToCashAddress({ prefix: 'bchtest', bytecode: hexToBin(`76a914${'11'.repeat(20)}88ac`) });
       outside = typeof made === 'string' ? made : made.address;
@@ -322,6 +477,9 @@ export const course = (options: { directory: string; continuing: boolean; until:
     const directory = `${work}profiles/${name}`;
     if (fresh) rmSync(directory, { recursive: true, force: true });
     const context = await chromium.launchPersistentContext(directory, { headless: !headed, viewport: PHONE, deviceScaleFactor: 1 });
+    // An action on a page (a click, a fill, a reading) that cannot be done within the wait of a page stops the course.
+    context.setDefaultTimeout(PAGE_WAIT);
+    context.setDefaultNavigationTimeout(PAGE_WAIT);
     const page = context.pages()[0] ?? (await context.newPage());
     watchPage(name, page);
     const made = { name, context, page };
@@ -410,7 +568,8 @@ export const course = (options: { directory: string; continuing: boolean; until:
     mkdirSync(screens, { recursive: true });
     for (const [label, size] of [['phone', PHONE], ['desktop', DESKTOP]] as const) {
       await page.setViewportSize(size);
-      await wait(400);
+      // The page laid out at its new size: two frames drawn.
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       // In a full-page picture the bar fixed at the bottom of a phone's screen would sit across the middle.
       // It is put at the end of the page for the picture.
       const phone = label === 'phone';
@@ -451,16 +610,43 @@ export const course = (options: { directory: string; continuing: boolean; until:
     return true;
   };
 
-  /** After the last step, or a failure: a picture of every device that is still open, then everything is closed. */
-  const failed = async (error: unknown): Promise<void> => {
-    log(`FAILED at step ${state.step}: ${(error as Error).message.split('\n')[0]}`);
+  /**
+   * A picture and the visible text of every open page of every profile, in the run's folder, named by the step and
+   * the profile; returns their paths. `why` heads each text file.
+   */
+  const capture = async (why: string): Promise<string[]> => {
+    const files: string[] = [];
     for (const gone of devices) {
       for (const [index, page] of gone.context.pages().entries()) {
-        const name = `failure-${gone.name}${index === 0 ? '' : `-${index + 1}`}`;
-        await page.screenshot({ path: `${work}${name}.png`, fullPage: true }).catch(() => undefined);
-        // What the page said when the run stopped, beside its picture.
-        const said = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '');
-        writeFileSync(`${work}${name}.txt`, `${page.url()}\n\n${said}\n`);
+        const name = `stopped-step-${state.step}-${gone.name}${index === 0 ? '' : `-tab-${index + 1}`}`;
+        await page.screenshot({ path: `${work}${name}.png`, fullPage: true, timeout: 5_000 }).then(
+          () => files.push(`${work}${name}.png`),
+          () => undefined,
+        );
+        const said = await page.locator('body').innerText({ timeout: 3_000 }).catch(() => '(the text could not be read)');
+        writeFileSync(`${work}${name}.txt`, `${why}\n\n${page.url()}\n\n${said}\n`);
+        files.push(`${work}${name}.txt`);
+      }
+    }
+    return files;
+  };
+  active = { log, capture, step: () => state.step, deadline, within };
+  /** After a failure: a picture and the text of every page that is still open, unless the failed wait took them. */
+  const failed = async (error: unknown): Promise<void> => {
+    log(`FAILED at step ${state.step}: ${(error as Error).message.split('\n')[0]}`);
+    if (error instanceof Stopped) return;
+    const files = await capture(`FAILED at step ${state.step}: ${(error as Error).message.split('\n')[0]}`);
+    log(`   what every page showed: ${files.join(', ')}`);
+  };
+  /**
+   * A run that continues: what every page of every profile shows, said in the log before anything is done, and what
+   * a stopped part can leave on the wallet's Applications screen cleared (see `clearLeftovers`).
+   */
+  const lookAround = async (): Promise<void> => {
+    for (const gone of devices) {
+      for (const page of gone.context.pages()) {
+        const said = flatText(await page.locator('body').innerText({ timeout: 3_000 }).catch(() => ''));
+        log(`   continuing: the ${gone.name}'s page ${page.url()} shows: "${said.slice(0, 300)}${said.length > 300 ? '…' : ''}"`);
       }
     }
   };
@@ -471,7 +657,7 @@ export const course = (options: { directory: string; continuing: boolean; until:
     await relay?.close();
   };
 
-  return { work, started, lines, note, log, run, pay, mine, passTime, elsewhere, prepare, device, watchPage, close, keepStorage, freshEngine, devices, shot, state, begin, failed, end, mark, since, blockFacts, blockFact, standing, standingNow, height, sweepSent, nameNewest };
+  return { work, started, lines, note, log, run, pay, fundRunKey, keyBalance, returnCoins, keyFile, keyLocking: () => runKeyLocking(keyFile), lookAround, capture, mine, passTime, elsewhere, prepare, device, watchPage, close, keepStorage, freshEngine, devices, shot, state, begin, failed, end, mark, since, blockFacts, blockFact, standing, standingNow, height, sweepSent, nameNewest };
 };
 
 export type Course = ReturnType<typeof course>;
@@ -544,19 +730,20 @@ export const pagesUsed = (apps: string[], timed: string): string =>
 
 // ------------------------------------------------------------------ waiting for a page
 
-/** Wait for text on the page, patiently: an engine opens, blocks come, receipts are polled. */
-export const see = async (page: Page, text: string | RegExp, timeout = 180_000): Promise<void> => {
-  await page.getByText(text).first().waitFor({ state: 'visible', timeout: timeout * patience });
-};
-export const valueOf = async (page: Page, testId: string, timeout = 180_000): Promise<string> => {
+/** Kind 1: text on the page, within PAGE_WAIT. */
+// The third argument some earlier scripts pass is not used: a page's answer is waited for PAGE_WAIT, whatever they ask.
+export const see = async (page: Page, text: string | RegExp, _ignored?: number): Promise<void> => pageShows(page.getByText(text), `the text ${String(text)}`);
+/** Kind 1: the `data-value` of an element, once shown, within PAGE_WAIT. */
+export const valueOf = async (page: Page, testId: string, _ignored?: number): Promise<string> => {
   const element = page.getByTestId(testId).first();
-  await element.waitFor({ state: 'visible', timeout: timeout * patience });
+  await pageShows(element, `the element ${testId}`);
   return (await element.getAttribute('data-value')) ?? '';
 };
-export const click = async (page: Page, name: string | RegExp, timeout = 180_000): Promise<void> => {
+/** Kind 1: a button shown and enabled within PAGE_WAIT, then clicked. */
+export const click = async (page: Page, name: string | RegExp, _ignored?: number): Promise<void> => {
   const button = page.getByRole('button', { name }).first();
-  await button.waitFor({ state: 'visible', timeout: timeout * patience });
-  for (let attempt = 0; attempt < (timeout * patience) / 500 && !(await button.isEnabled()); attempt++) await wait(500);
+  await pageShows(button, `the button ${String(name)}`);
+  await untilPage(() => button.isEnabled(), `the button ${String(name)} enabled`);
   // To the middle of the screen: a button scrolled just into view may sit under the bar at the bottom of a phone's screen.
   await button.evaluate((element) => element.scrollIntoView({ block: 'center' }));
   await button.click();
@@ -565,12 +752,33 @@ export const click = async (page: Page, name: string | RegExp, timeout = 180_000
  * On the Send screen, with the address filled in: "Max", then the review of sending everything. When the wallet holds too
  * little, "Max" itself shows "Too little to send", and there is nothing to review.
  */
-export const reviewEverything = async (page: Page, timeout = 120_000): Promise<void> => {
+export const reviewEverything = async (page: Page): Promise<void> => {
   await click(page, /^Max$/);
   const filled = page.getByText('Everything the wallet can send', { exact: true });
   const nothing = page.getByText('Too little to send');
-  await filled.or(nothing).first().waitFor({ state: 'visible', timeout: timeout * patience });
+  await pageShows(filled.or(nothing), '"Everything the wallet can send" or "Too little to send" after "Max"');
   if (await filled.isVisible()) await click(page, /^Review$/);
+};
+/**
+ * A run that continues, on the wallet's Applications screen: a card of an action that a stopped part asked for and did
+ * not carry out is declined, and the outcome cards it left are dismissed, each said in the log; so that the next
+ * request read is the one the course asks for.
+ */
+export const clearLeftovers = async (page: Page, log: (line: string) => void): Promise<void> => {
+  const cards = page.locator('.request-card');
+  await cards.first().waitFor({ state: 'visible', timeout: 3_000 }).catch(() => undefined);
+  for (let round = 0; round < 10; round++) {
+    const asked = cards.filter({ hasText: 'asks for your decision' }).first();
+    const outcome = cards.filter({ hasText: /Done:|Not carried out:|Declined:/ }).first();
+    if (await asked.isVisible()) {
+      log(`   continuing: the wallet shows a request that a stopped part did not carry out: "${flatText(await asked.innerText()).slice(0, 200)}"; it is declined`);
+      await asked.getByRole('button', { name: 'Decline' }).click();
+    } else if (await outcome.isVisible()) {
+      log(`   continuing: the wallet shows what a stopped part left: "${flatText(await outcome.innerText()).slice(0, 160)}"; it is dismissed`);
+      await outcome.getByRole('button', { name: 'Dismiss' }).click();
+    } else return;
+    await wait(300);
+  }
 };
 export const tick = async (page: Page, name: string | RegExp): Promise<void> => {
   await page.getByLabel(name).first().check();
@@ -581,9 +789,9 @@ export const openDesk = async (page: Page): Promise<void> => {
   await page.goto(RECOVERER);
   const list = page.getByTestId('open-wallet').first();
   const desk = page.getByText('Where the wallet stands').first();
-  await list.or(desk).first().waitFor({ state: 'visible', timeout: 60_000 * patience });
+  await pageShows(list.or(desk), 'the recoverer\'s list of wallets or its screen of the wallet');
   if (!(await desk.isVisible())) await list.click();
-  await desk.waitFor({ state: 'visible', timeout: 60_000 * patience });
+  await pageShows(desk, 'the recoverer\'s screen of the wallet, "Where the wallet stands"');
 };
 
 /**
@@ -595,12 +803,15 @@ export const openDeskWorking = async ({ freshEngine }: Course, recoverer: Device
   await openDesk(recoverer.page);
   const opening = recoverer.page.getByText('Opening this wallet');
   const behind = recoverer.page.getByText(/The engine's header check stands at \d+ of \d+/);
-  for (let attempt = 0; attempt < 90 && (await opening.isVisible()) && !(await behind.isVisible()); attempt++) await wait(2_000);
-  if (!(await opening.isVisible()) && !(await behind.isVisible())) return;
-  await freshEngine(recoverer, RECOVERER, await behind.isVisible());
+  const what = 'the recoverer\'s page to open the wallet\'s account (its engine\'s header check)';
+  const opened = await untilChain(what, LIMIT.header, async () => !(await opening.isVisible()) || (await behind.isVisible())).then(
+    () => true,
+    () => false,
+  );
+  if (opened && !(await behind.isVisible())) return;
+  await freshEngine(recoverer, RECOVERER, true);
   await openDesk(recoverer.page);
-  for (let attempt = 0; attempt < 150 && (await opening.isVisible()); attempt++) await wait(2_000);
-  if (await behind.isVisible()) throw new Error(`the recoverer's page still says: ${await behind.first().textContent()}`);
+  await untilChain(`${what}, with a fresh header store`, LIMIT.header, async () => !(await opening.isVisible()) && !(await behind.isVisible()));
 };
 
 /**
@@ -610,7 +821,7 @@ export const openDeskWorking = async ({ freshEngine }: Course, recoverer: Device
  */
 export const sendAllOfBalance = async (page: Page, to: string): Promise<string | undefined> => {
   const balance = page.getByTestId('funds-balance').first();
-  await balance.waitFor({ state: 'visible', timeout: 240_000 * patience });
+  await pageShows(balance, 'the recoverer\'s balance');
   if ((await balance.getAttribute('data-value')) === '0') return undefined;
   await click(page, 'Send all');
   await page.getByLabel('To').fill(to);
@@ -618,7 +829,7 @@ export const sendAllOfBalance = async (page: Page, to: string): Promise<string |
   await see(page, 'Arrives');
   await click(page, 'Send all');
   const sent = page.getByText(/The fee was [\d,]+ sat/).first();
-  await sent.waitFor({ state: 'visible', timeout: 120_000 * patience });
+  await pageShows(sent, '"The fee was … sat" after sending the recoverer\'s balance');
   return ((await sent.textContent()) ?? '').replace(/\s+/g, ' ').trim();
 };
 
@@ -637,7 +848,8 @@ export const balanceOf = async (page: Page): Promise<bigint> => {
  */
 export const pasteCode = async (page: Page, code: string): Promise<void> => {
   const cancel = page.locator('dialog.scan-dialog').getByRole('button', { name: 'Cancel' });
-  await cancel.waitFor({ state: 'visible', timeout: 30_000 }).then(() => cancel.click(), () => undefined);
+  // The scanner opens by itself on a page that offers it; one that does not goes straight on.
+  await cancel.waitFor({ state: 'visible', timeout: 5_000 }).then(() => cancel.click(), () => undefined);
   await page.getByText('No camera?').first().click();
   await page.locator('#code-text').fill(code);
   await click(page, 'Use it');
@@ -645,8 +857,7 @@ export const pasteCode = async (page: Page, code: string): Promise<void> => {
 
 /** The code a recoverer's screen shows, once its session is reachable. */
 const codeOn = async (page: Page, testId: string): Promise<string> => {
-  await see(page, /Waiting for (their|the new) phone to scan the code/, 60_000);
-  await wait(300);
+  await see(page, /Waiting for (their|the new) phone to scan the code/);
   return valueOf(page, testId);
 };
 
@@ -687,7 +898,7 @@ export const firstSteps = async (
   log(`   Anna's balance is funded at ${fundsAddress}; what her page keeps, her words among it, is copied to ${work.slice(root.length)}storage-recoverer.json first`);
   log(`   ${pay(fundsAddress, 400_000)}`);
   const balance = recoverer.page.locator('[data-testid="funds-balance"]:not([data-value="0"])');
-  await balance.first().waitFor({ state: 'visible', timeout: 120_000 * patience });
+  await chainShows(balance, 'the payment to reach Anna\'s balance on her page', LIMIT.coin);
   log(`   Anna's page shows her balance: ${(await balance.first().getAttribute('data-value')) ?? ''} satoshis`);
   await shoot(recoverer.page, 'recoverer-empty');
 
@@ -705,8 +916,8 @@ export const firstSteps = async (
   await click(old.page, 'Someone I trust is setting it up');
   await pasteCode(old.page, code);
   await beforeFunding(old);
-  await see(recoverer.page, 'Set up Grandma\'s wallet with', 120_000);
-  await see(old.page, 'Waiting for Anna to say yes', 120_000);
+  await see(recoverer.page, 'Set up Grandma\'s wallet with');
+  await see(old.page, 'Waiting for Anna to say yes');
   log('   the phone asked over the session; Anna\'s page asks "Set up Grandma\'s wallet?", the phone waits for her');
   await keepStorage(old);
   await shoot(old.page, 'wallet-setting-up');
@@ -715,16 +926,12 @@ export const firstSteps = async (
   mark('paid');
   // Anna's page says the wallet is set up for some seconds and then offers a new code for the next phone: it is
   // watched for from the moment she says yes, since on a public network the phone may say so later than that.
-  const setUpShown = recoverer.page
-    .getByText('Grandma\'s wallet is set up')
-    .first()
-    .waitFor({ state: 'visible', timeout: 240_000 * patience })
-    .then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+  const setUpShown = pageShows(recoverer.page.getByText('Grandma\'s wallet is set up'), 'Anna\'s page to say "Grandma\'s wallet is set up"').then(
+    () => undefined,
+    (error: unknown) => error,
+  );
   // The phone goes on as soon as the network has the creation: no block is waited for.
-  await see(old.page, 'Your wallet is ready', 180_000);
+  await see(old.page, 'Your wallet is ready');
   log(`   the phone shows "Your wallet is ready" with ${(await old.page.locator('.set-up-balance .balance-sub').first().textContent())?.trim()}`);
   await standingNow(old.page, `From "Set it up" to "Your wallet is ready": ${since('paid')}`);
   await shoot(old.page, 'wallet-ready');
@@ -732,7 +939,7 @@ export const firstSteps = async (
   if (notShown !== undefined) throw notShown;
   log('   Anna\'s page says the wallet is set up and keeps what a recovery needs');
   await click(old.page, 'Open my wallet');
-  await see(old.page, 'Protected', 180_000);
+  await chainShows(old.page.getByText('Protected'), 'the wallet to show "Protected": Anna\'s receipt read from the backup stores', LIMIT.read);
   log('   the wallet shows "Protected": Anna\'s receipt is on the backup stores');
   await standingNow(old.page, `From "Set it up" to "Protected", recovery on: ${since('paid')}`);
   mine(1);
@@ -747,17 +954,12 @@ export const firstSteps = async (
   // The vault address is given as soon as the wallet is created, as every other address.
   await old.page.getByRole('button', { name: 'For regular payments' }).click();
   const vaultShown = old.page.locator(`[data-testid="receive-address"]:not([data-value="${receiving}"])`);
-  await vaultShown.first().waitFor({ state: 'visible', timeout: 60_000 * patience });
+  await pageShows(vaultShown, 'the vault address, after "For regular payments"');
   log(`   vault address ${(await vaultShown.first().getAttribute('data-value')) ?? ''}`);
   await standingNow(old.page, `From "Set it up" to the vault address shown: ${since('paid')}`);
   await shoot(old.page, 'wallet-receive-vault');
   await old.page.getByRole('link', { name: 'Home' }).first().click();
-  await see(old.page, /^0\.00\d+/);
-  for (let attempt = 0; attempt < 30; attempt++) {
-    const balance = (await old.page.getByTestId('balance').textContent()) ?? '';
-    if (Number(balance.replace(/[^0-9.]/g, '')) > 0.0014) break;
-    await wait(1_000);
-  }
+  await untilChain('the payment of 50,000 satoshis to reach the wallet\'s balance (more than 0.0014 BCH)', LIMIT.coin, async () => Number(((await old.page.getByTestId('balance').textContent()) ?? '').replace(/[^0-9.]/g, '')) > 0.0014);
   log(`   the wallet holds ${(await old.page.getByTestId('balance').textContent())?.replace('BCH', ' BCH')}`);
   await shoot(old.page, 'wallet-home');
   return { recoverer, old, recovererLink: code, overSession: true };
@@ -782,7 +984,7 @@ export const newPhoneAsks = async (theCourse: Course, recoverer: Device, _link: 
   await next.page.goto(WALLET);
   await click(next.page, 'I lost my phone');
   await pasteCode(next.page, code);
-  await see(next.page, /Waiting for Anna/, 120_000);
+  await see(next.page, /Waiting for Anna/);
   log('   the new phone sent its request over the session of the code');
   await shoot(next.page, 'wallet-takeover-request');
   return next;
@@ -810,17 +1012,14 @@ export const completeTakeover = async (
   }
   mine(1);
   await see(recoverer.page, 'Your request is waiting');
-  if (chipnet) {
-    // The page shows the request at once; the waiting period counts from the block that holds it. On chipnet a
-    // block may leave it out for a while when blocks are full.
-    log('   the request is sent and waiting for a block');
-    await recoverer.page.getByTestId('waiting-clock').first().waitFor({ state: 'visible', timeout: 90 * 60_000 });
-  }
+  // The page shows the request at once; the waiting period counts from the block that holds it. On chipnet a
+  // block may leave it out for a while when blocks are full.
+  await chainShows(recoverer.page.getByTestId('waiting-clock'), `a block to hold the recovery request (${chipnet ? 'on chipnet about a minute' : 'the run made it'})`, LIMIT.block);
   log('   the request is in a block; the waiting period runs');
   // The recoverer's page shows the chain's clock, and the waiting period measured against it.
   const shown = async (testId: string): Promise<string> => {
     const element = recoverer.page.getByTestId(testId).first();
-    await element.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await pageShows(element, `the element ${testId} on the recoverer's page`);
     return ((await element.textContent()) ?? '').trim();
   };
   const clockBefore = await valueOf(recoverer.page, 'chain-clock');
@@ -829,24 +1028,28 @@ export const completeTakeover = async (
   if (!chipnet) {
     // The clock on the page moves with the blocks that were made.
     const moved = recoverer.page.locator(`[data-testid="chain-clock"]:not([data-value="${clockBefore}"])`).first();
-    await moved.waitFor({ state: 'visible', timeout: 60_000 });
+    await chainShows(moved, 'the blocks the run made to reach the recoverer\'s page (its chain\'s clock to move on)', LIMIT.block);
     log(`   the chain's clock on the page moved on by ${Number(await moved.getAttribute('data-value')) - Number(clockBefore)} seconds, to block ${await valueOf(recoverer.page, 'chain-height')}`);
   }
-  // On chipnet the chain's clock has to pass 512 seconds: the button is enabled when it has.
-  await click(recoverer.page, 'Complete the move', chipnet ? 360_000 : 120_000);
+  // The chain's clock has to pass the waiting period: the button is enabled when it has.
+  const complete = recoverer.page.getByRole('button', { name: 'Complete the move' }).first();
+  await untilChain(`the waiting period to end on the chain's clock ("Complete the move" enabled${chipnet ? '; on chipnet its median time passes 512 seconds after the block' : ''})`, LIMIT.waitingPeriod, async () => (await complete.isVisible()) && (await complete.isEnabled()));
+  await click(recoverer.page, 'Complete the move');
   await see(recoverer.page, 'The wallet is moved');
   mark('completed');
   await nameNewest('the completion');
   // The hand-over is made as soon as the network shows the completion: no block is waited for.
-  const handOver = await valueOf(recoverer.page, 'handover-link', 120_000);
+  const handOverShown = recoverer.page.getByTestId('handover-link').first();
+  await chainShows(handOverShown, 'the hand-over, made once the server shows the completion', LIMIT.read);
+  const handOver = (await handOverShown.getAttribute('data-value')) ?? '';
   log('   completed; the hand-over is ready');
   blockFact(`From the completion to the hand-over: ${since('completed')}; the chain is at height ${await height()}.`);
   await shoot(recoverer.page, 'recoverer-handover');
   // Over the session of the lost phone's code, when the new phone is still on it; otherwise by the hand-over's code.
-  const arrived = await next.page.getByText('Bringing your coins over').first().waitFor({ state: 'visible', timeout: 45_000 }).then(() => true, () => false);
+  const arrived = await next.page.getByText('Bringing your coins over').first().waitFor({ state: 'visible', timeout: PAGE_WAIT }).then(() => true, () => false);
   if (arrived) {
     log('   the hand-over reached the new phone over the session');
-    const told = await recoverer.page.getByText('The new phone has the wallet').first().waitFor({ state: 'visible', timeout: 30_000 }).then(() => true, () => false);
+    const told = await recoverer.page.getByText('The new phone has the wallet').first().waitFor({ state: 'visible', timeout: PAGE_WAIT }).then(() => true, () => false);
     log(told ? '   the recoverer\'s page says that the new phone has the wallet' : '   the recoverer\'s page was not told that the new phone has the wallet');
   } else {
     log('   the hand-over did not arrive over the session; the new phone opens the hand-over\'s code');
@@ -856,26 +1059,23 @@ export const completeTakeover = async (
   await shoot(next.page, 'wallet-arrival');
   // The sweep is looked at on the chain as soon as the page has sent it, before the full search ends.
   let swept = false;
-  for (let attempt = 0; attempt < 120; attempt++) {
+  let polled = 0;
+  await untilChain('the new phone to find the wallet\'s coins and sweep them ("Open the wallet")', LIMIT.sweep, async () => {
     if (!swept && (await sweepSent(next.page))) {
       swept = true;
       await standingNow(next.page, `From the completion to the sweep sent by the new phone: ${since('completed')}`);
     }
-    if (await next.page.getByRole('button', { name: 'Open the wallet' }).isVisible()) break;
-    if (attempt % 3 === 0) mine(1);
-    await wait(1_000);
-  }
+    if (await next.page.getByRole('button', { name: 'Open the wallet' }).isVisible()) return true;
+    if (polled++ % 3 === 0) mine(1);
+    return false;
+  });
   await click(next.page, 'Open the wallet');
   mine(1);
   await see(next.page, 'In your wallet');
-  for (let attempt = 0; attempt < 30; attempt++) {
-    const balance = (await next.page.getByTestId('balance').textContent()) ?? '';
-    if (Number(balance.replace(/[^0-9.]/g, '')) > 0.001) break;
-    await wait(1_000);
-  }
+  await untilChain('the swept coins to reach the new phone\'s balance (more than 0.001 BCH)', LIMIT.coin, async () => Number(((await next.page.getByTestId('balance').textContent()) ?? '').replace(/[^0-9.]/g, '')) > 0.001);
   log(`   the new phone holds ${(await next.page.getByTestId('balance').textContent())?.replace('BCH', ' BCH')}`);
   await standingNow(next.page, `From the completion to the swept coins in the new phone's wallet: ${since('completed')}`);
-  await see(next.page, 'Protected', 120_000);
+  await chainShows(next.page.getByText('Protected'), 'the new phone to show "Protected": its receipt read from the backup stores', LIMIT.read);
   log('   recovery is on for the new phone');
   blockFact(`From the completion to "Protected" on the new phone: ${since('completed')}.`);
   await shoot(next.page, 'wallet-home-after-takeover');

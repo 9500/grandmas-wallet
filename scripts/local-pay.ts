@@ -16,6 +16,7 @@ import { binToHex, cashAddressToLockingBytecode, hexToBin, lockingBytecodeToCash
 import { type Utxo, buildTransaction, checkBeforeSending, keyPairFromPrivateKey, p2pkhInput, p2pkhLockingBytecode } from '@grandmas-wallet/core';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
+import { takeChainLock } from './run-key.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const cli = (...parameters: string[]): string => execFileSync(`${root}deploy/regtest/regtest.sh`, ['cli', ...parameters], { encoding: 'utf8' }).trim();
@@ -27,6 +28,9 @@ const burnAddress = (): string => {
 const mine = (blocks: number, to = burnAddress()): void => void cli('generatetoaddress', String(blocks), to);
 
 const [first, second, ...flags] = process.argv.slice(2);
+// Runs that go at the same time make blocks, move the clock and pay from the payer one at a time.
+const release = takeChainLock();
+process.on('exit', release);
 if (first === undefined || second === undefined) {
   console.error('usage: npx tsx scripts/local-pay.ts <address> <satoshis> [--no-block] | mine <blocks> | time <seconds>');
   process.exit(2);
@@ -66,23 +70,35 @@ const coins = async (): Promise<Utxo[]> =>
     // A block reward can be spent after 100 blocks; anything else at once.
     .map((entry) => ({ transactionHash: hexToBin(entry.transactionId), index: entry.index, output: { lockingBytecode: funderLocking, valueSatoshis: entry.valueSatoshis } }));
 let held = await coins();
-if (held.reduce((sum, coin) => sum + coin.output.valueSatoshis, 0n) < BigInt(second) + 10_000n) {
+const total = (): bigint => held.reduce((sum, coin) => sum + coin.output.valueSatoshis, 0n);
+if (total() < BigInt(second) + 10_000n) {
+  // Block rewards to the payer, as many as the payment needs (a reward halves every 150 blocks on regtest), then 100
+  // blocks, after which every coin of the payer can be spent.
   const made = lockingBytecodeToCashAddress({ prefix: 'bchreg', bytecode: funderLocking });
   if (typeof made === 'string') throw new Error(made);
-  mine(1, made.address);
+  let rewarded = 0n;
+  for (let count = 0; count < 50 && total() + rewarded < BigInt(second) + 10_000n; count++) {
+    const [hash] = JSON.parse(cli('generatetoaddress', '1', made.address)) as string[];
+    const block = JSON.parse(cli('getblock', hash as string, '2')) as { tx: { vout: { value: number }[] }[] };
+    rewarded += BigInt(Math.round((block.tx[0]?.vout[0]?.value ?? 0) * 1e8));
+  }
   mine(100);
-  for (let attempt = 0; attempt < 40 && held.length === 0; attempt += 1) {
+  const before = held.length;
+  for (let attempt = 0; attempt < 40 && total() < BigInt(second) + 10_000n; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 250));
     held = await coins();
   }
+  if (held.length === before) held = await coins();
 }
-// The largest coin pays: a reward that is not yet 100 blocks old is refused, and the next attempt takes another.
+// The largest coin pays: a reward that is not yet 100 blocks old is refused, and the next attempt takes another. When
+// no coin is large enough, every coin goes in.
 held.sort((a, b) => (a.output.valueSatoshis > b.output.valueSatoshis ? -1 : 1));
 let sent: string | undefined;
 let refusal = 'the payer holds no coin';
-for (const coin of held) {
-  if (coin.output.valueSatoshis < BigInt(second) + 1_000n) continue;
-  const built = buildTransaction({ inputs: [p2pkhInput(coin, funder)], outputs: [{ lockingBytecode, valueSatoshis: BigInt(second) }], changeLockingBytecode: funderLocking });
+const attempts: Utxo[][] = held.filter((coin) => coin.output.valueSatoshis >= BigInt(second) + 1_000n).map((coin) => [coin]);
+if (attempts.length === 0 && held.length > 0) attempts.push(held);
+for (const inputs of attempts) {
+  const built = buildTransaction({ inputs: inputs.map((coin) => p2pkhInput(coin, funder)), outputs: [{ lockingBytecode, valueSatoshis: BigInt(second) }], changeLockingBytecode: funderLocking });
   const check = checkBeforeSending(built);
   if (check !== true) throw new Error(`the payment fails the check before sending: ${check}`);
   const result = await server.broadcast(binToHex(built.encoded));

@@ -14,13 +14,14 @@
 // beside the profiles, so that a continued run keeps them), and the run stops if one goes to the Savings Jar page.
 //
 // usage (from the repository's root, with the local node running and the pages built: deploy/preview.sh build):
-//   npx tsx scripts/stage-17-jar-browser.ts [local] [--screens] [--headed] [--until <step>] [--from 5|7|8|9] [--ports <base>]
+//   npx tsx scripts/stage-17-jar-browser.ts [local] [--screens] [--headed] [--until <step>] [--from 5|7|8|9] [--ports <base>] [--directory <name>] [--within <minutes>]
 // on chipnet, with the public pages and backup stores, paid from the key in .chipnet/funder-design-2.json:
 //   npx tsx scripts/stage-17-jar-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 5|7|8|9] [--record-only]
 // --record-only writes the record again from what the run kept, and runs nothing.
 //
 // The pages, a relay and two backup stores are served on this machine on ports of the run's own (see
-// scripts/browser-course.ts; 8301 to 8304, 8311 and 8312 unless --ports says otherwise). The run makes the blocks
+// scripts/browser-course.ts; 8301 to 8304, 8311 and 8312 unless --ports says otherwise). The run pays from a key of
+// its own, given 460,000 satoshis at the start and emptied back to the funding address at the end (scripts/run-key.ts). The run makes the blocks
 // and moves the chain's clock. Profiles, the stores' data, the log and what the run knows between steps are under
 // .local-runs/stage-17-jar-browser/. `--from` continues a run that stopped, with the profiles on disk.
 //
@@ -35,7 +36,7 @@ import { controllerScript } from '@grandmas-wallet/core';
 import { savingsJarScript } from '@grandmas-wallet/savings-jar';
 import type { Locator, Page } from 'playwright';
 
-import { type Device, JAR, RECOVERER, WALLET, argument, chipnet, click, completeTakeover, config, course, firstSteps, newPhoneAsks, openDeskWorking, pagesUsed, patience, recordFile, reviewEverything, root, see, sendAllOfBalance, servedFrom, valueOf, wait } from './browser-course.js';
+import { PAGE_WAIT, type Device, JAR, LIMIT, RECOVERER, WALLET, argument, chainShows, chipnet, clearLeftovers, click, completeTakeover, config, course, firstSteps, newPhoneAsks, openDeskWorking, pageShows, pagesUsed, recordFile, reviewEverything, root, see, sendAllOfBalance, servedFrom, untilChain, untilPage, valueOf } from './browser-course.js';
 import { type LedgerTransaction, addressOf, chainClock, chainHeight, ledgerSection, runTransactions } from './browser-ledger.js';
 import { type RequestLog, controllerLabels, flat, localPayerLocking, lockingOf, openFolds, recordRequests, requestsSection, textOf, walletKept, walletPlaces } from './browser-live.js';
 
@@ -44,7 +45,8 @@ const until = Number(argument('until') ?? '99');
 const recordOnly = process.argv.includes('--record-only');
 const from = Number(argument('from') ?? (recordOnly ? '9' : '1'));
 if (![1, 5, 7, 8, 9].includes(from)) throw new Error('A run continues from step 5, 7, 8 or 9.');
-const theCourse = course({ directory: 'stage-17-jar-browser', continuing: from > 1, until });
+// What the run pays: 400,000 satoshis to Anna's balance and 50,000 to the owner, with room for the fees.
+const theCourse = course({ directory: 'stage-17-jar-browser', continuing: from > 1, until, ports: 8300, need: 460_000 });
 const { work, started, lines, log, mine, passTime, prepare, device, watchPage, close, shot, state, begin, elsewhere, keepStorage } = theCourse;
 const noShot = async (): Promise<void> => undefined;
 const JAR_ORIGIN = new URL(JAR).origin;
@@ -109,18 +111,39 @@ const keyRow = (page: Page): Locator => page.locator('li.token').filter({ has: p
 const connect = async (wallet: Page, jarPage: Page): Promise<void> => {
   await jarPage.goto(JAR);
   const address = jarPage.locator('.value-text[data-value^="wiz:"]').first();
-  await address.waitFor({ state: 'visible', timeout: 120_000 * patience });
+  // A page that was connected to this wallet in a part of the run that stopped takes that session up again by itself.
+  const resumed = jarPage.getByText(/^Connected to /).first();
+  await pageShows(address.or(resumed).or(jarPage.getByText(/Reaching the wallet/)), 'the Savings Jar page\'s connection address, or the session it had before');
+  if (!(await address.isVisible())) {
+    // A session of a part that stopped may have gone through a relay that is gone with it: then the page is paired again.
+    const back = await resumed.waitFor({ state: 'visible', timeout: PAGE_WAIT }).then(() => true, () => false);
+    if (back) {
+      log('   the Savings Jar page took up the session it had with this wallet before');
+      return;
+    }
+    log(`   the Savings Jar page did not take up its earlier session within ${PAGE_WAIT / 1000} s ("${flat(await jarPage.locator('.link-state, .connect-card, main').first().innerText().catch(() => ''))}"); it is connected again with "Connect another wallet"`);
+    await click(jarPage, 'Connect another wallet');
+    await pageShows(address, 'the Savings Jar page\'s connection address after "Connect another wallet"');
+  }
   const uri = (await address.getAttribute('data-value')) ?? '';
-  await see(jarPage, 'Waiting for your wallet.', 120_000);
+  await see(jarPage, 'Waiting for your wallet.');
   log(`   the Savings Jar page shows its connection address (${uri.length} characters) and waits for a wallet`);
   await wallet.goto(`${WALLET}apps`);
   await click(wallet, 'Paste a link instead');
   await wallet.getByLabel('Connection link').fill(uri);
   await click(wallet, /^Connect$/);
-  const row = wallet.locator('ul.connections li').first();
-  await row.getByText('Connected', { exact: true }).waitFor({ state: 'visible', timeout: 120_000 * patience });
+  const row = wallet.locator('ul.connections li').filter({ has: wallet.getByText('Connected', { exact: true }) }).first();
+  await pageShows(row, 'the wallet\'s Applications screen to say "Connected"');
+  // A connection to the session of a part that stopped, which cannot come back, is ended.
+  const stale = wallet.locator('ul.connections li').filter({ hasText: 'Connecting' });
+  for (let round = 0; round < 5 && (await stale.first().isVisible()); round++) {
+    const before = await stale.count();
+    await stale.first().getByRole('button', { name: 'End the connection' }).click();
+    log('   the wallet\'s connection to the session of the part that stopped is ended');
+    await untilPage(async () => (await stale.count()) < before, 'the ended connection to leave the wallet\'s list');
+  }
   log(`   the wallet's Applications screen: "${await textOf(row.locator('.connection-name'))}", ${await textOf(row.locator('.small.muted'))}; "Connected"`);
-  await see(jarPage, /Connected to /, 120_000);
+  await see(jarPage, /Connected to /);
   log(`   the Savings Jar page: "${await textOf(jarPage.locator('.status-title'))}"`);
 };
 
@@ -142,7 +165,7 @@ const steps = async (): Promise<void> => {
     const oldJar = await old.context.newPage();
     watchPage('old-phone, jar tab', oldJar);
     await connect(old.page, oldJar);
-    await see(oldJar, /^No jars (yet|to show)\./);
+    await chainShows(oldJar.getByText(/^No jars (yet|to show)\./), 'the Savings Jar page to look for jars', LIMIT.read);
     log(`   the jar page lists: "${await textOf(oldJar.locator('.card').filter({ hasText: 'Your jars' }).locator('p'))}"`);
     // The date: some minutes ahead of the chain's clock and of this machine's, so that it is still ahead after the
     // waiting period of the takeover has moved the chain's clock on.
@@ -163,10 +186,10 @@ const steps = async (): Promise<void> => {
     await see(oldJar, 'On its way');
 
     const request = old.page.locator('.request-card').filter({ hasText: 'asks for your decision' }).first();
-    await request.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await pageShows(request, 'the wallet to show the Savings Jar page\'s request');
     const approve = request.getByRole('button', { name: 'Approve' });
-    await approve.waitFor({ state: 'visible', timeout: 120_000 * patience });
-    for (let attempt = 0; attempt < 120 && !(await approve.isEnabled()); attempt++) await wait(500);
+    await pageShows(approve, 'Approve on the request');
+    await untilPage(() => approve.isEnabled(), 'Approve enabled on the request');
     const first = await textOf(request);
     await picture(old.page, 'open-review');
     await openFolds(request);
@@ -174,13 +197,13 @@ const steps = async (): Promise<void> => {
     fact(`Opening the jar, the wallet showed the page's request with its own figures before anything was signed. With its folds closed, as it first appears: "${first}"`);
     await click(old.page, /^Approve$/);
     const done = old.page.locator('.request-card').filter({ hasText: 'Done:' }).first();
-    await done.waitFor({ state: 'visible', timeout: 180_000 * patience });
+    await pageShows(done, '"Done:" after approving the opening of the jar');
     const opened = (await done.getByTestId('action-transaction').getAttribute('data-value')) ?? '';
     label(opened, 'The owner\'s phone opens the jar, on the Savings Jar page\'s request (30,000 sat into the jar, the key to the wallet)');
     log(`   approved; the wallet: "${await textOf(done.locator('h2, .card-title'))}", transaction ${opened}`);
-    await see(oldJar, 'The jar is open. Its key is in your wallet.', 120_000);
+    await see(oldJar, 'The jar is open. Its key is in your wallet.');
     const item = oldJar.getByTestId('jar').first();
-    await item.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await pageShows(item, 'the jar in the Savings Jar page\'s list');
     log(`   the jar page: "The jar is open. Its key is in your wallet."; the jar: ${await textOf(item.locator('.jar-top'))}, "${await textOf(item.locator('.jar-when'))}"`);
     await picture(oldJar, 'page-opened');
     mine(1);
@@ -188,7 +211,7 @@ const steps = async (): Promise<void> => {
     // The jar in the wallet's own list, from the record it wrote before signing.
     await old.page.goto(`${WALLET}apps`);
     const position = old.page.getByTestId('position-open').first();
-    await position.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await chainShows(position, 'the wallet to list the jar from its record, read against the chain', LIMIT.read);
     kept.category = (await position.locator('.token-id [title]').first().getAttribute('title')) ?? '';
     if (!/^[0-9a-f]{64}$/.test(kept.category)) throw new Error(`the key's category could not be read: ${kept.category}`);
     const made = savingsJarScript(hexToBin(kept.category), kept.unlockTime).lockingBytecode;
@@ -211,7 +234,11 @@ const steps = async (): Promise<void> => {
     if (from > 6) {
       next = await device('new-phone', false);
       requests.watch(next.context);
-    }
+      // What the new phone's wallet shows before anything is done, and what a stopped part left on it.
+      await next.page.goto(`${WALLET}apps`);
+      await theCourse.lookAround();
+      await clearLeftovers(next.page, log);
+    } else await theCourse.lookAround();
   }
 
   // 6 ------------------------------------------------------------------
@@ -231,7 +258,7 @@ const steps = async (): Promise<void> => {
     await phone.page.goto(`${WALLET}apps`);
     const swept = keyRow(phone.page);
     const trust = swept.getByRole('button', { name: 'Trust this template' });
-    await trust.waitFor({ state: 'visible', timeout: 180_000 * patience });
+    await chainShows(trust, 'the new phone to list the swept key, read from the chain, with "Trust this template"', LIMIT.read);
     const before = await textOf(swept);
     log(`   the Applications screen lists the swept key: "${before}"`);
     fact(`On the new phone, after the recovery, the wallet listed the swept key as a token of a template it does not trust yet: "${before}".`);
@@ -243,7 +270,7 @@ const steps = async (): Promise<void> => {
     await picture(phone.page, 'trust-from-backup');
     await click(phone.page, 'Trust this template');
     const position = phone.page.getByTestId('position-open').filter({ has: phone.page.locator(`.token-id [title="${kept.category}"]`) });
-    await position.waitFor({ state: 'visible', timeout: 180_000 * patience });
+    await chainShows(position, 'the new phone to list the jar from its record, checked against the chain', LIMIT.read);
     const listed = await textOf(position);
     log(`   trusted; the wallet's list: "${listed}"`);
     fact(`Once the user trusted the template the earlier owner had stored, the new phone checked the record against the chain and listed the jar from it as open: "${listed}". The actions it offers: ${(await position.locator('.token-actions button:not(.info-button):not(.hex)').allInnerTexts()).map((text) => `"${flat(text)}"`).join(', ')}.`);
@@ -257,17 +284,20 @@ const steps = async (): Promise<void> => {
     if (!chipnet && clock.median <= kept.unlockTime) log(`   ${passTime(kept.unlockTime - clock.tip + 120)}`);
     // On chipnet the chain's clock passes the date by itself, as blocks come.
     if (chipnet && clock.median <= kept.unlockTime) log(`   the chain's median time is ${iso(clock.median)}; waiting for it to pass the jar's date ${iso(kept.unlockTime)}`);
-    for (let attempt = 0; chipnet && attempt < 180 && (await chainClock()).median <= kept.unlockTime; attempt++) await wait(30_000);
+    if (chipnet) {
+      const left = Math.max(0, kept.unlockTime - clock.median) * 1000;
+      await untilChain(`the chain's median time to pass the jar's date ${iso(kept.unlockTime)} (it trails the blocks' times by about six blocks)`, left + 20 * 60_000, async () => (await chainClock()).median > kept.unlockTime, 15_000);
+    }
     log(`   the chain's median time is ${iso((await chainClock()).median)}, past the jar's date ${iso(kept.unlockTime)}`);
     await phone.page.goto(`${WALLET}apps`);
     const position = phone.page.getByTestId('position-open').filter({ has: phone.page.locator(`.token-id [title="${kept.category}"]`) });
-    await position.waitFor({ state: 'visible', timeout: 180_000 * patience });
+    await chainShows(position, 'the new phone to list the jar as open, from its record checked against the chain', LIMIT.read);
     await position.getByRole('button', { name: 'Empty a savings jar', exact: true }).click();
     const review = phone.page.locator('.request-card').filter({ hasText: 'Check and carry out' }).first();
-    await review.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await pageShows(review, 'the review "Check and carry out" after "Empty a savings jar"');
     const carry = review.getByRole('button', { name: 'Carry it out' });
-    await carry.waitFor({ state: 'visible', timeout: 120_000 * patience });
-    for (let attempt = 0; attempt < 120 && !(await carry.isEnabled()); attempt++) await wait(500);
+    await pageShows(carry, '"Carry it out" on the review');
+    await untilPage(() => carry.isEnabled(), '"Carry it out" enabled');
     const reviewed = await textOf(review);
     await picture(phone.page, 'empty-review');
     await openFolds(review);
@@ -275,7 +305,7 @@ const steps = async (): Promise<void> => {
     fact(`From its own list the new phone offered "Empty a savings jar" and showed its review, every value from the record or the wallet itself. With its folds closed: "${reviewed}"`);
     await click(phone.page, 'Carry it out');
     const outcome = phone.page.getByText(/^(Done|Not carried out)$/).first();
-    await outcome.waitFor({ state: 'visible', timeout: 180_000 * patience });
+    await pageShows(outcome, '"Done" or "Not carried out" after "Carry it out"');
     if ((await outcome.innerText()).trim() !== 'Done') throw new Error(`the jar was not emptied: ${await textOf(phone.page.locator('.refused-card'))}`);
     const emptied = (await phone.page.getByTestId('action-transaction').first().getAttribute('data-value')) ?? '';
     label(emptied, 'The new phone empties the jar by itself, from its own list (the key at input 0, the key and the savings to the new seed)');
@@ -284,11 +314,12 @@ const steps = async (): Promise<void> => {
     await click(phone.page, 'Back to the tokens');
     mine(1);
     const closed = phone.page.getByTestId('position-closed').filter({ has: phone.page.locator(`.token-id [title="${kept.category}"]`) });
-    for (let attempt = 0; attempt < 30 && !(await closed.isVisible()); attempt++) {
-      await phone.page.getByRole('button', { name: 'Read again' }).click().catch(() => undefined);
-      await wait(2_000);
-    }
-    await closed.waitFor({ state: 'visible', timeout: 60_000 * patience });
+    let asked = 0;
+    await untilChain('the wallet\'s list to show the jar closed, once the server has the emptying', LIMIT.read, async () => {
+      if (await closed.isVisible()) return true;
+      if (asked++ % 2 === 0) await phone.page.getByRole('button', { name: 'Read again' }).click({ timeout: 2_000 }).catch(() => undefined);
+      return false;
+    }, 1_000);
     log(`   the wallet's list: "${await textOf(closed)}"`);
     await picture(phone.page, 'positions-emptied');
     const toJar = requests.urls().filter((url) => url.startsWith(JAR_ORIGIN));
@@ -304,7 +335,7 @@ const steps = async (): Promise<void> => {
   await reviewEverything(phone.page);
   const everything = phone.page.getByText('Arrives', { exact: true });
   const nothing = phone.page.getByText('Too little to send');
-  await everything.or(nothing).first().waitFor({ state: 'visible', timeout: 120_000 * patience });
+  await pageShows(everything.or(nothing), 'the review of sending everything, or "Too little to send"');
   if (await everything.isVisible()) {
     await click(phone.page, /^Send$/);
     await see(phone.page, 'Sent');
@@ -334,12 +365,13 @@ const writeRecord = async (outcome: string): Promise<void> => {
   const outside = lockingOf(elsewhere());
   const funds = kept.fundsAddress === '' ? '' : lockingOf(kept.fundsAddress);
   const payer = localPayerLocking();
+  const ownKey = theCourse.keyLocking();
   // On chipnet the run's transactions are found from the run's own addresses.
   // The funding address is not read: others use it too, and what it paid the run is found through the run's addresses.
-  const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, jarLocking, funds]);
+  const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, jarLocking, funds, ownKey]);
   for (const entry of wallet.activity) label(entry.transactionId, `${entry.who === 'old-phone' ? 'The owner\'s phone' : 'The new phone'}: ${entry.what}`);
   const placeOf = (lockingBytecode: string): string | undefined =>
-    lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === jarLocking ? 'the jar' : lockingBytecode === outside ? `the outside address the coins went back to (${addressOf(outside)})` : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === payer ? (chipnet ? 'the funding address (`scripts/chipnet-pay.ts`)' : 'the local payer (`scripts/local-pay.ts`)') : places.get(lockingBytecode);
+    lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === jarLocking ? 'the jar' : lockingBytecode === outside ? `the outside address the coins went back to (${addressOf(outside)})` : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === ownKey ? 'the run\'s own key (`scripts/run-key.ts`)' : lockingBytecode === payer ? (chipnet ? 'the funding address (`scripts/chipnet-pay.ts`)' : 'the local payer (`scripts/local-pay.ts`)') : places.get(lockingBytecode);
   const ofController = await controllerLabels(identity);
   const labelOf = (transaction: LedgerTransaction): string | undefined => {
     const named = kept.labels[transaction.transactionId] ?? ofController.get(transaction.transactionId);
@@ -350,7 +382,8 @@ const writeRecord = async (outcome: string): Promise<void> => {
     if (touches(controller)) return 'A transaction of the controller';
     if (fromFunds && transaction.outputs.some((output) => output.lockingBytecode === outside)) return 'The recoverer sends her balance back';
     if (fromFunds) return 'Paid from the recoverer\'s balance';
-    if (transaction.inputs.some((input) => input.lockingBytecode === payer)) return chipnet ? 'The funding address pays' : 'The local payer pays';
+    if (ownKey !== '' && transaction.inputs.some((input) => input.lockingBytecode === ownKey)) return transaction.outputs.some((output) => output.lockingBytecode === outside) ? 'The run\'s key sends what it holds back to the funding address' : 'The run\'s key pays';
+    if (transaction.inputs.some((input) => input.lockingBytecode === payer)) return chipnet ? 'The funding address pays the run\'s key' : 'The local payer pays the run\'s key';
     return undefined;
   };
   const toJarPage = requests.urls().filter((url) => url.startsWith(JAR_ORIGIN));
@@ -376,7 +409,7 @@ const writeRecord = async (outcome: string): Promise<void> => {
       '',
       chipnet
         ? `Read from chipnet's server after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the wallet's addresses of both phones' seeds, its controller, the jar and the recoverer's balance). The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`
-        : `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, and in the node's pool. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
+        : `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or in the node's pool, that touches an address of the run (the run's own key, the wallet's addresses of both phones' seeds, its controller, the jar and the recoverer's balance), so that another run at the same time is left out. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
       '',
       ...ledgerSection(ledger, labelOf, placeOf),
       ...(kept.screens.length === 0 ? [] : ['## Pictures', '', `In \`docs/screens/\`, each at 390×844 (\`-phone\`) and 1280×800 (\`-desktop\`): ${kept.screens.map((name) => `\`${prefix}-${name}\``).join(', ')}.`, '']),
@@ -409,6 +442,7 @@ try {
     theCourse.note(`       continued from step ${from}`);
   }
   await prepare(['wallet', 'recoverer', 'jar']);
+  if (from === 1) theCourse.fundRunKey();
   if (chipnet) {
     const now = await servedFrom([WALLET, RECOVERER, JAR]);
     if (!(kept.served ?? []).includes(now)) kept.served = [...(kept.served ?? []), now];
@@ -417,6 +451,7 @@ try {
   log(`   the run starts after block ${kept.startHeight}; the jar page is at ${JAR}, on ${config.network}`);
   await steps();
   const all = state.step >= 9 && until >= 9;
+  if (all) theCourse.returnCoins();
   await writeRecord(all ? (kept.continued.length > 0 ? 'every step was carried out, in parts with the same browser profiles (see below).' : 'every step was carried out.') : `stopped after step ${Math.min(state.step, until)}, as asked.`);
 } catch (error) {
   await theCourse.failed(error);

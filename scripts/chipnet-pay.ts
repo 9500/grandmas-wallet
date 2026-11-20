@@ -35,11 +35,13 @@ if (first === 'address') {
 }
 
 const server = await Electrum.connect('wss://chipnet.9500.cash:443');
-const coins: Utxo[] = (await server.listUnspent(funderLocking, 'exclude')).map((entry) => ({
-  transactionHash: hexToBin(entry.transactionId),
-  index: entry.index,
-  output: { lockingBytecode: funderLocking, valueSatoshis: entry.valueSatoshis },
-}));
+const listCoins = async (): Promise<Utxo[]> =>
+  (await server.listUnspent(funderLocking, 'exclude')).map((entry) => ({
+    transactionHash: hexToBin(entry.transactionId),
+    index: entry.index,
+    output: { lockingBytecode: funderLocking, valueSatoshis: entry.valueSatoshis },
+  }));
+let coins = await listCoins();
 const holds = coins.reduce((sum, coin) => sum + coin.output.valueSatoshis, 0n);
 if (first === 'balance') {
   console.log(`${holds} satoshis in ${coins.length} coin${coins.length === 1 ? '' : 's'} at ${funderAddress}`);
@@ -57,15 +59,26 @@ if (holds < amount + 1_000n) {
   console.error(`not paid: the funding address holds ${holds} satoshis`);
   process.exit(1);
 }
-// Every coin goes in, so that the funding address ends with one coin again.
-const built = buildTransaction({ inputs: coins.map((coin) => p2pkhInput(coin, funder)), outputs: [{ lockingBytecode: decoded.bytecode, valueSatoshis: amount }], changeLockingBytecode: funderLocking });
-const check = checkBeforeSending(built);
-if (check !== true) throw new Error(`the payment fails the check before sending: ${check}`);
-const result = await server.broadcast(binToHex(built.encoded));
+// Every coin goes in, so that the funding address ends with one coin again. Another run that paid from it at the same
+// moment spends the same coins: the payment is built again from what it holds then, a few times.
+let sent: string | undefined;
+let refusal = '';
+for (let attempt = 0; attempt < 5 && sent === undefined; attempt++) {
+  if (attempt > 0) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    coins = await listCoins();
+  }
+  const built = buildTransaction({ inputs: coins.map((coin) => p2pkhInput(coin, funder)), outputs: [{ lockingBytecode: decoded.bytecode, valueSatoshis: amount }], changeLockingBytecode: funderLocking });
+  const check = checkBeforeSending(built);
+  if (check !== true) throw new Error(`the payment fails the check before sending: ${check}`);
+  const result = await server.broadcast(binToHex(built.encoded));
+  if (result.accepted) sent = built.transactionId;
+  else refusal = result.reason;
+}
 await server.disconnect();
-if (!result.accepted) {
-  console.error(`not paid: ${result.reason}`);
+if (sent === undefined) {
+  console.error(`not paid: ${refusal}`);
   process.exit(1);
 }
-console.log(`paid ${amount} satoshis in ${built.transactionId}:0, unconfirmed`);
+console.log(`paid ${amount} satoshis in ${sent}:0, unconfirmed`);
 process.exit(0);

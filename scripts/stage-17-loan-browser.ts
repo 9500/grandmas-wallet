@@ -20,15 +20,17 @@
 // before then.
 //
 // usage (from the repository's root, with the local node running and the pages built: deploy/preview.sh build):
-//   npx tsx scripts/stage-17-loan-browser.ts [local] [--screens] [--headed] [--until <step>] [--from 7|9|10|11] [--ports <base>]
+//   npx tsx scripts/stage-17-loan-browser.ts [local] [--screens] [--headed] [--until <step>] [--from 7|9|10|11] [--ports <base>] [--directory <name>] [--within <minutes>]
 // on chipnet, with the public pages and backup stores, paid from the key in .chipnet/funder-design-2.json:
 //   npx tsx scripts/stage-17-loan-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 7|8|9|10|11] [--record-only]
 // --from 8 continues a run whose new phone has sent its request: the move is completed with no new request.
 // --record-only writes the record again from what the run kept, and runs nothing.
 //
-// On chipnet the collateral is most of what the funding address holds: the run pays the owner's wallet all of it but a
-// small reserve, and borrows at the highest ratio from 125% down to the page's least, 115%, that the wallet can pay at
-// the page's own prices; where not even 115% can be paid it stops before anything is paid. A run that stops keeps its
+// The run pays from a key of its own (scripts/run-key.ts), given at the start what the run needs in one payment from the
+// funding address and emptied back to it at the end. On chipnet that is what borrowing at 125% at the page's prices
+// needs (about 0.6 BCH), or what the funding address can give less a reserve; the run pays the owner's wallet all the
+// key holds but a small reserve, and borrows at the highest ratio from 125% down to the page's least, 115%, that the
+// wallet can pay at the page's own prices; where not even 115% can be paid it stops before anything is paid. A run that stops keeps its
 // profiles and words on disk and is continued with --from, so that the loan is closed and the collateral comes back.
 //
 // Served on this machine as the jar course is (scripts/browser-course.ts); the loan page with the deployment in its
@@ -45,7 +47,8 @@ import type { Page } from 'playwright';
 
 import { DEPLOYMENT, borrowPlan, formatPrice } from '../apps/loan/src/loan.js';
 import { generalProtocolsOracle, readMarket } from '../apps/loan/src/market.js';
-import { type Device, LOAN, RECOVERER, WALLET, argument, chipnet, click, completeTakeover, config, course, firstSteps, newPhoneAsks, openDeskWorking, pagesUsed, patience, recordFile, reviewEverything, root, see, sendAllOfBalance, servedFrom, valueOf, wait } from './browser-course.js';
+import { PAGE_WAIT, type Device, LIMIT, LOAN, RECOVERER, WALLET, argument, chainShows, chipnet, clearLeftovers, click, completeTakeover, config, course, firstSteps, newPhoneAsks, openDeskWorking, pageShows, pagesUsed, recordFile, reviewEverything, root, see, sendAllOfBalance, servedFrom, untilPage, valueOf } from './browser-course.js';
+import { withChainLock } from './run-key.js';
 import { type LedgerTransaction, addressOf, chainHeight, chainServer, ledgerSection, runTransactions } from './browser-ledger.js';
 import { type RequestLog, controllerLabels, flat, localPayerLocking, lockingOf, openFolds, recordRequests, requestsSection, textOf, walletKept, walletPlaces } from './browser-live.js';
 
@@ -54,7 +57,9 @@ const until = Number(argument('until') ?? '99');
 const recordOnly = process.argv.includes('--record-only');
 const from = Number(argument('from') ?? (recordOnly ? '11' : '1'));
 if (![1, 7, 8, 9, 10, 11].includes(from)) throw new Error('A run continues from step 7, 8, 9, 10 or 11.');
-const theCourse = course({ directory: 'stage-17-loan-browser', continuing: from > 1, until });
+// What the run pays on the local node: 400,000 satoshis to Anna's balance, 50,000 and 61,000,000 to the owner, with room
+// for the fees. On chipnet the key is given what the loan needs at the page's prices (see below).
+const theCourse = course({ directory: 'stage-17-loan-browser', continuing: from > 1, until, ports: 8340, need: 61_460_000 });
 const { work, started, lines, log, pay, mine, prepare, device, watchPage, close, shot, state, begin, elsewhere, keepStorage } = theCourse;
 const noShot = async (): Promise<void> => undefined;
 const LOAN_ORIGIN = new URL(LOAN).origin;
@@ -139,8 +144,11 @@ const deploy = async (): Promise<ParyonDeployment> => {
     return made.address;
   };
   // Two block rewards define the deployment's two categories; they are spendable after 100 more blocks.
-  const hashes = JSON.parse(cli('generatetoaddress', '2', addressOf(deployerLocking))) as string[];
-  cli('generatetoaddress', '100', addressOf(hexToBin(`76a914${'00'.repeat(20)}88ac`)));
+  const hashes = withChainLock(() => {
+    const made = JSON.parse(cli('generatetoaddress', '2', addressOf(deployerLocking))) as string[];
+    cli('generatetoaddress', '100', addressOf(hexToBin(`76a914${'00'.repeat(20)}88ac`)));
+    return made;
+  });
   const coinbase = (hash: string): Utxo => {
     const block = JSON.parse(cli('getblock', hash, '2')) as { tx: { txid: string; vout: { value: number }[] }[] };
     const [first] = block.tx;
@@ -188,11 +196,17 @@ const connect = async (wallet: Page, loanPage: Page): Promise<void> => {
   // A page that was connected to this wallet in a part of the run that stopped takes that session up again.
   const resumed = loanPage.getByText('Your loans').first();
   // The page shows one or the other within seconds of loading: a short wait, and a stop with the page's picture and text otherwise.
-  await address.or(resumed).or(loanPage.getByText(/Reaching the wallet/).first()).first().waitFor({ state: 'visible', timeout: 30_000 });
+  await pageShows(address.or(resumed).or(loanPage.getByText(/Reaching the wallet/).first()), 'the loan page\'s connection address, or the session it had before');
   if (!(await address.isVisible())) {
-    await resumed.waitFor({ state: 'visible', timeout: 30_000 });
-    log('   the loan page took up the session it had with this wallet before, and shows "Your loans"');
-    return;
+    // A session of a part that stopped may have gone through a relay that is gone with it: then the page is paired again.
+    const back = await resumed.waitFor({ state: 'visible', timeout: PAGE_WAIT }).then(() => true, () => false);
+    if (back) {
+      log('   the loan page took up the session it had with this wallet before');
+      return;
+    }
+    log(`   the loan page did not take up its earlier session within ${PAGE_WAIT / 1000} s ("${flat(await loanPage.locator('.link-state, .connect-card, main').first().innerText().catch(() => ''))}"); it is connected again with "Connect another wallet"`);
+    await click(loanPage, 'Connect another wallet');
+    await pageShows(address, 'the loan page\'s connection address after "Connect another wallet"');
   }
   const uri = (await address.getAttribute('data-value')) ?? '';
   log(`   the loan page shows its connection address (${uri.length} characters) and waits for a wallet`);
@@ -200,10 +214,18 @@ const connect = async (wallet: Page, loanPage: Page): Promise<void> => {
   await click(wallet, 'Paste a link instead');
   await wallet.getByLabel('Connection link').fill(uri);
   await click(wallet, /^Connect$/);
-  const row = wallet.locator('ul.connections li').first();
-  await row.getByText('Connected', { exact: true }).waitFor({ state: 'visible', timeout: 120_000 * patience });
+  const row = wallet.locator('ul.connections li').filter({ has: wallet.getByText('Connected', { exact: true }) }).first();
+  await pageShows(row, 'the wallet\'s Applications screen to say "Connected"');
+  // A connection to the session of a part that stopped, which cannot come back, is ended.
+  const stale = wallet.locator('ul.connections li').filter({ hasText: 'Connecting' });
+  for (let round = 0; round < 5 && (await stale.first().isVisible()); round++) {
+    const before = await stale.count();
+    await stale.first().getByRole('button', { name: 'End the connection' }).click();
+    log('   the wallet\'s connection to the session of the part that stopped is ended');
+    await untilPage(async () => (await stale.count()) < before, 'the ended connection to leave the wallet\'s list');
+  }
   log(`   the wallet's Applications screen: "${await textOf(row.locator('.connection-name'))}"; "Connected"`);
-  await see(loanPage, 'Your loans', 120_000);
+  await see(loanPage, 'Your loans');
   log('   the loan page shows "Your loans" and "Open a loan"');
 };
 
@@ -213,12 +235,12 @@ const connect = async (wallet: Page, loanPage: Page): Promise<void> => {
  */
 const approveRequest = async (wallet: Page, what: string, name: string | undefined, tick = false): Promise<string> => {
   const request = wallet.locator('.request-card').filter({ hasText: 'asks for your decision' }).first();
-  await request.waitFor({ state: 'visible', timeout: 180_000 * patience });
+  await pageShows(request, `the wallet to show the loan page's request (${what})`);
   const approve = request.getByRole('button', { name: 'Approve' });
-  await approve.waitFor({ state: 'visible', timeout: 180_000 * patience });
+  await pageShows(approve, `Approve on the request (${what})`);
   const box = request.locator('input[type=checkbox]');
-  if (tick) await box.first().waitFor({ state: 'visible', timeout: 120_000 * patience });
-  else for (let attempt = 0; attempt < 240 && !(await approve.isEnabled()); attempt++) await wait(500);
+  if (tick) await pageShows(box, `the box to tick on the request (${what})`);
+  else await untilPage(() => approve.isEnabled(), `Approve enabled on the request (${what})`);
   const first = await textOf(request);
   const ticks = await box.count();
   fact(`${what}: the wallet's review of the page's request, as it first appears${ticks > 0 ? `, with ${ticks} box to tick` : ''}: "${first}"`);
@@ -226,7 +248,7 @@ const approveRequest = async (wallet: Page, what: string, name: string | undefin
   if (tick) {
     if (await approve.isEnabled()) throw new Error('Approve works before the box is ticked');
     await box.first().check();
-    for (let attempt = 0; attempt < 20 && !(await approve.isEnabled()); attempt++) await wait(250);
+    await untilPage(() => approve.isEnabled(), `Approve enabled once the box is ticked (${what})`);
     log('   Approve was off until the box was ticked; ticked');
     if (name !== undefined) await picture(wallet, `${name}-ticked`);
   } else if (ticks > 0) throw new Error(`${what}: the wallet asks for a tick where none was expected`);
@@ -234,7 +256,7 @@ const approveRequest = async (wallet: Page, what: string, name: string | undefin
   log(`   ${what}, every fold opened: "${await textOf(request)}"`);
   await click(wallet, /^Approve$/);
   const outcome = wallet.locator('.request-card').filter({ hasText: /Done:|Not carried out:/ }).first();
-  await outcome.waitFor({ state: 'visible', timeout: 240_000 * patience });
+  await pageShows(outcome, `"Done:" or "Not carried out:" after approving (${what})`);
   const title = await textOf(outcome.locator('h2, .card-title'));
   if (!title.startsWith('Done')) throw new Error(`${what} was not carried out: ${await textOf(outcome)}`);
   const transactionId = (await outcome.getByTestId('action-transaction').getAttribute('data-value')) ?? '';
@@ -245,7 +267,7 @@ const approveRequest = async (wallet: Page, what: string, name: string | undefin
 
 /** Wait for the loan page to say an action is done, and read it. */
 const pageDone = async (loanPage: Page, text: string | RegExp): Promise<void> => {
-  await see(loanPage, text, 240_000);
+  await see(loanPage, text);
   log(`   the loan page: "${typeof text === 'string' ? text : flat((await loanPage.getByText(text).first().innerText()) ?? '')}"`);
 };
 
@@ -268,11 +290,11 @@ const steps = async (): Promise<void> => {
     const receiving = await valueOf(old.page, 'receive-address');
     if (chipnet) {
       if (kept.paidForLoan === undefined) {
-        const balance = BigInt(/^(\d+) satoshis/.exec(theCourse.run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'balance']))?.[1] ?? '0');
+        const balance = theCourse.keyBalance();
         const market = await chipnetMarket();
         const amount = balance - RESERVE;
         const percent = affordable(market, amount);
-        if (percent === undefined) throw new Error(`The funding address holds ${balance} satoshis. Borrowing 100.00 PUSD at no less than 115% of ${formatPrice(market.lower)} (the lower of the stored ${formatPrice(market.stored)} and the oracle's ${market.oracle === undefined ? 'none' : formatPrice(market.oracle.price)}) needs ${borrowPlan(DEBT, 115, market).total + 40_000n} satoshis in the wallet. Nothing was paid.`);
+        if (percent === undefined) throw new Error(`The run's key holds ${balance} satoshis. Borrowing 100.00 PUSD at no less than 115% of ${formatPrice(market.lower)} (the lower of the stored ${formatPrice(market.stored)} and the oracle's ${market.oracle === undefined ? 'none' : formatPrice(market.oracle.price)}) needs ${borrowPlan(DEBT, 115, market).total + 40_000n} satoshis in the wallet. Nothing was paid.`);
         log(`   at ${formatPrice(market.lower)} the wallet can borrow at ${percent}% with ${amount} satoshis`);
         kept.paidForLoan = paid(receiving, Number(amount), 'The funding address pays the owner\'s wallet for the loan\'s collateral');
         save();
@@ -282,7 +304,7 @@ const steps = async (): Promise<void> => {
     const oldLoan = await old.context.newPage();
     watchPage('old-phone, loan tab', oldLoan);
     await connect(old.page, oldLoan);
-    await see(oldLoan, 'Make a loan key', 120_000);
+    await see(oldLoan, 'Make a loan key');
     await picture(oldLoan, 'page-connected');
     await oldLoan.getByRole('button', { name: 'Make a loan key' }).click();
     const made = await approveRequest(old.page, 'Making a loan key', 'key-review', true);
@@ -304,7 +326,7 @@ const steps = async (): Promise<void> => {
     }
     const move = oldLoan.getByRole('button', { name: 'Bring the contracts up to date' });
     const ready = oldLoan.getByText(/^Up to date\. A loan opened now/);
-    await move.or(ready).first().waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await chainShows(move.or(ready), 'the loan page to read where Paryon\'s contracts stand', LIMIT.read);
     if (await move.isVisible()) {
       log(`   the page: "${await textOf(oldLoan.locator('.new-step').nth(1))}"`);
       await move.click();
@@ -312,7 +334,7 @@ const steps = async (): Promise<void> => {
       label(moved, 'The owner\'s phone brings Paryon\'s Borrowing contract up to the current period, on the loan page\'s request');
       await pageDone(oldLoan, 'Paryon\'s contracts are up to date.');
     }
-    await ready.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await chainShows(ready, 'the loan page to read that Paryon\'s contracts are up to date', LIMIT.read);
     log(`   the page: "${await textOf(ready)}"; the borrowing form: "${await textOf(oldLoan.locator('.summary'))}"`);
     await picture(oldLoan, 'page-borrow');
     await oldLoan.getByRole('button', { name: /^Borrow 100\.00 PUSD/ }).click();
@@ -321,7 +343,7 @@ const steps = async (): Promise<void> => {
     await pageDone(oldLoan, 'The loan is open. The PUSD and the loan key are in your wallet.');
     mine(1);
     const loan = oldLoan.getByTestId('loan').first();
-    await loan.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await chainShows(loan, 'the loan page to list the loan, read from the chain', LIMIT.read);
     log(`   the loan page lists: "${await textOf(loan)}"`);
 
     // 6 ------------------------------------------------------------------
@@ -335,7 +357,7 @@ const steps = async (): Promise<void> => {
     mine(1);
     await oldLoan.reload();
     const after = oldLoan.getByTestId('loan').first();
-    await after.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await chainShows(after, 'the loan page, opened again, to list the loan from the chain', LIMIT.read);
     const listed = await textOf(after);
     log(`   the loan page lists: "${listed}"`);
     await picture(oldLoan, 'page-loan');
@@ -343,7 +365,7 @@ const steps = async (): Promise<void> => {
     // The key in the wallet's own list: under the template's name, done through the application.
     await old.page.goto(`${WALLET}apps`);
     const held = old.page.getByTestId('position-held').first();
-    await held.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await chainShows(held, 'the wallet to list the loan key from its record, read against the chain', LIMIT.read);
     kept.category = (await held.locator('.token-id [title]').first().getAttribute('title')) ?? kept.category;
     save();
     fact(`The loan was opened and given more collateral from the loan page: "${listed}". On the owner's phone the wallet lists the key from its record: "${await textOf(held)}". The key's category is \`${kept.category}\`.`);
@@ -361,7 +383,11 @@ const steps = async (): Promise<void> => {
     if (from > 8) {
       next = await device('new-phone', false);
       requests.watch(next.context);
-    }
+      // What the new phone's wallet shows before anything is done, and what a stopped part left on it.
+      await next.page.goto(`${WALLET}apps`);
+      await theCourse.lookAround();
+      await clearLeftovers(next.page, log);
+    } else await theCourse.lookAround();
     if (from === 8) {
       // The new phone sent its request in the part that stopped: the move is completed from there, with no request of its own.
       state.step = 7;
@@ -392,7 +418,7 @@ const steps = async (): Promise<void> => {
     const swept = phone.page.locator('li.token').filter({ has: phone.page.locator(`.token-id [title="${kept.category}"]`) });
     const trust = swept.getByRole('button', { name: 'Trust this template' });
     const held = keyRow('held');
-    await trust.or(held).first().waitFor({ state: 'visible', timeout: 180_000 * patience });
+    await chainShows(trust.or(held), 'the new phone to list the swept key, read from the chain', LIMIT.read);
     if (await trust.isVisible()) {
       const before = await textOf(swept);
       log(`   the Applications screen lists the swept key: "${before}"`);
@@ -402,7 +428,7 @@ const steps = async (): Promise<void> => {
       await see(phone.page, 'A template from your backup');
       await click(phone.page, 'Trust this template');
     } else log('   the template is trusted on this phone already, by the part of the run that stopped');
-    await held.waitFor({ state: 'visible', timeout: 180_000 * patience });
+    await chainShows(held, 'the new phone to list the key from its record under the template\'s name', LIMIT.read);
     const listed = await textOf(held);
     // Its buttons, leaving out the "?" and the identifiers shown short, which open in full when tapped.
     const buttons = (await held.locator('button:not(.hex):not(.info-button)').allInnerTexts()).map(flat);
@@ -413,7 +439,7 @@ const steps = async (): Promise<void> => {
     await picture(phone.page, 'open-the-application');
     await held.getByRole('button', { name: /^Why this needs the application/ }).click();
     const help = held.locator('.info-bubble').first();
-    await help.waitFor({ state: 'visible', timeout: 10_000 });
+    await pageShows(help, 'the "?" bubble');
     const helpText = await textOf(help);
     log(`   the "?": "${helpText}"`);
     await picture(phone.page, 'open-the-application-help');
@@ -439,13 +465,14 @@ const steps = async (): Promise<void> => {
     const ask = phone.page.locator('.request-card').filter({ hasText: 'asks to see your tokens' }).first();
     const loan = newLoan.getByTestId('loan').first();
     // The wallet's question, or the loan listed where it was allowed before: within seconds once the page is connected.
-    await ask.or(loan).first().waitFor({ state: 'visible', timeout: 30_000 });
+    // The two are on different pages: each is looked at.
+    await untilPage(async () => (await ask.isVisible()) || (await loan.isVisible()), 'the wallet asking whether the page may see its tokens, or the loan listed where that was allowed before');
     if (await ask.isVisible()) {
       log(`   the wallet: "${await textOf(ask)}"`);
       await picture(phone.page, 'positions-ask');
       await ask.getByRole('button', { name: 'Allow' }).click();
     } else log('   the user had allowed the page to see the wallet\'s tokens of its template in the part of the run that stopped');
-    await loan.waitFor({ state: 'visible', timeout: 180_000 * patience });
+    await chainShows(loan, 'the loan page to find the loan from the key the wallet reported', LIMIT.read);
     const found = await textOf(loan);
     log(`   allowed; the loan page found the loan from the key: "${found}"`);
     await picture(newLoan, 'page-found');
@@ -457,7 +484,7 @@ const steps = async (): Promise<void> => {
     mine(1);
     await newLoan.reload();
     const after = newLoan.getByTestId('loan').first();
-    await after.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await chainShows(after, 'the loan page, opened again, to list the closed loan', LIMIT.read);
     log(`   the loan page lists: "${await textOf(after)}"`);
     await picture(newLoan, 'page-closed');
     fact(`On the new phone the loan page, connected and allowed by the user, found the loan from the key the wallet reported: "${found}". It closed it through the wallet (transaction \`${closed}\`), and then listed: "${await textOf(after)}".`);
@@ -471,7 +498,7 @@ const steps = async (): Promise<void> => {
   await reviewEverything(phone.page);
   const everything = phone.page.getByText('Arrives', { exact: true });
   const nothing = phone.page.getByText('Too little to send');
-  await everything.or(nothing).first().waitFor({ state: 'visible', timeout: 120_000 * patience });
+  await pageShows(everything.or(nothing), 'the review of sending everything, or "Too little to send"');
   if (await everything.isVisible()) {
     await click(phone.page, /^Send$/);
     await see(phone.page, 'Sent');
@@ -499,10 +526,11 @@ const writeRecord = async (outcome: string): Promise<void> => {
   const outside = lockingOf(elsewhere());
   const funds = kept.fundsAddress === '' ? '' : lockingOf(kept.fundsAddress);
   const payer = localPayerLocking();
+  const ownKey = theCourse.keyLocking();
   const deployerHex = chipnet ? '' : binToHex(deployerLocking);
   // On chipnet the run's transactions are found from the run's own addresses; Paryon's contracts are everybody's.
   // The funding address is not read: others use it too, and what it paid the run is found through the run's addresses.
-  const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, funds]);
+  const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, funds, ownKey, deployerHex]);
   const contracts = chipnet ? paryonContracts(DEPLOYMENT) : kept.deployment === undefined ? undefined : paryonContracts(kept.deployment);
   const paryonPlaces = new Map<string, string>();
   if (contracts !== undefined) {
@@ -515,7 +543,7 @@ const writeRecord = async (outcome: string): Promise<void> => {
   }
   for (const entry of wallet.activity) label(entry.transactionId, `${entry.who === 'old-phone' ? 'The owner\'s phone' : 'The new phone'}: ${entry.what}`);
   const placeOf = (lockingBytecode: string): string | undefined =>
-    lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === outside ? `the outside address the coins went back to (${addressOf(outside)})` : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === payer ? (chipnet ? 'the funding address (`scripts/chipnet-pay.ts`)' : 'the local payer (`scripts/local-pay.ts`)') : lockingBytecode === deployerHex ? 'the key that deployed Paryon\'s contracts, which gets Paryon\'s fee' : (paryonPlaces.get(lockingBytecode) ?? places.get(lockingBytecode));
+    lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === outside ? `the outside address the coins went back to (${addressOf(outside)})` : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === ownKey ? 'the run\'s own key (`scripts/run-key.ts`)' : lockingBytecode === payer ? (chipnet ? 'the funding address (`scripts/chipnet-pay.ts`)' : 'the local payer (`scripts/local-pay.ts`)') : lockingBytecode === deployerHex ? 'the key that deployed Paryon\'s contracts, which gets Paryon\'s fee' : (paryonPlaces.get(lockingBytecode) ?? places.get(lockingBytecode));
   const ofController = await controllerLabels(identity);
   const labelOf = (transaction: LedgerTransaction): string | undefined => {
     const named = kept.labels[transaction.transactionId] ?? ofController.get(transaction.transactionId);
@@ -523,7 +551,8 @@ const writeRecord = async (outcome: string): Promise<void> => {
     const fromFunds = funds !== '' && transaction.inputs.some((input) => input.lockingBytecode === funds);
     if (fromFunds && transaction.outputs.some((output) => output.lockingBytecode === outside)) return 'The recoverer sends her balance back';
     if (fromFunds) return 'Paid from the recoverer\'s balance';
-    if (transaction.inputs.some((input) => input.lockingBytecode === payer)) return chipnet ? 'The funding address pays' : 'The local payer pays';
+    if (ownKey !== '' && transaction.inputs.some((input) => input.lockingBytecode === ownKey)) return transaction.outputs.some((output) => output.lockingBytecode === outside) ? 'The run\'s key sends what it holds back to the funding address' : 'The run\'s key pays';
+    if (transaction.inputs.some((input) => input.lockingBytecode === payer)) return chipnet ? 'The funding address pays the run\'s key' : 'The local payer pays the run\'s key';
     return undefined;
   };
   const urls = requests.urls();
@@ -553,7 +582,7 @@ const writeRecord = async (outcome: string): Promise<void> => {
       '',
       chipnet
         ? `Read from chipnet's server after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the wallet's addresses of both phones' seeds, its controller and the recoverer's balance). Paryon's contracts are named where the run's coins went into them. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`
-        : `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, and in the node's pool. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
+        : `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or in the node's pool, that touches an address of the run (the run's own key, the key that deployed Paryon's contracts, the wallet's addresses of both phones' seeds, its controller and the recoverer's balance), so that another run at the same time is left out. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
       '',
       ...ledgerSection(ledger, labelOf, placeOf),
       ...(kept.screens.length === 0 ? [] : ['## Pictures', '', `In \`docs/screens/\`, each at 390×844 (\`-phone\`) and 1280×800 (\`-desktop\`): ${kept.screens.map((name) => `\`${prefix}-${name}\``).join(', ')}.`, '']),
@@ -585,15 +614,21 @@ try {
     theCourse.note(`       continued from step ${from}`);
   }
   const deployment = await deploy();
+  /** On chipnet, what the run's key is given: the first steps' 460,000 sat, and what borrowing at 125% needs, or what the funding address can give less a reserve. */
+  let need: number | undefined;
   if (chipnet && from === 1) {
     // Before anything is set up: whether the funding address can pay for the loan at the page's prices as they are now.
     // The first steps give the recoverer 400,000 sat, of which the wallet gets 100,000, and pay the wallet 50,000.
     const balance = BigInt(/^(\d+) satoshis/.exec(theCourse.run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'balance']))?.[1] ?? '0');
     const market = await chipnetMarket();
-    const holds = balance - 400_000n - 50_000n - 10_000n - RESERVE + 150_000n;
+    const wanted = borrowPlan(DEBT, 125, market).total + BigInt(Math.round(Number(ADDED) * 1e8)) + 30_000n + RESERVE + 460_000n;
+    const given = wanted < balance - RESERVE ? wanted : balance - RESERVE;
+    const holds = given - 460_000n - RESERVE + 150_000n;
     if (affordable(market, holds) === undefined) throw new Error(`The funding address holds ${balance} satoshis. Borrowing 100.00 PUSD at no less than 115% of ${formatPrice(market.lower)} needs about ${borrowPlan(DEBT, 115, market).total + 40_000n} satoshis in the wallet, which would hold about ${holds}. Nothing was set up or paid.`);
+    need = Number(given);
   }
   await prepare(['wallet', 'recoverer', 'loan'], chipnet ? {} : { paryon: deployment });
+  if (from === 1) theCourse.fundRunKey(need);
   if (chipnet) {
     const now = await servedFrom([WALLET, RECOVERER, LOAN]);
     if (!(kept.served ?? []).includes(now)) kept.served = [...(kept.served ?? []), now];
@@ -602,6 +637,7 @@ try {
   log(`   the run starts after block ${kept.startHeight}; Paryon's deployment "${deployment.name}" on ${config.network}, PUSD ${deployment.tokenIds.paryon.slice(0, 12)}…`);
   await steps();
   const all = state.step >= 11 && until >= 11;
+  if (all) theCourse.returnCoins();
   await writeRecord(all ? (kept.continued.length > 0 ? 'every step was carried out, in parts with the same browser profiles (see below).' : 'every step was carried out.') : `stopped after step ${Math.min(state.step, until)}, as asked.`);
 } catch (error) {
   await theCourse.failed(error);

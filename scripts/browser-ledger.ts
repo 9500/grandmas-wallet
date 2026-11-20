@@ -90,7 +90,9 @@ export const runTransactions = async (afterHeight: number, places: string[] = []
       return transaction;
     };
     const listed: { transactionId: string; height: number }[] = [];
-    if (chipnet) {
+    // A course names its addresses: then only what touches them is its own, on the local node too, where another
+    // course may run at the same time.
+    if (chipnet || places.length > 0) {
       const found = new Map<string, number>();
       for (const place of new Set(places.filter((bytecode) => bytecode !== ''))) {
         for (const entry of await server.getHistory(hexToBin(place))) {
@@ -139,6 +141,8 @@ export const runTransactions = async (afterHeight: number, places: string[] = []
     for (const { transactionId, height } of listed) {
       const transaction = await read(transactionId);
       if (typeof transaction === 'string') throw new Error(transaction);
+      // A block reward (an address of the run may receive one on the local node) spends nothing.
+      if (transaction.inputs.length === 1 && transaction.inputs[0]?.outpointTransactionHash.every((byte) => byte === 0)) continue;
       const inputs: LedgerInput[] = [];
       for (const input of transaction.inputs) {
         const from = binToHex(input.outpointTransactionHash);
