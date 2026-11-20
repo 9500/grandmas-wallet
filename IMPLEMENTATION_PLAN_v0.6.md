@@ -131,11 +131,11 @@ The owner decided on 20 November 2026 that the pages of this version are served 
 
 Asked for by the owner on 20 November 2026, for after the chipnet runs. Until then the wallet shows a fungible token by its category and in raw units (proposal section 13.3, decision 25).
 
-- First an evaluation, written into the proposal before anything is built: whether the wallet can read Bitcoin Cash Metadata Registries (BCMR) to show a token's name, symbol and decimals. The Cashonize wallet is the example to read: where it takes a registry from, how it ties a registry to a category on chain, what it keeps, and what it shows when there is none.
+- First an evaluation, before anything is built: whether the wallet can read Bitcoin Cash Metadata Registries (BCMR) to show a token's name, symbol and decimals. **Written on 20 November 2026: [docs/token-registries.md](docs/token-registries.md),** from the specification, the sources of Cashonize and Selene, and a trial that followed PUSD's registry on chipnet from its category to a file with the published hash. It proposes names taken only from a file the token's own chain of transactions publishes, and lists eight decisions for the owner.
 - What has to be settled there: which registries the wallet trusts and how a category's own registry is found and checked against the chain; what a lookup tells a server about the wallet's tokens; what is kept on the device and in the backup, so that a new phone shows the same names; what the wallet shows when a registry and a template disagree; that amounts the wallet's own figures show stay the wallet's, with a registry supplying only the name and where the decimal point goes.
 - Then the wallet's screens: balances, sending, the review of an action, and typed amounts in the token's own units.
 
-**Done when** the evaluation is in the proposal with the owner's decision, and, if it is built, the tests it names pass.
+**Done when** the owner has decided the points of that document's section 8, and, if it is built, its tests TR01 to TR14 pass and its exit criteria are met.
 
 ## Stage 20 — Mainnet by configuration
 
@@ -187,5 +187,5 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 34 | Several places that hold coins for one token | Decided, 20 November 2026 | Each is listed as an open position; telling a moved position from one set beside it is not pursued |
 | 36 | Where the pages of this version are served for the chipnet runs | Decided, 20 November 2026 | At the public addresses, in place of the second design's pages |
 | 37 | The wait for the engine to list the coins of an action just sent | Decided, 20 November 2026 | Accepted |
-| 38 | Token names and units from a registry (BCMR) | Stage 19 | To be evaluated |
+| 38 | Token names and units from a registry (BCMR) | Stage 19 | Evaluated in `docs/token-registries.md`; its eight decisions are open |
 | 39 | Mainnet | Stage 20 | By a configuration parameter, off by default, with a warning |
