@@ -94,7 +94,7 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 - This wallet's answers of section 12.5: it refuses where something does not come back or cannot be told.
 - A template for the tests alone, with a script that takes a key of the device.
 
-**Tests:** PR08, PR09. **Done when** they pass on the simulated chain.
+**Tests:** PR08, PR09. **Done on 20 November 2026:** they pass on the simulated chain (`docs/results/stage-15.md` on the branch `design-3`).
 
 ## Stage 16 — The wallet's screens
 
@@ -102,7 +102,7 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 - Tokens shown by category and in raw units, and an NFT by its template and output (section 13.3), on Send, Receive and the review.
 - Each is pictured on a phone and on a desktop from the fixtures page before it is wired to the wallet, and shown to the owner.
 
-**Done when** the pictures are in `docs/screens/` and the owner has seen them.
+**Done when** the pictures are in `docs/screens/` and the owner has seen them. The pictures were made on 20 November 2026 (`docs/screens/apps-*.png` on the branch `design-3`); the owner has not yet seen them.
 
 ## Stage 17 — The two applications without declarations
 
