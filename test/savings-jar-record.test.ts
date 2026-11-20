@@ -107,7 +107,7 @@ describe('a savings jar through the loss of a device, as recorded', () => {
     expect(record).toMatch(/No application takes part|with the application's site not consulted/);
   });
 
-  // `scripts/browser-run-jar.ts`: the wallet page, the recoverer page and the jar page in real browsers.
+  // `scripts/browser-run-jar.ts` at the tag `design-2`: the wallet page, the recoverer page and the jar page in real browsers.
   it('SJ04: in real browsers, a new phone found the jar from the swept key and the template without a request to the jar page, and emptied it twice', () => {
     const record = readFileSync(new URL('../docs/runs/stage-8-browser-local-node.md', import.meta.url), 'utf8');
     expect(record).toMatch(/^Outcome: every step was carried out\.$/m);

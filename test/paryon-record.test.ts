@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /**
- * The ParyonUSD loan by script on chipnet (`scripts/run-e.ts`, run E, step 1) writes its own record. These
+ * The ParyonUSD loan by script on chipnet (`scripts/run-e.ts` at the tag `design-2`, run E, step 1) wrote its own record. These
  * tests do not repeat the run: they read its record and check that it is of the complete course, with every
  * transaction named and every fee exactly the size. The transactions themselves, the repayment that leaves a
  * loan open among them, are checked in the virtual machine against Paryon's live outputs in

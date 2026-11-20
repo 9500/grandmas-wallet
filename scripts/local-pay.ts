@@ -6,7 +6,7 @@
 //   npx tsx scripts/local-pay.ts mine <blocks>                                   make blocks
 //   npx tsx scripts/local-pay.ts time <seconds>                                  move the chain's clock on and make the blocks that carry it
 //
-// The payer is a key of its own, kept in .chipnet/local-funder.json. It is given a block reward when it
+// The payer is a key of its own, kept in .local-runs/local-funder.json. It is given a block reward when it
 // holds nothing, which takes 101 blocks; after `deploy/regtest/regtest.sh reset` that happens again.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -47,8 +47,8 @@ if (first === 'time') {
   process.exit(0);
 }
 
-mkdirSync(`${root}.chipnet`, { recursive: true });
-const keyFile = `${root}.chipnet/local-funder.json`;
+mkdirSync(`${root}.local-runs`, { recursive: true });
+const keyFile = `${root}.local-runs/local-funder.json`;
 if (!existsSync(keyFile)) writeFileSync(keyFile, JSON.stringify({ privateKey: binToHex(crypto.getRandomValues(new Uint8Array(32))) }), { mode: 0o600 });
 const funder = keyPairFromPrivateKey(hexToBin((JSON.parse(readFileSync(keyFile, 'utf8')) as { privateKey: string }).privateKey));
 const funderLocking = p2pkhLockingBytecode(funder.keyHash);

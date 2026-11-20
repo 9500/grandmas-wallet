@@ -1,4 +1,5 @@
-// What the scripted courses in a browser share (scripts/browser-run.ts and scripts/browser-run-jar.ts): the log
+// What the scripted courses in a browser share (scripts/browser-run.ts, scripts/stage-17-jar-browser.ts and
+// scripts/stage-17-loan-browser.ts; scripts/browser-run-jar.ts at the tag `design-2`): the log
 // kept line by line, the chain and the servers of the local node, the devices (one browser profile each, kept on
 // disk), the ways of waiting for a page, the screenshots, and the first steps that every course begins with:
 // a recoverer gives its link, the owner makes a wallet with it, the recoverer keeps the kit, the owner receives.
@@ -6,9 +7,14 @@
 // The first argument of a course is `local` (the default) or `chipnet`; `--screens` takes screenshots and
 // `--headed` shows the browser. On chipnet, `--local-pages` serves the pages of this checkout on this machine
 // (deploy/config/local.json) instead of using the public ones. `--directory <name>` keeps the profiles, the
-// stores' data and the log under `.chipnet/<name>/` (with `-chipnet` added on chipnet) instead of the course's
-// own directory, and `--record <file name>` writes the record to that file in docs/runs/ instead of the
-// course's own, so that a run does not touch an earlier run's profiles or record.
+// stores' data and the log under `.local-runs/<name>/` on the local node, or `.chipnet/<name>-chipnet/` on
+// chipnet, instead of the course's own directory, and `--record <file name>` writes the record to that file in
+// docs/runs/ instead of the course's own, so that a run does not touch an earlier run's profiles or record.
+//
+// On the local node the pages and the two backup stores of a run are served on ports of their own, on
+// 127.0.0.1 only: from `--ports <base>` (8300 when not given) the wallet at base + 1, the recoverer at + 2, the
+// Savings Jar at + 3, the loan page at + 4, and the stores at + 11 and + 12. Nothing else on this machine is
+// used or touched.
 //
 // The wallet is made with its recoverer as a person would first do it (proposal section 14.4): the owner's phone
 // reads the code on the recoverer's "Your link" screen, which carries the link and a session, and the wallet
@@ -41,7 +47,23 @@ export const viaLinks = process.argv.includes('--links');
 /** On chipnet: the pages of this checkout, served on this machine, instead of the public ones. */
 export const localPages = !chipnet || process.argv.includes('--local-pages');
 const configName = chipnet ? (localPages ? 'local' : 'production') : 'local-regtest';
-export const config = JSON.parse(readFileSync(`${root}deploy/config/${configName}.json`, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl: string; loanUrl?: string; network: string; relays?: string[]; chain: string[] };
+type App = 'wallet' | 'recoverer' | 'jar' | 'loan';
+/** The ports of a run's pages and stores on the local node; on chipnet with the pages of this checkout, those of deploy/config/local.json. */
+const portBase = chipnet ? 8100 : Number(argument('ports') ?? '8300');
+if (!Number.isInteger(portBase) || portBase < 1024 || portBase > 65_000) throw new Error(`--ports takes a port number to count from, such as 8300, not ${argument('ports')}`);
+const PORTS: Record<App, number> = { wallet: portBase + 1, recoverer: portBase + 2, jar: portBase + 3, loan: portBase + 4 };
+const STORE_PORTS = [portBase + 11, portBase + 12] as const;
+const fromFile = JSON.parse(readFileSync(`${root}deploy/config/${configName}.json`, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl: string; loanUrl?: string; stores: string[]; network: string; relays?: string[]; chain: string[] };
+export const config = chipnet
+  ? fromFile
+  : {
+      ...fromFile,
+      walletUrl: `http://localhost:${PORTS.wallet}/`,
+      recovererUrl: `http://localhost:${PORTS.recoverer}/`,
+      jarUrl: `http://localhost:${PORTS.jar}/`,
+      loanUrl: `http://localhost:${PORTS.loan}/`,
+      stores: STORE_PORTS.map((port) => `http://localhost:${port}`),
+    };
 /**
  * The file in docs/runs/ the record is written to: the course's own, or the one `--record` names. A name that
  * is not a plain file name ending in `.md` is refused, so that a record never lands outside docs/runs/.
@@ -54,7 +76,7 @@ export const recordFile = (own: string): string => {
 export const WALLET = config.walletUrl;
 export const RECOVERER = config.recovererUrl;
 export const JAR = config.jarUrl;
-export const LOAN = config.loanUrl ?? 'http://localhost:8104/';
+export const LOAN = config.loanUrl ?? `http://localhost:${PORTS.loan}/`;
 /** On chipnet a block takes about a minute and may take several: every wait is given ten times as long. */
 export const patience = chipnet ? 10 : 1;
 export const PHONE = { width: 390, height: 844 };
@@ -69,21 +91,19 @@ export interface Device {
   page: Page;
 }
 
-type App = 'wallet' | 'recoverer' | 'jar' | 'loan';
-const PORTS: Record<App, number> = { wallet: 8101, recoverer: 8102, jar: 8103, loan: 8104 };
 /** Servers a page alone may talk to, besides those of the configuration. */
 const EXTRA: Partial<Record<App, string[]>> = { loan: ['--connect', 'https://oracles.generalprotocols.com'] };
 
 /**
  * A course: its log, its devices and its servers.
- * @param directory - under `.chipnet/`, for the profiles, the stores' data and the log (with `-chipnet` added on chipnet)
+ * @param directory - under `.local-runs/` on the local node, or `.chipnet/` with `-chipnet` added on chipnet: the profiles, the stores' data and the log
  * @param continuing - the log goes on from the lines a stopped run left
  * @param until - the last step to carry out
  */
 export const course = (options: { directory: string; continuing: boolean; until: number }) => {
   const directory = argument('directory') ?? options.directory;
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(directory)) throw new Error(`--directory takes a plain name, made a directory under .chipnet/, not ${directory}`);
-  const work = `${root}.chipnet/${directory}${chipnet ? '-chipnet' : ''}/`;
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(directory)) throw new Error(`--directory takes a plain name, made a directory of the run's own, not ${directory}`);
+  const work = chipnet ? `${root}.chipnet/${directory}-chipnet/` : `${root}.local-runs/${directory}/`;
   const started = Date.now();
 
   // ------------------------------------------------------------------ the log
@@ -249,7 +269,11 @@ export const course = (options: { directory: string; continuing: boolean; until:
   /** The relay on this machine that the pages' sessions go through, on the local node. */
   let relay: MemoryRelay | undefined;
   /** What a run needs before its first step: the public pages' version on chipnet, or the pages and stores of this checkout on this machine. */
-  const prepare = async (apps: App[]): Promise<void> => {
+  /**
+   * @param apps - the pages the course uses
+   * @param served - on the local node, more of the configuration the pages are served with (the loan page's deployment of Paryon's contracts)
+   */
+  const prepare = async (apps: App[], served: Record<string, unknown> = {}): Promise<void> => {
     if (chipnet && !localPages) {
       for (const app of apps) {
         const url = app === 'wallet' ? WALLET : app === 'recoverer' ? RECOVERER : JAR;
@@ -269,21 +293,22 @@ export const course = (options: { directory: string; continuing: boolean; until:
     if (!chipnet) {
       relay = await startMemoryRelay();
       configFile = `${work}config.json`;
-      writeFileSync(configFile, JSON.stringify({ ...config, relays: [relay.url] }, null, 2));
+      writeFileSync(configFile, JSON.stringify({ ...config, ...served, relays: [relay.url] }, null, 2));
       log(`relay: ${relay.url}, on this machine, for the sessions between the pages`);
     }
     mkdirSync(`${work}store1`, { recursive: true });
     mkdirSync(`${work}store2`, { recursive: true });
-    const origins = ['--origin', 'http://localhost:8101', '--origin', 'http://localhost:8102'];
-    await serve('http://127.0.0.1:8111/', process.execPath, ['--import', 'tsx', 'apps/archive-store/src/cli.ts', '--port', '8111', '--directory', `${work}store1`, ...origins], 'store 1');
-    await serve('http://127.0.0.1:8112/', process.execPath, ['--import', 'tsx', 'apps/archive-store/src/cli.ts', '--port', '8112', '--directory', `${work}store2`, ...origins], 'store 2');
+    const origins = ['--origin', new URL(WALLET).origin, '--origin', new URL(RECOVERER).origin];
+    for (const [index, port] of STORE_PORTS.entries()) {
+      await serve(`http://127.0.0.1:${port}/`, process.execPath, ['--import', 'tsx', 'apps/archive-store/src/cli.ts', '--port', String(port), '--host', '127.0.0.1', '--directory', `${work}store${index + 1}`, ...origins], `store ${index + 1}`);
+    }
     // Each is started as a process of its own, not through a wrapper, so that it ends when the run does.
     for (const app of apps) {
       const port = PORTS[app];
       await serve(`http://127.0.0.1:${port}/`, process.execPath, ['deploy/serve.mjs', '--root', `apps/${app}/dist`, '--config', configFile, '--host', '127.0.0.1', '--port', String(port), ...(EXTRA[app] ?? [])], `the ${app} page`);
-      const served = (await (await fetch(`http://127.0.0.1:${port}/version.json`)).json()) as { commit?: string; network?: string };
-      if (served.network !== config.network) throw new Error(`the ${app} page on port ${port} serves ${served.network}, not ${config.network}: something else answers there`);
-      log(`${app} page: http://localhost:${port}/, this checkout at ${served.commit}, ${served.network}`);
+      const version = (await (await fetch(`http://127.0.0.1:${port}/version.json`)).json()) as { commit?: string; network?: string };
+      if (version.network !== config.network) throw new Error(`the ${app} page on port ${port} serves ${version.network}, not ${config.network}: something else answers there`);
+      log(`${app} page: http://localhost:${port}/, this checkout at ${version.commit}, ${version.network}`);
       // Pages that something else serves may name other relays: said, so that the record shows where sessions went.
       const relays = ((await (await fetch(`http://127.0.0.1:${port}/config.json`)).json()) as { relays?: string[] }).relays ?? [];
       if (relay !== undefined && !(relays.length === 1 && relays[0] === relay.url)) log(`   the ${app} page was already served on port ${port}, with the relays ${relays.join(', ')}`);
@@ -393,6 +418,10 @@ export const course = (options: { directory: string; continuing: boolean; until:
         window.scrollTo(0, 0);
         document.querySelectorAll<HTMLElement>('.toast').forEach((element) => element.style.setProperty('display', 'none'));
         document.querySelectorAll<HTMLElement>('.topbar').forEach((element) => element.style.setProperty('position', 'static'));
+        // The decision bar of a request, which sticks to the foot of the screen, at the foot of its card; the rail of a
+        // desktop, a screen high, as high as the page.
+        document.querySelectorAll<HTMLElement>('.request-card .decide').forEach((element) => element.style.setProperty('position', 'static'));
+        document.querySelectorAll<HTMLElement>('.rail').forEach((element) => element.style.setProperty('height', 'auto'));
       });
       if (phone) await page.evaluate(() => {
         const app = document.querySelector<HTMLElement>('.app.with-nav');
@@ -407,7 +436,7 @@ export const course = (options: { directory: string; continuing: boolean; until:
       if (phone) await page.evaluate(() => {
         document.querySelectorAll<HTMLElement>('.app, .nav').forEach((element) => ['display', 'flex-direction', 'position', 'order'].forEach((property) => element.style.removeProperty(property)));
       });
-      await page.evaluate(() => document.querySelectorAll<HTMLElement>('.toast, .topbar').forEach((element) => ['display', 'position'].forEach((property) => element.style.removeProperty(property))));
+      await page.evaluate(() => document.querySelectorAll<HTMLElement>('.toast, .topbar, .request-card .decide, .rail').forEach((element) => ['display', 'position', 'height'].forEach((property) => element.style.removeProperty(property))));
     }
     await page.setViewportSize(PHONE);
   };
