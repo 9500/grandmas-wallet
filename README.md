@@ -33,7 +33,7 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 
 - **Design 1** is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1), with its web demonstration and chipnet runs. It spent every coin together with the wallet's controller, which linked all of a wallet's activity and got in the way of applications.
 - **Design 2** is at the tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2), and is what the pages under "Try it" run. It gives each address its own key and uses the controller only for recovery. After a recovery, the new phone finds what the owner holds in an application from the application's token, its template and the chain alone.
-- **Design 3** starts from design 2 and keeps its keys, addresses and controller. It is built on the branch `design-3`. It changes how an application's position comes back after a recovery. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6, and nothing of it is built yet.
+- **Design 3** starts from design 2 and keeps its keys, addresses and controller. It is built on the branch `design-3`. It changes how an application's position comes back after a recovery. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6. It is built and has run on a local test node; it has not yet run on chipnet.
 
 ### Why a third design
 
