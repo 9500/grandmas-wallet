@@ -455,7 +455,13 @@ export const course = (options: { directory: string; continuing: boolean; until:
   const failed = async (error: unknown): Promise<void> => {
     log(`FAILED at step ${state.step}: ${(error as Error).message.split('\n')[0]}`);
     for (const gone of devices) {
-      for (const [index, page] of gone.context.pages().entries()) await page.screenshot({ path: `${work}failure-${gone.name}${index === 0 ? '' : `-${index + 1}`}.png`, fullPage: true }).catch(() => undefined);
+      for (const [index, page] of gone.context.pages().entries()) {
+        const name = `failure-${gone.name}${index === 0 ? '' : `-${index + 1}`}`;
+        await page.screenshot({ path: `${work}${name}.png`, fullPage: true }).catch(() => undefined);
+        // What the page said when the run stopped, beside its picture.
+        const said = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '');
+        writeFileSync(`${work}${name}.txt`, `${page.url()}\n\n${said}\n`);
+      }
     }
   };
   const end = async (): Promise<void> => {

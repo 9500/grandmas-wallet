@@ -187,9 +187,10 @@ const connect = async (wallet: Page, loanPage: Page): Promise<void> => {
   const address = loanPage.locator('.value-text[data-value^="wiz:"]').first();
   // A page that was connected to this wallet in a part of the run that stopped takes that session up again.
   const resumed = loanPage.getByText('Your loans').first();
-  await address.or(resumed).or(loanPage.getByText(/Reaching the wallet/).first()).first().waitFor({ state: 'visible', timeout: 120_000 * patience });
+  // The page shows one or the other within seconds of loading: a short wait, and a stop with the page's picture and text otherwise.
+  await address.or(resumed).or(loanPage.getByText(/Reaching the wallet/).first()).first().waitFor({ state: 'visible', timeout: 30_000 });
   if (!(await address.isVisible())) {
-    await resumed.waitFor({ state: 'visible', timeout: 120_000 * patience });
+    await resumed.waitFor({ state: 'visible', timeout: 30_000 });
     log('   the loan page took up the session it had with this wallet before, and shows "Your loans"');
     return;
   }
@@ -437,7 +438,8 @@ const steps = async (): Promise<void> => {
     // The template came from the backup: the wallet asks before it tells this page which keys of it it holds.
     const ask = phone.page.locator('.request-card').filter({ hasText: 'asks to see your tokens' }).first();
     const loan = newLoan.getByTestId('loan').first();
-    await ask.or(loan).first().waitFor({ state: 'visible', timeout: 180_000 * patience });
+    // The wallet's question, or the loan listed where it was allowed before: within seconds once the page is connected.
+    await ask.or(loan).first().waitFor({ state: 'visible', timeout: 30_000 });
     if (await ask.isVisible()) {
       log(`   the wallet: "${await textOf(ask)}"`);
       await picture(phone.page, 'positions-ask');
