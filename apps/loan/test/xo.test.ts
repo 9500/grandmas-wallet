@@ -97,7 +97,7 @@ const connectPage = (device: Device, chain: PageChain, pending = memoryKept<Pend
     }
     return asked;
   };
-  return { page, answer, proposals: () => proposals };
+  return { page, answer, proposals: () => proposals, connector };
 };
 
 /** The wallet with Paryon's outputs on its chain, and the page connected to it. The user approves what the wallet shows. */
@@ -113,7 +113,7 @@ const setUp = async (satoshis = 70_000_000n) => {
   };
   const pending = memoryKept<PendingRequest>();
   const keys = memoryKept<KeptKey>();
-  const { page, answer, proposals } = connectPage(device, chain, pending, keys);
+  const { page, answer, proposals, connector } = connectPage(device, chain, pending, keys);
   const first = page();
   const { loans } = first;
   const market = () => readMarket(chain, 'chipnet', async () => ({ price: ORACLE, time: 1_795_000_000 }));
@@ -122,7 +122,37 @@ const setUp = async (satoshis = 70_000_000n) => {
     if (typeof transaction === 'string') throw new Error(transaction);
     return transaction;
   };
-  return { device, chain, loans, page, first, answer, market, pending, keys, sentToWallet: first.sentToWallet, decoded, proposals };
+  return { device, chain, loans, page, first, answer, market, pending, keys, sentToWallet: first.sentToWallet, decoded, proposals, connector };
+};
+
+/** A loan of 100 PUSD, opened from the page: a key, the contracts brought up to date where needed, and the loan. */
+const openLoan = async ({ loans, answer, market }: Awaited<ReturnType<typeof setUp>>) => {
+  await answer(loans.createKey(), true, true);
+  const [key] = await loans.waitingKeys();
+  const now = await market();
+  const need = periodNeed(now);
+  if (need.needed === true) await answer(loans.movePeriod(need.thread, now.lockHeight));
+  const ready = await market();
+  const current = periodNeed(ready);
+  if (current.needed !== false) throw new Error('the contracts are still behind');
+  const plan = borrowPlan(100_00n, DEFAULT_PERCENT, ready);
+  await answer(loans.borrow(key as never, current.thread, ready, plan));
+  return { category: key?.category as string, plan };
+};
+
+/**
+ * For the next `times` broadcasts: after the wallet has worked out the action and the user approved it, and just
+ * before the transaction reaches the network, `meddle` runs, as someone else spending a coin the action names.
+ */
+const beforeBroadcasts = (device: Device, times: number, meddle: (transactionHex: string) => undefined | Promise<{ accepted: false; reason: string }>) => {
+  const original = device.chain.broadcast;
+  let left = times;
+  device.chain.broadcast = async (transactionHex) => {
+    left -= 1;
+    if (left <= 0) device.chain.broadcast = original;
+    const answered = await meddle(transactionHex);
+    return answered ?? original(transactionHex);
+  };
 };
 
 describe('the loan page with a wallet that carries out actions itself (PY02)', () => {
@@ -320,3 +350,99 @@ describe('the loan page on a new phone, after the loss of the device (PR20)', ()
   });
 });
 
+describe('the loan page when someone else uses one of Paryon\'s coins first', () => {
+  const requested = (sentToWallet: XoMessage[]) => sentToWallet.filter((message) => message.action === 'xo_action_request' && message.templateAction === 'close');
+  /** The coin of Paryon's function contract a closing names: one of many that every user's actions take and make again. */
+  const functionInputOf = (message: XoMessage | undefined): string => (message as { inputs?: Record<string, string> } | undefined)?.inputs?.['repayInput'] ?? '';
+
+  it('the wallet says why in a code, its own coins are free again, and the page asks again at once with the current coins; the second try is carried out once approved', { timeout: 120_000 }, async () => {
+    const context = await setUp();
+    const { device, loans, answer, sentToWallet, connector, pending } = context;
+    const { category, plan } = await openLoan(context);
+    const balance = await device.wallet.balance();
+
+    // Between the user's look at the review and the broadcast, another user spends the coin of Paryon's function
+    // contract the request named, and remakes it elsewhere.
+    beforeBroadcasts(device, 1, () => {
+      device.chain.spendElsewhere(functionInputOf(requested(sentToWallet).at(-1)));
+      return undefined;
+    });
+    const said: string[] = [];
+    const stages: string[] = [];
+    const closing = loans.close(category, (stage) => stages.push(stage), (words) => said.push(words));
+    await answer(Promise.resolve());
+    // The first try's outcome, as the wallet keeps it and as the page got it: not carried out, with the code.
+    const [refused] = connector.ledger.filter((entry) => entry.templateAction === 'close');
+    expect(refused).toMatchObject({ status: 'failed', code: 'inputs-spent', error: expect.stringMatching(/missingorspent/) as string });
+    expect(said).toEqual(['Someone else used one of Paryon\'s coins first. Asking your wallet again with the current ones.']);
+    // Nothing was sent, and the wallet's own coins in the refused action are free again: its balance is as it was.
+    expect((await device.wallet.balance()).recoverable).toBe(balance.recoverable);
+    expect((await device.wallet.balance()).tokens.length).toBe(balance.tokens.length);
+
+    // The page asked again by itself, naming the coins as they are now; the user approves the new review.
+    await answer(closing);
+    const [first, second] = requested(sentToWallet);
+    expect(functionInputOf(second)).not.toBe(functionInputOf(first));
+    expect(second?.id).not.toBe(first?.id);
+    expect(connector.ledger.filter((entry) => entry.templateAction === 'close').map(({ status }) => status)).toEqual(['failed', 'done']);
+    expect(stages.filter((stage) => stage === 'on-network')).toHaveLength(1);
+    expect(pending.get()).toEqual([]);
+    expect((await loans.list()).loans.map(({ status }) => status)).toEqual(['closed']);
+    expect((await device.wallet.balance()).recoverable - balance.recoverable).toBeGreaterThan(plan.collateral);
+  });
+
+  it('asks no more than three times in a row, does not ask again after another kind of refusal, and stops where the loan itself changed', { timeout: 120_000 }, async () => {
+    const context = await setUp();
+    const { device, loans, answer, sentToWallet, proposals, pending } = context;
+    const { category } = await openLoan(context);
+
+    // Another kind of refusal: the page is told the wallet's words and asks nothing again.
+    beforeBroadcasts(device, 1, async () => ({ accepted: false, reason: 'non-BIP68-final' }));
+    const other = loans.close(category);
+    await answer(Promise.resolve());
+    const error = await other.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(RequestRefusedError);
+    expect((error as RequestRefusedError).code).toBeUndefined();
+    await settle();
+    expect(proposals()).toEqual([]);
+    expect(requested(sentToWallet)).toHaveLength(1);
+
+    // Three conflicts in a row: three reviews, each approved, then the page says so and asks nothing more.
+    beforeBroadcasts(device, 3, () => {
+      device.chain.spendElsewhere(functionInputOf(requested(sentToWallet).at(-1)));
+      return undefined;
+    });
+    const said: string[] = [];
+    const tried = loans.close(category, undefined, (words) => said.push(words));
+    for (let attempt = 0; attempt < 3; attempt++) await answer(Promise.resolve());
+    await expect(tried).rejects.toThrow('Someone else used one of Paryon\'s coins first, 3 times in a row. Nothing was sent. Try again in a moment.');
+    expect(said).toHaveLength(2);
+    await settle();
+    expect(proposals()).toEqual([]);
+    expect(requested(sentToWallet)).toHaveLength(4);
+    expect(pending.get()).toEqual([]);
+
+    // The loan changed between the tries (here: its coins were spent and made again elsewhere), or is gone: the page
+    // says so and does not ask.
+    const inputsOf = () => (requested(sentToWallet).at(-1) as { inputs?: Record<string, string> } | undefined)?.inputs ?? {};
+    beforeBroadcasts(device, 1, () => {
+      device.chain.spendElsewhere(functionInputOf(requested(sentToWallet).at(-1)));
+      device.chain.spendElsewhere(inputsOf()['loanInput'] ?? '', inputsOf()['sidecarInput'] ?? '');
+      return undefined;
+    });
+    const changed = loans.close(category);
+    await answer(Promise.resolve());
+    await expect(changed).rejects.toThrow('The loan has changed since you asked: another transaction spent it. Nothing was sent. Look at the loan again before you ask.');
+    beforeBroadcasts(device, 1, () => {
+      device.chain.spendElsewhere(functionInputOf(requested(sentToWallet).at(-1)));
+      device.chain.spendElsewhere(inputsOf()['loanInput'] ?? '');
+      return undefined;
+    });
+    const gone = loans.close(category);
+    await answer(Promise.resolve());
+    await expect(gone).rejects.toThrow(/opens no loan on the chain just now/);
+    await settle();
+    expect(proposals()).toEqual([]);
+    expect(requested(sentToWallet)).toHaveLength(6);
+  });
+});

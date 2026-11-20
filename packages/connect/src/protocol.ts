@@ -122,6 +122,17 @@ export interface InvitationUpdate extends Envelope {
   stage: 'approved' | 'recorded' | 'sent';
 }
 
+/**
+ * Why an action was not carried out, in a form an application can act on, beside the words of `error`. The same for
+ * every application.
+ * - `inputs-spent`: the network refused the transaction because one of the coins it spends was spent by another
+ *   transaction first, or is no longer there. Nothing was sent. The wallet's own coins in it are free again; the
+ *   application may read its coins again and ask anew.
+ */
+export const ACTION_ERROR_CODES = ['inputs-spent'] as const;
+export type ActionErrorCode = (typeof ACTION_ERROR_CODES)[number];
+export const isActionErrorCode = (value: unknown): value is ActionErrorCode => (ACTION_ERROR_CODES as readonly unknown[]).includes(value);
+
 export interface ActionResult extends Envelope {
   action: typeof ACTION_RESULT;
   id: string;
@@ -129,6 +140,8 @@ export interface ActionResult extends Envelope {
   /** For `ok`: the transaction, and the tokens the wallet received. */
   result?: Record<string, unknown>;
   error?: string;
+  /** For a failure the application can act on: why, as one of {@link ACTION_ERROR_CODES}. An application that does not know the code reads `error`. */
+  code?: ActionErrorCode;
 }
 
 /** Ask which tokens of a template the wallet holds. Answered without asking the user, and only for a template the user trusted in a session with this application. */

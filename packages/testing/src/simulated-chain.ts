@@ -28,6 +28,7 @@ export class SimulatedChain implements ChainReader {
   /** Leave accepted transactions unconfirmed until {@link mine} is called. */
   blocksOnDemand = false;
   private tip = 1;
+  private elsewhere = 0;
   private readonly unspent = new Map<string, { output: Output; createdMs: number }>();
   private readonly transactions = new Map<string, string>();
   private readonly history = new Map<string, Set<string>>();
@@ -136,6 +137,23 @@ export class SimulatedChain implements ChainReader {
         this.remember(output.lockingBytecode, transactionId);
       }
     }
+  }
+
+  /**
+   * Someone else spends coins, in a transaction of theirs, and makes the same outputs again at new outpoints, in the
+   * order given: as another user does with a coin of a contract many share. Returns the new outpoints.
+   */
+  spendElsewhere(...outpoints: string[]): string[] {
+    const entries = outpoints.map((outpoint) => {
+      const entry = this.unspent.get(outpoint);
+      if (entry === undefined) throw new Error(`The coin ${outpoint} is not unspent.`);
+      return entry;
+    });
+    for (const outpoint of outpoints) this.unspent.delete(outpoint);
+    this.elsewhere += 1;
+    const transactionId = binToHex(hashTransactionUiOrder(new TextEncoder().encode(`elsewhere ${this.elsewhere} ${outpoints.join()}`)));
+    this.adopt(entries.map(({ output }, index) => ({ transactionId, index, output })));
+    return outpoints.map((_, index) => `${transactionId}:${index}`);
   }
 
   balanceOf(lockingBytecode: Uint8Array): bigint {

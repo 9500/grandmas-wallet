@@ -1,5 +1,6 @@
 import {
   type ActionDetails,
+  type ActionErrorCode,
   type ActionRequest,
   type ActionResult,
   type Channel,
@@ -15,6 +16,7 @@ import {
   TEMPLATE_OFFER,
   XO_EXTENSION_VERSION,
   type TemplateName,
+  isActionErrorCode,
 } from './protocol.js';
 
 /**
@@ -27,7 +29,11 @@ export type RequestStage = 'sent' | 'accepted' | 'approved' | 'recorded' | 'on-n
 
 /** The wallet refused, the user declined, or the action failed in the wallet. */
 export class RequestRefusedError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** Why, where the wallet gave a reason the application can act on (`ActionResult.code`); for example `inputs-spent`: ask again with the coins as they are now. */
+    readonly code?: ActionErrorCode,
+  ) {
     super(message);
     this.name = 'RequestRefusedError';
   }
@@ -211,10 +217,10 @@ export class DappRequests {
       if (stage === 'approved' || stage === 'recorded') open.onStage(stage);
       if (stage === 'sent') open.onStage('on-network');
     } else if (action === ACTION_RESULT) {
-      const { ok, result, error } = message as ActionResult;
+      const { ok, result, error, code } = message as ActionResult;
       this.pending.delete(id);
       if (ok) open.resolve(result ?? {});
-      else open.reject(new RequestRefusedError(typeof error === 'string' ? error : 'The wallet could not carry out the request.'));
+      else open.reject(new RequestRefusedError(typeof error === 'string' ? error : 'The wallet could not carry out the request.', isActionErrorCode(code) ? code : undefined));
     }
   }
 }

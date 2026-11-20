@@ -1,5 +1,6 @@
+import { binToHex } from '@bitauth/libauth';
 import type { ActionDetails, DappRequests, RequestStage, XoAdvertisement } from '@grandmas-wallet/connect';
-import { XO_EXTENSION_VERSION } from '@grandmas-wallet/connect';
+import { RequestRefusedError, XO_EXTENSION_VERSION } from '@grandmas-wallet/connect';
 import {
   type BorrowingThread,
   type LoanCoins,
@@ -110,6 +111,36 @@ export const manageDetails = (coins: LoanCoins, collateral: bigint, page?: PageA
 export const repayDetails = (coins: LoanCoins, repay: bigint, collateral: bigint, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(repayRequestAlone(desk.template.names, { ...coins, repay, collateral, ...from(page) }));
 export const closeDetails = (coins: LoanCoins, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(closeRequestAlone(desk.template.names, { ...coins, ...from(page) }));
 
+/**
+ * How many times in a row an action that names Paryon's shared coins is asked for, when each time another transaction
+ * spent one of those coins first. Each try is a new transaction, which the user approves anew in the wallet.
+ */
+export const TRIES = 3;
+
+/** What the page says while it asks again. */
+export const ASKING_AGAIN = 'Someone else used one of Paryon\'s coins first. Asking your wallet again with the current ones.';
+
+/** Each try in a row found one of Paryon's coins spent by someone else first. */
+export class SpentFirstError extends Error {
+  constructor() {
+    super(`Someone else used one of Paryon's coins first, ${TRIES} times in a row. Nothing was sent. Try again in a moment.`);
+    this.name = 'SpentFirstError';
+  }
+}
+
+/** The wallet says that another transaction spent one of the coins the request named first (`ActionResult.code`). */
+export const spentFirst = (error: unknown): boolean => error instanceof RequestRefusedError && error.code === 'inputs-spent';
+
+/** The loan, as read for a try after the first, differs from what the first try was about. */
+export class LoanChangedError extends Error {
+  constructor() {
+    super('The loan has changed since you asked: another transaction spent it. Nothing was sent. Look at the loan again before you ask.');
+    this.name = 'LoanChangedError';
+  }
+}
+
+const outpointOf = (utxo: Utxo): string => `${binToHex(utxo.transactionHash)}:${utxo.index}`;
+
 const newId = (): string => `loan-${Array.from(crypto.getRandomValues(new Uint8Array(10)), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 
 export interface Outcome {
@@ -175,8 +206,8 @@ export class XoLoans {
   }
 
   /** Make a loan key, from a factory of Paryon's the page reads from the chain. The wallet asks for the user's tick: the key waits in Paryon's contract. */
-  async createKey(onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
-    return this.start('createKey', createKeyDetails(await readFactory(this.chain, this.desk), this.page, this.desk), onStage);
+  async createKey(onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {
+    return this.tries('createKey', async () => createKeyDetails(await readFactory(this.chain, this.desk), this.page, this.desk), onStage, onAgain);
   }
 
   movePeriod(thread: BorrowingThread, lockHeight: number, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
@@ -199,17 +230,62 @@ export class XoLoans {
     return readLoanCoins(this.chain, category, BigInt(reported.satoshis), this.desk);
   }
 
-  async manage(category: string, collateral: bigint, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
-    return this.start('manage', manageDetails(await this.coinsOf(category), collateral, this.page, this.desk), onStage);
+  /**
+   * Ask for an action, and ask again at once, up to {@link TRIES} times in a row, while the wallet says that another
+   * transaction spent one of the coins the request named first: the request is built anew each time from the coins
+   * read now. The wallet shows each try to the user, who approves it anew. Any other outcome ends the tries.
+   * @param build - reads the coins and builds the request; `first` for the first try
+   * @param onAgain - told, before each try after the first, what the page says while it asks again
+   * @throws SpentFirstError when every try found a coin spent first
+   */
+  private async tries(action: LoanAction, build: (first: boolean) => Promise<ActionDetails>, onStage: (stage: RequestStage) => void, onAgain: (words: string) => void): Promise<Outcome> {
+    for (let attempt = 1; ; attempt++) {
+      const details = await build(attempt === 1);
+      try {
+        return await this.start(action, details, onStage);
+      } catch (error) {
+        if (!spentFirst(error)) throw error;
+        if (attempt >= TRIES) throw new SpentFirstError();
+        onAgain(ASKING_AGAIN);
+      }
+    }
   }
 
-  async repay(loan: LoanView, repay: bigint, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
-    const coins = await this.coinsOf(loan.category);
-    return this.start('repay', repayDetails(coins, repay, coins.loan.output.valueSatoshis, this.page, this.desk), onStage);
+  /**
+   * The coins of a loan's request, read anew for each try. A try after the first is about the loan the first was
+   * about: if the loan is gone, or another transaction has changed it, the page says so and asks nothing.
+   */
+  private loanTries(category: string): (first: boolean) => Promise<LoanCoins> {
+    let loan: string | undefined;
+    return async (first) => {
+      const coins = await this.coinsOf(category);
+      if (first) loan = outpointOf(coins.loan);
+      else if (outpointOf(coins.loan) !== loan) throw new LoanChangedError();
+      return coins;
+    };
   }
 
-  async close(category: string, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
-    return this.start('close', closeDetails(await this.coinsOf(category), this.page, this.desk), onStage);
+  async manage(category: string, collateral: bigint, onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {
+    const read = this.loanTries(category);
+    return this.tries('manage', async (first) => manageDetails(await read(first), collateral, this.page, this.desk), onStage, onAgain);
+  }
+
+  async repay(loan: LoanView, repay: bigint, onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {
+    const read = this.loanTries(loan.category);
+    return this.tries(
+      'repay',
+      async (first) => {
+        const coins = await read(first);
+        return repayDetails(coins, repay, coins.loan.output.valueSatoshis, this.page, this.desk);
+      },
+      onStage,
+      onAgain,
+    );
+  }
+
+  async close(category: string, onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {
+    const read = this.loanTries(category);
+    return this.tries('close', async (first) => closeDetails(await read(first), this.page, this.desk), onStage, onAgain);
   }
 
   /**
