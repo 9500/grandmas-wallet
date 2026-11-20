@@ -1879,7 +1879,8 @@ export class Applications {
    * script, the one whose script holds coins is the current one and the others are not listed; none holding
    * coins means closed; more than one holding coins means each is shown as not confirmed. A record that names
    * no script and counts gives the token under its template's name, with no word on whether the position is
-   * open. A record that does not count is shown as not confirmed. A token without a record is not a position:
+   * open. A record that does not count is shown as not confirmed. A record of a template the user does not trust
+   * is not checked and gives no position: its token is listed by `tokens` as one of a template not trusted. A token without a record is not a position:
    * it is listed by `tokens` alone. A record whose NFT the wallet does not hold is no position.
    *
    * @param options.template - only records of this template
@@ -1933,6 +1934,9 @@ export class Applications {
       const token: RecordedPosition['token'] = { category, commitment: hex(held.commitment), capability: held.capability, outpoint, satoshis: coin.utxo.output.valueSatoshis, place };
       const checked: { entry: PositionRecordEntry; standing: RecordedPosition['standing']; verdict: PositionRecordVerdict; script?: string }[] = [];
       for (const { entry, standing } of mine) {
+        // A record of a template the user does not trust cannot be checked: its token is listed as a token of that
+        // template, with the way to trust it, and not as a position the chain does not confirm.
+        if (trusted(entry.templateIdentifier) === undefined) continue;
         const verdict = await check(entry, this.wallet, trusted(entry.templateIdentifier));
         // A record that counts belongs to the coin the check tied it to.
         if (verdict.counts && verdict.heldAt !== undefined && verdict.heldAt !== outpoint) continue;

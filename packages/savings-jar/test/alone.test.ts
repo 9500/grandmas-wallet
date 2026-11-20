@@ -148,6 +148,25 @@ describe('the Savings Jar from its template alone (PR19)', () => {
 });
 
 describe('a Savings Jar through the loss of the device (PR19)', () => {
+  it('until the user trusts the template the earlier owner stored, the swept key is a token of a template not trusted, with that template to trust, and not a position the chain does not confirm', async () => {
+    const device = await deviceWith([100_000n, 60_000n]);
+    const unlockTime = Math.floor(device.chain.nowMs / 1000) + 3_600;
+    const category = (await device.applications.carryOut(open(unlockTime, 30_000))).tokens[0]?.category as string;
+    await device.recover();
+    const taken = await device.takeOver();
+    await taken.wallet.search();
+    await taken.wallet.sweepEarlier();
+    await finishCopying(taken);
+    await taken.applications.readBackup();
+    expect(taken.applications.suggestedRecords).toHaveLength(1);
+    expect(await taken.applications.recordedPositions()).toEqual([]);
+    expect(await taken.applications.tokens()).toMatchObject([{ category, meaning: 'incomplete', template: { identifier: names.identifier, name: 'Savings Jar' } }]);
+    for (const suggested of taken.applications.suggestions) await taken.applications.trust(suggested, undefined);
+    expect(await taken.applications.recordedPositions()).toMatchObject([{ status: 'open', standing: 'suggested', satoshis: 30_000n }]);
+    await taken.applications.confirmRecords();
+    expect(await taken.applications.recordedPositions()).toMatchObject([{ status: 'open', standing: 'own', satoshis: 30_000n }]);
+  }, 60_000);
+
   it('the new device finds the jar from its record and empties it by itself, from its own list, with no request from the jar\'s page; the key and the savings go to addresses of the new seed', async () => {
     const device = await deviceWith([100_000n, 60_000n]);
     const unlockTime = Math.floor(device.chain.nowMs / 1000) + 3_600;

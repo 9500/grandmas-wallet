@@ -164,7 +164,10 @@ describe('the check of a position record, and positions from records', () => {
     await taken.applications.readBackup();
     expect(taken.applications.suggestedRecords).toEqual([record]);
     expect(taken.applications.positionRecords).toEqual([]);
-    expect(listed(await taken.applications.recordedPositions())).toEqual([{ status: 'unconfirmed', lockingBytecode: hex(boxAt(strongbox, category)), satoshis: 30_000n }]);
+    // Until the user trusts it, the record cannot be checked: the token is listed as one of a template not trusted, with
+    // that template to trust, and not as a position the chain does not confirm.
+    expect(await taken.applications.recordedPositions()).toEqual([]);
+    expect(await taken.applications.tokens()).toMatchObject([{ category, meaning: 'incomplete', template: { identifier: strongbox.names.identifier } }]);
 
     // The user trusts the template the earlier owner stored; the chain confirms the record.
     const [suggested] = taken.applications.suggestions;
