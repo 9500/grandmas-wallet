@@ -552,7 +552,7 @@ export const NewLoanCard = ({
             </p>
           ) : (
             <>
-              <p class="small muted">Your wallet makes it. About 2,800 satoshis: 2,000 go with the key into Paryon's contracts, 1,000 of which come back with the key when you borrow, and the rest is the network's fee.</p>
+              <p class="small muted">Your wallet makes it. About 2,800 satoshis: 2,000 go with the key into Paryon's contracts, 1,000 of which come back with the key when you borrow, and the rest is the network's fee. The key waits in Paryon's contracts until then, so your wallet asks you to tick that it goes there.</p>
               <Button small disabled={busy} onClick={onMakeKey}>
                 {state.running?.name === keyName && <Spinner />}
                 Make a loan key

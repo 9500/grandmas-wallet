@@ -65,6 +65,15 @@ const RESUMED_DONE: Record<PendingRequest['action'], string> = {
 
 const follow = (progress: (step: Progress) => void) => (stage: RequestStage) => progress({ text: STAGE_WORDS[stage], stage });
 
+/**
+ * The address this page is served from, for the wallet's record of each loan key: where the user can open the
+ * page again. A page is replaceable; whoever serves a copy has its own address here.
+ */
+const pageAddress = (): string | undefined => {
+  const { protocol, origin, pathname } = window.location;
+  return protocol === 'https:' || protocol === 'http:' ? `${origin}${pathname}` : undefined;
+};
+
 /** The page once a wallet is connected. */
 const Loans = ({ environment, loans, chain, peerName, onDisconnect }: { environment: Environment; loans: XoLoans; chain: PageChain; peerName: string; onDisconnect: () => void }) => {
   const [market, setMarket] = useState<(Market & { oracleProblem?: string }) | undefined>();
@@ -252,7 +261,7 @@ const App = ({ environment }: { environment: Environment }) => {
     if (current === undefined || !usable || status.state !== 'connected' || chain === undefined) return undefined;
     const requests = new DappRequests();
     requests.attach(current.channel);
-    return new XoLoans(requests, chain, pendingStore, keyStore);
+    return new XoLoans(requests, chain, pendingStore, keyStore, pageAddress());
   }, [usable, chain, status.state === 'connected']);
 
   if (environment.network !== 'chipnet') {
