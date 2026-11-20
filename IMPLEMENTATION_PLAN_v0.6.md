@@ -35,7 +35,7 @@ Everything of the second design, at the tag `design-2`. The parts this version b
 | --- | --- |
 | Sealed, signed records on several stores; the rules for records of an earlier seed; the copy into a new archive; writes that wait for a store and writes that are retried | `packages/archive`, `packages/app/src/applications.ts` |
 | Token notes, and the check of a note against the chain | `packages/archive/src/records.ts`, `packages/app/src/applications.ts` |
-| Reading a declaration; checking a template against it; finding a position from a token and the chain. These are removed in stage 14; the reading of coins from the chain in the last is kept for the check of stage 13 | `packages/app/src/declaration.ts`, `template-check.ts`, `positions.ts` |
+| Reading a declaration; checking a template against it; finding a position from a token and the chain. These were removed in stage 14; the reading of coins from the chain in the last is kept for the check of stage 13 | `packages/app/src/declaration.ts`, `template-check.ts`, `positions.ts` |
 | Making a script known to the engine from its template, locking script, role and values | `followScript` in `packages/app/src/account.ts` |
 | Working an action out before the user is asked, with the wallet's own figures | `plan` in `packages/app/src/applications.ts` |
 | The request, with the wallet's own outputs, the token an action spends and the application's coins; the positions request and its answer | `packages/connect/src/protocol.ts` |
@@ -86,7 +86,7 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 - `xo_v1` in its version 2 (section 14.2): no profile, no declaration, the new answers to a positions request.
 - Second part, after stage 17: removed are reading a declaration, finding a position from the chain, the template check that depends on a declaration, and token names from a declaration. Token notes are no longer written. The tests of the second design that this version retires (proposal section 21) are removed with the code they test; the others still pass.
 
-**Tests:** PR13, PR14, PR15, PR16, PR17, PR18, PR22 in the first part; PR21 in the second. **Done when** they pass on the simulated chain. **The first part was done on 20 November 2026** (`docs/results/stage-14.md` on the branch `design-3`), on the simulated chain only. The proposal's section 13.3 was corrected for what it showed: when an action creates a token category, and which input spends a position.
+**Tests:** PR13, PR14, PR15, PR16, PR17, PR18, PR22 in the first part; PR21 in the second. **Done when** they pass on the simulated chain. **The first part was done on 20 November 2026** (`docs/results/stage-14.md` on the branch `design-3`), on the simulated chain only. The proposal's section 13.3 was corrected for what it showed: when an action creates a token category, and which input spends a position. **The second part was done on 20 November 2026** (`docs/results/stage-14b.md`): PR21 passes, and the wallet, the recoverer, the messages and the applications' packages hold nothing that reads a declaration. With it went version 1 of `xo_v1`, the Savings Jar's third template version, and the run scripts of the second design that drove declarations. The script of stage 13's local run now uses the fourth template version; its record stays as it was made. Five defects that stage 17 found on the wallet's side were corrected in the same part, among them the coins of an action just sent, for which the wallet now waits on the engine's server (proposal section 13.4).
 
 ## Stage 15 — Findings for each action
 
@@ -114,7 +114,7 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 
 **Tests:** PR19, PR20. **Done when** the runs' records are committed. **Push.**
 
-**State on 20 November 2026:** the template, the two pages and their packages are changed, and both courses ran on the local node through the engine without a browser (`docs/runs/stage-17-jar-local-node.md`, `docs/runs/stage-17-loan-local-node.md` on the branch `design-3`). Still open: the positions of the second design on chipnet, the courses in browsers, and the chipnet runs G and H.
+**State on 20 November 2026:** the template, the two pages and their packages are changed, and both courses ran on the local node through the engine without a browser (`docs/runs/stage-17-jar-local-node.md`, `docs/runs/stage-17-loan-local-node.md` on the branch `design-3`), and again after the declaration was removed from the wallet. Still open: the positions of the second design on chipnet, the courses in browsers, and the chipnet runs G and H.
 
 ## Stage 18 — For XO, and the documents
 
