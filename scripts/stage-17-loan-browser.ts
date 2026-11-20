@@ -22,7 +22,8 @@
 // usage (from the repository's root, with the local node running and the pages built: deploy/preview.sh build):
 //   npx tsx scripts/stage-17-loan-browser.ts [local] [--screens] [--headed] [--until <step>] [--from 7|9|10|11] [--ports <base>]
 // on chipnet, with the public pages and backup stores, paid from the key in .chipnet/funder-design-2.json:
-//   npx tsx scripts/stage-17-loan-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 7|9|10|11] [--record-only]
+//   npx tsx scripts/stage-17-loan-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 7|8|9|10|11] [--record-only]
+// --from 8 continues a run whose new phone has sent its request: the move is completed with no new request.
 // --record-only writes the record again from what the run kept, and runs nothing.
 //
 // On chipnet the collateral is most of what the funding address holds: the run pays the owner's wallet all of it but a
@@ -52,7 +53,7 @@ const until = Number(argument('until') ?? '99');
 /** Only the record is written again, from what the run kept and the chain as it is now: nothing is run, and the run's log and requests are kept. */
 const recordOnly = process.argv.includes('--record-only');
 const from = Number(argument('from') ?? (recordOnly ? '11' : '1'));
-if (![1, 7, 9, 10, 11].includes(from)) throw new Error('A run continues from step 7, 9, 10 or 11.');
+if (![1, 7, 8, 9, 10, 11].includes(from)) throw new Error('A run continues from step 7, 8, 9, 10 or 11.');
 const theCourse = course({ directory: 'stage-17-loan-browser', continuing: from > 1, until });
 const { work, started, lines, log, pay, mine, prepare, device, watchPage, close, shot, state, begin, elsewhere, keepStorage } = theCourse;
 const noShot = async (): Promise<void> => undefined;
@@ -352,6 +353,15 @@ const steps = async (): Promise<void> => {
     if (from > 8) {
       next = await device('new-phone', false);
       requests.watch(next.context);
+    }
+    if (from === 8) {
+      // The new phone sent its request in the part that stopped: the move is completed from there, with no request of its own.
+      state.step = 7;
+      if (!begin('A new phone takes the wallet over with Anna\'s help, and sweeps')) return;
+      next = await device('new-phone', false);
+      requests.watch(next.context);
+      await completeTakeover(theCourse, recoverer, next, noShot, true);
+      await keepStorage(next);
     }
   }
 

@@ -786,12 +786,30 @@ export const newPhoneAsks = async (theCourse: Course, recoverer: Device, _link: 
  * The request the recoverer sent goes into a block, the waiting period passes, the recoverer completes the
  * move and hands the wallet over, and the new phone sweeps the coins to its own seed.
  */
-export const completeTakeover = async ({ log, mine, passTime, mark, since, blockFact, standingNow, keepStorage, height, sweepSent, nameNewest }: Course, recoverer: Device, next: Device, shoot: (page: Page, name: string) => Promise<void>): Promise<void> => {
+export const completeTakeover = async (
+  { log, mine, passTime, mark, since, blockFact, standingNow, keepStorage, height, sweepSent, nameNewest }: Course,
+  recoverer: Device,
+  next: Device,
+  shoot: (page: Page, name: string) => Promise<void>,
+  /** The request was sent by a part of the run that stopped: the pages are opened again where they were. */
+  resumed = false,
+): Promise<void> => {
   // The new phone's words, kept beside its profile before any coin is swept to them.
   await keepStorage(next);
-  await see(recoverer.page, 'The request is sent');
+  if (resumed) {
+    await openDesk(recoverer.page);
+    await next.page.goto(WALLET);
+  } else {
+    await see(recoverer.page, 'The request is sent');
+  }
   mine(1);
   await see(recoverer.page, 'Your request is waiting');
+  if (chipnet) {
+    // The page shows the request at once; the waiting period counts from the block that holds it. On chipnet a
+    // block may leave it out for a while when blocks are full.
+    log('   the request is sent and waiting for a block');
+    await recoverer.page.getByTestId('waiting-clock').first().waitFor({ state: 'visible', timeout: 90 * 60_000 });
+  }
   log('   the request is in a block; the waiting period runs');
   // The recoverer's page shows the chain's clock, and the waiting period measured against it.
   const shown = async (testId: string): Promise<string> => {
