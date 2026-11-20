@@ -6,14 +6,19 @@ import { type BorrowingThread, type FoundLoan, type PriceThread, decodePriceStat
 import { Frame } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 
-import { type LoanView, type Market, CONTRACTS, lowerPrice } from './loan.js';
+import { type Desk, type LoanView, type Market, CHIPNET_DESK, CONTRACTS, lowerPrice } from './loan.js';
 import type { MadeKey } from './market.js';
 import { type ActionState, ConnectCard, ConnectedCard, HowItWorks, Independent, Intro, LoanList, NewLoanCard, OnItsWay, PricesCard } from './view.js';
 
 /*
  * The states of the page, fed from fixed data, for looking at them in a browser without a wallet. Served by the
  * development server only (`fixtures.html?show=connect|new|ready|loans|running`); the build does not include it.
+ * `&local` shows the page as it is served for a deployment on a chain of one's own, where no oracle is read.
  */
+
+const local = new URLSearchParams(window.location.search).has('local');
+/** A deployment named by the page's configuration, as on the local node: not Paryon's own, and no oracle. */
+const desk: Desk = local ? { ...CHIPNET_DESK, paryons: false, deployment: { ...CHIPNET_DESK.deployment, name: 'local', periodLengthBlocks: 10 } } : CHIPNET_DESK;
 
 const now = Math.floor(Date.now() / 1000);
 const coin = (fill: number, index: number, valueSatoshis: bigint) => ({ transactionHash: new Uint8Array(32).fill(fill), index, height: 336_300, output: { lockingBytecode: CONTRACTS.loan.lockingBytecode, valueSatoshis } });
@@ -26,8 +31,7 @@ const market: Market & { oracleProblem?: string } = {
   borrowing: [thread(show() === 'new' ? 9_139 : 10_288)],
   priceThread,
   stored: priceThread.state.price,
-  oracle: { price: 20_867n, time: now - 240 },
-  lower: lowerPrice(priceThread.state.price, 20_867n),
+  ...(local ? { withoutOracle: true as const, lower: priceThread.state.price } : { oracle: { price: 20_867n, time: now - 240 }, lower: lowerPrice(priceThread.state.price, 20_867n) }),
 };
 function show(): string {
   return new URLSearchParams(window.location.search).get('show') ?? 'loans';
@@ -48,15 +52,15 @@ const state: ActionState =
     : show() === 'loans'
       ? { done: { name: `manage:${A}`, text: 'The collateral is changed. The key is back where it was in your wallet.', transactionId: 'ab'.repeat(32) } }
       : {};
-const facts = { network: 'chipnet', explorer: 'https://chipnet.imaginary.cash/tx/' };
+const facts = local ? { network: 'regtest', explorer: '' } : { network: 'chipnet', explorer: 'https://chipnet.imaginary.cash/tx/' };
 const ignore = () => undefined;
 
 render(
-  <Frame brand="Loan desk" role="Independent, not affiliated with Paryon" environment={{ network: 'chipnet', walletUrl: '', recovererUrl: '', stores: [], chain: [], relays: [], explorer: '', secondsPerBlock: 60 }}>
+  <Frame brand="Loan desk" role="Independent, not affiliated with Paryon" environment={{ network: local ? 'regtest' : 'chipnet', walletUrl: '', recovererUrl: '', stores: [], chain: [], relays: [], explorer: '', secondsPerBlock: 60 }}>
     {show() === 'connect' ? (
       <div class="stack">
         <Intro />
-        <Independent />
+        <Independent desk={desk} />
         <div class="columns">
           <ConnectCard uri={`wiz://?p=${'02'.repeat(33)}&s=${'7f'.repeat(16)}`} state="waiting" />
           <HowItWorks />
@@ -64,7 +68,7 @@ render(
       </div>
     ) : (
       <div class="stack">
-        <Independent />
+        <Independent desk={desk} />
         <ConnectedCard peerName="Grandma's Wallet" onDisconnect={ignore} />
         <div class="columns">
           <div class="stack">
@@ -72,8 +76,8 @@ render(
             <LoanList loans={loans} trusted market={market} facts={facts} state={state} onManage={ignore} onRepay={ignore} onClose={ignore} />
           </div>
           <div class="stack">
-            <NewLoanCard market={market} keys={keys} facts={facts} state={state} onMakeKey={ignore} onMove={ignore} onBorrow={ignore} />
-            <PricesCard market={market} />
+            <NewLoanCard market={market} desk={desk} keys={keys} facts={facts} state={state} onMakeKey={ignore} onMove={ignore} onBorrow={ignore} />
+            <PricesCard market={market} desk={desk} />
           </div>
         </div>
       </div>

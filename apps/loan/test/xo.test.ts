@@ -136,7 +136,7 @@ describe('the loan page with a wallet that carries out actions itself (PY02)', (
   });
 
   it('makes a key, brings the contracts up to date, borrows 100 PUSD at 125% of the lower price, sees the loan, adds collateral and closes it', { timeout: 60_000 }, async () => {
-    const { loans, answer, market, keys, sentToWallet, decoded, device } = await setUp();
+    const { loans, answer, market, keys, sentToWallet, decoded, device, chain } = await setUp();
 
     // Before anything: the wallet reports nothing for a template the user has not trusted with this page.
     expect(await loans.list()).toEqual({ trusted: false, loans: [] });
@@ -159,6 +159,11 @@ describe('the loan page with a wallet that carries out actions itself (PY02)', (
     // The contracts are two periods behind: they are brought up to date first.
     const before = await market();
     expect(before.lower).toBe(ORACLE);
+    expect(before.withoutOracle).toBeUndefined();
+    // Without an oracle, as for a deployment on a chain of one's own, the stored price is the only one.
+    const alone = await readMarket(chain, 'chipnet', undefined);
+    expect(alone).toMatchObject({ withoutOracle: true, lower: alone.stored });
+    expect(alone.oracle).toBeUndefined();
     const need = periodNeed(before);
     if (need.needed !== true) throw new Error(`expected the contracts to need bringing up to date: ${JSON.stringify(need.needed)}`);
     await answer(loans.movePeriod(need.thread, before.lockHeight));

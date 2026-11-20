@@ -17,6 +17,7 @@ import {
   partRepayment,
   periodNeed,
   periodOf,
+  priceBasis,
   repaymentProblem,
 } from '../src/loan.js';
 
@@ -90,6 +91,17 @@ describe('borrowing', () => {
     expect(borrowPlan(100_00n, SAFE_PERCENT, market).problem).toBeUndefined();
     // With the oracle above the stored price, the stored price is the lower one.
     expect(borrowPlan(100_00n, SAFE_PERCENT, { lower: lowerPrice(STORED, 30_000n), priceThread: priceAt(STORED) }).collateral).toBeGreaterThanOrEqual(minimumCollateral(100_00n, STORED));
+  });
+
+  it('names the price it reckons with as the deployment has it: the lower of two, or the stored one where no oracle is read', () => {
+    expect(priceBasis(undefined)).toEqual({ short: 'the lower price', explained: 'The lower of the stored price and the oracle\'s' });
+    expect(priceBasis(false).short).toBe('the lower price');
+    expect(borrowPlan(100_00n, SAFE_PERCENT - 1, market).problem).toMatch(/115% collateral at the lower price\./);
+    // A deployment on a chain of one's own: the stored price alone, and nothing said of an oracle.
+    const alone = { lower: STORED, priceThread: priceAt(STORED), withoutOracle: true as const };
+    expect(priceBasis(alone.withoutOracle)).toEqual({ short: 'the stored price', explained: 'The stored price; no oracle is read here' });
+    expect(borrowPlan(100_00n, SAFE_PERCENT - 1, alone).problem).toMatch(/115% collateral at the stored price\./);
+    expect(collateralRatio(borrowPlan(100_00n, DEFAULT_PERCENT, alone).collateral, 100_00n, STORED)).toBe(125);
   });
 });
 

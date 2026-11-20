@@ -5,8 +5,8 @@ import { type ListedOutput, type LoanCoins, type ParyonChain, findLoan, latestOr
 import { type Desk, type LoanView, type Market, CHIPNET_DESK, DEPLOYMENT, finalLockHeight, lowerPrice, periodOf } from './loan.js';
 
 /**
- * What the page reads from the chain and from the oracle: Paryon's contracts and prices, a loan from its key,
- * and a loan key it made. Every output is read from its own transaction; a server's listing only finds candidates.
+ * What the page reads from the chain and, for Paryon's own deployment, from the oracle: Paryon's contracts and
+ * prices, a loan from its key, and a loan key it made. Every output is read from its own transaction; a server's listing only finds candidates.
  */
 
 /** What the page needs of a server. */
@@ -53,6 +53,7 @@ export const readMarket = async (chain: PageChain, network: string, oracle: Orac
     priceThread,
     stored,
     ...(signed === undefined ? {} : { oracle: { price: signed.price, time: signed.time } }),
+    ...(oracle === undefined ? { withoutOracle: true as const } : {}),
     lower: lowerPrice(stored, signed?.price),
     ...(oracleProblem === undefined ? {} : { oracleProblem }),
   };

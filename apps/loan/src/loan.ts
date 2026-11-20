@@ -130,9 +130,23 @@ export interface Market {
   stored: bigint;
   /** The latest price the oracle signed, if it could be read. */
   oracle?: { price: bigint; time: number };
+  /**
+   * Set for a deployment no oracle signs prices for, as on a chain of one's own: the stored price is then the only
+   * one, and `lower` is it.
+   */
+  withoutOracle?: true;
   /** The lower of the stored price and the oracle's: what the page reckons collateral with. */
   lower: bigint;
 }
+
+/**
+ * The price the page reckons with, in words: "the lower price" where an oracle's price is read beside the stored one,
+ * "the stored price" where the deployment has no oracle.
+ */
+export const priceBasis = (withoutOracle: boolean | undefined): { short: string; explained: string } =>
+  withoutOracle === true
+    ? { short: 'the stored price', explained: 'The stored price; no oracle is read here' }
+    : { short: 'the lower price', explained: 'The lower of the stored price and the oracle\'s' };
 
 /** The lower of the lowest stored price and the oracle's latest. */
 export const lowerPrice = (stored: bigint, oracle: bigint | undefined): bigint => (oracle !== undefined && oracle < stored ? oracle : stored);
@@ -182,7 +196,7 @@ export interface BorrowPlan {
   problem?: string;
 }
 
-export const borrowPlan = (debt: bigint, percent: number, market: Pick<Market, 'lower' | 'priceThread'>): BorrowPlan => {
+export const borrowPlan = (debt: bigint, percent: number, market: Pick<Market, 'lower' | 'priceThread' | 'withoutOracle'>): BorrowPlan => {
   const used = market.priceThread.state.price;
   const collateral = collateralAtRatio(debt, market.lower, BigInt(percent));
   const fee = borrowingFee(debt, used);
@@ -199,7 +213,7 @@ export const borrowPlan = (debt: bigint, percent: number, market: Pick<Market, '
     debt < MINIMUM_DEBT
       ? `Paryon lends at least ${formatPusd(MINIMUM_DEBT)} PUSD.`
       : percent < SAFE_PERCENT
-        ? `This page does not borrow with less than ${SAFE_PERCENT}% collateral at the lower price. Below that a small fall in the price would put the loan near the contracts' limit of 110%, where it can be liquidated.`
+        ? `This page does not borrow with less than ${SAFE_PERCENT}% collateral at ${priceBasis(market.withoutOracle).short}. Below that a small fall in the price would put the loan near the contracts' limit of 110%, where it can be liquidated.`
         : percent > 1_000
           ? 'Choose a collateral of at most 1,000%.'
           : collateral < minimumCollateral(debt, used)

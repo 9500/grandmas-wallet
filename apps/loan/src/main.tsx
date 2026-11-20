@@ -14,9 +14,10 @@ import { type ActionState, type LinkWords, type Progress, ConnectCard, Connected
 import { type KeptKey, type Outcome, type PendingRequest, STAGE_WORDS, XoLoans, xoProblem } from './xo.js';
 
 /**
- * The loan page: an independent demonstration on chipnet with Paryon's public contracts, for a wallet that
- * carries out the actions of a template itself. The page reads the chain and the oracle; the wallet builds,
- * shows and signs every transaction.
+ * The loan page: an independent demonstration with Paryon's public contracts, for a wallet that carries out the
+ * actions of a template itself. It works with Paryon's deployment on chipnet, or with one its configuration names,
+ * as on a chain of one's own. The page reads the chain, and for Paryon's own deployment the oracle; the wallet
+ * builds, shows and signs every transaction.
  */
 
 const BRAND = 'Loan desk';
@@ -187,6 +188,7 @@ const Loans = ({ environment, desk, loans, chain, peerName, onDisconnect }: { en
         <div class="stack">
         <NewLoanCard
           market={market}
+          desk={desk}
           keys={keys}
           facts={facts}
           state={state}
@@ -196,7 +198,7 @@ const Loans = ({ environment, desk, loans, chain, peerName, onDisconnect }: { en
             void act(borrowName, `Borrowing ${formatPusd(plan.debt)} PUSD against ${formatBch(plan.collateral)} BCH.`, (progress) => (market === undefined ? Promise.reject(new Error('The prices are not read yet.')) : loans.borrow(key, need.thread, market, plan, follow(progress))), 'The loan is open. The PUSD and the loan key are in your wallet.')
           }
         />
-        <PricesCard market={market} problem={marketProblem} />
+        <PricesCard market={market} problem={marketProblem} desk={desk} />
         </div>
       </div>
     </div>
@@ -276,8 +278,8 @@ const App = ({ environment }: { environment: Environment }) => {
     return (
       <div class="stack">
         <Independent />
-        <Card title="Chipnet only" tone="warn">
-          <p>This demonstration uses Paryon's deployment on chipnet, and this page is configured for {environment.network} without a deployment of Paryon's contracts. Open it with the chipnet configuration.</p>
+        <Card title="No deployment of Paryon's contracts" tone="warn">
+          <p>This page works with Paryon's deployment on chipnet, or with a deployment of Paryon's contracts that its configuration names. It is configured for {environment.network} and names none.</p>
         </Card>
       </div>
     );

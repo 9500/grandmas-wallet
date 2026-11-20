@@ -21,6 +21,7 @@ import {
   parsePusd,
   partRepayment,
   periodNeed,
+  priceBasis,
   ratioOf,
   repaymentProblem,
 } from './loan.js';
@@ -214,16 +215,35 @@ export const OnItsWay = ({ title, progress, onStopWaiting }: { title: string; pr
 
 // ------------------------------------------------------------------ prices
 
-export const PricesCard = ({ market, problem }: { market: (Market & { oracleProblem?: string }) | undefined; problem?: string | undefined }) => (
+/**
+ * The prices: on Paryon's own deployment the stored one and the oracle's, and the lower of the two that the page
+ * reckons with; on a deployment no oracle signs for, the stored price alone.
+ */
+export const PricesCard = ({ market, problem, desk = CHIPNET_DESK }: { market: (Market & { oracleProblem?: string }) | undefined; problem?: string | undefined; desk?: Desk | undefined }) => (
   <Card title="Prices">
     {market === undefined ? (
       problem === undefined ? (
         <p class="muted">
-          <Spinner /> Reading Paryon's contracts and the oracle…
+          <Spinner /> {desk.paryons ? 'Reading Paryon\'s contracts and the oracle…' : 'Reading Paryon\'s contracts…'}
         </p>
       ) : (
         <Notice tone="bad">{problem}</Notice>
       )
+    ) : market.withoutOracle === true ? (
+      <>
+        <KeyValues
+          entries={
+            market.priceThread.state.price === market.stored
+              ? [[<>Stored in Paryon's price contracts<small>What the contracts check a loan against, and what this page reckons with</small></>, <strong>{formatPrice(market.stored)}</strong>]]
+              : [
+                  [<>Stored in Paryon's price contracts<small>What the contracts check a loan against</small></>, `${formatPrice(market.stored)} to ${formatPrice(market.priceThread.state.price)}`],
+                  [<strong>This page reckons with</strong>, <strong>{formatPrice(market.lower)}</strong>],
+                ]
+          }
+        />
+        <p class="small muted">No oracle signs prices for this deployment. The price was stored when the contracts were deployed, and nobody updates it.</p>
+        {problem !== undefined && <Notice tone="warn">The prices could not be brought up to date: {problem}</Notice>}
+      </>
     ) : (
       <>
         <KeyValues
@@ -385,12 +405,12 @@ export const LoanItem = ({
           <KeyValues
             entries={[
               [<>Collateral</>, <Amount satoshis={loan.found?.loan.output.valueSatoshis ?? 0n} exact />],
-              [<>Worth, at {market === undefined ? 'the lower price' : formatPrice(market.lower)}<small>The lower of the stored price and the oracle's</small></>, <span class={`ratio${lowerRatio !== undefined && lowerRatio < SAFE_PERCENT ? ' low' : ''}`}>{percent(lowerRatio)} of the debt</span>],
+              [market === undefined ? <>Worth</> : <>Worth, at {formatPrice(market.lower)}<small>{priceBasis(market.withoutOracle).explained}</small></>, <span class={`ratio${lowerRatio !== undefined && lowerRatio < SAFE_PERCENT ? ' low' : ''}`}>{percent(lowerRatio)} of the debt</span>],
               ...(market === undefined || market.lower === market.priceThread.state.price ? [] : [[<>Worth, at the stored {formatPrice(market.priceThread.state.price)}</>, `${percent(ratioOf(loan, market.priceThread.state.price))} of the debt`] as [ComponentChildren, ComponentChildren]]),
               [<>Interest</>, loan.interestRate === 0 || loan.interestRate === undefined ? 'None' : `${(loan.interestRate / 100_000).toFixed(3)}% a period`],
             ]}
           />
-          {lowerRatio !== undefined && lowerRatio < SAFE_PERCENT && <Notice tone="warn">The collateral is worth less than {SAFE_PERCENT}% of the debt at the lower price. Add collateral, or repay, before the price falls further: at 110% the contracts let anyone liquidate the loan.</Notice>}
+          {lowerRatio !== undefined && lowerRatio < SAFE_PERCENT && <Notice tone="warn">The collateral is worth less than {SAFE_PERCENT}% of the debt at {priceBasis(market?.withoutOracle).short}. Add collateral, or repay, before the price falls further: at 110% the contracts let anyone liquidate the loan.</Notice>}
           <div class="loan-key small muted">
             Loan key <span class="mono">{shorten(loan.category, 8, 6)}</span>, in your wallet
           </div>
@@ -523,11 +543,14 @@ export const NewLoanCard = ({
   keys,
   facts,
   state,
+  desk = CHIPNET_DESK,
   onMakeKey,
   onMove,
   onBorrow,
 }: {
   market: Market | undefined;
+  /** The deployment, for what the page says of Paryon's periods and of who moves the contracts on. */
+  desk?: Desk | undefined;
   keys: MadeKey[] | undefined;
   facts: PageFacts;
   state: ActionState;
@@ -581,7 +604,10 @@ export const NewLoanCard = ({
           ) : (
             <>
               <p class="small">
-                Paryon's contracts count time in periods of about half an hour, and a loan pays interest for each period from the one it starts in. The contract that would lend to you was last moved on {need.behind.toLocaleString('en-US')} periods ago, because Paryon's keepers on this test network have stopped. A loan opened from it now could be charged a fee for each of those periods, up to {formatSatoshis(need.atMost)} satoshis.
+                {desk.paryons
+                  ? `Paryon's contracts count time in periods of about half an hour, and a loan pays interest for each period from the one it starts in. The contract that would lend to you was last moved on ${need.behind.toLocaleString('en-US')} periods ago, because Paryon's keepers on this test network have stopped.`
+                  : `Paryon's contracts count time in periods of ${desk.deployment.periodLengthBlocks.toLocaleString('en-US')} blocks, and a loan pays interest for each period from the one it starts in. The contract that would lend to you was last moved on ${need.behind.toLocaleString('en-US')} periods ago: on this chain of its own nobody moves Paryon's contracts on.`}{' '}
+                A loan opened from it now could be charged a fee for each of those periods, up to {formatSatoshis(need.atMost)} satoshis.
               </p>
               <p class="small muted">Bringing it up to the current period first costs only the network's fee, about 1,100 satoshis, and anyone may do it.</p>
               <Button small disabled={busy} onClick={() => onMove(need)}>
@@ -601,7 +627,7 @@ export const NewLoanCard = ({
               <span>PUSD</span>
             </div>
           </Field>
-          <Field label="Collateral" id="loan-ratio" error={tried ? (typeof chosen === 'string' ? chosen : plan?.problem) : undefined} hint={`Worth this much of the debt at the lower price. ${DEFAULT_PERCENT}% is proposed; this page takes no less than ${SAFE_PERCENT}%.`}>
+          <Field label="Collateral" id="loan-ratio" error={tried ? (typeof chosen === 'string' ? chosen : plan?.problem) : undefined} hint={`Worth this much of the debt at ${priceBasis(market?.withoutOracle).short}. ${DEFAULT_PERCENT}% is proposed; this page takes no less than ${SAFE_PERCENT}%.`}>
             <div class="input-unit">
               <input id="loan-ratio" type="text" inputMode="numeric" autocomplete="off" value={ratio} aria-invalid={tried && (typeof chosen === 'string' || plan?.problem !== undefined)} onInput={(event) => setRatio((event.currentTarget as HTMLInputElement).value)} />
               <span>%</span>
