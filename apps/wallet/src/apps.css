@@ -190,8 +190,9 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 .tokens-loading { display: flex; gap: 10px; align-items: center; color: var(--muted); padding: 8px 0; }
 .tokens-none { margin: 0; color: var(--muted); }
 .token { display: flex; flex-direction: column; gap: 10px; }
-.token-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.token-head > :first-child { min-width: 0; }
+/* A long pill goes under the token's name rather than squeezing it and its identifiers into a narrow column. */
+.token-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 6px 12px; }
+.token-head > :first-child { flex: 1 1 15rem; min-width: 0; }
 .token-head .pill { flex: none; }
 .token-title { font-weight: 650; }
 .token-of { font-weight: 400; color: var(--muted); }
@@ -212,6 +213,7 @@ button.hex.whole { overflow-wrap: anywhere; word-break: break-all; }
 /* An action only the application's page can carry out */
 .token-actions > li.through-application { align-items: flex-start; }
 .token-action-name { font-weight: 600; }
+.token-action { display: flex; align-items: center; gap: 8px; }
 
 /* Tokens in a review */
 .moved-note { margin: -2px 0 6px; }

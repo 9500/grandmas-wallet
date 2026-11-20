@@ -980,12 +980,12 @@ export const PositionRow = ({ owner, position, onView }: { owner: Owner; positio
               {actions.map((action) => (
                 <li class={action.needsApplication === undefined ? undefined : 'through-application'}>
                   {action.needsApplication === undefined ? (
-                    <>
-                      <div class="small muted">{action.description !== '' ? action.description : 'An action of the template.'}</div>
+                    <div class="token-action">
                       <Button small kind="secondary" disabled={!usable} onClick={() => onView({ at: 'act', position, action })}>
                         {action.name}
                       </Button>
-                    </>
+                      {action.description !== '' && <Info label={`About "${action.name}"`}>{action.description}</Info>}
+                    </div>
                   ) : (
                     <div>
                       <div class="token-action-name">{action.name}</div>
