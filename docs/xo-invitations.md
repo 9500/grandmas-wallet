@@ -53,10 +53,29 @@ The actions to look for:
 
 Two things that may surprise:
 
-- **A recovery request and its completion are `pay` invitations.** The recoverer's key for a wallet comes from that wallet's credential, which the engine cannot hold: it derives every key from its own seed and takes none from outside. The recoverer's code signs the controller input itself and gives it to the engine as a finished input of a `pay` invitation, which pays the fee from the recoverer's balance. The controller template defines `requestRecovery` and `completeRecovery`, and those unlocking scripts are what the finished input satisfies.
+- **A recovery request and its completion are `pay` invitations.** The recoverer's code signs the controller input itself and gives it to the engine as a finished input of a `pay` invitation, which pays the fee from the recoverer's balance. The controller template defines `requestRecovery` and `completeRecovery`, and those unlocking scripts are what the finished input satisfies. The reason is in the next section.
 - **Paryon's shared coins come with their unlocking.** The coins of Paryon's contracts sit at scripts every user shares. The wallet works out their unlocking from the template and hands each to the engine as a finished input, so the engine does not have to follow scripts with tens of thousands of transactions. The wallet's own inputs are unlocked and signed by the engine from the template.
 
 The loan run of 19 November has no `movePeriod` invitation: the Borrowing thread it borrowed from was in the current period already, so there was nothing to move on.
+
+## Why a recovery is a `pay` invitation
+
+The controller template has seven actions. The owner's (`create`, `approve`, `changeSettings`, `close`) are carried out by the engine under their own names. The recoverer's two, `requestRecovery` and `completeRecovery`, reach the chain inside `pay` invitations. The contract's recovery branches are what those transactions run; only the name on the invitation differs.
+
+- **An engine signs with the keys of one seed.** An engine is opened on one twelve-word phrase and derives every key from it. It takes no key from outside, and only one engine can be open in a page.
+- **A recoverer looks after many wallets, each with a key of its own.** For every wallet it creates, the recoverer makes a separate twelve-word credential, and the recovery key for that wallet comes from it. Two wallets with the same recoverer then share no value on chain, and a credential that leaks exposes one wallet.
+- **The recoverer pays every fee from one balance.** The balance is at a seed of the recoverer's own, and the page's engine is opened on that seed.
+- **A request therefore needs signatures from two seeds.** Its first input is the wallet's controller, signed with the recovery key from that wallet's credential. Its other inputs are coins of the balance, signed with the balance's key. The page's one engine holds the second key and not the first.
+
+An engine opened on a wallet's credential derives the same recovery key, and the template's `takeUp` action is how such an engine takes the key up. The page would then need an engine per wallet, loaded one at a time, and coins set apart for each wallet's fees. Signing the controller input outside the engine was found more convenient: one page with one engine and one balance serves every wallet.
+
+What the page does for a request or a completion:
+
+1. Its own code builds the controller input and signs it with the recovery key, as the template's `requestRecovery` or `completeRecovery` unlocking script asks.
+2. It gives that input to the engine as a finished input, the way another participant's input arrives.
+3. The engine adds coins of the balance for the fee, signs them, and builds and sends the transaction as a `pay` action of the actions template.
+
+Proposal sections 9.2 and 9.6 have the decision and its reasons.
 
 ## Opening an invitation in the debug tool
 
