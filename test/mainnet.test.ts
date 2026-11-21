@@ -141,10 +141,10 @@ describe('what mainnet changes', () => {
     expect(delaysFor('chipnet').map((entry) => entry.delay.value)).toEqual([1, 7, 169, 1182]);
   });
 
-  it('the loan page is off on mainnet, also for a deployment its configuration names', () => {
-    expect(deskFor(environment)).toBeUndefined();
-    expect(deskFor({ network: 'mainnet', paryon: { name: 'x', tokenIds: { paryon: 'aa', loanKeyFactory: 'bb' } } })).toBeUndefined();
-    expect(deskFor({ network: 'chipnet' })).toBeDefined();
+  it('the loan page uses Paryon\'s mainnet deployment on mainnet, never one its configuration names', () => {
+    expect(deskFor(environment)?.deployment.name).toBe('mainnet-v1');
+    expect(deskFor({ network: 'mainnet', paryon: { name: 'x', tokenIds: { paryon: 'aa', loanKeyFactory: 'bb' } } })?.deployment.name).toBe('mainnet-v1');
+    expect(deskFor({ network: 'chipnet' })?.deployment.name).toBe('chipnet-fast-periods-6');
   });
 
   it('the example configuration is clearly an example', () => {

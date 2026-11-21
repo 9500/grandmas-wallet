@@ -10,13 +10,13 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { type Desk, type LoanView, type Market, deskFor, formatPusd } from './loan.js';
 import { type MadeKey, type PageChain, generalProtocolsOracle, readMarket } from './market.js';
-import { type ActionState, type LinkWords, type Progress, ConnectCard, ConnectedCard, HowItWorks, Independent, Intro, LoanList, NewLoanCard, OnItsWay, PricesCard, borrowName, closeName, keyName, manageName, moveName, repayName } from './view.js';
+import { type ActionState, type LinkWords, type Progress, ConnectCard, ConnectedCard, HowItWorks, Independent, Intro, LoanList, LoanNeeds, NewLoanCard, OnItsWay, PricesCard, borrowName, closeName, keyName, manageName, moveName, repayName } from './view.js';
 import { type KeptKey, type Outcome, type PendingRequest, STAGE_WORDS, XoLoans, xoProblem } from './xo.js';
 
 /**
  * The loan page: an independent demonstration with Paryon's public contracts, for a wallet that carries out the
- * actions of a template itself. It works with Paryon's deployment on chipnet, or with one its configuration names,
- * as on a chain of one's own. The page reads the chain, and for Paryon's own deployment the oracle; the wallet
+ * actions of a template itself. It works with Paryon's deployments on mainnet and on chipnet, or with one its
+ * configuration names, as on a chain of one's own. The page reads the chain, and for Paryon's own deployment the oracle; the wallet
  * builds, shows and signs every transaction.
  */
 
@@ -230,6 +230,9 @@ const App = ({ environment }: { environment: Environment }) => {
   const [resuming, setResuming] = useState(false);
   const [chain, setChain] = useState<PageChain | undefined>();
   const [chainProblem, setChainProblem] = useState<string | undefined>();
+  // Before a wallet is connected, the page reads Paryon's contracts and the prices once, to show what a loan needs.
+  const [glance, setGlance] = useState<Market | undefined>();
+  const [glanceProblem, setGlanceProblem] = useState<string | undefined>();
 
   const start = (credentials?: DappCredentials) => {
     link.current?.close();
@@ -275,6 +278,11 @@ const App = ({ environment }: { environment: Environment }) => {
     return () => link.current?.close();
   }, []);
 
+  useEffect(() => {
+    if (chain === undefined || desk === undefined) return;
+    readMarket(chain, environment.network, desk.paryons ? generalProtocolsOracle : undefined, desk).then(setGlance, (error: unknown) => setGlanceProblem(plainError(error)));
+  }, [chain]);
+
   const forget = () => {
     vault.remove('credentials');
     vault.remove('pending');
@@ -289,22 +297,12 @@ const App = ({ environment }: { environment: Environment }) => {
     return new XoLoans(requests, chain, pendingStore, keyStore, pageAddress(), undefined, desk);
   }, [usable, chain, status.state === 'connected']);
 
-  if (desk === undefined && environment.network === 'mainnet') {
-    return (
-      <div class="stack">
-        <Independent off />
-        <Card title="Off on mainnet" tone="warn">
-          <p>This page stays off on mainnet: no deployment of Paryon's contracts on mainnet is named in its code, so none can be checked from it.</p>
-        </Card>
-      </div>
-    );
-  }
   if (desk === undefined) {
     return (
       <div class="stack">
         <Independent />
         <Card title="No deployment of Paryon's contracts" tone="warn">
-          <p>This page works with Paryon's deployment on chipnet, or with a deployment of Paryon's contracts that its configuration names. It is configured for {environment.network} and names none.</p>
+          <p>This page works with Paryon's deployments on mainnet and on chipnet, or with a deployment of Paryon's contracts that its configuration names. It is configured for {environment.network} and names none.</p>
         </Card>
       </div>
     );
@@ -334,7 +332,10 @@ const App = ({ environment }: { environment: Environment }) => {
       <Independent desk={desk} />
       <div class="columns">
         <ConnectCard uri={address} state={words} problem={problem} onForget={resuming || problem !== undefined || vault.get<DappCredentials>('credentials')?.walletPublicKey !== undefined ? forget : undefined} />
-        <HowItWorks />
+        <div class="stack">
+          <LoanNeeds market={glance} problem={glanceProblem ?? chainProblem} desk={desk} network={environment.network} />
+          <HowItWorks />
+        </div>
       </div>
     </div>
   );
