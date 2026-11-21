@@ -17,13 +17,16 @@ import { walletTemplateNumbers } from '../../app/src/templates.js';
 import {
   type ListedOutput,
   type ParyonChain,
+  type ParyonDeployment,
   CHIPNET_FAST_PERIODS_6,
+  MAINNET_V1,
   NO_INTEREST_MANAGER,
   borrow,
   borrowingFee,
   closeLoan,
   collateralAtRatio,
   createLoanKey,
+  decodeBorrowingPeriod,
   decodeLoanState,
   decodePriceState,
   encodeLoanState,
@@ -33,17 +36,17 @@ import {
   minimumCollateral,
   paryonContracts,
   periodAt,
+  periodStart,
   updateBorrowingPeriod,
 } from '../src/index.js';
 
 /**
- * A borrower's five transactions on ParyonUSD's chipnet deployment, built against its live outputs as they
- * were recorded (`fixtures/chipnet-live.json`, written by `src/snapshot.ts`), with the wallet's coins and
- * the loan key at recoverable addresses of a wallet of this project. Each is checked in the virtual machine,
- * every input, under the 2026 rules with this project's check before sending, and under the 2025 rules.
+ * A borrower's five transactions on each of ParyonUSD's own deployments, chipnet's (periods of 3 blocks) and
+ * mainnet's (periods of 144), built against their live outputs as they were recorded (`fixtures/chipnet-live.json`,
+ * `fixtures/mainnet-live.json`, written by `src/snapshot.ts`), with the wallet's coins and the loan key at
+ * recoverable addresses of a wallet of this project. Each is checked in the virtual machine, every input, under the
+ * 2026 rules with this project's check before sending, and under the 2025 rules. Nothing is sent anywhere.
  */
-
-const contracts = paryonContracts(CHIPNET_FAST_PERIODS_6);
 
 interface RecordedOutput {
   transactionId: string;
@@ -53,7 +56,9 @@ interface RecordedOutput {
   lockingBytecode: string;
   token?: { category: string; amount: string; nft?: { capability: 'none' | 'mutable' | 'minting'; commitment: string } };
 }
-const recorded = JSON.parse(readFileSync(new URL('fixtures/chipnet-live.json', import.meta.url), 'utf8')) as {
+const runOn = (deployment: ParyonDeployment): void => {
+const contracts = paryonContracts(deployment);
+const recorded = JSON.parse(readFileSync(new URL(`fixtures/${deployment.network}-live.json`, import.meta.url), 'utf8')) as {
   tip: { height: number };
   borrowing: RecordedOutput[];
   price: RecordedOutput[];
@@ -133,7 +138,10 @@ const STORED_PRICE = decodePriceState(hexToBin(PRICE.token?.nft?.commitment ?? '
 const BORROWING = pick(recorded.borrowing);
 const FACTORY = pick(recorded.loanKeyFactory);
 const MANAGE = pick(recorded.manage);
-const HEIGHT = recorded.tip.height;
+// A lock height at the chain's tip, or, where every Borrowing thread is already in the tip's period (as on mainnet,
+// where Paryon's keepers move them on), the first height of the next period, so that a thread is moved on.
+const tipPeriod = periodAt(deployment, recorded.tip.height);
+const HEIGHT = recorded.borrowing.some((entry) => decodeBorrowingPeriod(hexToBin(entry.token?.nft?.commitment ?? '')) < tipPeriod) ? recorded.tip.height : periodStart(deployment, tipPeriod + 1);
 
 /** The course from the wallet's first coin: a loan key, the Borrowing thread moved on, the loan. */
 const open = (debt: bigint, collateral: bigint, startingInterest = 0) => {
@@ -168,10 +176,11 @@ describe('the deployment', () => {
       expect(entries.length).toBeGreaterThan(0);
       for (const entry of entries) expect(entry.lockingBytecode).toBe(binToHex(script.lockingBytecode));
     }
-    // Contracts without parameters are the same for every deployment, mainnet included.
+    // Contracts without parameters are the same for every deployment, mainnet included; the key's enforcer names the
+    // deployment's categories.
+    if (deployment === CHIPNET_FAST_PERIODS_6) expect(binToHex(contracts.loanKeyOriginEnforcer.lockingBytecode)).toBe('aa20f2c7937ed76ca51f5c93e608ab702ad56cee8f9224e132b7411be33a62b1e38187');
     expect(binToHex(contracts.loan.lockingBytecode)).toBe('aa200e21a4c1f868fe858109296e53720c50045825ab58e49d5f43e0ba8576a7509287');
     expect(binToHex(contracts.loanSidecar.lockingBytecode)).toBe('aa207886a5ad284f5ae9f09af871df72f5107b7b9dce7452b852a54e5fc6652dfd0f87');
-    expect(binToHex(contracts.loanKeyOriginEnforcer.lockingBytecode)).toBe('aa20f2c7937ed76ca51f5c93e608ab702ad56cee8f9224e132b7411be33a62b1e38187');
     expect(binToHex(contracts.loanKeyOriginProof.lockingBytecode)).toBe('aa207a30bbbf07a1cb3d7da2a270ab2c2a7c0fb1ed0dc092db9cd650ec3abd4a5b6e87');
   });
 });
@@ -205,7 +214,7 @@ describe('PY01, PY04: a loan from recoverable addresses, against the recorded li
     expect(binToHex(created.keyCategory)).toBe(binToHex(funding.transactionHash));
     expect(created.built.transaction.outputs.length).toBe(4);
     accepted(moved.built);
-    expect(moved.period).toBe(periodAt(CHIPNET_FAST_PERIODS_6, HEIGHT));
+    expect(moved.period).toBe(periodAt(deployment, HEIGHT));
     expect(moved.built.transaction.locktime).toBe(HEIGHT);
     accepted(opened.built);
     expect(opened.built.transaction.outputs.length).toBe(8);
@@ -370,3 +379,6 @@ describe('finding a loan from its key', () => {
     expect(await findLoan(chain, contracts, opened.keyCategory)).toBeUndefined();
   });
 });
+};
+
+for (const deployment of [CHIPNET_FAST_PERIODS_6, MAINNET_V1]) describe(deployment.name, () => runOn(deployment));
