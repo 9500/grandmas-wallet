@@ -14,6 +14,8 @@ import {
   MAINNET_V1,
   borrow,
   borrowRequestAlone,
+  changeInterestRate,
+  changeInterestRequestAlone,
   closeLoan,
   closeRequestAlone,
   collateralAtRatio,
@@ -23,13 +25,16 @@ import {
   decodeLoanState,
   decodePriceState,
   findLoan,
+  interestCoins,
   loanCoins,
   manageLoan,
   manageRequestAlone,
   minimumCollateral,
   movePeriodRequestAlone,
   paryonChipnetTemplateText,
+  paryonChipnetTemplateTextV1,
   paryonMainnetTemplateText,
+  paryonMainnetTemplateTextV1,
   paryonContracts,
   periodAt,
   periodStart,
@@ -61,7 +66,9 @@ const alone = paryonTemplateAlone(contracts);
 const hex = binToHex;
 const PAGE = 'https://loan.example/';
 
-const recorded = JSON.parse(readFileSync(new URL(`fixtures/${deployment.network}-live.json`, import.meta.url), 'utf8')) as Record<'borrowing' | 'price' | 'loanKeyFactory' | 'manage', RecordedOutput[]> & { tip: { height: number } };
+const recorded = JSON.parse(readFileSync(new URL(`fixtures/${deployment.network}-live.json`, import.meta.url), 'utf8')) as Record<'borrowing' | 'price' | 'loanKeyFactory' | 'manage' | 'changeInterest', RecordedOutput[]> & { tip: { height: number } };
+/** Paryon's shared outputs as recorded, on the simulated chain. */
+const sharedOutputs = (): RecordedOutput[] => [...recorded.borrowing, ...recorded.price, ...recorded.loanKeyFactory, ...recorded.manage, ...recorded.changeInterest];
 const outputOf = (entry: RecordedOutput): Output => ({
   lockingBytecode: hexToBin(entry.lockingBytecode),
   valueSatoshis: BigInt(entry.valueSatoshis),
@@ -83,9 +90,9 @@ const tipPeriod = periodAt(deployment, recorded.tip.height);
 const LOCK_HEIGHT = recorded.borrowing.some((entry) => decodeBorrowingPeriod(hexToBin(entry.token?.nft?.commitment ?? '')) < tipPeriod) ? recorded.tip.height : periodStart(deployment, tipPeriod + 1);
 
 /** A request of the page's, as the wallet's session turns it into an action (`actionOf`). */
-const asked = (request: LoanRequestAlone): ApplicationAction => ({
+const asked = (request: LoanRequestAlone, texts: { template: string } = alone.texts): ApplicationAction => ({
   template: request.template,
-  presented: alone.texts,
+  presented: texts,
   action: request.templateAction,
   role: request.role,
   variables: request.variables,
@@ -102,7 +109,7 @@ const TICKED = { tokensLeave: true };
 /** A wallet with coins, on a simulated chain that holds Paryon's live outputs as recorded. */
 const loanDevice = async (satoshis: bigint): Promise<Device> => {
   const device = await deviceWith([satoshis]);
-  device.chain.adopt([...recorded.borrowing, ...recorded.price, ...recorded.loanKeyFactory, ...recorded.manage].map((entry) => ({ transactionId: entry.transactionId, index: entry.index, output: outputOf(entry) })));
+  device.chain.adopt(sharedOutputs().map((entry) => ({ transactionId: entry.transactionId, index: entry.index, output: outputOf(entry) })));
   return device;
 };
 /** The chain as the page reads it: the simulated chain lists a token's category only, so the page reads each output itself. */
@@ -139,24 +146,25 @@ const coinsOf = async (device: Device, keyCategory: string) => {
 };
 
 /** The course up to the open loan, from the page's requests: a key (with the user's tick), the Borrowing thread moved on, the loan. */
-const openLoan = async (debt: bigint, collateral: bigint) => {
+const openLoan = async (debt: bigint, collateral: bigint, template: ReturnType<typeof paryonTemplateAlone> = alone) => {
+  const asked_ = (request: LoanRequestAlone): ApplicationAction => asked(request, template.texts);
   const device = await loanDevice(collateral + 10_000_000n);
   const factory = utxoOf(first(recorded.loanKeyFactory));
-  const makeKey = asked(createKeyRequestAlone(alone.names, { factory, page: PAGE }));
+  const makeKey = asked_(createKeyRequestAlone(template.names, { factory, page: PAGE }));
   const made = await device.applications.carryOut(makeKey, undefined, TICKED);
   const created = await decoded(device, made.transactionId);
   const keyCategory = hex(created.inputs[0]?.outpointTransactionHash as Uint8Array);
   const expectedKey = createLoanKey({ contracts, factory, defining: asSpent(created, await spent(device, created), 0), changeTo: created.outputs[0]?.lockingBytecode as Uint8Array });
 
   const thread = utxoOf(first(recorded.borrowing));
-  const moving = asked(movePeriodRequestAlone(alone.names, contracts, { borrowing: thread, lockHeight: LOCK_HEIGHT, page: PAGE }));
+  const moving = asked_(movePeriodRequestAlone(template.names, contracts, { borrowing: thread, lockHeight: LOCK_HEIGHT, page: PAGE }));
   // The Borrowing contract's minting NFT goes on with the new period in its commitment: carried on, not destroyed.
   expect((await device.applications.preview(moving)).figures.tokensDestroyed).toEqual([]);
   const movedOutcome = await device.applications.carryOut(moving);
   const moved = await decoded(device, movedOutcome.transactionId);
 
   const choice = { borrowing: at(movedOutcome.transactionId, moved, 0), price: utxoOf(PRICE), enforcer: at(made.transactionId, created, 2), proof: at(made.transactionId, created, 3), debt, collateral, startingInterest: 0 };
-  const opened = await device.applications.carryOut(asked(borrowRequestAlone(alone.names, { ...choice, page: PAGE })));
+  const opened = await device.applications.carryOut(asked_(borrowRequestAlone(template.names, { ...choice, page: PAGE })));
   const borrowed = await decoded(device, opened.transactionId);
   const borrowedSources = await spent(device, borrowed);
   const expectedBorrow = borrow({
@@ -174,16 +182,16 @@ describe('a ParyonUSD loan from the template alone (PR20)', () => {
   const DEBT = 200_00n;
   const COLLATERAL = collateralAtRatio(DEBT, STORED_PRICE, 125n);
 
-  it('PY02: the template sent is the frozen one, alone; it holds no key', () => {
+  it('PY02: the template sent is the frozen one of version 2, alone; it holds no key', () => {
     const frozen = deployment === MAINNET_V1 ? paryonMainnetTemplateText : paryonChipnetTemplateText;
     expect(alone.texts).toEqual({ template: frozen });
-    expect(alone.names.identifier).toBe(deployment === MAINNET_V1 ? 'efa0e18915670a6d21a634821d4558a316a4191a219447f615523fde6a6143a5' : 'aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be');
+    expect(alone.names.identifier).toBe(deployment === MAINNET_V1 ? '30647ea4b817c4e58b32fb4fc104643af9c1e92295729b33d5551dc875569364' : '3fa4baf9f313ee2a5046ae30fdf1f7affc6aca21a29e3f6b38227b4a826e9235');
     expect(frozen).not.toContain('private_key');
   });
 
   it('PY02: a wallet without a coin that can define the key pays itself first, and the key is made with what is left over at output 0', async () => {
     const device = await deviceWith([10_000_000n], { outputIndex: 1 });
-    device.chain.adopt([...recorded.borrowing, ...recorded.price, ...recorded.loanKeyFactory, ...recorded.manage].map((entry) => ({ transactionId: entry.transactionId, index: entry.index, output: outputOf(entry) })));
+    device.chain.adopt(sharedOutputs().map((entry) => ({ transactionId: entry.transactionId, index: entry.index, output: outputOf(entry) })));
     const request = asked(createKeyRequestAlone(alone.names, { factory: utxoOf(first(recorded.loanKeyFactory)), page: PAGE }));
     const preview = await device.applications.preview(request);
     expect(preview.figures.payingItself?.feeSatoshis).toBeGreaterThan(0n);
@@ -352,6 +360,71 @@ describe('a ParyonUSD loan from the template alone (PR20)', () => {
     // The wallet still holds the key, under the template; whether the loan is open is the page's to say.
     expect((await reportedKey(device, keyCategory))?.status).toBe('held');
     expect((await device.wallet.balance()).tokens.some((coin) => hex(coin.utxo.output.token?.category ?? new Uint8Array()) === hex(contracts.paryonCategory))).toBe(false);
+  });
+
+  it('the interest rate changed from the page\'s request, the builders\' transaction byte for byte: the loan key at input 3 and back where it was; the loan then repaid in part and closed', async () => {
+    const { device, keyCategory, borrowed } = await openLoan(DEBT, COLLATERAL);
+    const reported = await reportedKey(device, keyCategory);
+    const found = await interestCoins(pageChain(device), contracts, hexToBin(keyCategory), BigInt(reported?.satoshis ?? 0));
+    if (found === undefined) throw new Error('the page finds no loan for the key');
+    const request = changeInterestRequestAlone(alone.names, { keyCategory, keySatoshis: found.keySatoshis, loan: found.loan, sidecar: found.sidecar, interestFunction: found.interestFunction, rate: 100, page: PAGE });
+    expect(request).toMatchObject({ templateAction: 'changeInterest', about: { category: keyCategory, spent: true }, bindings: { keyHolder: 'return' }, page: PAGE, variables: { nextInterestRate: '6400', keySatoshis: '1000', collateral: String(COLLATERAL) } });
+    expect(Object.keys(request.inputs ?? {})).toEqual(['loanInput', 'sidecarInput', 'changeInterestInput']);
+    const preview = await device.applications.preview(asked(request));
+    expect(preview.words.action.name).toBe('Change the interest rate');
+    expect(preview.figures.applicationInputs.map(({ name }) => name)).toEqual(['The loan', 'The loan\'s sidecar', 'Paryon\'s interest function']);
+    expect(preview.figures.toWallet.map(({ kind }) => kind)).toEqual(['return', 'left over']);
+    expect(preview.figures.tokensDestroyed).toEqual([]);
+    expect(preview.tokensLeaving).toBeUndefined();
+    const outcome = await device.applications.carryOut(asked(request));
+    const changed = await decoded(device, outcome.transactionId);
+    const sources = await spent(device, changed);
+    sameAsBuilders(
+      changed,
+      changeInterestRate({
+        contracts,
+        loan: sources[0] as Utxo,
+        sidecar: sources[1] as Utxo,
+        interestFunction: sources[2] as Utxo,
+        key: asSpent(changed, sources, 3),
+        wallet: changed.inputs.slice(4).map((_, index) => asSpent(changed, sources, index + 4)),
+        rate: 100,
+        changeTo: changed.outputs[4]?.lockingBytecode as Uint8Array,
+      }).built,
+    );
+    expect(hex(changed.outputs[3]?.lockingBytecode as Uint8Array)).toBe(hex(borrowed.outputs[5]?.lockingBytecode as Uint8Array));
+    expect(decodeLoanState(changed.outputs[0]?.token?.nft?.commitment as Uint8Array)).toMatchObject({ borrowed: DEBT, currentInterestRate: 0, nextInterestRate: 100 });
+    expect((await reportedKey(device, keyCategory))?.status).toBe('held');
+    // A rate the contracts do not take is refused by the page's library before anything is asked.
+    expect(() => changeInterestRequestAlone(alone.names, { keyCategory, keySatoshis: 1_000n, loan: found.loan, sidecar: found.sidecar, interestFunction: found.interestFunction, rate: 40_000 })).toThrow(/from 0 to 32767/);
+
+    // The loan with its new rate, repaid in part and closed from the page's requests.
+    const coins = await coinsOf(device, keyCategory);
+    const repaid = await device.applications.carryOut(asked(repayRequestAlone(alone.names, { ...coins, repay: 100_00n, collateral: coins.loan.output.valueSatoshis })));
+    expect(decodeLoanState((await decoded(device, repaid.transactionId)).outputs[1]?.token?.nft?.commitment as Uint8Array)).toMatchObject({ borrowed: 100_00n, nextInterestRate: 100 });
+    await device.applications.carryOut(asked(closeRequestAlone(alone.names, await coinsOf(device, keyCategory))));
+    expect(await findLoan(pageChain(device), contracts, hexToBin(keyCategory))).toBeUndefined();
+  });
+
+  it('a loan opened with version 1: the wallet reports its key only under version 1, so a page that sends version 2 neither lists it nor names it; a request about the key under version 2 is carried out once the user trusts version 2', async () => {
+    const v1 = paryonTemplateAlone(contracts, 1);
+    expect(v1.texts.template).toBe(deployment === MAINNET_V1 ? paryonMainnetTemplateTextV1 : paryonChipnetTemplateTextV1);
+    const { device, keyCategory } = await openLoan(DEBT, COLLATERAL, v1);
+    expect(device.applications.positionRecords.map(({ templateIdentifier }) => templateIdentifier)).toEqual([v1.names.identifier]);
+    // The page of version 2 asks which keys of its template the wallet holds: not trusted, nothing.
+    expect(await device.applications.positionsFromRecords(alone.names.identifier, 'the loan page')).toBeUndefined();
+    // The page offers version 2 and the user trusts it: still no key, since the record names version 1.
+    await device.applications.trust({ identifier: alone.names.identifier, contentHash: alone.names.contentHash }, alone.texts, 'the loan page');
+    expect(await device.applications.positionsFromRecords(alone.names.identifier, 'the loan page')).toEqual([]);
+    expect((await device.applications.positionsFromRecords(v1.names.identifier, 'the loan page'))?.map(({ token }) => token.category)).toEqual([keyCategory]);
+    // Asked about the key under version 2 all the same (the page would need the key's coin value from elsewhere), the
+    // wallet carries the action out: it takes the key by its category, and every value from the request.
+    const found = await interestCoins(pageChain(device), contracts, hexToBin(keyCategory), 1_000n);
+    if (found === undefined) throw new Error('no loan');
+    const changed = await device.applications.carryOut(asked(changeInterestRequestAlone(alone.names, { keyCategory, keySatoshis: 1_000n, loan: found.loan, sidecar: found.sidecar, interestFunction: found.interestFunction, rate: 50, page: PAGE })));
+    expect(decodeLoanState((await decoded(device, changed.transactionId)).outputs[0]?.token?.nft?.commitment as Uint8Array).nextInterestRate).toBe(50);
+    expect(device.applications.positionRecords.map(({ templateIdentifier }) => templateIdentifier)).toEqual([v1.names.identifier]);
+    expect(await device.applications.positionsFromRecords(alone.names.identifier, 'the loan page')).toEqual([]);
   });
 
   it('refused before anything is sent: a look-alike sidecar, a request about no key that names none, the key not returned, too much collateral taken out, a coin at no script of the template', async () => {

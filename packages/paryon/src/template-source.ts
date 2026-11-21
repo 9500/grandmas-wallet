@@ -21,6 +21,12 @@ import type { ParyonContracts } from './deployment.js';
  * transaction is evaluated in the virtual machine before anything is signed, so a wrong value is a refusal.
  *
  * The text a wallet is sent is the frozen copy in `frozen/`, made from this source by `npm run freeze`.
+ *
+ * Versions. Version 1 offers all six of its actions as starting actions. Version 2 starts only what needs no coin of
+ * the borrower's (making a key, bringing Paryon up to date) and declares the rest where the contracts give them: the
+ * loan key waiting in Paryon's contract offers the borrowing, and a loan offers managing, repaying, closing and changing
+ * its interest rate, an action version 1 does not have. A loan that one of these actions leaves open is again at the
+ * loan's script, with the same actions. Version 1 is kept, as it was frozen, for what was recorded under it.
  */
 
 const view = (name: string, description: string) => ({ name, description });
@@ -30,6 +36,10 @@ const action = (name: string, description: string, variables: string[], transact
   requirements: { participants: [{ role: 'borrower', slots: { min: 1, max: 1 } }] },
   transaction,
 });
+/** A version of this template. Version 1 is kept as frozen; the pages and runs send the latest. */
+export type ParyonTemplateVersion = 1 | 2;
+export const PARYON_TEMPLATE_VERSION: ParyonTemplateVersion = 2;
+
 /**
  * A contract's script: the redeem bytecode, whole. Spent with the unlocking script its input names; never the
  * wallet's, never selected to pay. Every script of Paryon's is shared by all its users, so each is marked as one
@@ -37,16 +47,21 @@ const action = (name: string, description: string, variables: string[], transact
  * history (the Borrowing contract's alone has some 76,000 on chipnet), into the wallet's store. The wallet gives
  * such a coin to its key holder with the unlocking it works out from this template.
  */
-const contract = (name: string, description: string, script: string) => ({
+const contract = (name: string, description: string, script: string, followUps: string[] = []) => ({
   ...view(name, description),
   lockingType: 'p2sh',
   lockingBytecode: script,
   selectable: false,
-  roles: { borrower: { selectable: false, relevant: false } },
+  roles: { borrower: { selectable: false, relevant: false, ...(followUps.length === 0 ? {} : { actions: followUps.map((action) => ({ action, role: 'borrower' })) }) } },
 });
 const THREAD = '1000';
 
-export const paryonTemplateSource = (contracts: ParyonContracts) => {
+export const paryonTemplateSource = (contracts: ParyonContracts, version: ParyonTemplateVersion = PARYON_TEMPLATE_VERSION) => {
+  const latest = version === 2;
+  /** Parts version 1 does not have; each is added after the parts it had, so that version 1 is made as it was frozen. */
+  const added = <T extends object>(parts: T): T | Record<string, never> => (latest ? parts : {});
+  /** The actions a script offers a borrower who holds a coin there: none in version 1. */
+  const offers = (...actions: string[]): string[] => (latest ? actions : []);
   const P = binToHex(contracts.paryonCategory);
   const F = binToHex(contracts.loanKeyFactoryCategory);
   const deployment = contracts.deployment.name;
@@ -54,18 +69,16 @@ export const paryonTemplateSource = (contracts: ParyonContracts) => {
     $schema: 'https://libauth.org/schemas/wallet-template-v0.schema.json',
     ...view(
       `ParyonUSD loan (${deployment})`,
-      `Borrow ParyonUSD (PUSD) against BCH. The loan key, a token that stays in your wallet, manages the loan: whoever holds it can add or take out collateral, repay and close. Interest is taken from the collateral; the debt in PUSD does not grow. A loan whose collateral falls below 110% of the debt at the price in Paryon's price contract can be liquidated by anyone. Paryon's deployment "${deployment}".`,
+      `Borrow ParyonUSD (PUSD) against BCH. The loan key, a token that stays in your wallet, manages the loan: whoever holds it can add or take out collateral, repay and close${latest ? ', and change the interest rate' : ''}. Interest is taken from the collateral; the debt in PUSD does not grow. A loan whose collateral falls below 110% of the debt at the price in Paryon's price contract can be liquidated by anyone. Paryon's deployment "${deployment}".`,
     ),
-    version: '1',
+    version: String(version),
     supported: ['BCH_2026_05'],
     roles: { borrower: view('Borrower', 'Holds the loan key, and opens, manages and closes the loan.') },
     start: [
       { action: 'createKey', role: 'borrower' },
       { action: 'movePeriod', role: 'borrower' },
-      { action: 'borrow', role: 'borrower' },
-      { action: 'manage', role: 'borrower' },
-      { action: 'repay', role: 'borrower' },
-      { action: 'close', role: 'borrower' },
+      // Version 1 offered every action as a starting one.
+      ...(latest ? [] : ['borrow', 'manage', 'repay', 'close'].map((action) => ({ action, role: 'borrower' }))),
     ],
     actions: {
       createKey: action('Make a loan key', 'Make the key of a new loan. It waits in Paryon\'s contract until the loan is opened with it, and comes to your wallet then.', ['keyCategory'], 'createKeyTransaction'),
@@ -99,6 +112,14 @@ export const paryonTemplateSource = (contracts: ParyonContracts) => {
         ['keyCategory', 'priceCommitment', 'loanCommitment', 'repayAmount', 'interestManagerConfiguration', 'keySatoshis', 'keyHolder'],
         'closeTransaction',
       ),
+      ...added({
+        changeInterest: action(
+          'Change the interest rate',
+          'Choose the rate the loan pays from its next interest payment on. Interest is paid in BCH out of the collateral each period; the debt in PUSD does not grow. A lower rate costs less, but a redemption may be moved onto a loan with a lower rate: someone hands in PUSD for the same value in BCH out of that loan\'s collateral, and its debt falls by as much. The loan key goes back to the address it came from.',
+          ['keyCategory', 'collateral', 'loanCommitment', 'nextInterestRate', 'keySatoshis', 'keyHolder'],
+          'changeInterestTransaction',
+        ),
+      }),
     },
     transactions: {
       createKeyTransaction: {
@@ -196,6 +217,25 @@ export const paryonTemplateSource = (contracts: ParyonContracts) => {
         version: 2,
         locktime: 0,
       },
+      ...added({
+        changeInterestTransaction: {
+          ...view('Interest rate changed', 'The loan\'s rate for the periods to come was changed; the loan holds $(<collateral>) satoshis of collateral.'),
+          // Input 3 is the loan key, the wallet's; output 3 takes it back to the script it was spent from.
+          inputs: [
+            { input: 'loanInput', inputIndex: 0 },
+            { input: 'sidecarInput', inputIndex: 1 },
+            { input: 'changeInterestInput', inputIndex: 2 },
+          ],
+          outputs: [
+            { output: 'loanOutput', outputIndex: 0 },
+            { output: 'sidecarOutput', outputIndex: 1 },
+            { output: 'changeInterestOutput', outputIndex: 2 },
+            { output: 'keyBackOutput', outputIndex: 3 },
+          ],
+          version: 2,
+          locktime: 0,
+        },
+      }),
     },
     inputs: {
       factoryInput: { ...view('Paryon\'s key factory', 'A contract of Paryon that makes loan keys. It is put back as it was.'), unlockingScript: 'unlockWithoutArguments' },
@@ -208,6 +248,7 @@ export const paryonTemplateSource = (contracts: ParyonContracts) => {
       sidecarInput: { ...view('The loan\'s sidecar', 'The coin beside the loan that names its key.'), unlockingScript: 'unlockWithoutArguments' },
       manageInput: { ...view('Paryon\'s manage function', 'The contract that checks a change to a loan. It is put back as it was.'), unlockingScript: 'unlockManage' },
       repayInput: { ...view('Paryon\'s manage function', 'The contract that checks a repayment. It is put back as it was.'), unlockingScript: 'unlockRepay' },
+      ...added({ changeInterestInput: { ...view('Paryon\'s interest function', 'The contract that checks a change of a loan\'s interest rate. It is put back as it was.'), unlockingScript: 'unlockChangeInterest' } }),
     },
     outputs: {
       factoryOutput: { ...view('Paryon\'s key factory', 'Put back as it was.'), lockingScript: 'loanKeyFactoryContract', valueSatoshis: THREAD, token: { category: F, amount: null, nft: { capability: 'minting', commitment: '' } } },
@@ -251,16 +292,21 @@ export const paryonTemplateSource = (contracts: ParyonContracts) => {
       },
       repaidOutput: { ...view('PUSD repaid', '$(<repayAmount>) PUSD cents, destroyed.'), lockingScript: '$(<burnLockingBytecode>)', valueSatoshis: '0', token: { category: P, amount: '$(<repayAmount>)', nft: null } },
       loanRecordOutput: { ...view('The loan\'s record', 'Destroyed: the loan is over.'), lockingScript: '$(<burnLockingBytecode>)', valueSatoshis: '0', token: { category: P, amount: null, nft: { capability: 'mutable', commitment: '$(<loanCommitment>)' } } },
+      ...added({
+        changeInterestOutput: { ...view('Paryon\'s interest function', 'Put back as it was.'), lockingScript: 'changeInterestContract', valueSatoshis: THREAD, token: { category: P, amount: null, nft: { capability: 'none', commitment: '08' } } },
+      }),
     },
     lockingScripts: {
       borrowingContract: contract('Paryon\'s borrowing contract', 'Lends PUSD against BCH (Borrowing).', 'borrowingBytecode'),
       priceContract: contract('Paryon\'s price contract', 'Keeps the BCH price from the oracle (PriceContractGuarded).', 'priceBytecode'),
       loanKeyFactoryContract: contract('Paryon\'s key factory', 'Makes loan keys (LoanKeyFactory).', 'loanKeyFactoryBytecode'),
-      originEnforcerContract: contract('A loan key, waiting', 'Holds a loan key until its loan is opened (LoanKeyOriginEnforcer).', 'originEnforcerBytecode'),
+      // The borrower's coins are the key waiting here and, once the loan is open, the loan: each offers what can follow.
+      originEnforcerContract: contract('A loan key, waiting', 'Holds a loan key until its loan is opened (LoanKeyOriginEnforcer).', 'originEnforcerBytecode', offers('borrow')),
       originProofContract: contract('A loan key\'s proof of origin', 'Shows where a loan key comes from (LoanKeyOriginProof).', 'originProofBytecode'),
-      loanContract: contract('A loan', 'A loan\'s collateral and record (Loan).', 'loanBytecode'),
+      loanContract: contract('A loan', 'A loan\'s collateral and record (Loan).', 'loanBytecode', offers('manage', 'repay', 'close', 'changeInterest')),
       sidecarContract: contract('A loan\'s sidecar', 'Names a loan\'s key (LoanTokenSidecar).', 'sidecarBytecode'),
       manageContract: contract('Paryon\'s manage function', 'Checks every change to a loan (manageLoan).', 'manageBytecode'),
+      ...added({ changeInterestContract: contract('Paryon\'s interest function', 'Checks every change of a loan\'s interest rate (changeInterest).', 'changeInterestBytecode') }),
     },
     scripts: {
       // Each contract's redeem bytecode: the compiled contract with the deployment's parameters, as on chain.
@@ -279,6 +325,10 @@ export const paryonTemplateSource = (contracts: ParyonContracts) => {
       unlockSharePrice: '<1>',
       unlockManage: '<interestManagerConfiguration> <0>',
       unlockRepay: '<interestManagerConfiguration> <repayAmount>',
+      ...added({
+        changeInterestBytecode: `0x${binToHex(contracts.changeInterest.redeemBytecode)}`,
+        unlockChangeInterest: '<nextInterestRate>',
+      }),
     },
     constants: {
       protocolFeeLockingBytecode: { ...view('Paryon\'s fee address', 'Where borrowing fees go.'), type: 'locking_script', value: binToHex(contracts.protocolFeeLockingBytecode) },
@@ -301,6 +351,7 @@ export const paryonTemplateSource = (contracts: ParyonContracts) => {
       startingInterest: { ...view('Starting interest', 'Interest per 10,000,000 per period, as two bytes.'), type: 'bytes' },
       interestManagerConfiguration: { ...view('Interest manager', 'Who may change the loan\'s interest, and within which limits, as five bytes.'), type: 'bytes' },
       repayAmount: { ...view('Repayment', 'PUSD repaid, in cents.'), type: 'token_amount' },
+      ...added({ nextInterestRate: { ...view('Interest rate', 'The rate from the next interest payment on: per 10,000,000 of the debt\'s value, per period, as two bytes.'), type: 'bytes' } }),
     },
   };
 };

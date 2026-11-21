@@ -1,5 +1,5 @@
 import { hexToBin } from '@bitauth/libauth';
-import { type BorrowingThread, type PriceThread, borrowingFee, collateralRatio, decodePriceState, minimumCollateral } from '@grandmas-wallet/paryon';
+import { type BorrowingThread, type PriceThread, CHIPNET_FAST_PERIODS_6, MAINNET_V1, borrowingFee, collateralRatio, decodePriceState, minimumCollateral, paryonChipnetTemplateText, paryonMainnetTemplateText } from '@grandmas-wallet/paryon';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -16,14 +16,18 @@ import {
   finalLockHeight,
   formatPrice,
   formatPusd,
+  interestEachPeriod,
+  interestRateProblem,
   lowerPrice,
   parsePercent,
   parsePusd,
   partRepayment,
   periodNeed,
   periodOf,
+  periodsPerYear,
   priceBasis,
   repaymentProblem,
+  yearlyPercent,
 } from '../src/loan.js';
 
 /** The loan page's own arithmetic and rules, without a chain or a wallet. */
@@ -132,13 +136,36 @@ describe('managing a loan', () => {
   });
 });
 
+describe('the interest rate', () => {
+  it('takes a whole number from 0 to 32,767, per 10,000,000 per period', () => {
+    expect(interestRateProblem(0)).toBeUndefined();
+    expect(interestRateProblem(32_767)).toBeUndefined();
+    for (const rate of [-1, 32_768, 1.5, Number.NaN]) expect(interestRateProblem(rate)).toMatch(/from 0 to 32,767/);
+  });
+
+  it('gives a rate as a share of the debt in a year, as Paryon does: on mainnet a period is a day, and 1,096 is 4.0%; on chipnet a period is half an hour', () => {
+    expect(periodsPerYear(MAINNET_V1)).toBe(365);
+    expect(yearlyPercent(1_096, MAINNET_V1)).toBeCloseTo(4.0, 1);
+    expect(yearlyPercent(1_699, MAINNET_V1)).toBeCloseTo(6.2, 1);
+    expect(periodsPerYear(CHIPNET_FAST_PERIODS_6)).toBe(17_520);
+  });
+
+  it('says what a rate costs each period, in satoshis from the collateral, as Paryon\'s interest payment reckons it', () => {
+    // 200.00 PUSD at $198.49: 100,760,743 satoshis of value; 100 per 10,000,000 of it.
+    expect(interestEachPeriod(100, 200_00n, 19_849n)).toBe(1_007n);
+    expect(interestEachPeriod(0, 200_00n, 19_849n)).toBe(0n);
+  });
+});
+
 describe('on mainnet', () => {
-  it('uses Paryon\'s deployment mainnet-v1 and its own template, whose oracle is the one read on chipnet', () => {
+  it('uses Paryon\'s deployment mainnet-v1 and its own template, version 2 as on chipnet, whose oracle is the one read on chipnet', () => {
     expect(deskFor({ network: 'mainnet' })).toBe(MAINNET_DESK);
     expect(MAINNET_DESK.deployment.name).toBe('mainnet-v1');
     expect(MAINNET_DESK.paryons).toBe(true);
-    expect(MAINNET_DESK.template.names.identifier).toBe('efa0e18915670a6d21a634821d4558a316a4191a219447f615523fde6a6143a5');
-    expect(CHIPNET_DESK.template.names.identifier).toBe('aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be');
+    expect(MAINNET_DESK.template.names.identifier).toBe('30647ea4b817c4e58b32fb4fc104643af9c1e92295729b33d5551dc875569364');
+    expect(CHIPNET_DESK.template.names.identifier).toBe('3fa4baf9f313ee2a5046ae30fdf1f7affc6aca21a29e3f6b38227b4a826e9235');
+    expect(MAINNET_DESK.template.texts.template).toBe(paryonMainnetTemplateText);
+    expect(CHIPNET_DESK.template.texts.template).toBe(paryonChipnetTemplateText);
     // The page reads General Protocols' oracle with chipnet's deployment; the key is the same on mainnet.
     expect(MAINNET_DESK.deployment.oraclePublicKey).toBe(CHIPNET_DESK.deployment.oraclePublicKey);
   });

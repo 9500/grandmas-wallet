@@ -10,7 +10,9 @@ import {
   borrowingFee,
   collateralAtRatio,
   collateralRatio,
+  interestPerPeriod,
   minimumCollateral,
+  MAXIMUM_INTEREST_RATE,
   paryonContracts,
   paryonTemplateAlone,
   periodAt,
@@ -263,7 +265,9 @@ export interface LoanView {
   /** Read from the chain, for an open loan. */
   debt?: bigint;
   beingRedeemed?: bigint;
+  /** Per 10,000,000 of the debt's value per period: the rate charged now, and the one from the next interest payment on. */
   interestRate?: number;
+  nextInterestRate?: number;
   /** The loan's coin, for an open loan. */
   found?: FoundLoan;
 }
@@ -300,3 +304,25 @@ export const collateralProblem = (loan: Pick<LoanView, 'debt' | 'found'>, collat
   if (collateral < minimumCollateral(loan.debt, market.priceThread.state.price)) return 'The contracts would not take this little collateral.';
   return undefined;
 };
+
+// ------------------------------------------------------------------ the interest rate
+
+/**
+ * A loan's interest rate is a whole number per 10,000,000 of the debt's value per period, from 0 to 32,767. The loan's
+ * own key may set any of them (`changeInterest.cash`); there is no waiting time and no limit on how often. The new rate
+ * applies from the loan's next interest payment on, which anyone may make once a period has passed (`payInterest.cash`).
+ */
+export const interestRateProblem = (rate: number): string | undefined =>
+  !Number.isInteger(rate) || rate < 0 || rate > MAXIMUM_INTEREST_RATE ? `Paryon takes an interest rate from 0 to ${MAXIMUM_INTEREST_RATE.toLocaleString('en-US')}, a whole number per 10,000,000 per period.` : undefined;
+
+/**
+ * Paryon's periods in a year: they are counted in blocks of ten minutes, 52,560 a year (on chipnet, with its one-minute
+ * blocks, in the heights the chain would have at ten-minute blocks). On mainnet a period is 144 blocks, a day.
+ */
+export const periodsPerYear = (deployment: ParyonDeployment = DEPLOYMENT): number => 52_560 / deployment.periodLengthBlocks;
+
+/** A rate as a share of the debt's value in a year, in percent, as Paryon's own figures give it (1,096 on mainnet: 4.0%). */
+export const yearlyPercent = (rate: number, deployment: ParyonDeployment = DEPLOYMENT): number => (rate / 10_000_000) * periodsPerYear(deployment) * 100;
+
+/** What a rate costs a loan each period at a price, in satoshis taken from the collateral, as `payInterest.cash` reckons it; each payment also takes 1,500 for its fee. */
+export const interestEachPeriod = (rate: number, debt: bigint, price: bigint): bigint => interestPerPeriod(rate, debt, price);

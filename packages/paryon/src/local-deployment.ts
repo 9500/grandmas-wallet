@@ -2,7 +2,7 @@ import { binToHex, sha256, utf8ToBin } from '@bitauth/libauth';
 import { type BuiltTransaction, type KeyPair, type Utxo, buildTransaction, p2pkhInput, p2pkhLockingBytecode } from '@grandmas-wallet/core';
 
 import { type ParyonContracts, type ParyonDeployment, paryonContracts } from './deployment.js';
-import { MANAGE_FUNCTION_COMMITMENT, encodeBorrowingPeriod, paddedNumber } from './state.js';
+import { CHANGE_INTEREST_FUNCTION_COMMITMENT, MANAGE_FUNCTION_COMMITMENT, encodeBorrowingPeriod, paddedNumber } from './state.js';
 
 /**
  * A deployment of Paryon's contracts, as published, on a chain of one's own: the local node in regtest mode,
@@ -10,7 +10,7 @@ import { MANAGE_FUNCTION_COMMITMENT, encodeBorrowingPeriod, paddedNumber } from 
  * lets a run be rehearsed with the same contracts before it goes to chipnet.
  *
  * It holds what a borrower's transactions spend: Borrowing threads with PUSD to lend, price threads, the
- * manage function's NFTs and loan key factories. Everything else (the stability pool, redemptions,
+ * manage function's NFTs, the interest function's NFTs and loan key factories. Everything else (the stability pool, redemptions,
  * liquidations, interest payments) is not deployed: a borrower's own transactions do not touch it.
  *
  * Two coins of a single-key address, each output 0 of its transaction, define the deployment's two token
@@ -25,6 +25,8 @@ export interface LocalDeployment {
   borrowing: Utxo[];
   price: Utxo[];
   manage: Utxo[];
+  /** The interest function's NFTs (`changeInterest.cash`), which changing a loan's interest rate spends. */
+  changeInterest: Utxo[];
   loanKeyFactory: Utxo[];
 }
 
@@ -113,6 +115,7 @@ export const localDeployment = (parameters: LocalDeploymentParameters): LocalDep
         thread(contracts.price.lockingBytecode, { category: P, amount: 0n, nft: { capability: 'mutable', commitment: Uint8Array.of(0x00, ...paddedNumber(BigInt(1_000 + index), 4), ...paddedNumber(parameters.price, 4)) } }),
       ),
       ...Array.from({ length: threads }, () => thread(contracts.manage.lockingBytecode, { category: P, amount: 0n, nft: { capability: 'none', commitment: MANAGE_FUNCTION_COMMITMENT } })),
+      ...Array.from({ length: threads }, () => thread(contracts.changeInterest.lockingBytecode, { category: P, amount: 0n, nft: { capability: 'none', commitment: CHANGE_INTEREST_FUNCTION_COMMITMENT } })),
       ...(parameters.registry === undefined ? [] : [publicationOutput(parameters.registry)]),
     ],
     changeLockingBytecode: funderLocking,
@@ -131,6 +134,7 @@ export const localDeployment = (parameters: LocalDeploymentParameters): LocalDep
     borrowing: at(paryon, 0, threads),
     price: at(paryon, threads, threads),
     manage: at(paryon, 2 * threads, threads),
+    changeInterest: at(paryon, 3 * threads, threads),
     loanKeyFactory: at(factories, 0, threads),
   };
 };

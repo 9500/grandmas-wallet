@@ -113,5 +113,20 @@ export const encodeBorrowingPeriod = (period: number): Uint8Array => paddedNumbe
 export const SIDECAR_COMMITMENT = Uint8Array.of(0x01);
 /** The commitment of the manage function's NFT. */
 export const MANAGE_FUNCTION_COMMITMENT = Uint8Array.of(0x02);
+/** The commitment of the interest function's NFT (`changeInterest.cash`: identifier 0x08). */
+export const CHANGE_INTEREST_FUNCTION_COMMITMENT = Uint8Array.of(0x08);
+/** The highest interest rate the contracts take: two bytes, not negative (`changeInterest.cash`). */
+export const MAXIMUM_INTEREST_RATE = 32_767;
+
+/**
+ * A loan's record with another rate for the periods to come, as `changeInterest.cash` builds it: the first 20 bytes as
+ * they are, the new rate, then the interest manager's five bytes as they are. The rate charged now is not changed; an
+ * interest payment (`payInterest.cash`) makes the next rate the current one.
+ */
+export const withNextInterestRate = (commitment: Uint8Array, rate: number): Uint8Array => {
+  decodeLoanState(commitment);
+  if (!Number.isInteger(rate) || rate < 0 || rate > MAXIMUM_INTEREST_RATE) throw new Error(`An interest rate is a whole number from 0 to ${MAXIMUM_INTEREST_RATE}, per 10,000,000 per period; got ${rate}.`);
+  return flattenBinArray([commitment.slice(0, 20), encodeInterestRate(rate), commitment.slice(22)]);
+};
 /** The data output a repayment and a closing burn tokens to: `OP_RETURN` alone. */
 export const BURN_LOCKING_BYTECODE = hexToBin('6a');

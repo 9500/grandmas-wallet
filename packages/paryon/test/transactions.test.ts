@@ -23,6 +23,7 @@ import {
   NO_INTEREST_MANAGER,
   borrow,
   borrowingFee,
+  changeInterestRate,
   closeLoan,
   collateralAtRatio,
   createLoanKey,
@@ -64,6 +65,7 @@ const recorded = JSON.parse(readFileSync(new URL(`fixtures/${deployment.network}
   price: RecordedOutput[];
   loanKeyFactory: RecordedOutput[];
   manage: RecordedOutput[];
+  changeInterest: RecordedOutput[];
 };
 const outputOf = (entry: RecordedOutput): Output => ({
   lockingBytecode: hexToBin(entry.lockingBytecode),
@@ -138,6 +140,7 @@ const STORED_PRICE = decodePriceState(hexToBin(PRICE.token?.nft?.commitment ?? '
 const BORROWING = pick(recorded.borrowing);
 const FACTORY = pick(recorded.loanKeyFactory);
 const MANAGE = pick(recorded.manage);
+const INTEREST = pick(recorded.changeInterest);
 // A lock height at the chain's tip, or, where every Borrowing thread is already in the tip's period (as on mainnet,
 // where Paryon's keepers move them on), the first height of the next period, so that a thread is moved on.
 const tipPeriod = periodAt(deployment, recorded.tip.height);
@@ -172,6 +175,7 @@ describe('the deployment', () => {
       [recorded.price, contracts.price],
       [recorded.loanKeyFactory, contracts.loanKeyFactory],
       [recorded.manage, contracts.manage],
+      [recorded.changeInterest, contracts.changeInterest],
     ] as const) {
       expect(entries.length).toBeGreaterThan(0);
       for (const entry of entries) expect(entry.lockingBytecode).toBe(binToHex(script.lockingBytecode));
@@ -335,6 +339,82 @@ describe('PY04: managing with a repayment, on a loan of 200.00 PUSD (shown here,
     const closed = closeLoan({ contracts, price: repaid.price, loan: repaid.loan, sidecar: repaid.sidecar, manageFunction: repaid.manageFunction, key: spend(repaid.key), wallet: [spend(repaid.tokens as Utxo)], keyTo: to(9), changeTo: to(10) });
     accepted(closed.built);
     expect(closed.repaid).toBe(100_00n);
+  });
+});
+
+describe('changing the interest rate (`changeInterest.cash`), by the loan\'s own key', () => {
+  const DEBT = 200_00n;
+  const COLLATERAL = minimumCollateral(DEBT, STORED_PRICE) + 50_000n;
+  const change = (opened: ReturnType<typeof open>['opened'], rate: number, more: Partial<Parameters<typeof changeInterestRate>[0]> = {}) =>
+    changeInterestRate({ contracts, loan: opened.loan, sidecar: opened.sidecar, interestFunction: utxoOf(INTEREST), key: spend(opened.key), wallet: [spend(opened.change)], rate, changeTo: to(6), ...more });
+
+  it('the recorded coins of the interest function are NFTs of the deployment\'s category with commitment 08, of 1,000 satoshis', () => {
+    expect(recorded.changeInterest.length).toBeGreaterThan(1);
+    for (const entry of recorded.changeInterest) expect(entry).toMatchObject({ valueSatoshis: '1000', token: { category: deployment.tokenIds.paryon, amount: '0', nft: { capability: 'none', commitment: '08' } } });
+  });
+
+  it('sets the rate for the periods to come: only the next rate in the loan\'s record changes; the loan, its sidecar, the function and the key are recreated at outputs 0 to 3', () => {
+    const { opened } = open(DEBT, COLLATERAL);
+    const changed = change(opened, 1_096);
+    accepted(changed.built);
+    const before = hexToBin(binToHex(opened.loan.output.token?.nft?.commitment ?? new Uint8Array()));
+    const after = changed.loan.output.token?.nft?.commitment ?? new Uint8Array();
+    expect(changed.state).toEqual({ ...decodeLoanState(before), nextInterestRate: 1_096 });
+    expect(binToHex(after.slice(0, 20))).toBe(binToHex(before.slice(0, 20)));
+    expect(binToHex(after.slice(22))).toBe(binToHex(before.slice(22)));
+    expect(changed.loan.output.valueSatoshis).toBe(COLLATERAL);
+    const { inputs, outputs } = changed.built.transaction;
+    // Inputs: 0 loan, 1 sidecar, 2 the function, 3 the key, 4 the wallet's coin.
+    expect(inputs.map((input) => `${binToHex(input.outpointTransactionHash)}:${input.outpointIndex}`).slice(0, 4)).toEqual([opened.loan, opened.sidecar, utxoOf(INTEREST), opened.key].map((utxo) => `${binToHex(utxo.transactionHash)}:${utxo.index}`));
+    expect(binToHex(outputs[1]?.lockingBytecode ?? new Uint8Array())).toBe(binToHex(contracts.loanSidecar.lockingBytecode));
+    expect(binToHex(outputs[2]?.lockingBytecode ?? new Uint8Array())).toBe(binToHex(contracts.changeInterest.lockingBytecode));
+    expect(binToHex(outputs[3]?.lockingBytecode ?? new Uint8Array())).toBe(binToHex(opened.key.output.lockingBytecode));
+    expect(outputs).toHaveLength(5);
+    // The lowest and the highest rate the key holder may set; the rate back to 0.
+    accepted(change(opened, 0).built);
+    accepted(change(opened, 32_767).built);
+    expect(() => change(opened, 32_768)).toThrow(/from 0 to 32767/);
+    expect(() => change(opened, -1)).toThrow(/from 0 to 32767/);
+  });
+
+  it('needs no price contract and no period, and may be done again at once; a loan with a changed rate is managed and closed as any other', () => {
+    const { opened } = open(DEBT, COLLATERAL);
+    const first = change(opened, 500);
+    accepted(first.built);
+    const again = changeInterestRate({ contracts, loan: first.loan, sidecar: first.sidecar, interestFunction: first.interestFunction, key: spend(first.key), wallet: [spend(first.change)], rate: 10, changeTo: to(7) });
+    accepted(again.built);
+    expect(again.state.nextInterestRate).toBe(10);
+    expect(again.state.currentInterestRate).toBe(0);
+    const repaid = manageLoan({ contracts, price: opened.price, loan: again.loan, sidecar: again.sidecar, manageFunction: utxoOf(MANAGE), key: spend(again.key), wallet: [spend(again.change), spend(opened.tokens)], repay: 100_00n, collateral: again.loan.output.valueSatoshis, tokensChangeTo: to(8), changeTo: to(9) });
+    accepted(repaid.built);
+    expect(repaid.state.nextInterestRate).toBe(10);
+  });
+
+  it('refuses at the interest function: the key sent elsewhere, a record that changes more than the rate, collateral taken out', () => {
+    const { opened } = open(DEBT, COLLATERAL);
+    const honest = change(opened, 100);
+    // The key to another address of the wallet's.
+    const tx = honest.built.transaction;
+    const keyElsewhere = buildTransaction({
+      inputs: [
+        { utxo: opened.loan, unlock: () => tx.inputs[0]?.unlockingBytecode as Uint8Array },
+        { utxo: opened.sidecar, unlock: () => tx.inputs[1]?.unlockingBytecode as Uint8Array },
+        { utxo: utxoOf(INTEREST), unlock: () => tx.inputs[2]?.unlockingBytecode as Uint8Array },
+        spend(opened.key),
+        spend(opened.change),
+      ],
+      outputs: [tx.outputs[0] as Output, tx.outputs[1] as Output, tx.outputs[2] as Output, { ...(tx.outputs[3] as Output), lockingBytecode: to(9) }, { lockingBytecode: to(6), valueSatoshis: 0n }],
+      remainderOutputIndex: 4,
+    });
+    refused(keyElsewhere, 2);
+    // A record that also lowers the debt.
+    const lowered = buildTransaction({
+      inputs: keyElsewhere.transaction.inputs.map((_, index) => (index < 3 ? { utxo: [opened.loan, opened.sidecar, utxoOf(INTEREST)][index] as Utxo, unlock: () => tx.inputs[index]?.unlockingBytecode as Uint8Array } : index === 3 ? spend(opened.key) : spend(opened.change))),
+      outputs: [{ ...(tx.outputs[0] as Output), token: { ...(tx.outputs[0]?.token as NonNullable<Output['token']>), nft: { capability: 'mutable', commitment: encodeLoanState({ ...honest.state, borrowed: 100_00n }) } } }, tx.outputs[1] as Output, tx.outputs[2] as Output, tx.outputs[3] as Output, { lockingBytecode: to(6), valueSatoshis: 0n }],
+      remainderOutputIndex: 4,
+    });
+    refused(lowered, 2);
+    expect(() => change(opened, 100, { collateral: COLLATERAL - 1n })).toThrow(/cannot take collateral out/);
   });
 });
 

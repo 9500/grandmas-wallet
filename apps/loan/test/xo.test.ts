@@ -28,7 +28,7 @@ interface RecordedOutput {
   lockingBytecode: string;
   token?: { category: string; amount: string; nft?: { capability: 'none' | 'mutable' | 'minting'; commitment: string } };
 }
-const recorded = JSON.parse(readFileSync(new URL('../../../packages/paryon/test/fixtures/chipnet-live.json', import.meta.url), 'utf8')) as Record<'borrowing' | 'price' | 'loanKeyFactory' | 'manage', RecordedOutput[]> & { tip: { height: number } };
+const recorded = JSON.parse(readFileSync(new URL('../../../packages/paryon/test/fixtures/chipnet-live.json', import.meta.url), 'utf8')) as Record<'borrowing' | 'price' | 'loanKeyFactory' | 'manage' | 'changeInterest', RecordedOutput[]> & { tip: { height: number } };
 const outputOf = (entry: RecordedOutput): Output => ({
   lockingBytecode: hexToBin(entry.lockingBytecode),
   valueSatoshis: BigInt(entry.valueSatoshis),
@@ -103,7 +103,7 @@ const connectPage = (device: Device, chain: PageChain, pending = memoryKept<Pend
 /** The wallet with Paryon's outputs on its chain, and the page connected to it. The user approves what the wallet shows. */
 const setUp = async (satoshis = 70_000_000n) => {
   const device: Device = await deviceWith([satoshis]);
-  device.chain.adopt([...recorded.borrowing, ...recorded.price, ...recorded.loanKeyFactory, ...recorded.manage].map((entry) => ({ transactionId: entry.transactionId, index: entry.index, output: outputOf(entry) })));
+  device.chain.adopt([...recorded.borrowing, ...recorded.price, ...recorded.loanKeyFactory, ...recorded.manage, ...recorded.changeInterest].map((entry) => ({ transactionId: entry.transactionId, index: entry.index, output: outputOf(entry) })));
   // Ten blocks past the recording: the freshest borrowing contract is then two periods behind.
   const chain: PageChain = {
     getTransaction: (transactionId) => device.chain.getTransaction(transactionId),
@@ -246,6 +246,29 @@ describe('the loan page with a wallet that carries out actions itself (PY02)', (
     expect((await loans.list()).loans.map(({ status }) => status)).toEqual(['closed']);
     expect((await device.wallet.balance()).recoverable - balance).toBeGreaterThan(plan.collateral);
     expect((await device.wallet.balance()).tokens.some((coin) => binToHex(coin.utxo.output.token?.category ?? new Uint8Array()) === binToHex(CONTRACTS.paryonCategory))).toBe(false);
+  });
+
+  it('changes a loan\'s interest rate: the page names the loan, its sidecar and a coin of Paryon\'s interest function; the key goes back where it was; the page reads the new rate', { timeout: 60_000 }, async () => {
+    const context = await setUp();
+    const { loans, answer, sentToWallet, decoded } = context;
+    const { category, plan } = await openLoan(context);
+    const sent = sentToWallet.length;
+    await expect(loans.changeInterest(category, 40_000)).rejects.toThrow(/from 0 to 32,767/);
+    expect(sentToWallet.length).toBe(sent);
+    const changed = await answer(loans.changeInterest(category, 1_096));
+    const request = sentToWallet.filter((message) => message.action === 'xo_action_request').at(-1);
+    expect(request).toMatchObject({
+      templateAction: 'changeInterest',
+      about: { category, spent: true },
+      bindings: { keyHolder: 'return' },
+      page: PAGE,
+      variables: { keySatoshis: '1000', collateral: String(plan.collateral), nextInterestRate: '4804' },
+      inputs: { loanInput: expect.any(String) as string, sidecarInput: expect.any(String) as string, changeInterestInput: expect.any(String) as string },
+    });
+    const transaction = await decoded(changed.transactionId as string);
+    expect(decodeLoanState(transaction.outputs[0]?.token?.nft?.commitment as Uint8Array)).toMatchObject({ borrowed: 100_00n, currentInterestRate: 0, nextInterestRate: 1_096 });
+    const [loan] = (await loans.list()).loans;
+    expect(loan).toMatchObject({ status: 'open', interestRate: 0, nextInterestRate: 1_096, satoshis: plan.collateral });
   });
 
   it('refuses before asking the wallet: too little collateral, a loan the wallet does not report, or a second request like one still waiting', async () => {

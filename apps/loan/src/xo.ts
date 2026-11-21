@@ -3,9 +3,11 @@ import type { ActionDetails, DappRequests, RequestStage, XoAdvertisement } from 
 import { RequestRefusedError, XO_EXTENSION_VERSION } from '@grandmas-wallet/connect';
 import {
   type BorrowingThread,
+  type InterestCoins,
   type LoanCoins,
   type LoanRequestAlone,
   borrowRequestAlone,
+  changeInterestRequestAlone,
   closeRequestAlone,
   createKeyRequestAlone,
   manageRequestAlone,
@@ -14,8 +16,8 @@ import {
 } from '@grandmas-wallet/paryon';
 import type { Utxo } from '@grandmas-wallet/core';
 
-import { type BorrowPlan, type Desk, type LoanView, type Market, CHIPNET_DESK } from './loan.js';
-import { type MadeKey, type PageChain, keyWaiting, readFactory, readLoan, readLoanCoins, readMadeKey } from './market.js';
+import { type BorrowPlan, type Desk, type LoanView, type Market, CHIPNET_DESK, interestRateProblem } from './loan.js';
+import { type MadeKey, type PageChain, keyWaiting, readFactory, readInterestCoins, readLoan, readLoanCoins, readMadeKey } from './market.js';
 
 /**
  * Loans through a wallet that speaks `xo_v1`, version 2 (proposal sections 14.2 and 15.3). The page builds no
@@ -110,6 +112,7 @@ export const borrowDetails = (key: MadeKey, thread: BorrowingThread, market: Pic
 export const manageDetails = (coins: LoanCoins, collateral: bigint, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(manageRequestAlone(desk.template.names, { ...coins, collateral, ...from(page) }));
 export const repayDetails = (coins: LoanCoins, repay: bigint, collateral: bigint, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(repayRequestAlone(desk.template.names, { ...coins, repay, collateral, ...from(page) }));
 export const closeDetails = (coins: LoanCoins, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(closeRequestAlone(desk.template.names, { ...coins, ...from(page) }));
+export const changeInterestDetails = (coins: InterestCoins, rate: number, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(changeInterestRequestAlone(desk.template.names, { ...coins, rate, ...from(page) }));
 
 /**
  * How many times in a row an action that names Paryon's shared coins is asked for, when each time another transaction
@@ -224,10 +227,15 @@ export class XoLoans {
    * the loan, its sidecar and Paryon's coins, as the chain shows them.
    */
   private async coinsOf(category: string): Promise<LoanCoins> {
+    return readLoanCoins(this.chain, category, await this.keySatoshis(category), this.desk);
+  }
+
+  /** What the coin that holds a loan key holds, as the wallet reports it. */
+  private async keySatoshis(category: string): Promise<bigint> {
     const { positions } = await this.requests.recordedPositions(this.desk.template.names.identifier);
     const reported = positions.find((position) => position.category === category && position.capability === 'minting');
     if (reported === undefined || !/^\d+$/.test(reported.satoshis)) throw new Error('Your wallet does not report this loan key as one of this page\'s. Connect the wallet that holds it.');
-    return readLoanCoins(this.chain, category, BigInt(reported.satoshis), this.desk);
+    return BigInt(reported.satoshis);
   }
 
   /**
@@ -255,10 +263,10 @@ export class XoLoans {
    * The coins of a loan's request, read anew for each try. A try after the first is about the loan the first was
    * about: if the loan is gone, or another transaction has changed it, the page says so and asks nothing.
    */
-  private loanTries(category: string): (first: boolean) => Promise<LoanCoins> {
+  private loanTries<T extends { loan: Utxo } = LoanCoins>(category: string, read: (category: string) => Promise<T> = (key) => this.coinsOf(key) as unknown as Promise<T>): (first: boolean) => Promise<T> {
     let loan: string | undefined;
     return async (first) => {
-      const coins = await this.coinsOf(category);
+      const coins = await read(category);
       if (first) loan = outpointOf(coins.loan);
       else if (outpointOf(coins.loan) !== loan) throw new LoanChangedError();
       return coins;
@@ -281,6 +289,17 @@ export class XoLoans {
       onStage,
       onAgain,
     );
+  }
+
+  /**
+   * Change the loan's interest rate for the periods to come: `rate` per 10,000,000 of the debt's value per period, 0 to
+   * 32,767 (`interestRateProblem`). The page names the loan, its sidecar and a coin of Paryon's interest function.
+   */
+  async changeInterest(category: string, rate: number, onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {
+    const problem = interestRateProblem(rate);
+    if (problem !== undefined) throw new Error(problem);
+    const read = this.loanTries(category, async (key) => readInterestCoins(this.chain, key, await this.keySatoshis(key), this.desk));
+    return this.tries('changeInterest', async (first) => changeInterestDetails(await read(first), rate, this.page, this.desk), onStage, onAgain);
   }
 
   async close(category: string, onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {

@@ -2,7 +2,7 @@ import { type Output, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/
 import type { Utxo } from '@grandmas-wallet/core';
 
 import type { ParyonContracts } from './deployment.js';
-import { type LoanState, type PriceState, MANAGE_FUNCTION_COMMITMENT, SIDECAR_COMMITMENT, decodeBorrowingPeriod, decodeLoanState, decodePriceState } from './state.js';
+import { type LoanState, type PriceState, CHANGE_INTEREST_FUNCTION_COMMITMENT, MANAGE_FUNCTION_COMMITMENT, SIDECAR_COMMITMENT, decodeBorrowingPeriod, decodeLoanState, decodePriceState } from './state.js';
 
 /**
  * Reading a deployment's shared outputs and a borrower's loan from a server. A server's listing is used only
@@ -114,6 +114,22 @@ export const readParyonState = async (chain: ParyonChain, contracts: ParyonContr
   return { borrowing, price, loanKeyFactory, manage };
 };
 
+/**
+ * The coins of Paryon's interest function (`changeInterest.cash`), which an action that changes a loan's interest rate
+ * spends and makes again. They are not read with the rest of the deployment's shared outputs: only that action needs them.
+ */
+export const readInterestFunctions = async (chain: ParyonChain, contracts: ParyonContracts, reader = new TransactionReader(chain)): Promise<LiveOutput[]> => {
+  const P = contracts.paryonCategory;
+  return outputsAt(chain, reader, contracts.changeInterest.lockingBytecode, listedAs(P, 'none'), (output) => hasNft(output, P, 'none') && same(output.token?.nft?.commitment as Uint8Array, CHANGE_INTEREST_FUNCTION_COMMITMENT));
+};
+
+const outpointOf = (utxo: Utxo): string => `${binToHex(utxo.transactionHash)}:${utxo.index}`;
+/** One of a function's coins, by its place among them in the order of their outpoints; out of range is held to the list. */
+const picked = (coins: LiveOutput[], pick: (count: number) => number): LiveOutput | undefined => {
+  const sorted = coins.slice().sort((a, b) => (outpointOf(a) < outpointOf(b) ? -1 : 1));
+  return sorted[Math.min(Math.max(pick(sorted.length), 0), sorted.length - 1)];
+};
+
 /** A loan, found from its key. */
 export interface FoundLoan {
   loan: LiveOutput;
@@ -174,14 +190,35 @@ export const loanCoins = async (
   const found = await findLoan(chain, contracts, keyCategory, reader);
   if (found === undefined) return undefined;
   const state = await readParyonState(chain, contracts, reader);
-  const outpointOf = (utxo: Utxo): string => `${binToHex(utxo.transactionHash)}:${utxo.index}`;
   const [price] = state.price.slice().sort((a, b) => (b.state.price > a.state.price ? 1 : b.state.price < a.state.price ? -1 : outpointOf(a) < outpointOf(b) ? -1 : 1));
   // Anyone may spend a manage function's coin in an action of their own, which puts a new one in its place. Taking one at
   // random among those listed, rather than always the first, makes it unlikely that someone else spends the same coin
   // while the user looks at the request, which the network would then refuse as a conflict.
-  const functions = state.manage.slice().sort((a, b) => (outpointOf(a) < outpointOf(b) ? -1 : 1));
-  const manageFunction = functions[Math.min(Math.max(pick(functions.length), 0), functions.length - 1)];
+  const manageFunction = picked(state.manage, pick);
   if (price === undefined) throw new Error('Paryon\'s price contract could not be found on the chain just now.');
   if (manageFunction === undefined) throw new Error('Paryon\'s manage function could not be found on the chain just now.');
   return { ...found, price, manageFunction, keySatoshis };
+};
+
+/**
+ * What an action that changes a loan's interest rate spends, as the loan's page names it in a request
+ * (`changeInterestRequestAlone`): the loan and its sidecar found from the key, and one of the interest function's coins,
+ * taken at random as for the manage function. No price is needed: the rate does not depend on it.
+ *
+ * Returns `undefined` when the key opens no open loan.
+ * @throws when Paryon's interest function cannot be found
+ */
+export const interestCoins = async (
+  chain: ParyonChain,
+  contracts: ParyonContracts,
+  keyCategory: Uint8Array,
+  keySatoshis: bigint,
+  reader = new TransactionReader(chain),
+  pick: (count: number) => number = (count) => Math.floor(Math.random() * count),
+): Promise<(FoundLoan & { interestFunction: LiveOutput; keySatoshis: bigint }) | undefined> => {
+  const found = await findLoan(chain, contracts, keyCategory, reader);
+  if (found === undefined) return undefined;
+  const interestFunction = picked(await readInterestFunctions(chain, contracts, reader), pick);
+  if (interestFunction === undefined) throw new Error('Paryon\'s interest function could not be found on the chain just now.');
+  return { ...found, interestFunction, keySatoshis };
 };

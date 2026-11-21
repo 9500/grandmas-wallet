@@ -11,7 +11,7 @@ import { binToHex } from '@bitauth/libauth';
 
 import { Electrum } from '../../chipnet/src/electrum.js';
 import { paryonContracts, paryonDeploymentOn } from './deployment.js';
-import { type LiveOutput, readParyonState } from './live.js';
+import { type LiveOutput, readInterestFunctions, readParyonState } from './live.js';
 
 const network = process.env['NETWORK'] ?? 'chipnet';
 const deployment = paryonDeploymentOn(network);
@@ -21,6 +21,7 @@ const server = await Electrum.connect(process.env['ELECTRUM'] ?? (network === 'm
 try {
   const contracts = paryonContracts(deployment);
   const state = await readParyonState(server, contracts);
+  const changeInterest = await readInterestFunctions(server, contracts);
   const tip = await server.tip();
   const written = (output: LiveOutput) => ({
     transactionId: binToHex(output.transactionHash),
@@ -47,9 +48,10 @@ try {
     price: state.price.map(written),
     loanKeyFactory: state.loanKeyFactory.map(written),
     manage: state.manage.map(written),
+    changeInterest: changeInterest.map(written),
   };
   writeFileSync(file, `${JSON.stringify(snapshot, null, 1)}\n`);
-  console.log(`tip ${tip.height}: ${state.borrowing.length} Borrowing threads (periods ${[...new Set(state.borrowing.map((thread) => thread.period))].join(', ')}), ${state.price.length} price threads (${state.price.map((thread) => `$${Number(thread.state.price) / 100}`).join(', ')}), ${state.loanKeyFactory.length} factories, ${state.manage.length} manage NFTs. Written to ${file}`);
+  console.log(`tip ${tip.height}: ${state.borrowing.length} Borrowing threads (periods ${[...new Set(state.borrowing.map((thread) => thread.period))].join(', ')}), ${state.price.length} price threads (${state.price.map((thread) => `$${Number(thread.state.price) / 100}`).join(', ')}), ${state.loanKeyFactory.length} factories, ${state.manage.length} manage NFTs, ${changeInterest.length} interest function NFTs. Written to ${file}`);
 } finally {
   await server.disconnect();
 }

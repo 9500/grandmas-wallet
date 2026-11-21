@@ -54,6 +54,7 @@ const RESUMED_TITLE: Record<PendingRequest['action'], string> = {
   manage: 'Changing a loan\'s collateral, asked of your wallet before this page was loaded again.',
   repay: 'Repaying part of a loan, asked of your wallet before this page was loaded again.',
   close: 'Closing a loan, asked of your wallet before this page was loaded again.',
+  changeInterest: 'Changing a loan\'s interest rate, asked of your wallet before this page was loaded again.',
 };
 const RESUMED_DONE: Record<PendingRequest['action'], string> = {
   createKey: 'The loan key is made.',
@@ -62,6 +63,7 @@ const RESUMED_DONE: Record<PendingRequest['action'], string> = {
   manage: 'The collateral is changed.',
   repay: 'Repaid.',
   close: 'The loan is closed. The collateral is back in your wallet.',
+  changeInterest: 'The interest rate is changed.',
 };
 
 const follow = (progress: (step: Progress) => void) => (stage: RequestStage) => progress({ text: STAGE_WORDS[stage], stage });

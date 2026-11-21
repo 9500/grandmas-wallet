@@ -101,6 +101,8 @@ export interface ParyonContracts {
   loan: ContractScript;
   loanSidecar: ContractScript;
   manage: ContractScript;
+  /** The loan contract function that changes a loan's interest rate for the periods to come (`changeInterest.cash`). */
+  changeInterest: ContractScript;
 }
 
 /** Build every contract a borrower needs from the published artifacts and a deployment's parameters. */
@@ -123,7 +125,8 @@ export const paryonContracts = (deployment: ParyonDeployment): ParyonContracts =
   ]);
   const price = contractScript(paryonArtifacts.artifactPriceContractGuarded, [hexToBin(deployment.oraclePublicKey), categoryForScript(hexToBin(deployment.tokenIds.oracleMigrationKey))]);
   const manage = contractScript(paryonArtifacts.loanContractFunctions.artifactFunctionManage, []);
-  return { deployment, paryonCategory, loanKeyFactoryCategory, protocolFeeLockingBytecode, borrowing, price, loanKeyFactory, loanKeyOriginEnforcer, loanKeyOriginProof, loan, loanSidecar, manage };
+  const changeInterest = contractScript(paryonArtifacts.loanContractFunctions.artifactFunctionChangeInterest, []);
+  return { deployment, paryonCategory, loanKeyFactoryCategory, protocolFeeLockingBytecode, borrowing, price, loanKeyFactory, loanKeyOriginEnforcer, loanKeyOriginProof, loan, loanSidecar, manage, changeInterest };
 };
 
 /** The period a block height falls in, as the Borrowing contract counts it. */

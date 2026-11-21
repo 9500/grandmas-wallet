@@ -1,6 +1,6 @@
 import { type Output, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
 import type { Utxo } from '@grandmas-wallet/core';
-import { type ListedOutput, type LoanCoins, type ParyonChain, findLoan, latestOraclePrice, loanCoins, readParyonState } from '@grandmas-wallet/paryon';
+import { type InterestCoins, type ListedOutput, type LoanCoins, type ParyonChain, findLoan, interestCoins, latestOraclePrice, loanCoins, readParyonState } from '@grandmas-wallet/paryon';
 
 import { type Desk, type LoanView, type Market, CHIPNET_DESK, DEPLOYMENT, finalLockHeight, lowerPrice, periodOf } from './loan.js';
 
@@ -73,7 +73,7 @@ export const readLoan = async (chain: PageChain, category: string, keySatoshis: 
     return { category, status: 'unknown', satoshis: 0n, ...key };
   }
   if (found === undefined) return { category, status: 'closed', satoshis: 0n, ...key };
-  return { category, status: 'open', satoshis: found.loan.output.valueSatoshis, ...key, debt: found.state.borrowed, beingRedeemed: found.state.beingRedeemed, interestRate: found.state.currentInterestRate, found };
+  return { category, status: 'open', satoshis: found.loan.output.valueSatoshis, ...key, debt: found.state.borrowed, beingRedeemed: found.state.beingRedeemed, interestRate: found.state.currentInterestRate, nextInterestRate: found.state.nextInterestRate, found };
 };
 
 /**
@@ -85,6 +85,17 @@ export const readLoanCoins = async (chain: PageChain, category: string, keySatos
   const coins = await loanCoins(chain, desk.contracts, hexToBin(category), keySatoshis);
   if (coins === undefined) throw new Error('This key opens no loan on the chain just now. It may have been closed.');
   return { keyCategory: category, keySatoshis, loan: coins.loan, sidecar: coins.sidecar, price: coins.price, manageFunction: coins.manageFunction };
+};
+
+/**
+ * What a request to change a loan's interest rate names: the loan and its sidecar, found from the key, and a coin of
+ * Paryon's interest function the page chose, with what the key's coin holds as the wallet reported it.
+ * @throws when the key opens no open loan
+ */
+export const readInterestCoins = async (chain: PageChain, category: string, keySatoshis: bigint, desk: Desk = CHIPNET_DESK): Promise<InterestCoins> => {
+  const coins = await interestCoins(chain, desk.contracts, hexToBin(category), keySatoshis);
+  if (coins === undefined) throw new Error('This key opens no loan on the chain just now. It may have been closed.');
+  return { keyCategory: category, keySatoshis, loan: coins.loan, sidecar: coins.sidecar, interestFunction: coins.interestFunction };
 };
 
 /** A coin of Paryon's key factories, for making a key; the first by outpoint. */

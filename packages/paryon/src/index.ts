@@ -8,12 +8,12 @@
 export * from './amounts.js';
 export * from './contract.js';
 export * from './deployment.js';
-export { paryonChipnetTemplateText, paryonMainnetTemplateText } from './frozen.js';
+export { paryonChipnetTemplateText, paryonChipnetTemplateTextV1, paryonMainnetTemplateText, paryonMainnetTemplateTextV1 } from './frozen.js';
 export * from './live.js';
 export * from './local-deployment.js';
 export * from './oracle.js';
 export * from './page-requests.js';
 export * from './state.js';
 export * from './template.js';
-export { paryonTemplateSource } from './template-source.js';
+export { type ParyonTemplateVersion, PARYON_TEMPLATE_VERSION, paryonTemplateSource } from './template-source.js';
 export * from './transactions.js';

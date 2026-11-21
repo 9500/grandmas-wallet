@@ -15,6 +15,7 @@ import {
   encodeInterestRate,
   encodeLoanState,
   newLoanState,
+  withNextInterestRate,
 } from './state.js';
 
 /**
@@ -51,7 +52,7 @@ export interface TemplateNamesAlone {
 /** The details of an `xo_action_request`, as `packages/connect` sends them. */
 export interface LoanRequestAlone {
   template: TemplateNamesAlone;
-  templateAction: 'createKey' | 'movePeriod' | 'borrow' | 'manage' | 'repay' | 'close';
+  templateAction: 'createKey' | 'movePeriod' | 'borrow' | 'manage' | 'repay' | 'close' | 'changeInterest';
   role: 'borrower';
   variables: Record<string, string | number>;
   bindings?: Record<string, string>;
@@ -214,5 +215,42 @@ export const closeRequestAlone = (template: TemplateNamesAlone, coins: LoanCoins
     bindings: { keyHolder: 'receive' },
     about,
     inputs,
+  };
+};
+
+/**
+ * A loan as changing its interest rate needs it: the key, as the wallet reports it; the loan and its sidecar, found
+ * from the key (`interestCoins`); and the coin of Paryon's interest function the page chose. No price is named.
+ */
+export interface InterestCoins {
+  /** The loan key's category, explorer order, hex. */
+  keyCategory: string;
+  /** What the coin that holds the key holds, from the wallet's answer to a positions request. */
+  keySatoshis: bigint;
+  loan: Utxo;
+  sidecar: Utxo;
+  /** One of the coins of Paryon's interest function (`changeInterest.cash`, commitment `08`). */
+  interestFunction: Utxo;
+}
+
+/**
+ * Change the loan's interest rate for the periods to come: `rate` per 10,000,000 of the debt's value per period, a
+ * whole number from 0 to 32,767, which the loan's own key may set without limits. The page writes the loan's new
+ * record as the contract does (only the next rate changes); the collateral stays as it is; the key goes back to the
+ * script it left. The rate charged now stays until the next interest payment makes the new one current.
+ */
+export const changeInterestRequestAlone = (template: TemplateNamesAlone, coins: InterestCoins & { rate: number; page?: string }): LoanRequestAlone => {
+  const record = commitmentOf(coins.loan, 'loan');
+  return {
+    ...base(template, 'changeInterest', coins.page),
+    variables: {
+      keySatoshis: String(coins.keySatoshis),
+      collateral: String(coins.loan.output.valueSatoshis),
+      loanCommitment: binToHex(withNextInterestRate(record, coins.rate)),
+      nextInterestRate: binToHex(encodeInterestRate(coins.rate)),
+    },
+    bindings: { keyHolder: 'return' },
+    about: { category: coins.keyCategory, spent: true },
+    inputs: { loanInput: outpoint(coins.loan), sidecarInput: outpoint(coins.sidecar), changeInterestInput: outpoint(coins.interestFunction) },
   };
 };

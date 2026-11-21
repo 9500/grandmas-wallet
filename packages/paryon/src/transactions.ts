@@ -17,6 +17,7 @@ import {
   encodeInterestRate,
   encodeLoanState,
   newLoanState,
+  withNextInterestRate,
 } from './state.js';
 
 /**
@@ -426,4 +427,76 @@ export const closeLoan = (parameters: CloseParameters): Closed => {
     ...(tokensIndex === undefined ? {} : { tokens: outputOf(built, tokensIndex) }),
     change: outputOf(built, outputs.length - 1),
   };
+};
+
+// -------------------------------------------------------------------------------------- change the interest
+
+export interface ChangeInterestParameters {
+  contracts: ParyonContracts;
+  loan: Utxo;
+  /** The output after the loan in the same transaction. */
+  sidecar: Utxo;
+  /** One of the interest function's coins (`changeInterest.cash`, commitment `08`). */
+  interestFunction: Utxo;
+  /** The loan key, unlocked by the wallet. It is input 3. */
+  key: InputSpec;
+  /** The wallet's coins that pay the fee. */
+  wallet: InputSpec[];
+  /** The rate from the next interest payment on, per 10,000,000 per period: 0 to 32,767. */
+  rate: number;
+  /** What the loan holds afterwards: at least what it holds now, which is the default. */
+  collateral?: bigint;
+  /** What is left after the fee. */
+  changeTo: Uint8Array;
+  feeRate?: number;
+}
+
+export interface InterestChanged {
+  built: BuiltTransaction;
+  state: LoanState;
+  loan: Utxo;
+  sidecar: Utxo;
+  interestFunction: Utxo;
+  key: Utxo;
+  change: Utxo;
+}
+
+/**
+ * `changeInterest.changeInterest(bytes2 nextInterestRate)`, by the loan's own key: the loan's rate for the periods to
+ * come. The key holder may set any rate from 0 to 32,767; an interest manager the loan names only one within the
+ * loan's limits. No price, period or waiting time is involved. The rate charged now stays until the next interest
+ * payment, which makes the new one current (`payInterest.cash`).
+ *
+ * Inputs: 0 the loan · 1 its sidecar · 2 the interest function · 3 the loan key · 4… the wallet's coins.
+ * Outputs: 0 the loan, with the new rate in its record and at least the same value · 1 the sidecar · 2 the interest
+ * function · 3 the loan key, back to the script it was spent from, with the same value · 4 change.
+ */
+export const changeInterestRate = (parameters: ChangeInterestParameters): InterestChanged => {
+  const { contracts, loan, sidecar, interestFunction, key } = parameters;
+  plainCoins(parameters.wallet, 'changing the interest rate');
+  const keyToken = key.utxo.output.token;
+  if (keyToken?.nft?.capability !== 'minting' || binToHex(keyToken.category) !== binToHex(sidecar.output.token?.category ?? new Uint8Array())) throw new Error('The key is not the minting NFT of the sidecar\'s category.');
+  if (binToHex(loan.transactionHash) !== binToHex(sidecar.transactionHash) || sidecar.index !== loan.index + 1) throw new Error('The sidecar is not the output after the loan.');
+  const commitment = withNextInterestRate(commitmentOf(loan, 'loan'), parameters.rate);
+  const collateral = parameters.collateral ?? loan.output.valueSatoshis;
+  if (collateral < loan.output.valueSatoshis) throw new Error('Changing the interest rate cannot take collateral out.');
+  const built = buildTransaction({
+    inputs: [
+      contractInput(loan, contracts.loan.unlock('interact')),
+      contractInput(sidecar, contracts.loanSidecar.unlock('attach')),
+      contractInput(interestFunction, contracts.changeInterest.unlock('changeInterest', encodeInterestRate(parameters.rate))),
+      key,
+      ...parameters.wallet,
+    ],
+    outputs: [
+      { ...recreated(loan), valueSatoshis: collateral, token: { category: contracts.paryonCategory, amount: 0n, nft: { capability: 'mutable', commitment } } },
+      recreated(sidecar),
+      recreated(interestFunction),
+      recreated(key.utxo),
+      { lockingBytecode: parameters.changeTo, valueSatoshis: 0n },
+    ],
+    remainderOutputIndex: 4,
+    ...(parameters.feeRate === undefined ? {} : { feeRate: parameters.feeRate }),
+  });
+  return { built, state: decodeLoanState(commitment), loan: outputOf(built, 0), sidecar: outputOf(built, 1), interestFunction: outputOf(built, 2), key: outputOf(built, 3), change: outputOf(built, 4) };
 };
