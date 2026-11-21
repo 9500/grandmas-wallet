@@ -83,6 +83,10 @@ cp -r "$ROOT/apps/recoverer/dist" "$RELEASE.new/recoverer"
 cp -r "$ROOT/$JAR_ROOT" "$RELEASE.new/jar"
 if [ "$LOAN" = yes ]; then cp -r "$ROOT/apps/loan/dist" "$RELEASE.new/loan"; fi
 cp -r "$ROOT/deploy/landing" "$RELEASE.new/landing"
+# The proxy in front lets browsers keep a stylesheet for hours, so the landing page names its stylesheet with a mark
+# of the stylesheet's content: a changed stylesheet has a new address, and a visitor who was here before gets it at once.
+STYLE_MARK="$(sha256sum "$ROOT/deploy/landing/landing.css" | cut -c1-12)"
+sed -i "s|href=\"landing.css\"|href=\"landing.css?v=$STYLE_MARK\"|" "$RELEASE.new/landing/index.html"
 # The overview of this design, and beside it under its own name the overview of the second design, which it links to.
 cp "$ROOT/docs/design_v0.6.html" "$RELEASE.new/landing/design.html"
 cp "$ROOT/docs/design_v0.5.html" "$RELEASE.new/landing/design_v0.5.html"
