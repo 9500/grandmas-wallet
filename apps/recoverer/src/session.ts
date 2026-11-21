@@ -5,6 +5,7 @@ import { HttpStore } from '@grandmas-wallet/archive';
 import type { ChainReader, ChallengeDelay } from '@grandmas-wallet/core';
 import { type KeptKit, generateRecipientKeyPair, recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
 import { type Environment, type KeptInvitation, Vault, connectChain, keyNetwork, loadEnvironment, openAccount, withInvitation } from '@grandmas-wallet/ui';
+import { defaultChallengeDelay } from './delays.js';
 
 /**
  * What the recoverer's page holds while it is open, and what it keeps in this browser: its encryption key,
@@ -77,8 +78,8 @@ export interface Kept {
  * the waiting period starts at the shortest, so that moving a wallet to a new phone can be tried out without
  * a day's wait; with real coins it starts at a day.
  */
-let onTestNetwork = false;
-export const settingsOf = (): Settings => kept('settings') ?? { startingSatoshis: '10000', challengeDelay: { unit: 'time512', value: onTestNetwork ? 1 : 169 } };
+let pageNetwork = 'mainnet';
+export const settingsOf = (): Settings => kept('settings') ?? { startingSatoshis: '10000', challengeDelay: defaultChallengeDelay(pageNetwork) };
 
 /**
  * How this page works. A page that held kits before it could be asked keeps working as someone helping people
@@ -123,7 +124,7 @@ export const boot = async (): Promise<Session> => {
     key = { publicKey: binToHex(made.publicKey), privateKey: binToHex(made.privateKey) };
     keep('key', key);
   }
-  onTestNetwork = environment.network !== 'mainnet';
+  pageNetwork = environment.network;
   const { chain, servers } = await connectChain(environment.chain, environment.secondsPerBlock);
   return { environment, network: keyNetwork(environment), chain, servers, storeAt, publicKey: hexToBin(key.publicKey), privateKey: hexToBin(key.privateKey) };
 };

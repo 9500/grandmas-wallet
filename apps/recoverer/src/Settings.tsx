@@ -3,17 +3,13 @@ import type { ChallengeDelay } from '@grandmas-wallet/core';
 import { Amount, Button, Card, Choice, Developer, Field, Notice, PageHead, Segmented, TextInput, download, eraseDevice, formatSatoshis, useTask } from '@grandmas-wallet/ui';
 import { useState } from 'preact/hooks';
 
+import { delaysFor } from './delays.js';
+
 import { useBalance, useFunds } from './Funds.js';
 import { MODES } from './Start.js';
 import { type Mode, type Session, balanceWords, closeAccount, invitationText, keep, kept, modeOf, settingsOf, wallets } from './session.js';
 
-/** Waiting periods to choose from, counted by the chain's clock in steps of 512 seconds. */
-export const DELAYS: { delay: ChallengeDelay; hint: string }[] = [
-  { delay: { unit: 'time512', value: 1 }, hint: 'For trying the wallet out. Too short to rely on.' },
-  { delay: { unit: 'time512', value: 7 }, hint: 'Enough if the owner\'s phone is nearly always on and online.' },
-  { delay: { unit: 'time512', value: 169 }, hint: 'A day for the owner\'s phone to notice a request and refuse it.' },
-  { delay: { unit: 'time512', value: 1182 }, hint: 'A week. Safer, and a lost phone takes a week to replace.' },
-];
+export { DELAYS } from './delays.js';
 const same = (a: ChallengeDelay, b: ChallengeDelay): boolean => a.unit === b.unit && a.value === b.value;
 
 /**
@@ -50,7 +46,7 @@ export const Settings = ({ session, onSaved }: { session: Session; onSaved: () =
             </Field>
             <div role="radiogroup" aria-label="Waiting period">
               <p class="field-label">Waiting period</p>
-              {DELAYS.map((entry) => (
+              {delaysFor(session.environment.network).map((entry) => (
                 <Choice type="radio" name="delay" checked={same(entry.delay, delay)} onChange={() => setDelay(entry.delay)} title={describeDelay(entry.delay)}>
                   {entry.hint}
                 </Choice>

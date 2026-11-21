@@ -289,6 +289,16 @@ const App = ({ environment }: { environment: Environment }) => {
     return new XoLoans(requests, chain, pendingStore, keyStore, pageAddress(), undefined, desk);
   }, [usable, chain, status.state === 'connected']);
 
+  if (desk === undefined && environment.network === 'mainnet') {
+    return (
+      <div class="stack">
+        <Independent off />
+        <Card title="Off on mainnet" tone="warn">
+          <p>This page stays off on mainnet: no deployment of Paryon's contracts on mainnet is named in its code, so none can be checked from it.</p>
+        </Card>
+      </div>
+    );
+  }
   if (desk === undefined) {
     return (
       <div class="stack">

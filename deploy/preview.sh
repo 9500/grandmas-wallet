@@ -8,6 +8,10 @@
 #   build           build the four pages
 #   start local     serve the pages for the local node (regtest); a block is made every 15 seconds
 #   start chipnet   serve the pages for chipnet
+#   start <file>    serve the pages with that configuration file: for mainnet, a copy of
+#                   deploy/config/mainnet.example.json with the preview's addresses (wallet http://localhost:8101/,
+#                   recoverer http://localhost:8102/, stores http://localhost:8111 and 8112). Mainnet is served only
+#                   when the file allows it ("mainnetEnabled": true), and every page then shows its warning.
 #   stop            stop everything the preview started
 #   status          what is running
 #
@@ -47,11 +51,15 @@ case "${1:-}" in
     case "${2:-}" in
       local) CONFIG="deploy/config/local-regtest.json" ;;
       chipnet) CONFIG="deploy/config/local.json" ;;
-      *) echo "usage: deploy/preview.sh start <local|chipnet>" >&2; exit 2 ;;
+      *.json) CONFIG="$2"; [ -f "$CONFIG" ] || { echo "no configuration file $CONFIG" >&2; exit 2; } ;;
+      *) echo "usage: deploy/preview.sh start <local|chipnet|configuration file>" >&2; exit 2 ;;
     esac
     for app in wallet recoverer jar loan; do
       [ -f "apps/$app/dist/index.html" ] || { echo "apps/$app is not built: deploy/preview.sh build" >&2; exit 1; }
     done
+    NETWORK="$("$NODE" -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(c.network === "mainnet" ? (c.mainnetEnabled === true ? "mainnet" : "refused") : c.network)' "$CONFIG")"
+    if [ "$NETWORK" = refused ]; then echo "$CONFIG names mainnet but does not allow it (\"mainnetEnabled\": true)" >&2; exit 2; fi
+    if [ "$NETWORK" = mainnet ]; then echo "MAINNET: enabled only to meet the requirements of BCH Blaze. Nothing here has been audited; coins can be lost. This project does not recommend enabling it."; fi
     for number in 1 2; do
       launch "store$number" "$NODE" --import tsx apps/archive-store/src/cli.ts --port "$((8110 + number))" --host 127.0.0.1 \
         --directory "$STATE/store$number" --origin http://localhost:8101 --origin http://localhost:8102
@@ -85,7 +93,7 @@ case "${1:-}" in
     [ -f "$STATE/chain" ] && echo "chain: $(cat "$STATE/chain")"
     ;;
   *)
-    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

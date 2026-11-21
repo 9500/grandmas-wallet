@@ -26,6 +26,11 @@ if (!existsSync(join(root, 'index.html'))) {
   process.exit(1);
 }
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
+// Mainnet only with the parameter that allows it; the pages refuse it too.
+if (config.network === 'mainnet' && config.mainnetEnabled !== true) {
+  console.error(`${configPath} names mainnet but does not allow it ("mainnetEnabled": true). Not served.`);
+  process.exit(1);
+}
 // What is being served, for checking a deployment from outside: the record written when the pages were
 // released if there is one, and otherwise the checkout and its commit when the server started.
 const version = (() => {
@@ -44,7 +49,10 @@ const version = (() => {
 const extra = process.argv.flatMap((word, index) => (word === '--connect' && process.argv[index + 1] !== undefined ? [process.argv[index + 1]] : []));
 
 // The Electrum servers the XO engine connects to by itself on this network.
-const ENGINE_SERVERS = { chipnet: ['wss://chipnet.imaginary.cash:50004', 'wss://chipnet.bch.ninja:50004'] };
+const ENGINE_SERVERS = {
+  chipnet: ['wss://chipnet.imaginary.cash:50004', 'wss://chipnet.bch.ninja:50004'],
+  mainnet: ['wss://bch.imaginary.cash:50004', 'wss://electrum.imaginary.cash:50004', 'wss://cashnode.bch.ninja:50004', 'wss://fulcrum.greyh.at:50004'],
+};
 
 /** A page may only talk to the servers its configuration names. */
 const contentSecurityPolicy = [

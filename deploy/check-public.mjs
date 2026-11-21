@@ -14,6 +14,7 @@ const expected = expectAt === -1 ? undefined : parameters[expectAt + 1];
 const configPath = parameters.find((parameter, index) => !parameter.startsWith('--') && index !== expectAt + 1) ?? 'deploy/config/production.json';
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 let failed = false;
+if (config.network === 'mainnet') console.log(`configuration: mainnet, ${config.mainnetEnabled === true ? 'allowed by "mainnetEnabled": true' : 'NOT allowed (no "mainnetEnabled": true): the pages refuse to start'}`);
 
 const page = async (name, url, mustMatch) => {
   try {

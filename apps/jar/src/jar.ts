@@ -143,7 +143,7 @@ export const amountProblem = (satoshis: bigint, smallest: bigint = SMALLEST_JAR)
 
 /** Why a withdrawal is refused shortly after a jar's date. */
 export const TOO_EARLY =
-  'The network does not take this yet. It goes by the median time of the last eleven blocks, which runs some minutes behind the clock, and a jar opens once that time has passed its date. Try again in a few minutes.';
+  'The network does not take this yet. It goes by the median time of the last eleven blocks, which runs behind the clock (some minutes on a test network, about an hour on mainnet), and a jar opens once that time has passed its date. Try again later.';
 
 /** A refusal for a lock time that has not passed, by the network or in a wallet's words. */
 export const isTooEarly = (message: string): boolean => /non-?final/i.test(message) && !/BIP68/i.test(message);

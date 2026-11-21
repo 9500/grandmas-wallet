@@ -1,0 +1,14 @@
+{
+  "about": "AN EXAMPLE, not a deployment. Mainnet is enabled only to meet the requirements of BCH Blaze; nothing here has been audited; coins can be lost; this project does not recommend enabling it. The page addresses and stores below are placeholders: put your own, and keep mainnetEnabled only if you accept that.",
+  "network": "mainnet",
+  "mainnetEnabled": true,
+  "walletUrl": "https://wallet.mainnet.example.org/",
+  "recovererUrl": "https://recoverer.mainnet.example.org/",
+  "jarUrl": "https://jar.mainnet.example.org/",
+  "loanUrl": "https://loan.mainnet.example.org/",
+  "stores": ["https://store1.mainnet.example.org", "https://store2.mainnet.example.org"],
+  "chain": ["wss://bch.imaginary.cash:50004", "wss://electrum.imaginary.cash:50004", "wss://fulcrum.greyh.at:50004"],
+  "relays": ["wss://relay.riften.net:443", "wss://relay.cauldron.quest:443"],
+  "explorer": "https://blockchair.com/bitcoin-cash/transaction/",
+  "secondsPerBlock": 600
+}

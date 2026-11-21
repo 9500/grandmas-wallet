@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import qrcode from 'qrcode-generator';
 
 import type { Environment } from './environment.js';
+import { MainnetBand, onMainnet, showMainnetStatement } from './mainnet.js';
 
 /*
  * The parts both pages are built from. Wording on them is the pages' own; these only give it a shape.
@@ -67,7 +68,7 @@ export interface NavItem<Route extends string = string> {
 
 const networkLabel = (environment: Environment | undefined): { text: string; test: boolean } | undefined => {
   if (environment === undefined) return undefined;
-  if (environment.network === 'mainnet') return { text: 'Bitcoin Cash', test: false };
+  if (environment.network === 'mainnet') return { text: 'Mainnet', test: false };
   return { text: environment.network, test: true };
 };
 
@@ -110,8 +111,12 @@ export const Frame = <Route extends string>({
       </span>
     </div>
   );
+  // On mainnet, the band stays in view on every screen, also before the configuration is handed to the frame.
+  const mainnet = environment?.network === 'mainnet' || onMainnet();
   return (
-    <div class={`app ${nav === undefined ? 'narrow' : 'with-nav'}`}>
+    <>
+    {mainnet && <MainnetBand onOpen={showMainnetStatement} />}
+    <div class={`app ${nav === undefined ? 'narrow' : 'with-nav'}${mainnet ? ' mainnet' : ''}`}>
       <header class="topbar">
         {brandBlock}
         {chip}
@@ -144,6 +149,7 @@ export const Frame = <Route extends string>({
       )}
       <main class="content">{children}</main>
     </div>
+    </>
   );
 };
 

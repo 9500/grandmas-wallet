@@ -4,6 +4,8 @@ import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { ChainPool } from '@grandmas-wallet/chipnet/pool';
 import type { ChainReader } from '@grandmas-wallet/core';
 
+import { confirmMainnet } from './mainnet.js';
+
 /**
  * Where an application finds everything outside itself. Read from
  * `config.json` next to the page, so the same build runs in any environment.
@@ -23,12 +25,41 @@ export interface Environment {
   explorer: string;
   /** Seconds between blocks on this network, for working out when a waiting period counted in blocks ends. */
   secondsPerBlock: number;
+  /**
+   * Allows `"network": "mainnet"`. Without it a page configured for mainnet does not start. Only the configuration
+   * file a page is served with carries it; nothing on the page turns it on.
+   */
+  mainnetEnabled?: boolean;
 }
 
+/** A configuration for mainnet that does not carry the parameter allowing it. */
+export class MainnetNotEnabledError extends Error {
+  constructor() {
+    super('This page is configured for the main network of Bitcoin Cash, where coins have real value, but its configuration does not allow it ("mainnetEnabled": true). It does not start.');
+    this.name = 'MainnetNotEnabledError';
+  }
+}
+
+/**
+ * Check a page's configuration as read from `config.json`.
+ *
+ * @throws MainnetNotEnabledError for `"network": "mainnet"` without `"mainnetEnabled": true`
+ */
+export const readEnvironment = (config: unknown): Environment => {
+  if (typeof config !== 'object' || config === null) throw new Error('This site is not configured: config.json is not an object.');
+  const environment = config as Environment;
+  if (typeof environment.network !== 'string') throw new Error('This site is not configured: config.json names no network.');
+  if (environment.network === 'mainnet' && environment.mainnetEnabled !== true) throw new MainnetNotEnabledError();
+  return environment;
+};
+
+/** Read the page's configuration. On mainnet, the user confirms the warning first (see mainnet.tsx). */
 export const loadEnvironment = async (): Promise<Environment> => {
   const response = await fetch('/config.json', { cache: 'no-store' });
   if (!response.ok) throw new Error('This site is not configured: config.json is missing.');
-  return (await response.json()) as Environment;
+  const environment = readEnvironment(await response.json());
+  if (environment.network === 'mainnet') await confirmMainnet();
+  return environment;
 };
 
 export interface ChainConnection {

@@ -10,7 +10,9 @@
 #   design overview (docs/design_v0.6.html) is served beside it as design.html, and the second design's overview, which it
 #   links to, as design_v0.5.html.
 # The loan page is an independent demonstration with Paryon's public contracts on chipnet; it is served when
-# the configuration names an address for it (loanUrl) and it is built.
+# the configuration names an address for it (loanUrl) and it is built. On mainnet it says that it is off.
+# A configuration for mainnet (deploy/config/mainnet.example.json) is installed only if it carries
+# "mainnetEnabled": true; the services have the same names and ports as a chipnet installation and replace it.
 # The pages must have been built first: deploy/preview.sh build
 # Where an application of this design is not built yet, a page saying so is served in its place.
 #
@@ -27,6 +29,11 @@ NODE="$(command -v node)"
 UNITS="$HOME/.config/systemd/user"
 DATA="${GRANDMAS_WALLET_DATA:-$HOME/.local/share/grandmas-wallet}"
 mkdir -p "$UNITS" "$DATA"
+
+# Mainnet only with the parameter that allows it. The services replace this user's others of the same names.
+NETWORK="$("$NODE" -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(c.network === "mainnet" ? (c.mainnetEnabled === true ? "mainnet" : "refused") : c.network)' "$CONFIG")"
+if [ "$NETWORK" = refused ]; then echo "$CONFIG names mainnet but does not allow it (\"mainnetEnabled\": true)" >&2; exit 2; fi
+if [ "$NETWORK" = mainnet ]; then echo "MAINNET: enabled only to meet the requirements of BCH Blaze. Nothing here has been audited; coins can be lost. This project does not recommend enabling it."; fi
 
 # The stores answer browser requests only from the wallet and the recoverer pages.
 read -r WALLET_ORIGIN RECOVERER_ORIGIN < <("$NODE" -e '

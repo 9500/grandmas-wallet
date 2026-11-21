@@ -51,9 +51,12 @@ export const LOAN_TEMPLATE = CHIPNET_DESK.template;
 /**
  * The deployment the page uses on a network: the one its configuration names (`paryon`), which is how the page is
  * served for a chain of one's own with Paryon's contracts deployed on it; otherwise Paryon's own on chipnet.
- * @returns `undefined` where the network has none
+ * @returns `undefined` where the network has none, and always on mainnet
  */
 export const deskFor = (environment: { network: string; paryon?: unknown }): Desk | undefined => {
+  // Paryon's deployment on mainnet is not named in this code and cannot be checked from it: the page is off there,
+  // also for a deployment its configuration names.
+  if (environment.network === 'mainnet') return undefined;
   const named = environment.paryon as Partial<ParyonDeployment> | undefined;
   if (named !== undefined && typeof named === 'object' && typeof named.name === 'string' && typeof named.tokenIds?.paryon === 'string' && typeof named.tokenIds.loanKeyFactory === 'string') {
     return deskOf(named as ParyonDeployment, false);

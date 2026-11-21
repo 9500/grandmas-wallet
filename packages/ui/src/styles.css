@@ -498,3 +498,35 @@ button.info-button:focus-visible { border-radius: 50%; outline-offset: 0; }
 /* a label, or a figure's name, with its "?" */
 .info-label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .info-label > label { font-weight: inherit; }
+
+/* ------------------------------------------------------------------ mainnet: the band and the statement */
+
+:root { --band-h: 32px; }
+.mainnet-band, button.mainnet-band {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; height: var(--band-h); min-height: 0; margin: 0; padding: 0 12px;
+  border: 0; border-radius: 0; background: #8f1d16; color: #fff;
+  font: 600 13px/1 var(--font); letter-spacing: 0.01em; white-space: nowrap; cursor: pointer;
+}
+button.mainnet-band:hover:not(:disabled) { background: #7a1812; }
+.mainnet-band.static { cursor: default; }
+.mainnet-band-text { overflow: hidden; text-overflow: ellipsis; }
+.mainnet-band-mark {
+  flex: none; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; color: #8f1d16; font-size: 11px; font-weight: 800;
+}
+.app.mainnet .topbar { top: var(--band-h); }
+@media (min-width: 960px) { .app.mainnet .rail { top: var(--band-h); height: calc(100vh - var(--band-h)); } }
+
+.mainnet-gate:focus { outline: none; }
+.mainnet-gate { position: fixed; inset: 0; z-index: 100; overflow-y: auto; background: var(--bg); }
+.mainnet-statement { max-width: 520px; margin: 0 auto; padding: 32px 20px 40px; display: flex; flex-direction: column; gap: 16px; }
+.mainnet-statement h1 { font-size: 24px; line-height: 1.25; }
+.mainnet-statement ul {
+  margin: 0; padding: 16px 16px 16px 36px; border: 1px solid color-mix(in srgb, #8f1d16 45%, var(--line));
+  border-left: 4px solid #8f1d16; border-radius: var(--r-s); background: var(--surface);
+  display: flex; flex-direction: column; gap: 8px; font-weight: 550;
+}
+.mainnet-statement .small { text-align: center; margin-top: -4px; }
+@media (min-width: 960px) { .mainnet-statement { padding-top: 72px; } }

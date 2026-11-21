@@ -239,7 +239,7 @@ const describeTime = (jar: JarView, ready: Readiness, facts: PageFacts): { when:
       note: `The network takes a withdrawal once the median time of recent blocks has passed the date${ready.secondsLeft === undefined ? '' : `, in about ${formatDuration(ready.secondsLeft)}`}.`,
     };
   }
-  return { when: jar.status === 'empty' ? <>Opened on {date}</> : <>Open since {date}</>, note: facts.clock === undefined && facts.now - jar.unlockTime < 3_600 ? 'The network may take a few minutes more to accept a withdrawal.' : undefined };
+  return { when: jar.status === 'empty' ? <>Opened on {date}</> : <>Open since {date}</>, note: facts.clock === undefined && facts.now - jar.unlockTime < 3_600 ? (facts.network === 'mainnet' ? 'The network may take about an hour more to accept a withdrawal.' : 'The network may take a few minutes more to accept a withdrawal.') : undefined };
 };
 
 const JarPill = ({ jar, ready }: { jar: JarView; ready: Readiness }) => {
@@ -477,7 +477,7 @@ export const OpenJarForm = ({ kind, facts, state, onOpen }: { kind: 'xo' | 'plai
         {tried && dateError !== undefined ? (
           <div class="field-error">{dateError}</div>
         ) : (
-          <div class="hint">In your time zone, {timeZone()}. The network accepts a withdrawal a few minutes after this time, once the median time of its recent blocks has passed it.</div>
+          <div class="hint">In your time zone, {timeZone()}. The network accepts a withdrawal {facts.network === 'mainnet' ? 'about an hour' : 'a few minutes'} after this time, once the median time of its recent blocks has passed it.</div>
         )}
       </div>
       {amountError === undefined && dateError === undefined && typeof parsed === 'bigint' && unlockTime !== undefined && (

@@ -44,6 +44,13 @@ const firstAnswering = async (endpoints: string[]): Promise<string> => {
   throw new Error('None of the network\'s servers could be reached. Check the connection and reload.');
 };
 
+/**
+ * The network the engine is made for: mainnet for a page configured for it, chipnet otherwise. A local regtest
+ * chain is given to the engine as chipnet, with that chain's own parameters (`engineServers`), as before.
+ */
+export const engineNetwork = (environment: Pick<Environment, 'network'>): 'mainnet' | 'chipnet' =>
+  environment.network === 'mainnet' ? XO_SUPPORTED_NETWORKS.mainnet : XO_SUPPORTED_NETWORKS.chipnet;
+
 /** The server entry the engine is created with. */
 const engineServers = async (environment: Environment): Promise<unknown[]> => {
   const endpoint = await firstAnswering(environment.chain);
@@ -75,7 +82,7 @@ const engineServers = async (environment: Environment): Promise<unknown[]> => {
       },
     ];
   }
-  const [known] = resolveElectrumServersForNetwork(XO_SUPPORTED_NETWORKS.chipnet);
+  const [known] = resolveElectrumServersForNetwork(engineNetwork(environment));
   if (known === undefined) throw new Error('The engine names no server for this network.');
   if (!encrypted) throw new Error('The engine connects to a public server over an encrypted connection only.');
   return [{ host, version: known.version, transports: { wss: port }, blockchain: known.blockchain }];
@@ -95,7 +102,7 @@ export const openAccount = async (
   const electrumServers = (await engineServers(environment)) as NonNullable<Parameters<typeof Engine.create>[1]>['electrumServers'];
   // A header store the last load found stuck is deleted before the engine opens it (see engine-headers.ts).
   await resetMarkedHeaders(sessionStorage, indexedDB);
-  const engine = await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, ...(electrumServers === undefined ? {} : { electrumServers }) });
+  const engine = await Engine.create(words, { network: engineNetwork(environment), ...(electrumServers === undefined ? {} : { electrumServers }) });
   try {
     const account = await Account.open(engine, { ...(onProgress === undefined ? {} : { onProgress }), ...(onSent === undefined ? {} : { onSent }) });
     clearHeaderResetMark(sessionStorage);

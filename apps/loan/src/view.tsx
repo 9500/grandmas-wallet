@@ -101,10 +101,10 @@ export const Intro = () => (
 );
 
 /** Said on every screen: whose page this is and whose contracts it uses. */
-export const Independent = ({ desk = CHIPNET_DESK }: { desk?: Desk | undefined }) => (
+export const Independent = ({ desk = CHIPNET_DESK, off = false }: { desk?: Desk | undefined; off?: boolean }) => (
   <div class="independent" role="note">
     <strong>An independent implementation of a front end for Paryon's contracts, not affiliated with Paryon in any way.</strong> This page is not Paryon's site and is not made, reviewed or endorsed by Paryon.{' '}
-    {desk.paryons ? (
+    {off ? null : desk.paryons ? (
       <>
         It is a demonstration on chipnet, Bitcoin Cash's test network, and uses Paryon's public contracts unchanged, through their test deployment <span class="mono">{desk.deployment.name}</span>. Only test coins, which have no value, are used.
       </>
