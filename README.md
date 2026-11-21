@@ -6,7 +6,7 @@ Built for BCH Blaze 2026 on the XO stack.
 
 **Status:** a working demonstration on chipnet, the Bitcoin Cash test network. The wallet, the recoverer's page, two applications and the backup stores are built and have run through their whole course on chipnet, in scripts and in browsers. Nothing has been audited, the pages keep their keys unencrypted in the browser, and a phone watches for recovery requests only while the page is open. Use it with test coins only.
 
-`main` holds the third design of the wallet (design 3), which is what the pages under "Try it" serve. [Designs](#designs) says what each design is and why the third was made.
+`main` holds the third design of the wallet (design 3), which is what the pages under "Try it" serve. All three designs were made for BCH Blaze 2026, between 15 and 21 November 2026. [Designs](#designs) says what each design is, when it was made, and why the third was made.
 
 ## Try it
 
@@ -31,9 +31,17 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 
 ## Designs
 
-- **Design 1** is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1), with its web demonstration and chipnet runs. It spent every coin together with the wallet's controller, which linked all of a wallet's activity and got in the way of applications.
-- **Design 2** is at the tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2), and was what the pages under "Try it" ran until 20 November 2026. It gives each address its own key and uses the controller only for recovery. After a recovery, the new phone finds what the owner holds in an application from the application's token, its template, a second document written for this wallet, and the chain.
-- **Design 3** is what `main` holds. It keeps design 2's keys, addresses and controller, and changes how an application's position comes back after a recovery: from the application's XO template, the application's request and the wallet's own record in its sealed backup, checked against the chain. It has run on a local test node and on chipnet, in scripts and in browsers. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6.
+All three designs were made for BCH Blaze 2026, one after another in a single week. The repository starts with the first design's proposal on 15 November 2026 and contains no earlier work. The dates below can be checked in the commit history.
+
+| | Proposed | Worked on until | Where |
+| --- | --- | --- | --- |
+| Design 1 | 15 November 2026 | 17 November 2026 | tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1) |
+| Design 2 | 17 November 2026 | 20 November 2026 | tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2) |
+| Design 3 | 20 November 2026 | in progress | `main` |
+
+- **Design 1** (15 to 17 November 2026) is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1), with its web demonstration and chipnet runs. It spent every coin together with the wallet's controller, which linked all of a wallet's activity and got in the way of applications.
+- **Design 2** (17 to 20 November 2026) is at the tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2), and was what the pages under "Try it" ran until 20 November 2026. It gives each address its own key and uses the controller only for recovery. After a recovery, the new phone finds what the owner holds in an application from the application's token, its template, a second document written for this wallet, and the chain.
+- **Design 3** (since 20 November 2026) is what `main` holds, and what the pages under "Try it" serve since 21 November 2026. It keeps design 2's keys, addresses and controller, and changes how an application's position comes back after a recovery: from the application's XO template, the application's request and the wallet's own record in its sealed backup, checked against the chain. It has run on a local test node and on chipnet, in scripts and in browsers. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6.
 
 ### Why a third design
 
