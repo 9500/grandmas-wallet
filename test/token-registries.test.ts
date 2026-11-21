@@ -409,3 +409,25 @@ describe('what the screens write', () => {
     expect(tokenUnits(12_345n, frozenNames(live, [category])(category))).toBe('123.45 XDOL');
   });
 });
+
+describe('the local deployment of the loan course', () => {
+  it('publishes a registry for its PUSD that the resolver reads, through the authchain of its contracts', async () => {
+    const { localDeployment, localRegistry } = await import('@grandmas-wallet/paryon');
+    const { SimulatedChain } = await import('@grandmas-wallet/testing');
+    const chain = new SimulatedChain();
+    const funder = testKey(0x5c);
+    const locking = p2pkhLockingBytecode(funder.keyHash);
+    const coin = (transactionId: string) => ({ transactionHash: hexToBin(transactionId), index: 0, output: { lockingBytecode: locking, valueSatoshis: 5_000_000n } });
+    const paryonCoin = coin(chain.fund(locking, 5_000_000n));
+    const factoryCoin = coin(chain.fund(locking, 5_000_000n));
+    const category = hex(paryonCoin.transactionHash);
+    const file = localRegistry(category);
+    const deployed = localDeployment({ funder, paryonCoin, factoryCoin, price: 20_000n, period: 1, registry: { file, uri: 'ipfs://local-registry.json' } });
+    for (const built of deployed.transactions) expect(chain.submit(hex(built.encoded)).accepted).toBe(true);
+    const files = new Files();
+    files.served.set('http://localhost:8349/ipfs/local-registry.json', file);
+    const { registries } = resolver(chain, files, { mode: 'chain', ipfsGateway: 'http://localhost:8349/ipfs/' });
+    await registries.refresh([category]);
+    expect(registries.known(category)).toEqual({ name: 'ParyonUSD (local)', symbol: 'PUSDLOCAL', decimals: 2 });
+  });
+});

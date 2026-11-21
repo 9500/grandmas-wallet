@@ -1,6 +1,6 @@
 # Token names and units from registries (BCMR)
 
-Design and implementation notes for stage 19 of the [implementation plan](../IMPLEMENTATION_PLAN_v0.6.md). Written on 20 November 2026. **Nothing here is built.** The decisions in section 8 are open and are the owner's.
+Design and implementation notes for stage 19 of the [implementation plan](../IMPLEMENTATION_PLAN_v0.6.md). Written on 20 November 2026. Built on 21 November 2026 on the branch `token-registries`, with the decisions of section 8 taken as recommended; section 10 says where building differed from what is written here.
 
 Today the wallet shows a fungible token by its category and in raw units: 100.00 PUSD reads "10,000 units" of "a token of unknown meaning" (proposal section 13.3, decision 25). This document says how the wallet can show "100.00 PUSDTEST" instead, from what the token's issuer has published, without trusting anyone for it and without learning anything about any application.
 
@@ -182,3 +182,25 @@ Tests, numbered in the proposal's section 21 when the stage starts:
 - Holding or protecting an identity output, which Cashonize's identities page does.
 - Registries found by a domain name alone, without a publication on chain, and registries imported by hand.
 - Notices about planned changes of a token's name or decimals; other languages; the `chains` part of a registry.
+
+## 10. As built (21 November 2026)
+
+| Part | Where |
+| --- | --- |
+| Publication, file, snapshot, symbol rules, the reserved lists (taken from the specification's repository on 21 November 2026) | `packages/core/src/token-registry.ts` |
+| The walk, the fetch, what is kept, what the screens are given | `packages/app/src/token-registry.ts` (`TokenRegistries`, `httpRegistryFetch`, `shownRegistry`); `HeldToken.registry` in `applications.ts` |
+| Screens | `apps/wallet/src/token-words.tsx` (`TokenNames`, `tokenUnits`, `IssuerClaim`, `frozenNames`), `token-stake.ts`, `Apps.tsx`, `Send.tsx`, `ActionReview.tsx`; wired in `connections.ts` and `OwnerApp.tsx` |
+| Configuration and policy | `registries` in `packages/ui/src/environment.ts`; `"registries": { "mode": "chain" }` in `deploy/config/production.json` and `local.json`; one line in `deploy/serve.mjs` |
+| Tests | TR01 to TR12 and TR14 in `test/token-registries.test.ts`, TR13 in `test/wallet-knows-no-application.test.ts`; the screens in `scripts/registry-screens.ts`; the check against chipnet in `scripts/registry-check.ts` |
+| The local node | `localRegistry` and the `registry` parameter of `packages/paryon/src/local-deployment.ts`; `scripts/stage-17-loan-browser.ts` serves the file as an IPFS gateway would |
+
+Where building differed from sections 5 to 7:
+
+- **Staying current costs two requests, not one:** the authhead's transaction is read again for the script of its output 0, then that script's unspent coins. Keeping the script would make it one.
+- **What is kept** is in the wallet page's own storage under its own name (`registries`), not beside the kept templates: the templates' state is the applications', and keeping the two apart keeps registry data out of everything that is written to the backup.
+- **The categories of a review are not looked up by the review.** A review shows the names known when it opens (TR11), so a category the wallet does not hold yet, such as PUSD at the first borrowing, is in raw units in that review; it is resolved once the wallet holds it, when the token list is read.
+- **The content policy** opens `https:` on the wallet's page only, which `deploy/serve.mjs` tells by the folder it serves (`wallet` or `wallet/dist`), and the origin of `ipfsGateway` where one is configured. A local run uses that to serve its registry as a gateway would.
+- **Two held categories with the same symbol** need nothing more on the token list and the Send screen, which write the short category beside every token; `HeldToken.registry.sameSymbol` marks them for any screen that does not.
+- **The registry's name is cut at 20 characters** in lists only; the "?" gives it whole, with the raw amount and the category.
+- **Resolving PUSD on chipnet** from nothing took 1.4 seconds: 35 transactions read (most of them at the authbase's busy output script, in search of its spender), 2 histories, 3 lists of unspent coins and one file of 6,636 bytes.
+- **On the local node** the loan course in browsers (`scripts/stage-17-loan-browser.ts local`, record in `docs/runs/stage-19-registry-loan-local-node.md`) listed the borrowed PUSD as "100.00 PUSDLOCAL" on the owner's phone, again on the new phone after the recovery, which resolved it afresh, and in the review of the closing.

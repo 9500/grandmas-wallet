@@ -38,11 +38,12 @@
 // .local-runs/stage-17-loan-browser/. The record is written to docs/runs/stage-17-loan-browser-local-node.md; with
 // --screens, pictures at 390x844 and 1280x800 go to docs/screens/ as live-loan-*.png. On chipnet: under
 // .chipnet/stage-17-loan-browser-chipnet/, docs/runs/stage-17-loan-browser-chipnet.md and chipnet-loan-*.png.
+import { createServer } from 'node:http';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { binToHex, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
 import { type Utxo, controllerScript, keyPairFromPrivateKey, p2pkhLockingBytecode } from '@grandmas-wallet/core';
-import { type ParyonDeployment, localDeployment, paryonContracts } from '@grandmas-wallet/paryon';
+import { type ParyonDeployment, localDeployment, localRegistry, paryonContracts } from '@grandmas-wallet/paryon';
 import type { Page } from 'playwright';
 
 import { DEPLOYMENT, borrowPlan, formatPrice } from '../apps/loan/src/loan.js';
@@ -73,6 +74,8 @@ interface Kept {
   /** The key that deployed Paryon's contracts and gets Paryon's fee. */
   deployer: string;
   deployment?: ParyonDeployment;
+  /** On the local node: the registry the deployment published for its PUSD, as hex, served to the wallet's page as by an IPFS gateway. */
+  registry?: string;
   category: string;
   fundsAddress: string;
   /** How many of the new phone's requests were made before the loan page was opened on it. */
@@ -133,6 +136,23 @@ const cli = (...parameters: string[]): string => theCourse.run(`${root}deploy/re
 
 const deployer = keyPairFromPrivateKey(hexToBin(kept.deployer));
 const deployerLocking = p2pkhLockingBytecode(deployer.keyHash);
+/** The registry's name under the local gateway, and the gateway: a server of this run, on the port after the loan page's. */
+const REGISTRY_NAME = 'pusd-local-registry.json';
+const registryGateway = (): string => `http://localhost:${Number(new URL(LOAN).port) + 5}/ipfs/`;
+/** Serve the deployment's registry as an IPFS gateway would, to any origin; it ends with the run. */
+const serveRegistry = async (): Promise<void> => {
+  if (kept.registry === undefined) return;
+  const file = hexToBin(kept.registry);
+  const gateway = new URL(registryGateway());
+  const server = createServer((request, response) => {
+    const found = request.url === `${gateway.pathname}${REGISTRY_NAME}`;
+    response.writeHead(found ? 200 : 404, { 'access-control-allow-origin': '*', 'content-type': 'application/json' }).end(found ? file : undefined);
+  });
+  await new Promise<void>((resolve) => server.listen(Number(gateway.port), '127.0.0.1', resolve));
+  server.unref();
+  log(`   PUSD's registry, published on chain, served at ${gateway.href}${REGISTRY_NAME}`);
+};
+
 /** Deployed once, before the pages are served: the loan page is told of the deployment in its configuration. */
 const deploy = async (): Promise<ParyonDeployment> => {
   // On chipnet the page uses Paryon's own test deployment.
@@ -155,7 +175,10 @@ const deploy = async (): Promise<ParyonDeployment> => {
     if (first === undefined) throw new Error('no block reward');
     return { transactionHash: hexToBin(first.txid), index: 0, output: { lockingBytecode: deployerLocking, valueSatoshis: BigInt(Math.round((first.vout[0]?.value ?? 0) * 1e8)) } };
   };
-  const deployed = localDeployment({ funder: deployer, paryonCoin: coinbase(hashes[0] as string), factoryCoin: coinbase(hashes[1] as string), price: PRICE, period: 1, periodLengthBlocks: 10 });
+  // PUSD's registry, published on its authchain as an issuer does, so that the wallet shows PUSD in its units.
+  const registry = localRegistry(binToHex(coinbase(hashes[0] as string).transactionHash));
+  kept.registry = binToHex(registry);
+  const deployed = localDeployment({ funder: deployer, paryonCoin: coinbase(hashes[0] as string), factoryCoin: coinbase(hashes[1] as string), price: PRICE, period: 1, periodLengthBlocks: 10, registry: { file: registry, uri: `ipfs://${REGISTRY_NAME}` } });
   for (const built of deployed.transactions) {
     cli('sendrawtransaction', binToHex(built.encoded));
     label(built.transactionId, 'Paryon\'s contracts as published are deployed on the local chain (by the run, not the user)');
@@ -370,6 +393,13 @@ const steps = async (): Promise<void> => {
     save();
     fact(`The loan was opened and given more collateral from the loan page: "${listed}". On the owner's phone the wallet lists the key from its record: "${await textOf(held)}". The key's category is \`${kept.category}\`.`);
     await picture(old.page, 'positions-owner');
+    if (kept.registry !== undefined) {
+      // The borrowed PUSD, in the token's units: from the registry the deployment published on PUSD's authchain, checked against the chain.
+      const pusd = old.page.locator('li.token').filter({ hasText: '100.00 PUSDLOCAL' });
+      await pageShows(pusd, 'the wallet to list the borrowed PUSD in the token\'s units, from its registry');
+      fact(`The wallet lists the borrowed PUSD by the registry the deployment published on chain, checked against it: "${await textOf(pusd)}".`);
+      await picture(old.page, 'registry-owner');
+    }
 
     // 7 ------------------------------------------------------------------
     if (!begin('The phone is lost, with the loan open')) return;
@@ -627,7 +657,8 @@ try {
     if (affordable(market, holds) === undefined) throw new Error(`The funding address holds ${balance} satoshis. Borrowing 100.00 PUSD at no less than 115% of ${formatPrice(market.lower)} needs about ${borrowPlan(DEBT, 115, market).total + 40_000n} satoshis in the wallet, which would hold about ${holds}. Nothing was set up or paid.`);
     need = Number(given);
   }
-  await prepare(['wallet', 'recoverer', 'loan'], chipnet ? {} : { paryon: deployment });
+  if (!chipnet) await serveRegistry();
+  await prepare(['wallet', 'recoverer', 'loan'], chipnet ? {} : { paryon: deployment, ...(kept.registry === undefined ? {} : { registries: { mode: 'chain', ipfsGateway: registryGateway() } }) });
   if (from === 1) theCourse.fundRunKey(need);
   if (chipnet) {
     const now = await servedFrom([WALLET, RECOVERER, LOAN]);
