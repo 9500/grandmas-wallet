@@ -1,8 +1,11 @@
-import { type Output, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
+import { hexToBin } from '@bitauth/libauth';
 import type { Utxo } from '@grandmas-wallet/core';
-import { type InterestCoins, type ListedOutput, type LoanCoins, type ParyonChain, findLoan, interestCoins, latestOraclePrice, loanCoins, readParyonState } from '@grandmas-wallet/paryon';
+import { type InterestCoins, type LoanCoins, type ParyonChain, findLoan, firstFactory, interestCoins, latestOraclePrice, loanCoins, readParyonState } from '@grandmas-wallet/paryon';
 
 import { type Desk, type LoanView, type Market, CHIPNET_DESK, DEPLOYMENT, finalLockHeight, lowerPrice, periodOf } from './loan.js';
+
+// What Paryon's service reads too lives in packages/paryon; the page uses it from there.
+export { type MadeKey, keyWaiting, readMadeKey } from '@grandmas-wallet/paryon';
 
 /**
  * What the page reads from the chain and, for Paryon's own deployment, from the oracle: Paryon's contracts and
@@ -100,36 +103,7 @@ export const readInterestCoins = async (chain: PageChain, category: string, keyS
 
 /** A coin of Paryon's key factories, for making a key; the first by outpoint. */
 export const readFactory = async (chain: PageChain, desk: Desk = CHIPNET_DESK): Promise<Utxo> => {
-  const [factory] = (await readParyonState(chain, desk.contracts)).loanKeyFactory.slice().sort((a, b) => (`${binToHex(a.transactionHash)}:${a.index}` < `${binToHex(b.transactionHash)}:${b.index}` ? -1 : 1));
+  const factory = firstFactory(await readParyonState(chain, desk.contracts));
   if (factory === undefined) throw new MarketProblem('Paryon\'s key factory could not be found on the chain just now. Try again in a minute.');
   return factory;
-};
-
-/** A loan key the page had the wallet make, read back from the transaction that made it. */
-export interface MadeKey {
-  category: string;
-  transactionId: string;
-  /** Outputs 2 and 3 of that transaction: the new key, waiting in Paryon's contract, and its proof of origin. */
-  enforcer: Utxo;
-  proof: Utxo;
-}
-
-/** The key a transaction made: its category is the identifier of the transaction whose output the wallet spent first. */
-export const readMadeKey = async (chain: PageChain, transactionId: string): Promise<MadeKey> => {
-  const text = await chain.getTransaction(transactionId);
-  if (text === undefined) throw new Error('The transaction that made the loan key is not known to the server yet.');
-  const transaction = decodeTransactionBch(hexToBin(text));
-  if (typeof transaction === 'string') throw new Error(transaction);
-  const [first] = transaction.inputs;
-  if (first === undefined) throw new Error('The transaction that made the loan key has no inputs.');
-  const at = (index: number): Utxo => ({ transactionHash: hexToBin(transactionId), index, output: transaction.outputs[index] as Output });
-  return { category: binToHex(first.outpointTransactionHash), transactionId, enforcer: at(2), proof: at(3) };
-};
-
-/** Whether a key the page made is still waiting to be used: its two outputs unspent. */
-export const keyWaiting = async (chain: PageChain, key: MadeKey): Promise<boolean> => {
-  const listed = async (utxo: Utxo): Promise<boolean> =>
-    (await chain.listUnspent(utxo.output.lockingBytecode)).some((entry: ListedOutput) => entry.transactionId === binToHex(utxo.transactionHash) && entry.index === utxo.index);
-  const [enforcer, proof] = await Promise.all([listed(key.enforcer), listed(key.proof)]);
-  return enforcer && proof;
 };

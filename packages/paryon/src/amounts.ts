@@ -47,3 +47,35 @@ export const repaymentAllowed = (repay: bigint, borrowed: bigint, beingRedeemed:
   const redeemable = borrowed - beingRedeemed;
   return (repay === 0n || repay >= MINIMUM_DEBT || repay === redeemable) && repay <= redeemable && repay >= 0n;
 };
+
+/** PUSD cents as dollars and cents: 10000 → "100.00". */
+export const formatPusd = (cents: bigint): string => {
+  const negative = cents < 0n;
+  const value = negative ? -cents : cents;
+  return `${negative ? '−' : ''}${(value / 100n).toLocaleString('en-US')}.${(value % 100n).toString().padStart(2, '0')}`;
+};
+
+/** A price in US cents as dollars: 20867 → "$208.67". */
+export const formatPrice = (cents: bigint): string => `$${formatPusd(cents)}`;
+
+/** The highest interest rate the contracts take: two bytes, not negative (`changeInterest.cash`, `Borrowing.cash`). */
+const HIGHEST_RATE = 32_767;
+
+/**
+ * A loan's interest rate is a whole number per 10,000,000 of the debt's value per period, from 0 to 32,767. The loan's
+ * own key may set any of them (`changeInterest.cash`); there is no waiting time and no limit on how often. The new rate
+ * applies from the loan's next interest payment on, which anyone may make once a period has passed (`payInterest.cash`).
+ */
+export const interestRateProblem = (rate: number): string | undefined =>
+  !Number.isInteger(rate) || rate < 0 || rate > HIGHEST_RATE ? `Paryon takes an interest rate from 0 to ${HIGHEST_RATE.toLocaleString('en-US')}, a whole number per 10,000,000 per period.` : undefined;
+
+/**
+ * Why the contracts would not take this collateral for this debt at this price, or `undefined`: the collateral must be
+ * worth at least 110% of the debt at the price of the price contract the action uses (`Borrowing.cash`, `manage.cash`).
+ */
+export const contractCollateralProblem = (debt: bigint, collateral: bigint, price: bigint): string | undefined => {
+  const least = minimumCollateral(debt, price);
+  return collateral < least
+    ? `The collateral would be below 110% of the debt at ${formatPrice(price)}, the price in Paryon's price contract: a debt of ${formatPusd(debt)} PUSD needs at least ${least.toLocaleString('en-US')} satoshis.`
+    : undefined;
+};

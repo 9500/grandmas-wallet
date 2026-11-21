@@ -8,12 +8,33 @@
 export * from './amounts.js';
 export * from './contract.js';
 export * from './deployment.js';
-export { paryonChipnetTemplateText, paryonChipnetTemplateTextV1, paryonMainnetTemplateText, paryonMainnetTemplateTextV1 } from './frozen.js';
+// The names without a version mean version 2, which the pages and runs send until the wallet works with a service.
+export {
+  paryonChipnetTemplateText,
+  paryonChipnetTemplateTextV1,
+  paryonChipnetTemplateTextV2,
+  paryonChipnetTemplateTextV3,
+  paryonMainnetTemplateText,
+  paryonMainnetTemplateTextV1,
+  paryonMainnetTemplateTextV2,
+  paryonMainnetTemplateTextV3,
+} from './frozen.js';
 export * from './live.js';
 export * from './local-deployment.js';
 export * from './oracle.js';
 export * from './page-requests.js';
+export * from './service.js';
 export * from './state.js';
 export * from './template.js';
-export { type ParyonTemplateVersion, PARYON_TEMPLATE_VERSION, paryonTemplateSource } from './template-source.js';
+export {
+  type ParyonAction,
+  type ParyonAddresses,
+  type ParyonTemplateSource,
+  type ParyonTemplateVersion,
+  PARYON_ADDRESSES,
+  PARYON_SERVICE_SPLIT,
+  PARYON_TEMPLATE_VERSION,
+  SERVICE_RESOURCE,
+  paryonTemplateSource,
+} from './template-source.js';
 export * from './transactions.js';
