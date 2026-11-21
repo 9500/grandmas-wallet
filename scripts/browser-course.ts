@@ -529,6 +529,9 @@ export const course = (options: { directory: string; continuing: boolean; until:
     // An action on a page (a click, a fill, a reading) that cannot be done within the wait of a page stops the course.
     context.setDefaultTimeout(PAGE_WAIT);
     context.setDefaultNavigationTimeout(PAGE_WAIT);
+    // A site that offers more than one network asks a first-time visitor where to try the page. A course's devices
+    // have answered with the course's network; the question itself is looked at by scripts/page-smoke.ts.
+    if (readFile.networks !== undefined) await context.addInitScript(`if (localStorage.getItem('grandmas-wallet:network') === null) localStorage.setItem('grandmas-wallet:network', ${JSON.stringify(ownNetwork)});`);
     const page = context.pages()[0] ?? (await context.newPage());
     watchPage(name, page);
     const made = { name, context, page };

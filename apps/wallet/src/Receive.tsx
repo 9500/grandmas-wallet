@@ -1,5 +1,5 @@
 import { ADDRESS_KIND } from '@grandmas-wallet/core';
-import { Button, Card, Choice, CopyButton, Info, Loading, Notice, PageHead, QrCode, Segmented, TaskStatus, useTask } from '@grandmas-wallet/ui';
+import { Button, Card, Choice, CopyButton, Info, Loading, Notice, PageHead, PlayCoins, QrCode, Segmented, TaskStatus, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import type { Owner } from './OwnerApp.js';
@@ -102,6 +102,7 @@ export const Receive = ({ owner }: { owner: Owner }) => {
                     </Button>
                   )}
                 </div>
+                <PlayCoins environment={owner.session.environment} address={address} satoshis={100_000_000n} label="Get 1 BCH of play coins" />
                 {shown?.again === true && (
                   <Notice tone="warn">
                     <span class="again">

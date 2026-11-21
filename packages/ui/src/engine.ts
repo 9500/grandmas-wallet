@@ -5,6 +5,7 @@ import { Engine, XO_SUPPORTED_NETWORKS, resolveElectrumServersForNetwork } from 
 
 import { clearHeaderResetMark, headerResetMark, markHeadersForReset, resetMarkedHeaders } from './engine-headers.js';
 import type { Environment } from './environment.js';
+import { isOwnChain } from './network.js';
 
 /**
  * The XO engine account of a page: the keys of one set of twelve words, held in this browser.
@@ -55,7 +56,7 @@ export const engineNetwork = (environment: Pick<Environment, 'network'>): 'mainn
 const engineServers = async (environment: Environment): Promise<unknown[]> => {
   const endpoint = await firstAnswering(environment.chain);
   const { host, port, encrypted } = parse(endpoint);
-  if (environment.network === 'regtest') {
+  if (isOwnChain(environment.network)) {
     // The engine connects to listed servers over TLS only, so it is handed a prepared socket. It also needs a
     // checkpoint above the genesis block: block 1 of this chain, with the root the server gives for it.
     const server = await Electrum.connect(endpoint);

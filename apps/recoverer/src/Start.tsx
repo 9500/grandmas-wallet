@@ -1,5 +1,5 @@
 import { addressOf, creationCost } from '@grandmas-wallet/app';
-import { Amount, Button, Card, Field, HandOff, Notice, PageHead, Status, Steps, TextInput } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Field, HandOff, NetworkQuestion, Notice, PageHead, PlayCoins, Status, Steps, TextInput, networkUnchosen, networkWords, onMockup } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import { Opening, useBalanceRead, useFunds } from './Funds.js';
@@ -23,6 +23,9 @@ export const MODES: { mode: Mode; title: string; detail: string; name: string; p
   },
 ];
 
+/** What the mockup's service is asked for at a press: enough for many wallets, and for the fees of what follows. */
+export const PLAY_COINS = 5_000_000n;
+
 /**
  * Whether the first run is behind this page: it has said how it works and its balance has once covered a new
  * wallet. A page that looked after wallets before the first run had this step has it behind it.
@@ -35,20 +38,23 @@ export const started = (): boolean => modeOf() !== undefined && (kept('started')
  * transaction it pays for. The way of working and the name can be changed later in the settings.
  */
 export const Start = ({ session, onDone }: { session: Session; onDone: () => void }) => {
-  const [step, setStep] = useState<'choose' | 'fund'>(() => (modeOf() === undefined ? 'choose' : 'fund'));
+  const asked = session.environment.choice !== undefined;
+  const [step, setStep] = useState<'network' | 'choose' | 'fund'>(() => (modeOf() !== undefined ? 'fund' : networkUnchosen(session.environment) ? 'network' : 'choose'));
+  const here = networkWords(session.environment.network);
   return (
     <div class="stack">
-      <PageHead title="Welcome">{step === 'choose' ? 'How will you use this page? You can change it later in the settings.' : 'One thing is left before you can set up a wallet: this page needs coins of its own.'}</PageHead>
+      <PageHead title="Welcome">{step === 'network' ? 'Where do you want to try this? You can change it later with the network label of this page.' : step === 'choose' ? 'How will you use this page? You can change it later in the settings.' : 'One thing is left before you can set up a wallet: this page needs coins of its own.'}</PageHead>
       <Card flat cls="start-steps">
         <Steps
           steps={[
-            { title: 'Say how you use this page', state: step === 'choose' ? 'current' : 'done', ...(step === 'fund' ? { detail: `${modeOf() === 'bank' ? 'As a bank' : 'Helping someone you know'}, as ${kept('name') ?? ''}` } : {}) },
+            ...(asked ? [{ title: 'Choose where to try it', state: step === 'network' ? ('current' as const) : ('done' as const), ...(step === 'network' ? {} : { detail: `${here.name}, with ${here.coins}` }) }] : []),
+            { title: 'Say how you use this page', state: step === 'choose' ? 'current' : step === 'network' ? 'later' : 'done', ...(step === 'fund' ? { detail: `${modeOf() === 'bank' ? 'As a bank' : 'Helping someone you know'}, as ${kept('name') ?? ''}` } : {}) },
             { title: 'Add coins to your balance', state: step === 'fund' ? 'current' : 'later', detail: 'This page creates wallets and moves them to new phones with transactions on chain, and pays for them itself.' },
             { title: modeOf() === 'bank' ? 'Set up wallets for customers' : 'Set up a wallet for someone', state: 'later' },
           ]}
         />
       </Card>
-      {step === 'choose' ? <Choose onChosen={() => setStep('fund')} /> : <Fund session={session} onBack={() => setStep('choose')} onDone={onDone} />}
+      {step === 'network' ? <NetworkQuestion environment={session.environment} onStay={() => setStep('choose')} /> : step === 'choose' ? <Choose onChosen={() => setStep('fund')} /> : <Fund session={session} onBack={() => setStep('choose')} onDone={onDone} />}
     </div>
   );
 };
@@ -118,9 +124,10 @@ const Fund = ({ session, onBack, onDone }: { session: Session; onBack: () => voi
           <Opening />
         ) : (
           <HandOff text={address} qrLabel="QR code of the address of your balance" copyLabel="Copy address" testId="funds-address">
-            <p class="small muted">{test ? 'Send test coins to this address, from a faucet or any wallet of this test network.' : 'Send Bitcoin Cash to this address, from any wallet.'}</p>
+            <p class="small muted">{onMockup(session.environment) ? 'On the mockup, the button below sends play coins here.' : test ? 'Send test coins to this address, from a faucet or any wallet of this test network.' : 'Send Bitcoin Cash to this address, from any wallet.'}</p>
           </HandOff>
         )}
+        <PlayCoins environment={session.environment} address={address} satoshis={PLAY_COINS} />
         {balance === undefined ? (
           unread !== undefined && <Notice tone="bad">Your balance could not be read: {unread}</Notice>
         ) : covered ? (

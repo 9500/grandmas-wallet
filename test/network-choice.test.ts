@@ -111,8 +111,9 @@ describe('the configuration describes one network or both', () => {
     expect(() => readEnvironment({ ...BOTH, network: 'testnet4' })).toThrow(/does not describe it/);
   });
 
-  it('the public configuration starts on chipnet and offers mainnet; the example stays marked as one', () => {
-    expect(readEnvironment(PUBLIC)).toMatchObject({ network: 'chipnet', secondsPerBlock: 60, choice: { starting: 'chipnet', networks: ['chipnet', 'mainnet'] } });
+  it('the public configuration starts on chipnet and offers mainnet and the mockup; the example stays marked as one', () => {
+    expect(readEnvironment(PUBLIC)).toMatchObject({ network: 'chipnet', secondsPerBlock: 60, choice: { starting: 'chipnet', networks: ['chipnet', 'mainnet', 'mockup'] } });
+    expect(readEnvironment(PUBLIC, 'mockup')).toMatchObject({ network: 'mockup', mockupService: 'https://mockup-api.9500.cash', paryon: { name: 'mockup' } });
     expect(PUBLIC['mainnetEnabled']).toBe(true);
     expect(String(BOTH['about'])).toMatch(/^AN EXAMPLE/);
   });

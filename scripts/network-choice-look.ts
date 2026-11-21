@@ -101,6 +101,8 @@ try {
   // The recoverer's page: its own choice; on mainnet its balance account has a bitcoincash: address.
   const recoverer = await open(phone, 'recoverer');
   await recoverer.goto(RECOVERER);
+  // A first visit is asked where to try the page.
+  await recoverer.getByTestId('network-chipnet').click();
   await see(recoverer, 'recoverer-chipnet', 'How will you use this page?');
   await chip(recoverer).click();
   await recoverer.locator('.netmenu-item.real').click();
@@ -144,6 +146,7 @@ try {
   // The recoverer's page with its side rail: the label sits at the foot of the rail and the choice opens upwards.
   const wideRecoverer = await open(desktop, 'recoverer-wide');
   await wideRecoverer.goto(RECOVERER);
+  await wideRecoverer.getByTestId('network-chipnet').click();
   await see(wideRecoverer, 'wide-recoverer-start', 'How will you use this page?');
   await wideRecoverer.getByTestId('mode-friend').click();
   await wideRecoverer.getByLabel('Your name, as their wallet shows it').fill('Anna');

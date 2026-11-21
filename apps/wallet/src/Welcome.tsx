@@ -1,4 +1,5 @@
-import { Info, Notice } from '@grandmas-wallet/ui';
+import { Info, NetworkQuestion, Notice, networkUnchosen } from '@grandmas-wallet/ui';
+import { useState } from 'preact/hooks';
 
 import { type Session, kept } from './session.js';
 
@@ -12,6 +13,19 @@ export type Beginning = 'bank' | 'friend' | 'takeover' | 'move' | 'restore';
 export const Welcome = ({ session, onChoose }: { session: Session; onChoose: (beginning: Beginning) => void }) => {
   const lost = kept('lostSetUp');
   const test = session.environment.network !== 'mainnet';
+  // A first visit to a site that offers more than one network begins with where to try the wallet.
+  const [asking, setAsking] = useState(() => lost === undefined && networkUnchosen(session.environment));
+  if (asking) {
+    return (
+      <div class="stack set-up welcome">
+        <div class="set-up-head">
+          <h1>Welcome</h1>
+          <p class="muted">Where do you want to try the wallet? You can change it later with the network label at the top.</p>
+        </div>
+        <NetworkQuestion environment={session.environment} onStay={() => setAsking(false)} />
+      </div>
+    );
+  }
   return (
     <div class="stack set-up welcome">
       <div class="set-up-head">
@@ -50,7 +64,7 @@ export const Welcome = ({ session, onChoose }: { session: Session; onChoose: (be
           </button>
         </div>
       </section>
-      {test && <p class="small muted center">Test network ({session.environment.network}). Its coins have no value.</p>}
+      {test && <p class="small muted center">{session.environment.network === 'mockup' ? 'Mockup: a chain of this site\'s own. Its coins are free and have no value.' : `Test network (${session.environment.network}). Its coins have no value.`}</p>}
     </div>
   );
 };

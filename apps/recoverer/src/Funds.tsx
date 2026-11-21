@@ -1,6 +1,6 @@
 import { type RecovererFunds, addressOf } from '@grandmas-wallet/app';
 import { InsufficientFundsError } from '@grandmas-wallet/core';
-import { Amount, Button, Card, Field, HandOff, KeyValues, Loading, Notice, Sat, TaskStatus, TextInput, Value, lockingBytecodeOfAddress, plainError, recheckChain, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
+import { Amount, Button, Card, Field, HandOff, KeyValues, Loading, Notice, PlayCoins, Sat, TaskStatus, TextInput, Value, lockingBytecodeOfAddress, onMockup, plainError, recheckChain, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
@@ -120,9 +120,10 @@ export const FundsCard = ({ session, funds, problem, note, short }: { session: S
           {warning !== undefined && warning !== null && warning !== false && <Notice tone="warn">{warning}</Notice>}
           {address !== undefined && (
             <HandOff text={address} qrLabel="QR code of the address of your balance" copyLabel="Copy address" testId="funds-address">
-              <p class="small muted">{test ? 'Send test coins to this address.' : 'Send Bitcoin Cash to this address, from any wallet.'}</p>
+              <p class="small muted">{onMockup(session.environment) ? 'On the mockup, the button below sends play coins here.' : test ? 'Send test coins to this address.' : 'Send Bitcoin Cash to this address, from any wallet.'}</p>
             </HandOff>
           )}
+          <PlayCoins environment={session.environment} address={address} satoshis={5_000_000n} onPaid={() => setSent(sent + 1)} />
           <SendAll session={session} funds={funds} balance={balance} onSent={() => setSent(sent + 1)} />
         </div>
       )}

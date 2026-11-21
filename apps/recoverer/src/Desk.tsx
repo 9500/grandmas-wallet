@@ -2,7 +2,7 @@ import { binToHex, hexToBin } from '@bitauth/libauth';
 import { type RecovererFunds, type RecovererView, type RequestTiming, RecovererWallet, acceptTakeover, completeTakeover, describeDelay, recoveryFees, requestTiming, viewAsRecoverer } from '@grandmas-wallet/app';
 import { makeLink } from '@grandmas-wallet/app/links';
 import { keyFingerprint, recoveryKeyOf, undoHandOver } from '@grandmas-wallet/enrollment';
-import { Button, Card, Fingerprint, HandOff, KeyValues, Loading, More, Notice, PageHead, QrCode, Sat, Status, TaskStatus, Value, formatDuration, formatTime, plainError, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
+import { Button, Card, Fingerprint, HandOff, KeyValues, LetTimePass, Loading, More, Notice, PageHead, QrCode, Sat, Status, TaskStatus, Value, formatDuration, formatTime, plainError, shorten, useEvery, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
 import { ChainClock, clockTime, useChainClock } from './ChainClock.js';
@@ -162,6 +162,9 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
                   />
                 )}
                 <p>Until then the owner's phone can refuse it. You can close this page and come back to complete.</p>
+                {timing !== undefined && !timing.eligibility.ready && timing.eligibility.waitingFor === 'time' && (
+                  <LetTimePass environment={session.environment} seconds={(timing.endsAt !== undefined && clock !== undefined ? timing.endsAt - clock.clock : (timing.secondsLeft ?? 512)) + 60} />
+                )}
                 {!mine && <p>If you did not send it, your credential for this wallet may be in other hands. Tell the owner.</p>}
               </Status>
             ) : standing.kind === 'not named' ? (

@@ -18,6 +18,29 @@
       "chain": ["wss://electrum.imaginary.cash:50004", "wss://bch.imaginary.cash:50004", "wss://fulcrum.greyh.at:50004"],
       "explorer": "https://blockchair.com/bitcoin-cash/transaction/",
       "secondsPerBlock": 600
+    },
+    "mockup": {
+      "chain": ["wss://mockup.9500.cash:443"],
+      "explorer": "",
+      "secondsPerBlock": 600,
+      "mockupService": "https://mockup-api.9500.cash",
+      "paryon": {
+        "name": "mockup",
+        "network": "chipnet",
+        "apiBaseUrl": "",
+        "tokenIds": {
+          "paryon": "70f94781b1b6b6aa033ba1e03c5134660ac70d65884ab90be5d6f19a26deada5",
+          "pool": "0000000000000000000000000000000000000000000000000000000000000000",
+          "redeemer": "0000000000000000000000000000000000000000000000000000000000000000",
+          "loanKeyFactory": "8cb5cf9cb5b754d0eb66bd52f72590fb4d8c7a23e0384c67f327736fc58c5b3e",
+          "oracleMigrationKey": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "oraclePublicKey": "02d09db08af1ff4e8453919cc866a4be427d7bfe18f2c05e5444c196fcf6fd2818",
+        "protocolFeeLockingBytecode": "76a91450e9f5d4adbe19ca0d7ea2e2a195f28784df90c788ac",
+        "startBlockHeight": 0,
+        "periodLengthBlocks": 144,
+        "timeLockRedemption": 1
+      }
     }
   }
 }

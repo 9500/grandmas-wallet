@@ -1,0 +1,20 @@
+# Bitcoin Cash Node for the mockup network: a public sandbox chain in regtest mode.
+# Written to <folder>/node/bitcoin.conf by deploy/mockup/mockup.sh setup.
+regtest=1
+server=1
+disablewallet=1
+txindex=1
+dbcache=100
+maxmempool=100
+# No peers: the mockup service is the chain's only miner.
+listen=0
+# The relay rules of the public networks, not the relaxed regtest default.
+acceptnonstdtxn=0
+[regtest]
+connect=0
+rpcbind=127.0.0.1
+rpcallowip=127.0.0.1
+rpcport=@RPC_PORT@
+rpcuser=mockup
+rpcpassword=@PASSWORD@
+zmqpubhashblock=tcp://127.0.0.1:@ZMQ_PORT@

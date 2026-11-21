@@ -6,7 +6,7 @@ import {
   hexToBin,
   lockingBytecodeToCashAddress,
 } from '@bitauth/libauth';
-import { type ChainReader, type ChallengeDelay, type Utxo, encodeChallengeDelay } from '@grandmas-wallet/core';
+import { type ChainReader, type ChallengeDelay, type Utxo, encodeChallengeDelay, testAddressPrefix } from '@grandmas-wallet/core';
 
 /**
  * What the wallet's and the recoverer's actions share: amounts, addresses and
@@ -40,13 +40,13 @@ export const delayHex = (delay: ChallengeDelay): string => {
 
 export const addressOf = (lockingBytecode: string | Uint8Array, network = 'chipnet'): string => {
   const bytecode = typeof lockingBytecode === 'string' ? hexToBin(lockingBytecode) : lockingBytecode;
-  const result = lockingBytecodeToCashAddress({ prefix: network === 'mainnet' ? 'bitcoincash' : 'bchtest', bytecode });
+  const result = lockingBytecodeToCashAddress({ prefix: network === 'mainnet' ? 'bitcoincash' : testAddressPrefix(), bytecode });
   return typeof result === 'string' ? result : result.address;
 };
 
 /** @throws if the text is not an address of the given network */
 export const lockingBytecodeOf = (address: string, network = 'chipnet'): Uint8Array => {
-  const prefix = network === 'mainnet' ? 'bitcoincash' : 'bchtest';
+  const prefix = network === 'mainnet' ? 'bitcoincash' : testAddressPrefix();
   const decoded = cashAddressToLockingBytecode(address.includes(':') ? address.trim() : `${prefix}:${address.trim()}`);
   if (typeof decoded === 'string') throw new Error('That is not a valid address.');
   if (decoded.prefix !== prefix) throw new Error(`That address is for another network; this wallet is on ${network}.`);

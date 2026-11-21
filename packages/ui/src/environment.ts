@@ -2,10 +2,10 @@ import type { AppChain, RegistriesConfig } from '@grandmas-wallet/app';
 import { linkKind } from '@grandmas-wallet/app/links';
 import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { ChainPool } from '@grandmas-wallet/chipnet/pool';
-import type { ChainReader } from '@grandmas-wallet/core';
+import { type ChainReader, setTestAddressPrefix } from '@grandmas-wallet/core';
 
 import { confirmMainnet } from './mainnet.js';
-import { rememberedNetwork, settleStorageNetwork } from './network.js';
+import { MOCKUP, keepDatabasesApart, rememberedNetwork, settleStorageNetwork, storageNetwork } from './network.js';
 
 /**
  * Where an application finds everything outside itself. Read from
@@ -31,6 +31,8 @@ export interface Environment {
    * file a page is served with carries it; nothing on the page turns it on.
    */
   mainnetEnabled?: boolean;
+  /** On the mockup: the address of its service, which gives play coins and moves the chain's clock on (docs/mockup.md). */
+  mockupService?: string;
   /** Token names from registries checked against the chain (`chain`), or none (`off`, or no entry). */
   registries?: RegistriesConfig;
   /**
@@ -104,6 +106,9 @@ export const loadEnvironment = async (): Promise<Environment> => {
   const environment = readEnvironment(await response.json(), rememberedNetwork());
   // The page keeps its data under the names of the network it runs on; it loads again if it began with others.
   if (!settleStorageNetwork(environment.network)) return new Promise<Environment>(() => undefined);
+  if (storageNetwork() === 'mockup') keepDatabasesApart();
+  // The mockup's addresses are written so that they are not taken for chipnet's.
+  if (environment.network === MOCKUP) setTestAddressPrefix('bchreg');
   if (environment.network === 'mainnet') await confirmMainnet();
   return environment;
 };

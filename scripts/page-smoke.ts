@@ -22,7 +22,9 @@ if (file === undefined) {
   console.error('usage: npx tsx scripts/page-smoke.ts <configuration file> [--headed]');
   process.exit(2);
 }
-const config = JSON.parse(readFileSync(file, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl?: string; loanUrl?: string; network: string };
+const config = JSON.parse(readFileSync(file, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl?: string; loanUrl?: string; network: string; networks?: Record<string, unknown>; mainnetEnabled?: boolean };
+// A site that offers more than one network asks a first-time visitor where to try the page; the look answers with the one the site starts on.
+const asks = config.networks !== undefined && Object.keys(config.networks).filter((name) => name !== 'mainnet' || config.mainnetEnabled === true).length > 1;
 const started = Date.now();
 const log = (line: string): void => console.log(`${((Date.now() - started) / 1000).toFixed(0).padStart(4)} s  ${line}`);
 
@@ -49,6 +51,11 @@ try {
   log(`the pages of ${file}, on ${config.network}`);
   const recoverer = await open('recoverer');
   await recoverer.goto(config.recovererUrl);
+  if (asks) {
+    await see(recoverer, 'Where do you want to try this?');
+    log(`the recoverer's page asks a first-time visitor where to try it: ${(await recoverer.locator('[data-testid^="network-"]').allInnerTexts()).map((text) => text.split('\n')[0]).join(', ')}`);
+    await recoverer.getByTestId(`network-${config.network}`).click();
+  }
   await see(recoverer, 'How will you use this page?');
   await recoverer.getByTestId('mode-friend').click();
   await recoverer.getByLabel('Your name, as their wallet shows it').fill('Anna');
@@ -66,6 +73,10 @@ try {
 
   const wallet = await open('wallet');
   await wallet.goto(config.walletUrl);
+  if (asks) {
+    await see(wallet, 'Where do you want to try the wallet?');
+    await wallet.getByTestId(`network-${config.network}`).click();
+  }
   await see(wallet, 'Someone I trust is setting it up');
   await see(wallet, 'I have a code from my bank');
   log('the wallet page starts and offers to be set up by a bank or by someone the owner trusts');

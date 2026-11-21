@@ -70,7 +70,7 @@ if (config.networks !== undefined && !described.some((part) => part.network === 
   console.error(`${configPath} starts on ${config.network} but does not describe it under "networks". Not served.`);
   process.exit(1);
 }
-const servers = [...new Set(described.flatMap((part) => [...(part.chain ?? []), ...(part.stores ?? []), ...(part.relays ?? []), ...(ENGINE_SERVERS[part.network] ?? [])]))];
+const servers = [...new Set(described.flatMap((part) => [...(part.chain ?? []), ...(part.stores ?? []), ...(part.relays ?? []), ...(part.mockupService ? [part.mockupService] : []), ...(ENGINE_SERVERS[part.network] ?? [])]))];
 
 /** A page may only talk to the servers its configuration names. */
 const contentSecurityPolicy = [

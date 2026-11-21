@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 
 import type { Environment } from './environment.js';
 import { confirmMainnetChoice } from './mainnet.js';
-import { type StorageNetwork, forgetNetwork, rememberNetwork, storageNetworkOf } from './network.js';
+import { type StorageNetwork, MOCKUP, forgetNetwork, keepNetworkChoice, rememberNetwork, rememberedNetwork, storageNetworkOf } from './network.js';
 
 /*
  * The choice of network on a page whose deployment offers more than one: the network label in the header opens
@@ -12,7 +12,7 @@ import { type StorageNetwork, forgetNetwork, rememberNetwork, storageNetworkOf }
 
 /** How a network is named in the choice. */
 export const networkWords = (network: string): { name: string; coins: string } =>
-  network === 'mainnet' ? { name: 'Mainnet', coins: 'real coins' } : { name: network.slice(0, 1).toUpperCase() + network.slice(1), coins: 'test coins' };
+  network === 'mainnet' ? { name: 'Mainnet', coins: 'real coins' } : network === MOCKUP ? { name: 'Mockup', coins: 'play coins' } : { name: network.slice(0, 1).toUpperCase() + network.slice(1), coins: 'test coins' };
 
 /**
  * Change the page to another network the deployment offers: the statement first for mainnet, then the page loads
@@ -25,6 +25,53 @@ export const chooseNetwork = async (environment: Pick<Environment, 'network' | '
   if (network === 'mainnet' && !(await confirmMainnetChoice())) return false;
   rememberNetwork(network, before === undefined ? undefined : () => before(storageNetworkOf(network)));
   return true;
+};
+
+/** Whether a visitor is still to be asked where to try the page: the deployment offers a choice and this browser keeps none. */
+export const networkUnchosen = (environment: Pick<Environment, 'choice'>): boolean => environment.choice !== undefined && rememberedNetwork() === undefined;
+
+/** What each network is like to try, for someone who sees the choice for the first time. */
+const NETWORK_INTRODUCTIONS: Record<string, { title: string; detail: string }> = {
+  [MOCKUP]: { title: 'Mockup · play coins', detail: 'The quickest way to try everything. Coins are free at the press of a button, and a button lets a waiting period pass at once. It is a chain of this site\'s own (regtest), with the same contracts and the same steps as on the others.' },
+  chipnet: { title: 'Chipnet · test coins', detail: 'Bitcoin Cash\'s public test network. You bring test coins from a faucet, and moving a wallet to a new phone takes about ten minutes.' },
+  mainnet: { title: 'Mainnet · real coins', detail: 'Real Bitcoin Cash. Nothing here has been audited and coins can be lost. Moving a wallet to a new phone takes about a day.' },
+};
+
+/**
+ * The first question of a page whose deployment offers more than one network: where to try it. The answer is
+ * kept in this browser; the header's network label changes it later. The network the page is on is kept without
+ * loading again (`onStay`); another one loads the page again on it, mainnet after its statement.
+ */
+export const NetworkQuestion = ({ environment, onStay }: { environment: Pick<Environment, 'network' | 'choice'>; onStay: () => void }) => {
+  const offered = environment.choice?.networks ?? [environment.network];
+  // The mockup first, mainnet last.
+  const order = (network: string): number => (network === MOCKUP ? 0 : network === 'mainnet' ? 2 : 1);
+  const networks = [...offered].sort((a, b) => order(a) - order(b));
+  return (
+    <div class="choices network-question" role="group" aria-label="Network">
+      {networks.map((network) => {
+        const words = NETWORK_INTRODUCTIONS[network] ?? { title: `${networkWords(network).name} · ${networkWords(network).coins}`, detail: '' };
+        return (
+          <button
+            type="button"
+            class={`choice-card${network === 'mainnet' ? ' real' : ''}`}
+            data-testid={`network-${network}`}
+            onClick={() => {
+              if (network === environment.network) {
+                keepNetworkChoice(network);
+                onStay();
+                return;
+              }
+              void chooseNetwork(environment, network);
+            }}
+          >
+            {words.title}
+            {words.detail !== '' && <small>{words.detail}</small>}
+          </button>
+        );
+      })}
+    </div>
+  );
 };
 
 /** What an application does with the network of the wallet that connects to it. */
@@ -77,13 +124,13 @@ export const NetworkChip = ({ environment, choosable }: { environment: Environme
   const label = (
     <>
       {test ? environment.network : words.name}
-      {test && <span class="chip-more"> · test coins</span>}
+      {test && <span class="chip-more"> · {words.coins}</span>}
     </>
   );
   const networks = environment.choice?.networks;
   if (!choosable || networks === undefined) {
     return (
-      <span class={`netchip${test ? ' test' : ''}`} title={test ? 'A test network: its coins have no value.' : undefined}>
+      <span class={`netchip${test ? ' test' : ''}`} title={test ? (environment.network === MOCKUP ? 'The mockup: a chain of this site\'s own. Its coins are free and have no value.' : 'A test network: its coins have no value.') : undefined}>
         {label}
       </span>
     );

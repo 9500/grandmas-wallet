@@ -1,11 +1,13 @@
 import { hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
 import type { RequestStage } from '@grandmas-wallet/connect';
 import {
+  type Environment,
   Amount,
   Button,
   Card,
   Field,
   HandOff,
+  LetTimePass,
   More,
   Notice,
   Pill,
@@ -48,13 +50,16 @@ export interface PageFacts {
   now: number;
   /** The network's clock, if it could be read. */
   clock?: { height: number; medianTime: number } | undefined;
+  /** On the mockup: the page's environment, for moving the chain's clock on, and what to do once it has moved. */
+  mockup?: Environment;
+  onTimePassed?: () => void;
 }
 
 export const openName = 'open';
 export const depositName = (jar: JarView): string => `deposit:${jar.category}`;
 export const withdrawName = (jar: JarView): string => `withdraw:${jar.category}`;
 
-const prefixOf = (network: string): 'bitcoincash' | 'bchtest' | 'bchreg' => (network === 'mainnet' ? 'bitcoincash' : network === 'regtest' ? 'bchreg' : 'bchtest');
+const prefixOf = (network: string): 'bitcoincash' | 'bchtest' | 'bchreg' => (network === 'mainnet' ? 'bitcoincash' : network === 'regtest' || network === 'mockup' ? 'bchreg' : 'bchtest');
 
 /** The jar's address, for paying in from any wallet. */
 export const jarAddress = (jar: JarView, network: string): string => {
@@ -338,6 +343,9 @@ export const JarItem = ({
         <div class="jar-note">Your wallet does not confirm this jar from its records. It takes savings out of it, and pays nothing in.</div>
       ) : (
         note !== undefined && <div class="jar-note">{note}</div>
+      )}
+      {facts.mockup !== undefined && jar.status !== 'empty' && jar.unlockTime >= EARLIEST_TIME && ready.kind !== 'ready' && (
+        <LetTimePass environment={facts.mockup} seconds={jar.unlockTime - (facts.clock?.medianTime ?? facts.now) + 60} label="Let time pass until the jar opens" {...(facts.onTimePassed === undefined ? {} : { onPassed: facts.onTimePassed })} />
       )}
       <div class="jar-actions">
         {jar.status !== 'empty' && ready.kind !== 'locked' && (

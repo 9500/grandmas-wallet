@@ -28,7 +28,19 @@ export const ADDRESS_WINDOW: Record<AddressKind, number> = {
 
 export const ADDRESS_KINDS: AddressKind[] = [ADDRESS_KIND.givenOut, ADDRESS_KIND.change, ADDRESS_KIND.vault];
 
-const CASH_ADDRESS_PREFIX: Record<XoNetwork, 'bitcoincash' | 'bchtest'> = { mainnet: 'bitcoincash', testnet: 'bchtest' };
+const CASH_ADDRESS_PREFIX: Record<XoNetwork, 'bitcoincash' | 'bchtest' | 'bchreg'> = { mainnet: 'bitcoincash', testnet: 'bchtest' };
+
+/**
+ * How addresses of a test network are written: `bchtest`, or `bchreg` on a chain of one's own whose addresses
+ * should not be taken for chipnet's. The keys and the scripts are the same either way; only the text differs.
+ * Set once when a page or a script starts, before any address is written.
+ */
+export const setTestAddressPrefix = (prefix: 'bchtest' | 'bchreg'): void => {
+  CASH_ADDRESS_PREFIX.testnet = prefix;
+};
+
+/** The prefix addresses of a test network are written with now. */
+export const testAddressPrefix = (): 'bchtest' | 'bchreg' => CASH_ADDRESS_PREFIX.testnet as 'bchtest' | 'bchreg';
 
 interface AddressBase {
   number: number;

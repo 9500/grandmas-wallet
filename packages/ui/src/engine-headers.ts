@@ -10,10 +10,11 @@
  * own starting point. It is done once in a row: if the check is stuck again right after, the page says so.
  */
 
-import { isMainnetName, networkName, storageNetwork } from './network.js';
+import { type StorageNetwork, DATABASE_SPACE, networkName, sideOfName, storageNetwork } from './network.js';
 
 /** The names of the engine's header stores: those of the Electrum layer, one per chain, of the page's network only. */
-export const isEngineHeaderStore = (name: string, mainnet = storageNetwork() === 'mainnet'): boolean => name.startsWith('Electrum') && isMainnetName(name) === mainnet;
+export const isEngineHeaderStore = (name: string, mainnet = storageNetwork() === 'mainnet', side: StorageNetwork = mainnet ? 'mainnet' : storageNetwork() === 'mockup' ? 'mockup' : 'test'): boolean =>
+  name.replace(DATABASE_SPACE, '').startsWith('Electrum') && sideOfName(name) === side;
 
 /** The mark in the tab's session storage, kept across the reload: one for each network. */
 export const headerResetMark = (): string => networkName('gw2-engine-headers');

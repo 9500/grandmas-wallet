@@ -20,7 +20,7 @@ import { HttpStore } from '@grandmas-wallet/archive';
 import type { LedgerEntry } from '@grandmas-wallet/connect';
 import { type ChainReader, type ChallengeDelay, type SeedKeys, deriveSeedKeys } from '@grandmas-wallet/core';
 import { recipientKeyFingerprint } from '@grandmas-wallet/enrollment';
-import { type Environment, type KeptInvitation, Vault, connectChain, keyNetwork, loadEnvironment, openAccount, withInvitation } from '@grandmas-wallet/ui';
+import { type Environment, type KeptInvitation, Vault, connectChain, keyNetwork, loadEnvironment, networkWords, openAccount, withInvitation } from '@grandmas-wallet/ui';
 
 import type { Handing, HandingSlot } from './hand-to-recoverer.js';
 
@@ -193,6 +193,7 @@ const storeAt: StoreAt = (address) => {
 /** Read the configuration, connect to the servers, and take in a link the page was opened with. */
 export const boot = async (): Promise<Session> => {
   const environment = await loadEnvironment();
+  pageNetwork = environment.network;
   // The link's content is taken out of the address bar, where it would otherwise stay in the history.
   const kind = linkKind(window.location.href);
   if (kind !== undefined) {
@@ -242,14 +243,21 @@ export const openWallet = async (session: Session): Promise<OwnerWallet> =>
 
 export const saveState = (state: OwnerWalletState): void => keep('state', state);
 
+/** The network this page runs on, once it has started: a recoverer's code made on another one is not taken. */
+let pageNetwork: string | undefined;
+
 /**
  * Read a `recoverer` link: the recoverer's name, page and encryption key, and, from the page's QR code, the
- * address of the session it offers.
+ * address of the session it offers. A link that names another network than this page's is refused in plain words:
+ * the recoverer would create the wallet on a chain this phone does not look at.
  */
 export const readRecipientLink = async (text: string): Promise<StoredRecipient> => {
-  const read = await readLink<{ name?: unknown; page?: unknown; publicKey?: unknown; session?: unknown }>(text, 'recoverer');
+  const read = await readLink<{ name?: unknown; page?: unknown; publicKey?: unknown; session?: unknown; network?: unknown }>(text, 'recoverer');
   if (read === undefined) throw new Error('This is not a recoverer\'s link. The recoverer\'s page shows it under "Your link".');
-  const { name, page, publicKey, session } = read;
+  const { name, page, publicKey, session, network } = read;
+  if (typeof network === 'string' && pageNetwork !== undefined && network !== pageNetwork) {
+    throw new Error(`This code is from a recoverer on ${networkWords(network).name}; this wallet is on ${networkWords(pageNetwork).name}. Choose ${networkWords(network).name} with the network label at the top of this page, then scan the code again.`);
+  }
   if (typeof name !== 'string' || typeof page !== 'string' || typeof publicKey !== 'string' || !/^[0-9a-f]{64}$/.test(publicKey)) throw new Error('The recoverer\'s link is incomplete.');
   // A session address that cannot be used is left out: the link works without it.
   const usable = typeof session === 'string' && session.length < 400 && /^wiz:\/\//i.test(session);

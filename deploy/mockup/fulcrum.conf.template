@@ -1,0 +1,15 @@
+# Fulcrum on the mockup network.
+# Written to <folder>/fulcrum/fulcrum.conf by deploy/mockup/mockup.sh setup.
+datadir = @DIR@/fulcrum/data
+bitcoind = 127.0.0.1:@RPC_PORT@
+rpcuser = mockup
+rpcpassword = @PASSWORD@
+tcp = 127.0.0.1:@TCP_PORT@
+# Published by the reverse proxy over TLS.
+ws = @WS_HOST@:@WS_PORT@
+polltime = 1
+peering = false
+announce = false
+db_mem = 128
+# Every visitor arrives through the reverse proxy, from one address: no limit of connections per address.
+max_clients_per_ip = 0

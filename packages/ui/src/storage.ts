@@ -2,7 +2,7 @@ import { binToHex, hexToBin } from '@bitauth/libauth';
 import type { Memory } from '@grandmas-wallet/app';
 import { type ArchiveStore, blobIdOf } from '@grandmas-wallet/archive';
 
-import { type StorageNetwork, NETWORK_CHOICE_KEY, isMainnetName, networkName, storageNetwork } from './network.js';
+import { type StorageNetwork, NETWORK_CHOICE_KEY, networkName, sideOfName, storageNetwork } from './network.js';
 
 /**
  * What an application keeps in the browser. Everything is under the page's
@@ -120,8 +120,8 @@ export class DeviceStore implements ArchiveStore {
  * other network's side keeps, and the choice of network, stay.
  */
 export const eraseDevice = async (): Promise<void> => {
-  const mainnet = storageNetwork() === 'mainnet';
-  const ours = (name: string): boolean => name !== NETWORK_CHOICE_KEY && isMainnetName(name) === mainnet;
+  const side = storageNetwork();
+  const ours = (name: string): boolean => name !== NETWORK_CHOICE_KEY && sideOfName(name) === side;
   for (const key of Object.keys(localStorage).filter(ours)) localStorage.removeItem(key);
   const databases = (await indexedDB.databases?.()) ?? [];
   await Promise.all(

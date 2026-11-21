@@ -143,6 +143,8 @@ export const recovererLink = (session: Session, sessionAddress?: string): Promis
     name: kept('name') ?? '',
     page: session.environment.recovererUrl,
     publicKey: binToHex(session.publicKey),
+    // The network the recoverer's page is on, so that a wallet on another one says so instead of asking in vain.
+    network: session.environment.network,
     ...(sessionAddress === undefined ? {} : { session: sessionAddress }),
   });
 

@@ -3,7 +3,7 @@ import './jar.css';
 
 import { DappRequests } from '@grandmas-wallet/connect';
 import { type DappCredentials, type DappLink, type LinkStatus, type WalletOffer, openDappLink } from '@grandmas-wallet/connect/wizard';
-import { type ChainConnection, type Environment, Button, Card, Frame, Loading, Vault, chooseNetwork, connectChain, followWallet, formatBch, formatTime, loadEnvironment, networkWords, plainError, returnToStartingNetwork, useEvery } from '@grandmas-wallet/ui';
+import { type ChainConnection, type Environment, Button, Card, Frame, Loading, Vault, chooseNetwork, connectChain, followWallet, formatBch, formatTime, loadEnvironment, networkWords, onMockup, plainError, returnToStartingNetwork, useEvery } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
@@ -123,7 +123,16 @@ const Jars = ({ environment, source, peerName, chain, onDisconnect }: { environm
     if (chain !== undefined) setClock(await networkTime(chain.chain));
   }, [chain]);
 
-  const facts = { network: environment.network, explorer: environment.explorer, now: time, clock };
+  // On the mockup the chain's clock can be days ahead of this device's, since anyone may move it on: dates are
+  // chosen and counted by the chain's clock there.
+  const mockup = onMockup(environment);
+  const facts = {
+    network: environment.network,
+    explorer: environment.explorer,
+    now: mockup && clock !== undefined ? Math.max(clock.medianTime, time) : time,
+    clock,
+    ...(mockup ? { mockup: environment, onTimePassed: () => void (chain === undefined ? undefined : networkTime(chain.chain).then(setClock)) } : {}),
+  };
   const dated = (jar: JarView) => formatTime(jar.unlockTime);
   const stopWaiting =
     state.running?.name.startsWith('resume:') === true
