@@ -56,7 +56,14 @@ const until = Number(argument('until') ?? '99');
 /** Only the record is written again, from what the run kept and the chain as it is now: nothing is run, and the run's log and requests are kept. */
 const recordOnly = process.argv.includes('--record-only');
 const from = Number(argument('from') ?? (recordOnly ? '9' : '1'));
-if (![1, 5, 7, 8, 9].includes(from)) throw new Error('A run continues from step 5, 7, 8 or 9.');
+if (![1, 5, 6, 7, 8, 9].includes(from)) throw new Error('A run continues from step 5, 6, 7, 8 or 9.');
+/**
+ * Step 6 only as far as the recovery request in a block: the run stops there, before the waiting period. The
+ * request is held back from the network until the new phone's keys and what Anna's page keeps for the request are
+ * copied to disk. `--from 6` goes on from there: the move is completed, and steps 7 to 9 follow.
+ */
+const requestOnly = process.argv.includes('--request-only');
+if (requestOnly && from !== 5) throw new Error('--request-only goes with --from 5: the recoverer\'s page has to be opened by the run, so that its request can be held until what it keeps is on disk.');
 /**
  * What a first use pays, in satoshis: Anna's balance (the wallet's creation with the page's proposed starting
  * balance of 10,000, and room for a recovery's two transactions later), a payment to the owner, a payment out of
@@ -297,6 +304,88 @@ const positionRecordRead = async (before: Map<string, number> | undefined, appro
   for (const line of lines) log(`   ${line}`);
 };
 
+// ------------------------------------------------------------------ the request alone
+
+/** A value anywhere in what a page keeps, its JSON strings read too: the first object under `name` that has the text `field`. */
+const findKept = (value: unknown, name: string, field: string): Record<string, unknown> | undefined => {
+  if (typeof value === 'string') {
+    if (!/^[[{]/.test(value)) return undefined;
+    try {
+      return findKept(JSON.parse(value), name, field);
+    } catch {
+      return undefined;
+    }
+  }
+  if (value === null || typeof value !== 'object') return undefined;
+  for (const [key, inner] of Object.entries(value)) {
+    if (key === name && inner !== null && typeof inner === 'object' && typeof (inner as Record<string, unknown>)[field] === 'string') return inner as Record<string, unknown>;
+    const found = findKept(inner, name, field);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+};
+
+/**
+ * Step 6 as far as the request in a block (`--request-only`). Anna's page sends the request as soon as the new
+ * phone's request reaches it; what it sends to the network is held back until the new phone's keys and what her page
+ * keeps for the request are copied to disk, and then let through. The run then waits for a block to hold the request
+ * and says when the waiting period ends by the chain's clock.
+ */
+const requestHeld = async (recoverer: Device, next: Device): Promise<void> => {
+  const held: (() => void)[] = [];
+  let holding = true;
+  let leftThrough = 0;
+  // Installed before Anna's page is opened, so that every connection it makes to the chain's servers passes here.
+  await recoverer.context.routeWebSocket(/^wss:\/\//, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      const text = typeof message === 'string' ? message : message.toString('utf8');
+      if (text.includes('blockchain.transaction.broadcast')) {
+        if (holding) {
+          held.push(() => server.send(message));
+          return;
+        }
+        leftThrough += 1;
+      }
+      server.send(message);
+    });
+  });
+  await newPhoneAsks(theCourse, recoverer, '', noShot, next);
+  await untilChain('Anna\'s page to sign the request, held back from the network', LIMIT.read, async () => held.length > 0);
+  log(`   Anna's page signed the request; it is held back from the network (${held.length} message${held.length === 1 ? '' : 's'}) while what both pages keep is copied to disk`);
+  await keepStorage(next);
+  await keepStorage(recoverer);
+  const newPhone = readFileSync(`${work}storage-new-phone.json`, 'utf8');
+  const anna = readFileSync(`${work}storage-recoverer.json`, 'utf8');
+  const words = walletKey('words');
+  if (!newPhone.includes(words) || !newPhone.includes(walletKey('takeover'))) throw new Error(`the new phone's words or its takeover request are not in ${work}storage-new-phone.json: nothing was let through to the network`);
+  const pending = findKept(JSON.parse(anna), 'pending', 'proposedKeyHash');
+  if (pending === undefined || typeof pending.proposedKeyHash !== 'string') throw new Error(`Anna's saved takeover is not in ${work}storage-recoverer.json: nothing was let through to the network`);
+  log(`   on disk before the request goes out: the new phone's words and its takeover request (storage-new-phone.json, and its profile), and Anna's saved takeover to the key ${pending.proposedKeyHash.slice(0, 8)}… (storage-recoverer.json)`);
+  holding = false;
+  for (const send of held) send();
+  log('   the request is let through to the network');
+  await chainShows(recoverer.page.getByText('Your request is waiting'), 'Anna\'s page to show "Your request is waiting", once the server has the request', LIMIT.read);
+  await keepStorage(recoverer);
+  const requested = findKept(JSON.parse(readFileSync(`${work}storage-recoverer.json`, 'utf8')), 'requested', 'transactionId');
+  const transactionId = typeof requested?.transactionId === 'string' ? requested.transactionId : '';
+  label(transactionId, 'Anna\'s page sends the recovery request, from her balance, to the new phone\'s key');
+  log(`   the request: transaction ${transactionId || '(not found in what her page keeps)'}${leftThrough > 0 ? `; ${leftThrough} more transaction${leftThrough === 1 ? '' : 's'} went out after it` : ''}`);
+  await picture(recoverer.page, 'request-sent');
+  const sentAt = Date.now();
+  const limit = 40 * 60_000;
+  await chainShows(recoverer.page.getByTestId('waiting-clock'), `a block to hold the recovery request (on mainnet about ten minutes; at most ${limit / 60_000} minutes)`, limit);
+  const clockOf = async (testId: string): Promise<string> => ((await recoverer.page.getByTestId(testId).first().textContent()) ?? '').trim();
+  const height = await valueOf(recoverer.page, 'chain-height');
+  log(`   the request is in a block, ${Math.round((Date.now() - sentAt) / 1000)} s after it was let through; the recoverer's page shows the chain's clock at ${await clockOf('waiting-clock')}, block ${height}; the waiting period ends when it passes ${await clockOf('waiting-ends')}`);
+  const status = await textOf(recoverer.page.locator('.card').filter({ hasText: 'Where the wallet stands' }).first()).catch(() => '(not read)');
+  log(`   Anna's page: "${status}"`);
+  fact(`Anna's page sent the recovery request (transaction \`${transactionId}\`) once the new phone's keys and her saved takeover were on disk; a block held it, and her page said: "${status}"`);
+  await picture(recoverer.page, 'request-in-block');
+  await keepStorage(next);
+  await keepStorage(recoverer);
+};
+
 // ------------------------------------------------------------------ the run
 
 const steps = async (): Promise<void> => {
@@ -422,11 +511,23 @@ const steps = async (): Promise<void> => {
 
   // 6 ------------------------------------------------------------------
   if (next === undefined) {
-    if (!begin('A new phone takes the wallet over with Anna\'s help, and sweeps')) return;
-    next = await device('new-phone');
-    requests.watch(next.context);
-    await newPhoneAsks(theCourse, recoverer, '', noShot, next);
-    await completeTakeover(theCourse, recoverer, next, noShot);
+    if (!begin(requestOnly ? 'A new phone asks Anna to move the wallet; her page sends the request, and it goes into a block' : 'A new phone takes the wallet over with Anna\'s help, and sweeps')) return;
+    if (from === 6) {
+      next = await device('new-phone', false);
+      requests.watch(next.context);
+      log('   the request was sent by the part that stopped; the new phone\'s profile and Anna\'s page are opened again where they were');
+      await completeTakeover(theCourse, recoverer, next, noShot, true);
+    } else if (requestOnly) {
+      next = await device('new-phone');
+      requests.watch(next.context);
+      await requestHeld(recoverer, next);
+      return;
+    } else {
+      next = await device('new-phone');
+      requests.watch(next.context);
+      await newPhoneAsks(theCourse, recoverer, '', noShot, next);
+      await completeTakeover(theCourse, recoverer, next, noShot);
+    }
     await keepStorage(next);
   }
   const phone = next;
@@ -655,9 +756,9 @@ const writeRecord = async (outcome: string): Promise<void> => {
   writeFileSync(
     recordFile(`stage-17-jar-browser-${where}.md`),
     [
-      `# Stage 17 in browsers on ${chipnet ? 'chipnet (run G)' : 'the local node'}: the Savings Jar from its template alone, through the loss of a phone (PR19)`,
+      `# Stage 17 in browsers on ${chipnet ? 'chipnet (run G)' : mainnet ? 'mainnet' : 'the local node'}: the Savings Jar from its template alone, through the loss of a phone (PR19)`,
       '',
-      `Written by \`scripts/stage-17-jar-browser.ts${(kept.command ?? '') === '' ? '' : ` ${kept.command}`}\` on ${new Date(kept.startedAt ?? started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the Savings Jar page is a second tab of the phone that uses it. ${chipnet ? pagesUsed([WALLET, RECOVERER, JAR], 'Blocks, the waiting period and the jar\'s date took their real time; the coins came from the funding address and went back to it.') : `The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${JAR}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. The run made the blocks and moved the chain's clock.`}${served} The wallet reads no recovery declaration: the Savings Jar reached it as its template of version 4, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
+      `Written by \`scripts/stage-17-jar-browser.ts${(kept.command ?? '') === '' ? '' : ` ${kept.command}`}\` on ${new Date(kept.startedAt ?? started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the Savings Jar page is a second tab of the phone that uses it. ${chipnet ? pagesUsed([WALLET, RECOVERER, JAR], 'Blocks, the waiting period and the jar\'s date took their real time; the coins came from the funding address and went back to it.') : mainnet ? `The pages are this checkout's production builds served on this machine by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${JAR}, with two backup stores and a relay for the sessions between the pages on this machine, against mainnet's servers ${config.chain.join(', ')}. Blocks, the waiting period and the jar's date take their real time.` : `The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${JAR}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. The run made the blocks and moved the chain's clock.`}${served} The wallet reads no recovery declaration: the Savings Jar reached it as its template of version 4, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
       '',
       `Outcome: ${outcome}`,
       ...(kept.continued.length === 0 ? [] : ['', ...kept.continued]),
@@ -671,8 +772,8 @@ const writeRecord = async (outcome: string): Promise<void> => {
       ...requestsSection(requests, JAR_ORIGIN, 'the Savings Jar page', toJarPage),
       '## Transactions and coins',
       '',
-      chipnet
-        ? `Read from chipnet's server after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the wallet's addresses of both phones' seeds, its controller, the jar and the recoverer's balance). The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`
+      publicChain
+        ? `Read from ${mainnet ? 'mainnet' : 'chipnet'}'s server after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the wallet's addresses of both phones' seeds, its controller, the jar and the recoverer's balance). The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`
         : `Read from the local node after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or in the node's pool, that touches an address of the run (the run's own key, the wallet's addresses of both phones' seeds, its controller, the jar and the recoverer's balance), so that another run at the same time is left out. The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
       '',
       ...ledgerSection(ledger, labelOf, placeOf),

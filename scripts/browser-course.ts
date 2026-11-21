@@ -1094,11 +1094,13 @@ export const completeTakeover = async (
     await see(recoverer.page, 'The request is sent');
   }
   mine(1);
-  await see(recoverer.page, 'Your request is waiting');
+  // A page opened again reads the chain before it shows the request.
+  await chainShows(recoverer.page.getByText('Your request is waiting'), 'the recoverer\'s page to show "Your request is waiting"', LIMIT.read);
   // The page shows the request at once; the waiting period counts from the block that holds it. On chipnet a
-  // block may leave it out for a while when blocks are full.
-  await chainShows(recoverer.page.getByTestId('waiting-clock'), `a block to hold the recovery request (${chipnet ? 'on chipnet about a minute' : 'the run made it'})`, LIMIT.block);
-  log('   the request is in a block; the waiting period runs');
+  // block may leave it out for a while when blocks are full. A request sent by a part that stopped may be past its
+  // waiting period already, and the page then shows no clock of it.
+  const passed = recoverer.page.getByText('The waiting period has passed.');
+  await chainShows(recoverer.page.getByTestId('waiting-clock').or(passed), `a block to hold the recovery request (${mainnet ? 'on mainnet about ten minutes' : chipnet ? 'on chipnet about a minute' : 'the run made it'})`, LIMIT.block);
   // The recoverer's page shows the chain's clock, and the waiting period measured against it.
   const shown = async (testId: string): Promise<string> => {
     const element = recoverer.page.getByTestId(testId).first();
@@ -1106,9 +1108,13 @@ export const completeTakeover = async (
     return ((await element.textContent()) ?? '').trim();
   };
   const clockBefore = await valueOf(recoverer.page, 'chain-clock');
-  log(`   the recoverer's page shows the chain's clock at ${await shown('waiting-clock')}, block ${await valueOf(recoverer.page, 'chain-height')}; the waiting period ends when it passes ${await shown('waiting-ends')}`);
+  if (await passed.first().isVisible()) log(`   the request is in a block and its waiting period has passed on the chain's clock (block ${await valueOf(recoverer.page, 'chain-height')})`);
+  else {
+    log('   the request is in a block; the waiting period runs');
+    log(`   the recoverer's page shows the chain's clock at ${await shown('waiting-clock')}, block ${await valueOf(recoverer.page, 'chain-height')}; the waiting period ends when it passes ${await shown('waiting-ends')}`);
+  }
   log(`   ${passTime(700)}`);
-  if (!chipnet) {
+  if (!publicChain) {
     // The clock on the page moves with the blocks that were made.
     const moved = recoverer.page.locator(`[data-testid="chain-clock"]:not([data-value="${clockBefore}"])`).first();
     await chainShows(moved, 'the blocks the run made to reach the recoverer\'s page (its chain\'s clock to move on)', LIMIT.block);
