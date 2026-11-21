@@ -62,7 +62,7 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 - Design 3, as built: [architecture proposal v0.6](Grandmas_Wallet_Architecture_Proposal_v0.6.md), [implementation plan v0.6](IMPLEMENTATION_PLAN_v0.6.md), and the [illustrated overview v0.6](https://blaze2026.9500.cash/design.html) ([source](docs/design_v0.6.html))
 - Design 2, at the tag `design-2`: [architecture proposal v0.4](Grandmas_Wallet_Architecture_Proposal_v0.4.md), [implementation plan v0.4](IMPLEMENTATION_PLAN_v0.4.md), and the [illustrated overview v0.5](https://blaze2026.9500.cash/design_v0.5.html) ([source](docs/design_v0.5.html))
 - [Decisions log](docs/decisions.md)
-- Proposed, not built: [token names and units from registries (BCMR)](docs/token-registries.md)
+- [Token names and units from registries (BCMR)](docs/token-registries.md): how the wallet shows a token in its own units, from what its issuer published on chain
 - [XO templates and invitations](docs/xo-invitations.md)
 - [Trying the wallet by hand](docs/walkthrough.md)
 - [The local test node](docs/local-node.md)

@@ -1081,7 +1081,8 @@ export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldTo
         </div>
       )}
 
-      {token.meaning === 'unknown' && (
+      {/* A token its own registry names needs no line saying that nothing says what it is. */}
+      {token.meaning === 'unknown' && (token.registry === undefined || token.template !== undefined) && (
         <div class="token-body">
           <div class="small muted token-line">
             {token.template === undefined ? 'Nothing here says what it stands for.' : 'No record ties it to a position.'}{' '}

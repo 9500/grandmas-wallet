@@ -131,7 +131,7 @@ The owner decided on 20 November 2026 that the pages of this version are served 
 
 ## Stage 19 — Token names and units from a registry
 
-Decided by the owner on 21 November 2026: built now, with stage 20, before anything else.
+Decided by the owner on 21 November 2026: built now, with stage 20, before anything else. **Built the same day:** TR01 to TR14 pass on the simulated chain; the resolver read the registry of PUSD on Paryon's chipnet deployment from the chain in 1.4 seconds (35 transactions read, one file fetched) and the built wallet page fetched and checked the file in a browser; the loan course on the local node, whose deployment now publishes a registry, shows "100.00 PUSDLOCAL" before and after a recovery (`docs/runs/stage-19-registry-loan-local-node.md`). Open: the public wallet showing PUSD in its units on chipnet, which needs a release. A review does not resolve a category the wallet does not hold yet, so the first borrowing still shows raw units.
 
 Asked for by the owner on 20 November 2026, for after the chipnet runs. Until then the wallet shows a fungible token by its category and in raw units (proposal section 13.3, decision 25).
 
@@ -175,9 +175,10 @@ Agreed by the owner on 21 November 2026, for after stages 19 and 20. The wallet 
 | 14 | PR13–PR18, PR21, PR22 |
 | 15 | PR08, PR09 |
 | 17 | PR19, PR20 |
+| 19 | TR01–TR14 |
 | 21 | PR26, PR27 |
 
-All 27 tests that this version adds to the proposal's section 21 are in this table once. The tests of the second design are in the table of version 0.4; the proposal's section 21 says which of them this version retires or replaces.
+All 41 tests that this version adds to the proposal's section 21 are in this table once. The tests of the second design are in the table of version 0.4; the proposal's section 21 says which of them this version retires or replaces.
 
 `scripts/test-record.mjs` reads the statements of the tests from the proposal of version 0.6.
 
@@ -206,5 +207,5 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 34 | Several places that hold coins for one token | Decided, 20 November 2026 | Each is listed as an open position; telling a moved position from one set beside it is not pursued |
 | 36 | Where the pages of this version are served for the chipnet runs | Decided, 20 November 2026 | At the public addresses, in place of the second design's pages |
 | 37 | The wait for the engine to list the coins of an action just sent | Decided, 20 November 2026 | Accepted |
-| 38 | Token names and units from a registry (BCMR) | Stage 19 | Evaluated in `docs/token-registries.md`; its eight decisions are open |
+| 38 | Token names and units from a registry (BCMR) | Built, 21 November 2026 | From the chain only, as `docs/token-registries.md` proposed |
 | 39 | Mainnet | Built, 21 November 2026 | `"mainnetEnabled": true` beside `"network": "mainnet"` in the served configuration; off without it; a warning on every page. Nothing has been spent on mainnet |
