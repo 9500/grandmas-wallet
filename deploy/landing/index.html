@@ -95,7 +95,7 @@
             <p>Enabled only to meet the requirements of BCH Blaze. Nothing here has been audited, coins can be lost, and we do not recommend it.</p>
             <dl>
               <div><dt>Coins</dt><dd>Real Bitcoin Cash</dd></div>
-              <div><dt>A recovery</dt><dd>About a day, with the usual waiting period</dd></div>
+              <div><dt>A recovery</dt><dd>About 30 minutes with the shortest waiting period; about a day with the usual one</dd></div>
             </dl>
           </article>
         </div>
@@ -222,7 +222,7 @@
             <p>On the recoverer, open the wallet under <q>People</q> and press <q><em>name</em> lost their phone</q>. Paste the code's text into the new wallet (or scan it). The recoverer then asks the network to move the wallet to the new key, and the waiting period starts. The recoverer shows how long is left; the new wallet waits.</p>
             <ul class="by-network">
               <li><strong>Mockup:</strong> press <q>Let the waiting period pass</q> on the recoverer when you have seen enough of the wait. It moves the chain's clock on, for everyone on the mockup.</li>
-              <li><strong>Chipnet:</strong> the move can complete about 15 minutes after the request. <strong>Mainnet:</strong> about a day.</li>
+              <li><strong>Chipnet:</strong> the move can complete about 15 minutes after the request. <strong>Mainnet:</strong> about 30 minutes with the shortest waiting period, about a day with the one the recoverer starts with.</li>
             </ul>
             <p class="tip warn">Close the old wallet first. While it is open, it refuses any request by itself. That is the protection working, and it is step 6.</p>
           </li>
@@ -250,7 +250,7 @@
     <section id="waiting" class="section alt">
       <div class="wrap">
         <h2>The waiting period</h2>
-        <p class="section-lead">The waiting period is the owner's protection: the recoverer can ask to move a wallet without proving anything, and the old phone has this long to say no. The steps are the same on every network; how long they take is not. On mainnet the recoverer's usual waiting period is 24 hours. On chipnet it offers about 9 minutes, the shortest the network can measure, and a move can complete about 15 minutes after the request is sent. On the mockup the waiting period is the same 9 minutes by the chain's clock, and a button moves that clock on.</p>
+        <p class="section-lead">The waiting period is the owner's protection: the recoverer can ask to move a wallet without proving anything, and the old phone has this long to say no. The steps are the same on every network; how long they take is not. The shortest waiting period the network can measure is 512 seconds, about 9 minutes, and the recoverer offers it on every network. With it a move can complete seconds after a press on the mockup, about 15 minutes after the request on chipnet, and about 30 minutes after it on mainnet. For real use the recoverer starts mainnet wallets with about 24 hours.</p>
 
         <div class="network">
           <p class="network-head"><strong>Mockup</strong> <span class="network-detail">A block when a transaction arrives · the shortest waiting period, skipped at a press</span></p>
@@ -275,15 +275,15 @@
         </div>
 
         <div class="network">
-          <p class="network-head"><strong>Mainnet</strong> <span class="network-detail">A block about every ten minutes · the recoverer's usual waiting period</span></p>
-          <div class="timeline" role="img" aria-label="On mainnet: request sent; about ten minutes until a block holds it; then about 24 hours of waiting period by the chain's clock; then the move can complete, about a day after the request. The old phone can refuse until the end.">
+          <p class="network-head"><strong>Mainnet</strong> <span class="network-detail">A block about every ten minutes · the shortest waiting period</span></p>
+          <div class="timeline" role="img" aria-label="On mainnet, with the shortest waiting period: request sent; about ten minutes until a block holds it; then 512 seconds of waiting period by the chain's clock, which moves only when a block comes, about 15 to 20 minutes; then the move can complete, about 30 minutes after the request. The old phone can refuse until the end.">
             <div class="seg seg-send"><span class="seg-title">Request sent</span><span class="seg-sub">the old phone sees it at once</span></div>
             <div class="seg seg-block"><span class="seg-title">Into a block</span><span class="seg-sub">about 10 min on mainnet</span></div>
-            <div class="seg seg-wait"><span class="seg-title">Waiting period</span><span class="seg-sub">169 × 512 seconds by the chain's clock, about 24 hours</span></div>
-            <div class="seg seg-done"><span class="seg-title">Move can complete</span><span class="seg-sub">about a day after the request</span></div>
+            <div class="seg seg-wait"><span class="seg-title">Waiting period</span><span class="seg-sub">1 × 512 seconds by the chain's clock, which moves only when a block comes: about 15 to 20 min</span></div>
+            <div class="seg seg-done"><span class="seg-title">Move can complete</span><span class="seg-sub">about 30 min after the request</span></div>
           </div>
           <div class="refuse-bar"><span>The old phone can refuse during all of this</span></div>
-          <p class="note network-note"><strong>The shortest wait on mainnet.</strong> About 9 minutes is the shortest wait the network can measure. On mainnet a move with it usually takes about half an hour, because the wait starts only when a block holds the request and the chain's clock moves only when blocks come. When blocks are slow it can take a few hours. The recoverer's page offers about an hour as its shortest on mainnet.</p>
+          <p class="note network-note"><strong>Thirty minutes is the usual case, not a promise.</strong> The wait starts only when a block holds the request, and the chain's clock moves only when blocks come. When blocks are slow, a move with the shortest waiting period can take a few hours. <strong>For real use</strong> the recoverer starts mainnet wallets with 169 × 512 seconds, about 24 hours, and the move then completes about a day after the request; the shortest is chosen under <q>Settings</q>.</p>
         </div>
 
         <div class="facts">
@@ -301,7 +301,7 @@
           </div>
           <div>
             <h3>For real use</h3>
-            <p>Nine minutes is for trying it out, on chipnet and on the mockup. On mainnet the recoverer sets up wallets with about 24 hours, and also offers about an hour or about a week. The longer the wait, the longer a phone can be off and still notice a request in time.</p>
+            <p>Nine minutes is for trying it out, on every network. On mainnet the recoverer sets up wallets with about 24 hours unless you choose otherwise, and also offers about an hour or about a week. The longer the wait, the longer a phone can be off and still notice a request in time.</p>
           </div>
         </div>
       </div>

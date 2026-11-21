@@ -137,7 +137,9 @@ describe('what mainnet changes', () => {
   it('the waiting periods are the mainnet ones', () => {
     expect(defaultChallengeDelay('mainnet')).toEqual({ unit: 'time512', value: 169 });
     expect(defaultChallengeDelay('chipnet')).toEqual({ unit: 'time512', value: 1 });
-    expect(delaysFor('mainnet').map((entry) => entry.delay.value)).toEqual([7, 169, 1182]);
+    // The shortest is offered on mainnet too, with what it comes to there; a new wallet still starts with a day.
+    expect(delaysFor('mainnet').map((entry) => entry.delay.value)).toEqual([1, 7, 169, 1182]);
+    expect(delaysFor('mainnet')[0]?.hint).toMatch(/about half an hour/);
     expect(delaysFor('chipnet').map((entry) => entry.delay.value)).toEqual([1, 7, 169, 1182]);
   });
 
