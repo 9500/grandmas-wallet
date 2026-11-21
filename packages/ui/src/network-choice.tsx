@@ -32,8 +32,8 @@ export const networkUnchosen = (environment: Pick<Environment, 'choice'>): boole
 
 /** What each network is like to try, for someone who sees the choice for the first time. */
 const NETWORK_INTRODUCTIONS: Record<string, { title: string; detail: string }> = {
-  [MOCKUP]: { title: 'Mockup · play coins', detail: 'The quickest way to try everything. Coins are free at the press of a button, and a button lets a waiting period pass at once. It is a chain of this site\'s own (regtest), with the same contracts and the same steps as on the others.' },
-  chipnet: { title: 'Chipnet · test coins', detail: 'Bitcoin Cash\'s public test network. You bring test coins from a faucet, and moving a wallet to a new phone takes about ten minutes.' },
+  [MOCKUP]: { title: 'Mockup · play coins', detail: 'The quickest way to try everything. Coins are free at the press of a button, and a button moves the chain\'s clock past a waiting period. It is a chain of this site\'s own (regtest), with the same contracts and the same steps as on the others.' },
+  chipnet: { title: 'Chipnet · test coins', detail: 'Bitcoin Cash\'s public test network. You bring test coins from a faucet, and moving a wallet to a new phone takes about 15 minutes.' },
   mainnet: { title: 'Mainnet · real coins', detail: 'Real Bitcoin Cash. Nothing here has been audited and coins can be lost. Moving a wallet to a new phone takes about a day.' },
 };
 

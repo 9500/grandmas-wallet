@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Grandma's Wallet · BCH Blaze 2026</title>
-  <meta name="description" content="A Bitcoin Cash wallet that someone you trust can move to a new phone, after a waiting period in which the old phone can say no. Try it on chipnet.">
+  <meta name="description" content="A Bitcoin Cash wallet that someone you trust can move to a new phone, after a waiting period in which the old phone can say no. Try it on a mockup chain with play coins, on chipnet, or on mainnet.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="landing.css">
 </head>
@@ -42,11 +42,27 @@
     <section class="hero">
       <div class="wrap hero-grid">
         <div class="hero-text">
-          <p class="eyebrow">BCH Blaze 2026 · running on chipnet</p>
+          <p class="eyebrow">BCH Blaze 2026 · on a mockup chain, chipnet and mainnet</p>
           <h1>A Bitcoin Cash wallet you can get back after losing your phone</h1>
           <p class="lead">No seed phrase to write down. Someone you trust, your bank or a person you know, can move the wallet to a new phone. They can only do it in the open, on chain, and after a waiting period in which the old phone can say no.</p>
           <p class="lead">Coins, tokens and positions in applications come along: a savings jar and a ParyonUSD loan survive the move.</p>
-          <p class="testnet"><span class="dot" aria-hidden="true"></span> The wallet and the recoverer ask where you want to try them. The mockup is the quickest: a chain of this site's own, where coins are free at the press of a button and a button lets the waiting period pass. Chipnet is Bitcoin Cash's test network, whose coins have no value. Mainnet can be chosen too; it is enabled only to meet the requirements of BCH Blaze, nothing here has been audited, coins can be lost, and we do not recommend it.</p>
+          <div class="where" aria-label="Where to try it">
+            <p class="where-head">The wallet and the recoverer ask where you want to try them.</p>
+            <dl>
+              <div class="where-row mockup">
+                <dt>Mockup <span>play coins</span></dt>
+                <dd>A chain of this site's own. Coins come at the press of a button, and a button moves the chain's clock past the waiting period. A recovery takes a couple of minutes.</dd>
+              </div>
+              <div class="where-row chipnet">
+                <dt>Chipnet <span>test coins</span></dt>
+                <dd>Bitcoin Cash's test network. Coins come from a faucet, and a recovery takes about 15 minutes.</dd>
+              </div>
+              <div class="where-row mainnet">
+                <dt>Mainnet <span>real coins</span></dt>
+                <dd>A recovery takes about a day. Enabled only to meet the requirements of BCH Blaze: nothing here has been audited, coins can be lost, and we do not recommend it.</dd>
+              </div>
+            </dl>
+          </div>
           <p class="hero-links">
             <a class="button primary" href="#try">What to try</a>
             <a class="button" href="design.html" target="_blank" rel="noopener">How it works: design 3 <span aria-hidden="true">↗</span></a>
@@ -142,31 +158,43 @@
     <section id="try" class="section">
       <div class="wrap">
         <h2>What to try</h2>
-        <p class="section-lead">About half an hour from start to finish, most of it the waiting period. Start the recovery (step 4) early and try the applications while it runs.</p>
+        <p class="section-lead">On the mockup the whole course takes a few minutes: nothing has to be brought and nothing has to be waited for. On chipnet it takes about half an hour, half of it the waiting period, so start the recovery (step 4) early and try the applications while it runs. On mainnet the waiting period is a day.</p>
         <ol class="steps">
           <li>
-            <h3>Give the recoverer some test coins</h3>
-            <p>Open the <a href="https://recoverer.9500.cash/" target="_blank" rel="noopener">recoverer</a> on your desktop and choose <q>I'm helping someone I know</q>, or <q>I'm a bank</q> to set up wallets without approving each one. The recoverer pays for every wallet it sets up, so its next step asks for coins: send test coins from a chipnet faucet, such as <a href="https://tbch.googol.cash/" target="_blank" rel="noopener">tbch.googol.cash</a>, to the address it shows, and press <q>Continue</q> when they have arrived. Until then the page offers nothing else.</p>
-            <p class="tip">On the mockup no faucet is needed: <q>Get 2 BCH of play coins</q> fills the recoverer's balance, and the wallet's <q>Receive</q> screen has the same button. Every wallet starts with a small balance from the recoverer. Raise it under <q>Settings</q> if you want to try the applications without sending more coins later.</p>
+            <h3>Choose where to try it, and give the recoverer coins</h3>
+            <p>Open the <a href="https://recoverer.9500.cash/" target="_blank" rel="noopener">recoverer</a> on your desktop. It asks where you want to try it, then whether you are <q>helping someone I know</q> or <q>a bank</q>, which sets up wallets without approving each one. The recoverer pays for every wallet it sets up, so its last step asks for coins, and the page offers nothing else until they have arrived.</p>
+            <ul class="by-network">
+              <li><strong>Mockup:</strong> press <q>Get 2 BCH of play coins</q>.</li>
+              <li><strong>Chipnet:</strong> send test coins from a faucet, such as <a href="https://tbch.googol.cash/" target="_blank" rel="noopener">tbch.googol.cash</a>, to the address it shows.</li>
+            </ul>
+            <p class="tip">Every wallet starts with a small balance from the recoverer. Raise it under <q>Settings</q> if you like. The wallet asks the same first question: choose the same network there.</p>
           </li>
           <li>
             <h3>Set up a wallet on your phone</h3>
-            <p>On the recoverer, open <q>Set up</q> to show a code. On your phone, open the <a href="https://wallet.9500.cash/" target="_blank" rel="noopener">wallet</a>, tap <q>Someone I trust is setting it up</q> and scan the code. Approve on the recoverer. The wallet is ready the moment the network has the transaction that creates it; there is no wait for a block.</p>
+            <p>On the recoverer, open <q>Set up</q> to show a code. On your phone, open the <a href="https://wallet.9500.cash/" target="_blank" rel="noopener">wallet</a>, tap <q>Someone I trust is setting it up</q> and scan the code. Approve on the recoverer. The wallet is ready the moment the network has the transaction that creates it; there is no wait for a block, on any network.</p>
           </li>
           <li>
             <h3>Use an application</h3>
-            <p>Open the <a href="https://jar.9500.cash/" target="_blank" rel="noopener">Savings Jar</a> and scan its code from the wallet's <q>Apps</q> tab. Open a jar that unlocks a few minutes from now. The wallet shows what the transaction does before you approve it, keeps the jar's template and a record of the jar in your backup before it signs, and the jar's key arrives in the wallet as a token.</p>
-            <p>The <a href="https://paryon.9500.cash/" target="_blank" rel="noopener">loan page</a> pairs the same way. A loan of 100 PUSD needs about 0.6 test BCH of collateral, so send more test coins to the wallet's <q>Receive</q> address first.</p>
+            <p>Open the <a href="https://jar.9500.cash/" target="_blank" rel="noopener">Savings Jar</a> and scan its code from the wallet's <q>Apps</q> tab. Open a jar that opens in ten minutes. The wallet shows what the transaction does before you approve it, keeps the jar's template and a record of the jar in your backup before it signs, and the jar's key arrives in the wallet as a token.</p>
+            <p>The <a href="https://paryon.9500.cash/" target="_blank" rel="noopener">loan page</a> pairs the same way. A loan of 100 PUSD needs collateral in the wallet first: the page says how much before anything is asked of the wallet.</p>
+            <ul class="by-network">
+              <li><strong>Mockup:</strong> <q>Get 2 BCH of play coins</q> on the wallet's <q>Receive</q> screen covers the loan, and <q>Let time pass until the jar opens</q> on the jar's page opens the jar at once. Both pages change to the mockup by themselves when the wallet connects.</li>
+              <li><strong>Chipnet:</strong> send about 0.6 test BCH to the wallet's <q>Receive</q> address for the loan. The jar opens a few minutes after its date.</li>
+            </ul>
           </li>
           <li>
             <h3>Lose your phone</h3>
             <p>Close the wallet on your phone. Then open the wallet in a private window, or another browser, on the desktop: this is the new phone. Tap <q>I lost my phone</q>.</p>
             <p>On the recoverer, open the wallet under <q>People</q> and press <q><em>name</em> lost their phone</q>. Paste the code's text into the new wallet (or scan it). The recoverer then asks the network to move the wallet to the new key, and the waiting period starts. The recoverer shows how long is left; the new wallet waits.</p>
+            <ul class="by-network">
+              <li><strong>Mockup:</strong> press <q>Let the waiting period pass</q> on the recoverer when you have seen enough of the wait. It moves the chain's clock on, for everyone on the mockup.</li>
+              <li><strong>Chipnet:</strong> the move can complete about 15 minutes after the request. <strong>Mainnet:</strong> about a day.</li>
+            </ul>
             <p class="tip warn">Close the old wallet first. While it is open, it refuses any request by itself. That is the protection working, and it is step 5.</p>
           </li>
           <li>
             <h3>Or say no from the old phone</h3>
-            <p>Leave the old wallet open and make a request: the wallet refuses it on chain, at once, and the recoverer's page says that the owner's phone refused the request. Under <q>Recovery</q> you can turn off <q>Refuse requests without asking</q> to decide yourself.</p>
+            <p>Leave the old wallet open and make a request: the wallet refuses it on chain, at once, on every network, and the recoverer's page says that the owner's phone refused the request. Under <q>Recovery</q> you can turn off <q>Refuse requests without asking</q> to decide yourself.</p>
           </li>
           <li>
             <h3>Finish the move</h3>
@@ -179,7 +207,7 @@
           <ul>
             <li><strong>I still have my old phone.</strong> Moving to a new phone while the old one works needs no waiting period: the old phone hands the wallet over.</li>
             <li><strong>Your own backup.</strong> Optional. With it, the wallet opens again on any phone at once, without the recoverer.</li>
-            <li><strong>Any wallet.</strong> The Savings Jar also works with an ordinary chipnet wallet, such as Cashonize. The jar cannot tell the difference.</li>
+            <li><strong>Any wallet.</strong> On chipnet the Savings Jar also works with an ordinary wallet, such as Cashonize. The jar cannot tell the difference. The mockup is a chain of this site's own, which other wallets do not know.</li>
           </ul>
         </div>
       </div>
@@ -188,15 +216,26 @@
     <section id="waiting" class="section alt">
       <div class="wrap">
         <h2>The waiting period</h2>
-        <p class="section-lead">The waiting period is the owner's protection: the recoverer can ask to move a wallet without proving anything, and the old phone has this long to say no. On chipnet the recoverer offers about 9 minutes, the shortest the network can measure, and a move can complete about 11 minutes after the request is sent. On mainnet the same steps take about a day.</p>
+        <p class="section-lead">The waiting period is the owner's protection: the recoverer can ask to move a wallet without proving anything, and the old phone has this long to say no. The steps are the same on every network; how long they take is not. On mainnet the recoverer's usual waiting period is 24 hours. On chipnet it offers about 9 minutes, the shortest the network can measure, and a move can complete about 15 minutes after the request is sent. On the mockup the waiting period is the same 9 minutes by the chain's clock, and a button moves that clock on.</p>
 
         <div class="network">
-          <p class="network-head"><span><strong>Chipnet</strong>, this demonstration</span> <span class="network-detail">A block about every minute · the shortest waiting period</span></p>
-          <div class="timeline" role="img" aria-label="On chipnet: request sent; about one minute until a block holds it; then about nine minutes of waiting period by the chain's clock; then the move can complete, about 11 minutes after the request. The old phone can refuse until the end.">
+          <p class="network-head"><strong>Mockup</strong> <span class="network-detail">A block when a transaction arrives · the shortest waiting period, skipped at a press</span></p>
+          <div class="timeline" role="img" aria-label="On the mockup: request sent; a few seconds until a block holds it; then nine minutes of waiting period by the chain's clock, which a button moves on at once; then the move can complete, seconds after the button is pressed. The old phone can refuse until the end.">
+            <div class="seg seg-send"><span class="seg-title">Request sent</span><span class="seg-sub">the old phone sees it at once</span></div>
+            <div class="seg seg-block"><span class="seg-title">Into a block</span><span class="seg-sub">a few seconds: the mockup makes one</span></div>
+            <div class="seg seg-wait"><span class="seg-title">Waiting period</span><span class="seg-sub">512 seconds by the chain's clock, which “Let the waiting period pass” moves on</span></div>
+            <div class="seg seg-done"><span class="seg-title">Move can complete</span><span class="seg-sub">seconds after the press</span></div>
+          </div>
+          <div class="refuse-bar"><span>The old phone can refuse during all of this</span></div>
+        </div>
+
+        <div class="network">
+          <p class="network-head"><strong>Chipnet</strong> <span class="network-detail">A block about every minute · the shortest waiting period</span></p>
+          <div class="timeline" role="img" aria-label="On chipnet: request sent; about one minute until a block holds it; then nine minutes of waiting period by the chain's clock, which trails the real time and moves only when a block comes; then the move can complete, about 15 minutes after the request. The old phone can refuse until the end.">
             <div class="seg seg-send"><span class="seg-title">Request sent</span><span class="seg-sub">the old phone sees it at once</span></div>
             <div class="seg seg-block"><span class="seg-title">Into a block</span><span class="seg-sub">about 1 min on chipnet</span></div>
-            <div class="seg seg-wait"><span class="seg-title">Waiting period</span><span class="seg-sub">512 seconds by the chain's clock, about 9–10 min</span></div>
-            <div class="seg seg-done"><span class="seg-title">Move can complete</span><span class="seg-sub">from about 11 min</span></div>
+            <div class="seg seg-wait"><span class="seg-title">Waiting period</span><span class="seg-sub">512 seconds by the chain's clock, which trails the real time: about 9 to 14 min</span></div>
+            <div class="seg seg-done"><span class="seg-title">Move can complete</span><span class="seg-sub">about 15 min after the request</span></div>
           </div>
           <div class="refuse-bar"><span>The old phone can refuse during all of this</span></div>
         </div>
@@ -207,7 +246,7 @@
             <div class="seg seg-send"><span class="seg-title">Request sent</span><span class="seg-sub">the old phone sees it at once</span></div>
             <div class="seg seg-block"><span class="seg-title">Into a block</span><span class="seg-sub">about 10 min on mainnet</span></div>
             <div class="seg seg-wait"><span class="seg-title">Waiting period</span><span class="seg-sub">169 × 512 seconds by the chain's clock, about 24 hours</span></div>
-            <div class="seg seg-done"><span class="seg-title">Move can complete</span><span class="seg-sub">from about a day</span></div>
+            <div class="seg seg-done"><span class="seg-title">Move can complete</span><span class="seg-sub">about a day after the request</span></div>
           </div>
           <div class="refuse-bar"><span>The old phone can refuse during all of this</span></div>
         </div>
@@ -223,11 +262,11 @@
           </div>
           <div>
             <h3>The chain's clock</h3>
-            <p>Nodes compare against the middle time of the last eleven blocks. It moves only when a block comes, and trails the real time by a few minutes on chipnet and by about an hour on mainnet. A waiting period starts and ends by this clock, so the lag does not make it longer. A jar's date is compared with it directly, so a jar opens that much after its date.</p>
+            <p>Nodes compare against the middle time of the last eleven blocks. It moves only when a block comes, and trails the real time by a few minutes on chipnet and by about an hour on mainnet. A waiting period starts and ends by this clock, so on chipnet the nine minutes come to about 15 from the request: a block has to hold the request first, and the clock has to pass the end, which it does a few blocks after the real time has. A jar's date is compared with the clock directly, so a jar opens that much after its date. On the mockup the clock also moves when someone presses a button, for everyone there, and can be ahead of the real time.</p>
           </div>
           <div>
             <h3>For real use</h3>
-            <p>Nine minutes is for trying it out. On mainnet the recoverer sets up wallets with about 24 hours, and also offers about an hour or about a week. The longer the wait, the longer a phone can be off and still notice a request in time.</p>
+            <p>Nine minutes is for trying it out, on chipnet and on the mockup. On mainnet the recoverer sets up wallets with about 24 hours, and also offers about an hour or about a week. The longer the wait, the longer a phone can be off and still notice a request in time.</p>
           </div>
         </div>
       </div>
@@ -236,7 +275,7 @@
 
   <footer class="foot">
     <div class="wrap foot-row">
-      <p>Grandma's Wallet, built for BCH Blaze 2026 on the XO stack. Not audited. Use test coins.</p>
+      <p>Grandma's Wallet, built for BCH Blaze 2026 on the XO stack. Not audited. Use play coins or test coins.</p>
       <p><a href="design.html" target="_blank" rel="noopener">Design overview</a> · <a href="design_v0.5.html" target="_blank" rel="noopener">The second design</a> · <a href="https://github.com/9500/grandmas-wallet" target="_blank" rel="noopener">Source on GitHub</a></p>
     </div>
   </footer>
