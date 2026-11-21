@@ -974,6 +974,8 @@ export const firstSteps = async (
     log('   friend mode; new wallets get 100,000 satoshis and a waiting period of about 9 minutes');
     await recoverer.page.getByRole('link', { name: 'People' }).first().click();
   }
+  // Her balance's address is shown once the page has opened its account, after its engine's header check.
+  await chainShows(recoverer.page.getByTestId('funds-address'), 'the recoverer\'s page to open its account (its engine\'s header check)', LIMIT.header);
   const fundsAddress = await valueOf(recoverer.page, 'funds-address');
   await keepStorage(recoverer);
   log(`   Anna's balance is funded at ${fundsAddress}; what her page keeps, her words among it, is copied to ${work.startsWith(root) ? work.slice(root.length) : work}storage-recoverer.json first`);
