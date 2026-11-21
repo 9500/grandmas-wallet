@@ -1161,7 +1161,9 @@ export const completeTakeover = async (
   await click(next.page, 'Open the wallet');
   mine(1);
   await see(next.page, 'In your wallet');
-  await untilChain('the swept coins to reach the new phone\'s balance (more than 0.001 BCH)', LIMIT.coin, async () => Number(((await next.page.getByTestId('balance').textContent()) ?? '').replace(/[^0-9.]/g, '')) > 0.001);
+  // A first use holds small amounts: some 20,000 satoshis, against the 150,000 of a whole course.
+  const least = firstUse ? 0.0001 : 0.001;
+  await untilChain(`the swept coins to reach the new phone's balance (more than ${least} BCH)`, LIMIT.coin, async () => Number(((await next.page.getByTestId('balance').textContent()) ?? '').replace(/[^0-9.]/g, '')) > least);
   log(`   the new phone holds ${(await next.page.getByTestId('balance').textContent())?.replace('BCH', ' BCH')}`);
   await standingNow(next.page, `From the completion to the swept coins in the new phone's wallet: ${since('completed')}`);
   await chainShows(next.page.getByText('Protected'), 'the new phone to show "Protected": its receipt read from the backup stores', LIMIT.read);
