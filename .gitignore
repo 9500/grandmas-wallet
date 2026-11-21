@@ -12,6 +12,7 @@ coverage/
 *.mnemonic
 .claude/settings.local.json
 .chipnet
+.mainnet
 .xo-demo/
 .vitest/
 .local-runs/
