@@ -61,6 +61,18 @@ export interface XoAdvertisement {
 
 export type ParameterValue = string | number;
 
+/**
+ * Which position an action is about, by the category of the wallet's token, and whether the action spends that
+ * token. Paying into a position is about its token and does not spend it.
+ */
+export interface PositionAbout {
+  category: string;
+  spent: boolean;
+}
+
+/** Variables the wallet fills with a locking script of its own: variable name to one of the wallet's kinds. */
+export type OutputBindings = Record<string, string>;
+
 interface Envelope {
   /** Unix seconds. */
   time: number;
@@ -76,14 +88,11 @@ export interface ActionDetails {
   role: string;
   variables: Record<string, ParameterValue>;
   /** Variables the wallet fills with a locking script of its own: variable name to one of the wallet's kinds. */
-  bindings?: Record<string, string>;
+  bindings?: OutputBindings;
   /** The variable the wallet fills with the category of the tokens the action creates. The wallet supplies the coin that defines it. */
   creates?: string;
-  /**
-   * Which position the action is about, by the category of the wallet's token, and whether the action spends that
-   * token. Paying into a position is about its token and does not spend it.
-   */
-  about?: { category: string; spent: boolean };
+  /** Which position the action is about, and whether the action spends its token. */
+  about?: PositionAbout;
   /** The address of the application's page, which the wallet keeps in the position's record. */
   page?: string;
   /**
@@ -221,7 +230,7 @@ export class ProtocolError extends Error {
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isText = (value: unknown, maximum = 200): value is string => typeof value === 'string' && value.length > 0 && value.length <= maximum;
 const isHash = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
-const isTemplateName = (value: unknown): value is TemplateName => isObject(value) && isHash(value['identifier']) && isHash(value['contentHash']);
+export const isTemplateName = (value: unknown): value is TemplateName => isObject(value) && isHash(value['identifier']) && isHash(value['contentHash']);
 
 /**
  * Read a wallet's advertisement from a session's extensions: the version of the requests, the network and the
@@ -256,6 +265,27 @@ const readValues = (values: unknown, what: string): Record<string, ParameterValu
   return read;
 };
 
+/**
+ * Read which position a message says an action is about.
+ * @returns `undefined` if it is not in the form of {@link PositionAbout}
+ */
+export const readAbout = (value: unknown): PositionAbout | undefined =>
+  isObject(value) && isHash(value['category']) && typeof value['spent'] === 'boolean' ? { category: value['category'], spent: value['spent'] } : undefined;
+
+/**
+ * Read the variables a message asks the wallet to fill with a locking script of its own.
+ * @returns `undefined` if they are not names of variables with the names of kinds of output
+ */
+export const readBindings = (value: unknown): OutputBindings | undefined => {
+  if (!isObject(value)) return undefined;
+  const read: OutputBindings = {};
+  for (const [name, source] of Object.entries(value)) {
+    if (typeof source !== 'string' || source.length > 400) return undefined;
+    read[name] = source;
+  }
+  return read;
+};
+
 /** The largest text a request may carry: a template with its compiled contracts. */
 const LARGEST_TEXT = 400_000;
 const isLongText = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= LARGEST_TEXT;
@@ -278,13 +308,14 @@ export const parseRequest = (message: unknown): ActionRequest => {
   }
   if (!isTemplateName(template)) throw new ProtocolError('The request does not name its template by identifier and content hash.');
   if (creates !== undefined && !isText(creates, 80)) throw new ProtocolError('The request names the variable of a new token in a form this wallet does not accept.');
-  const bound = bindings === undefined ? undefined : readValues(bindings, 'bindings');
+  const bound = bindings === undefined ? undefined : readBindings(bindings);
+  if (bindings !== undefined && bound === undefined) throw new ProtocolError('The request\'s bindings are not names.');
   const named = inputs === undefined ? undefined : readValues(inputs, 'inputs');
   if (named !== undefined && (Object.keys(named).length > 16 || !Object.values(named).every((outpoint) => typeof outpoint === 'string' && /^[0-9a-f]{64}:\d{1,5}$/.test(outpoint)))) {
     throw new ProtocolError('The request names coins in a form this wallet does not accept.');
   }
-  if (bound !== undefined && Object.values(bound).some((source) => typeof source !== 'string')) throw new ProtocolError('The request\'s bindings are not names.');
-  if (about !== undefined && (!isObject(about) || !isHash(about['category']) || typeof about['spent'] !== 'boolean')) throw new ProtocolError('The request names the position it is about in a form this wallet does not accept.');
+  const position = about === undefined ? undefined : readAbout(about);
+  if (about !== undefined && position === undefined) throw new ProtocolError('The request names the position it is about in a form this wallet does not accept.');
   if (page !== undefined && (!isText(page, 400) || !/^https?:\/\/[^\s]+$/.test(page))) throw new ProtocolError('The request names the application\'s page in a form this wallet does not accept.');
   return {
     action: ACTION_REQUEST,
@@ -296,10 +327,10 @@ export const parseRequest = (message: unknown): ActionRequest => {
     templateAction,
     role,
     variables: readValues(variables, 'values'),
-    ...(bound === undefined ? {} : { bindings: bound as Record<string, string> }),
+    ...(bound === undefined ? {} : { bindings: bound }),
     ...(creates === undefined ? {} : { creates }),
     ...(named === undefined ? {} : { inputs: named as Record<string, string> }),
-    ...(about === undefined ? {} : { about: { category: (about as { category: string }).category, spent: (about as { spent: boolean }).spent } }),
+    ...(position === undefined ? {} : { about: position }),
     ...(page === undefined ? {} : { page: page as string }),
   };
 };
