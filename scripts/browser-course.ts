@@ -89,7 +89,13 @@ let portBase = chipnet ? 8100 : Number(argument('ports') ?? '8300');
 if (!Number.isInteger(portBase) || portBase < 1024 || portBase > 65_000) throw new Error(`--ports takes a port number to count from, such as 8300, not ${argument('ports')}`);
 let PORTS: Record<App, number> = { wallet: portBase + 1, recoverer: portBase + 2, jar: portBase + 3, loan: portBase + 4 };
 let STORE_PORTS = [portBase + 11, portBase + 12] as const;
-const fromFile = JSON.parse(readFileSync(`${root}deploy/config/${configName}.json`, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl: string; loanUrl?: string; stores: string[]; network: string; relays?: string[]; chain: string[]; mainnetEnabled?: boolean; about?: string };
+type CourseConfig = { walletUrl: string; recovererUrl: string; jarUrl: string; loanUrl?: string; stores: string[]; network: string; relays?: string[]; chain: string[]; mainnetEnabled?: boolean; about?: string };
+const readFile = JSON.parse(readFileSync(`${root}deploy/config/${configName}.json`, 'utf8')) as CourseConfig & { networks?: Record<string, Partial<CourseConfig>> };
+// A configuration that describes several networks keeps what differs by network under `networks`: the course takes its own network's part.
+const ownNetwork = mainnet ? 'mainnet' : chipnet ? 'chipnet' : readFile.network;
+if (readFile.networks !== undefined && readFile.networks[ownNetwork] === undefined) throw new Error(`deploy/config/${configName}.json describes ${Object.keys(readFile.networks).join(', ')}, not ${ownNetwork}`);
+const fromFile: CourseConfig = readFile.networks === undefined ? readFile : (({ networks, ...shared }) => ({ ...shared, ...networks?.[ownNetwork], network: ownNetwork }))(readFile);
+if (!Array.isArray(fromFile.chain) || fromFile.chain.length === 0) throw new Error(`deploy/config/${configName}.json names no chain servers for ${ownNetwork}`);
 // The example's words say it is not a deployment; the run's copy says what it is.
 if (mainnet) fromFile.about = 'The pages of a run on mainnet, served on this machine only for that run (scripts/browser-course.ts). Mainnet is enabled only to meet the requirements of BCH Blaze; nothing here has been audited; coins can be lost; this project does not recommend enabling it.';
 const localConfig = (): typeof fromFile => ({

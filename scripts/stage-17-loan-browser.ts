@@ -22,7 +22,8 @@
 // usage (from the repository's root, with the local node running and the pages built: deploy/preview.sh build):
 //   npx tsx scripts/stage-17-loan-browser.ts [local] [--screens] [--headed] [--until <step>] [--from 7|9|10|11] [--ports <base>] [--directory <name>] [--within <minutes>]
 // on chipnet, with the public pages and backup stores, paid from the key in .chipnet/funder-design-2.json:
-//   npx tsx scripts/stage-17-loan-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 7|8|9|10|11] [--record-only]
+//   npx tsx scripts/stage-17-loan-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 4|7|8|9|10|11] [--record-only]
+// --from 4 continues a run that stopped before the wallet was paid for the loan, with its wallet set up.
 // --from 8 continues a run whose new phone has sent its request: the move is completed with no new request.
 // --record-only writes the record again from what the run kept, and runs nothing.
 //
@@ -57,7 +58,7 @@ const until = Number(argument('until') ?? '99');
 /** Only the record is written again, from what the run kept and the chain as it is now: nothing is run, and the run's log and requests are kept. */
 const recordOnly = process.argv.includes('--record-only');
 const from = Number(argument('from') ?? (recordOnly ? '11' : '1'));
-if (![1, 7, 8, 9, 10, 11].includes(from)) throw new Error('A run continues from step 7, 8, 9, 10 or 11.');
+if (![1, 4, 7, 8, 9, 10, 11].includes(from)) throw new Error('A run continues from step 4, 7, 8, 9, 10 or 11.');
 // What the run pays on the local node: 400,000 satoshis to Anna's balance, 50,000 and 61,000,000 to the owner, with room
 // for the fees. On chipnet the key is given what the loan needs at the page's prices (see below).
 const theCourse = course({ directory: 'stage-17-loan-browser', continuing: from > 1, until, ports: 8340, need: 61_460_000 });
@@ -82,6 +83,8 @@ interface Kept {
   requestsBeforePage?: number;
   /** On chipnet: what the funding address paid the owner's wallet for the loan, and which release of the pages each part used. */
   paidForLoan?: string;
+  /** What the wallet held, in satoshis, before it was paid for the loan. */
+  heldBefore?: string;
   served?: string[];
   labels: Record<string, string>;
   facts: string[];
@@ -104,7 +107,13 @@ const prefix = chipnet ? 'chipnet-loan' : 'live-loan';
 /** The collateral added from the page in step 6, in BCH as typed. */
 const ADDED = chipnet ? '0.0001' : '0.001';
 /** What the funding address keeps back when it pays the owner's wallet for the loan on chipnet. */
-const RESERVE = 40_000n;
+const RESERVE = 10_000n;
+/**
+ * What the first steps pay: Anna's balance and the owner. On chipnet Anna gets little more than the wallet she sets up
+ * takes, so that the funding address's coins go to the loan's collateral.
+ */
+const FIRST = chipnet ? { balance: 130_000, receive: 50_000 } : { balance: 400_000, receive: 50_000 };
+const FIRST_PAID = BigInt(FIRST.balance + FIRST.receive + 10_000);
 /** 100.00 PUSD, in cents. */
 const DEBT = 10_000n;
 const save = (): void => writeFileSync(keptFile, JSON.stringify(kept, null, 1), { mode: 0o600 });
@@ -299,16 +308,36 @@ const pageDone = async (loanPage: Page, text: string | RegExp): Promise<void> =>
 const steps = async (): Promise<void> => {
   let recoverer: Device;
   let next: Device | undefined;
-  if (from === 1) {
-    const reached = await firstSteps(theCourse, noShot, async (old) => keepStorage(old));
-    if (reached === undefined) return;
-    const { old } = reached;
-    recoverer = reached.recoverer;
-    kept.fundsAddress = await valueOf(recoverer.page, 'funds-address').catch(() => '');
-    save();
+  if (from === 1 || from === 4) {
+    let old: Device;
+    if (from === 1) {
+      const reached = await firstSteps(theCourse, noShot, async (phone) => keepStorage(phone), FIRST);
+      if (reached === undefined) return;
+      old = reached.old;
+      recoverer = reached.recoverer;
+      kept.fundsAddress = await valueOf(recoverer.page, 'funds-address').catch(() => '');
+      save();
+    } else {
+      // The part that stopped set the wallet up: the same profiles are opened where they were.
+      recoverer = await device('recoverer', false);
+      old = await device('old-phone', false);
+      await recoverer.page.goto(RECOVERER);
+      await old.page.goto(WALLET);
+      state.step = 3;
+      await theCourse.lookAround();
+    }
 
     // 4 ------------------------------------------------------------------
     if (!begin('The owner is paid for the loan, connects the wallet to the loan page, and the page has the wallet make a loan key')) return;
+    if (chipnet && kept.heldBefore === undefined) {
+      // What the wallet holds already counts towards the loan: its starting balance and the first payment.
+      await old.page.getByRole('link', { name: 'Home' }).first().click();
+      const shown = Number.parseFloat((await old.page.getByTestId('balance').textContent()) ?? '');
+      if (!Number.isFinite(shown)) throw new Error('The wallet\'s balance could not be read before it is paid for the loan. Nothing was paid.');
+      kept.heldBefore = String(Math.round(shown * 1e8));
+      save();
+    }
+    const heldBefore = BigInt(kept.heldBefore ?? '0');
     await old.page.getByRole('link', { name: 'Receive' }).first().click();
     const receiving = await valueOf(old.page, 'receive-address');
     if (chipnet) {
@@ -316,9 +345,9 @@ const steps = async (): Promise<void> => {
         const balance = theCourse.keyBalance();
         const market = await chipnetMarket();
         const amount = balance - RESERVE;
-        const percent = affordable(market, amount);
-        if (percent === undefined) throw new Error(`The run's key holds ${balance} satoshis. Borrowing 100.00 PUSD at no less than 115% of ${formatPrice(market.lower)} (the lower of the stored ${formatPrice(market.stored)} and the oracle's ${market.oracle === undefined ? 'none' : formatPrice(market.oracle.price)}) needs ${borrowPlan(DEBT, 115, market).total + 40_000n} satoshis in the wallet. Nothing was paid.`);
-        log(`   at ${formatPrice(market.lower)} the wallet can borrow at ${percent}% with ${amount} satoshis`);
+        const percent = affordable(market, amount + heldBefore);
+        if (percent === undefined) throw new Error(`The run's key holds ${balance} satoshis and the wallet ${heldBefore}. Borrowing 100.00 PUSD at no less than 115% of ${formatPrice(market.lower)} (the lower of the stored ${formatPrice(market.stored)} and the oracle's ${market.oracle === undefined ? 'none' : formatPrice(market.oracle.price)}) needs ${borrowPlan(DEBT, 115, market).total + 40_000n} satoshis in the wallet. Nothing was paid.`);
+        log(`   at ${formatPrice(market.lower)} the wallet can borrow at ${percent}% with ${amount} satoshis beside the ${heldBefore} it holds`);
         kept.paidForLoan = paid(receiving, Number(amount), 'The funding address pays the owner\'s wallet for the loan\'s collateral');
         save();
       }
@@ -342,8 +371,8 @@ const steps = async (): Promise<void> => {
       // The ratio the wallet can pay at the page's prices as they are now.
       const paidAmount = BigInt(/paid (\d+) satoshis/.exec(kept.paidForLoan ?? '')?.[1] ?? '0');
       const market = await chipnetMarket();
-      const percent = affordable(market, paidAmount - 5_000n);
-      if (percent === undefined) throw new Error(`At ${formatPrice(market.lower)} the ${paidAmount} satoshis paid to the wallet do not borrow 100.00 PUSD at 115%. The key is made and no loan is open; the run can be continued with --from when the price allows.`);
+      const percent = affordable(market, paidAmount + heldBefore - 5_000n);
+      if (percent === undefined) throw new Error(`At ${formatPrice(market.lower)} the ${paidAmount} satoshis paid to the wallet, beside the ${heldBefore} it held, do not borrow 100.00 PUSD at 115%. The key is made and no loan is open; the run can be continued with --from when the price allows.`);
       await oldLoan.locator('#loan-ratio').fill(String(percent));
       log(`   the collateral set to ${percent}% of the debt at ${formatPrice(market.lower)}`);
     }
@@ -644,16 +673,16 @@ try {
     theCourse.note(`       continued from step ${from}`);
   }
   const deployment = await deploy();
-  /** On chipnet, what the run's key is given: the first steps' 460,000 sat, and what borrowing at 125% needs, or what the funding address can give less a reserve. */
+  /** On chipnet, what the run's key is given: what the first steps pay, and what borrowing at 125% needs, or what the funding address can give less a reserve. */
   let need: number | undefined;
   if (chipnet && from === 1) {
     // Before anything is set up: whether the funding address can pay for the loan at the page's prices as they are now.
-    // The first steps give the recoverer 400,000 sat, of which the wallet gets 100,000, and pay the wallet 50,000.
+    // The first steps give the recoverer her balance, of which the wallet gets 100,000, and pay the wallet 50,000.
     const balance = BigInt(/^(\d+) satoshis/.exec(theCourse.run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'balance']))?.[1] ?? '0');
     const market = await chipnetMarket();
-    const wanted = borrowPlan(DEBT, 125, market).total + BigInt(Math.round(Number(ADDED) * 1e8)) + 30_000n + RESERVE + 460_000n;
+    const wanted = borrowPlan(DEBT, 125, market).total + BigInt(Math.round(Number(ADDED) * 1e8)) + 30_000n + RESERVE + FIRST_PAID;
     const given = wanted < balance - RESERVE ? wanted : balance - RESERVE;
-    const holds = given - 460_000n - RESERVE + 150_000n;
+    const holds = given - FIRST_PAID - RESERVE + 150_000n;
     if (affordable(market, holds) === undefined) throw new Error(`The funding address holds ${balance} satoshis. Borrowing 100.00 PUSD at no less than 115% of ${formatPrice(market.lower)} needs about ${borrowPlan(DEBT, 115, market).total + 40_000n} satoshis in the wallet, which would hold about ${holds}. Nothing was set up or paid.`);
     need = Number(given);
   }

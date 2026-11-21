@@ -14,8 +14,8 @@ if (category === undefined) {
   console.error('usage: registry-check.ts <category> [electrum endpoint ...]');
   process.exit(1);
 }
-const config = JSON.parse(readFileSync(new URL('../deploy/config/production.json', import.meta.url), 'utf8')) as { chain: string[] };
-const connection = await connectChain(given.length > 0 ? given : config.chain);
+const config = JSON.parse(readFileSync(new URL('../deploy/config/production.json', import.meta.url), 'utf8')) as { chain?: string[]; networks?: { chipnet?: { chain?: string[] } } };
+const connection = await connectChain(given.length > 0 ? given : (config.networks?.chipnet?.chain ?? config.chain ?? []));
 const counts = { getTransaction: 0, getHistory: 0, listUnspent: 0, fetch: 0 };
 const chain = {
   getTransaction: (id: string) => ((counts.getTransaction += 1), connection.chain.getTransaction(id)),
