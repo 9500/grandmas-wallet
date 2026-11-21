@@ -2,6 +2,8 @@ import { binToHex, hexToBin } from '@bitauth/libauth';
 import type { Memory } from '@grandmas-wallet/app';
 import { type ArchiveStore, blobIdOf } from '@grandmas-wallet/archive';
 
+import { type StorageNetwork, NETWORK_CHOICE_KEY, isMainnetName, networkName, storageNetwork } from './network.js';
+
 /**
  * What an application keeps in the browser. Everything is under the page's
  * own origin, which the browser keeps apart from every other site's.
@@ -22,9 +24,24 @@ const decode = <T>(text: string): T =>
     return item;
   }) as T;
 
-/** Named values kept between visits. Byte arrays and whole numbers of any size survive the round trip. */
+/**
+ * Named values kept between visits. Byte arrays and whole numbers of any size survive the round trip. The names
+ * are the page's network's (see network.ts): on mainnet the prefix has `-mainnet` added.
+ */
 export class Vault {
-  constructor(private readonly prefix: string) {}
+  constructor(
+    private readonly base: string,
+    private readonly network?: StorageNetwork,
+  ) {}
+
+  private get prefix(): string {
+    return networkName(this.base, this.network ?? storageNetwork());
+  }
+
+  /** The same values on another network's side: only to carry a session over when the page changes network. */
+  on(network: StorageNetwork): Vault {
+    return new Vault(this.base, network);
+  }
 
   get<T>(name: string): T | undefined {
     const text = localStorage.getItem(`${this.prefix}:${name}`);
@@ -69,7 +86,7 @@ export class DeviceStore implements ArchiveStore {
 
   private open(): Promise<IDBDatabase> {
     this.database ??= new Promise((resolve, reject) => {
-      const opening = indexedDB.open(this.databaseName, 1);
+      const opening = indexedDB.open(networkName(this.databaseName), 1);
       opening.onupgradeneeded = () => opening.result.createObjectStore('blobs');
       opening.onsuccess = () => resolve(opening.result);
       opening.onerror = () => reject(opening.error ?? new Error('The browser\'s storage could not be opened.'));
@@ -98,15 +115,20 @@ export class DeviceStore implements ArchiveStore {
   }
 }
 
-/** Remove everything this site keeps in the browser: what losing the device does. */
+/**
+ * Remove everything this site keeps in the browser for the page's network: what losing the device does. What the
+ * other network's side keeps, and the choice of network, stay.
+ */
 export const eraseDevice = async (): Promise<void> => {
-  localStorage.clear();
+  const mainnet = storageNetwork() === 'mainnet';
+  const ours = (name: string): boolean => name !== NETWORK_CHOICE_KEY && isMainnetName(name) === mainnet;
+  for (const key of Object.keys(localStorage).filter(ours)) localStorage.removeItem(key);
   const databases = (await indexedDB.databases?.()) ?? [];
   await Promise.all(
     databases.map(
       ({ name }) =>
         new Promise<void>((resolve) => {
-          if (name === undefined) return resolve();
+          if (name === undefined || !ours(name)) return resolve();
           const deleting = indexedDB.deleteDatabase(name);
           deleting.onsuccess = deleting.onerror = deleting.onblocked = () => resolve();
         }),

@@ -20,6 +20,8 @@ export const MAINNET_STATEMENT = {
   ],
   confirm: 'I understand that coins can be lost',
   once: 'Asked once in this browser.',
+  /** When the person chooses mainnet on the page: asked every time it is chosen. */
+  back: 'Stay on chipnet',
 } as const;
 
 /** Where a browser keeps that the statement was confirmed. A new wording gets a new value and is asked again. */
@@ -64,7 +66,7 @@ export const MainnetBand = ({ onOpen }: { onOpen?: () => void }) => (
   </button>
 );
 
-const Statement = ({ onConfirm, onClose }: { onConfirm?: () => void; onClose?: () => void }) => (
+const Statement = ({ onConfirm, onClose, onBack }: { onConfirm?: () => void; onClose?: () => void; onBack?: () => void }) => (
   <div class="mainnet-gate" role="dialog" aria-modal="true" aria-labelledby="mainnet-title" tabIndex={-1}>
     <div class="mainnet-band static" aria-hidden="true">
       <span class="mainnet-band-mark">!</span>
@@ -83,7 +85,13 @@ const Statement = ({ onConfirm, onClose }: { onConfirm?: () => void; onClose?: (
           <button type="button" class="block" onClick={onConfirm}>
             {MAINNET_STATEMENT.confirm}
           </button>
-          <p class="small muted">{MAINNET_STATEMENT.once}</p>
+          {onBack === undefined ? (
+            <p class="small muted">{MAINNET_STATEMENT.once}</p>
+          ) : (
+            <button type="button" class="secondary block" onClick={onBack}>
+              {MAINNET_STATEMENT.back}
+            </button>
+          )}
         </>
       ) : (
         <button type="button" class="secondary block" onClick={onClose}>
@@ -94,19 +102,45 @@ const Statement = ({ onConfirm, onClose }: { onConfirm?: () => void; onClose?: (
   </div>
 );
 
-/** Show the statement over the page; resolves when it is confirmed, or closed where it was confirmed before. */
-const showStatement = (confirming: boolean): Promise<void> =>
+/**
+ * Show the statement over the page; resolves true when it is confirmed, or when it is closed where it was confirmed
+ * before, and false when the person goes back from choosing mainnet.
+ */
+const showStatement = (how: 'confirm' | 'close' | 'choose'): Promise<boolean> =>
   new Promise((resolve) => {
     const host = document.createElement('div');
     document.body.append(host);
-    const done = () => {
+    const done = (confirmed: boolean) => () => {
       render(null, host);
       host.remove();
-      resolve();
+      resolve(confirmed);
     };
-    render(confirming ? <Statement onConfirm={done} /> : <Statement onClose={done} />, host);
+    render(how === 'confirm' ? <Statement onConfirm={done(true)} /> : how === 'close' ? <Statement onClose={done(true)} /> : <Statement onConfirm={done(true)} onBack={done(false)} />, host);
     host.querySelector<HTMLElement>('.mainnet-gate')?.focus();
   });
+
+let askChoice: () => Promise<boolean> = () => showStatement('choose');
+/** For tests: what stands for the statement when mainnet is chosen. */
+export const setMainnetChoiceAsk = (ask: () => Promise<boolean>): void => {
+  askChoice = ask;
+};
+
+/**
+ * The statement when the person chooses mainnet on a page: every time, whatever was confirmed before. Resolves
+ * whether it was confirmed; a confirmation is also kept, so that the page loading again on mainnet does not ask
+ * a second time.
+ */
+export const confirmMainnetChoice = async (): Promise<boolean> => {
+  const confirmed = await askChoice();
+  if (confirmed) {
+    try {
+      window.localStorage.setItem(MAINNET_CONFIRMED_KEY, CONFIRMED_VALUE);
+    } catch {
+      // asked again when the page loads
+    }
+  }
+  return confirmed;
+};
 
 /** Before a page configured for mainnet does anything: the statement, confirmed once in this browser. */
 export const confirmMainnet = (): Promise<void> => {
@@ -116,8 +150,8 @@ export const confirmMainnet = (): Promise<void> => {
   } catch {
     marks = undefined;
   }
-  return mainnetGate(marks, () => showStatement(true));
+  return mainnetGate(marks, async () => void (await showStatement('confirm')));
 };
 
 /** The statement again, from the band. */
-export const showMainnetStatement = (): void => void showStatement(false);
+export const showMainnetStatement = (): void => void showStatement('close');

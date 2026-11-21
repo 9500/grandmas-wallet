@@ -60,6 +60,9 @@ case "${1:-}" in
     NETWORK="$("$NODE" -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(c.network === "mainnet" ? (c.mainnetEnabled === true ? "mainnet" : "refused") : c.network)' "$CONFIG")"
     if [ "$NETWORK" = refused ]; then echo "$CONFIG names mainnet but does not allow it (\"mainnetEnabled\": true)" >&2; exit 2; fi
     if [ "$NETWORK" = mainnet ]; then echo "MAINNET: enabled only to meet the requirements of BCH Blaze. Nothing here has been audited; coins can be lost. This project does not recommend enabling it."; fi
+    # A configuration of both networks (`networks`) offers mainnet on the pages only with the same parameter.
+    OFFERED="$("$NODE" -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(c.networks === undefined ? c.network : Object.keys(c.networks).filter((n) => n !== "mainnet" || c.mainnetEnabled === true).join(" "))' "$CONFIG")"
+    case " $OFFERED " in *" mainnet "*) [ "$NETWORK" = mainnet ] || echo "MAINNET offered on the pages beside $NETWORK: enabled only to meet the requirements of BCH Blaze. Nothing here has been audited; coins can be lost. This project does not recommend enabling it." ;; esac
     for number in 1 2; do
       launch "store$number" "$NODE" --import tsx apps/archive-store/src/cli.ts --port "$((8110 + number))" --host 127.0.0.1 \
         --directory "$STATE/store$number" --origin http://localhost:8101 --origin http://localhost:8102

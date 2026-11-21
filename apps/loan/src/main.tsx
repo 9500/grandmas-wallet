@@ -4,7 +4,7 @@ import './loan.css';
 import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { DappRequests, type RequestStage } from '@grandmas-wallet/connect';
 import { type DappCredentials, type DappLink, type LinkStatus, openDappLink } from '@grandmas-wallet/connect/wizard';
-import { type Environment, Button, Card, Frame, Loading, Vault, formatBch, loadEnvironment, plainError, useEvery } from '@grandmas-wallet/ui';
+import { type Environment, Button, Card, Frame, Loading, Vault, chooseNetwork, followWallet, formatBch, loadEnvironment, networkWords, plainError, returnToStartingNetwork, useEvery } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
@@ -230,6 +230,28 @@ const App = ({ environment }: { environment: Environment }) => {
   const [resuming, setResuming] = useState(false);
   const [chain, setChain] = useState<PageChain | undefined>();
   const [chainProblem, setChainProblem] = useState<string | undefined>();
+  const [moving, setMoving] = useState<string | undefined>();
+
+  /**
+   * The page works on the network of the wallet that connected: it changes to it where the deployment offers it,
+   * carrying the session over, and otherwise says why not. It stays off on mainnet, so it does not change to it.
+   */
+  const follow = (walletNetwork: string): string | undefined => {
+    const decision = followWallet(environment, walletNetwork, ['mainnet']);
+    if (decision.kind === 'same') return undefined;
+    if (decision.kind === 'refuse') return decision.reason;
+    setMoving(decision.network);
+    void chooseNetwork(environment, decision.network, (side) => {
+      const credentials = vault.get<DappCredentials>('credentials');
+      if (credentials !== undefined) vault.on(side).set('credentials', credentials);
+      vault.remove('credentials');
+    }).then((moved) => {
+      if (moved) return;
+      setMoving(undefined);
+      setProblem(`Your wallet is on ${networkWords(decision.network).name}; this page stays on ${networkWords(environment.network).name}.`);
+    });
+    return undefined;
+  };
 
   const start = (credentials?: DappCredentials) => {
     link.current?.close();
@@ -246,8 +268,9 @@ const App = ({ environment }: { environment: Environment }) => {
       onStatus: (next, offered) => {
         setStatus(next);
         if (next.state === 'connected' && offered !== undefined) {
-          const reason = offered.xo === undefined ? (offered.xoProblem ?? xoProblem(undefined, environment.network)) : xoProblem(offered.xo, environment.network);
-          setUsable(reason === undefined);
+          const elsewhere = offered.xo === undefined ? undefined : follow(offered.xo.network);
+          const reason = offered.xo === undefined ? (offered.xoProblem ?? xoProblem(undefined, environment.network)) : offered.xo.network !== environment.network ? elsewhere : xoProblem(offered.xo, environment.network);
+          setUsable(reason === undefined && offered.xo?.network === environment.network);
           setProblem(reason);
           setResuming(false);
         }
@@ -278,6 +301,8 @@ const App = ({ environment }: { environment: Environment }) => {
   const forget = () => {
     vault.remove('credentials');
     vault.remove('pending');
+    // A page that followed a wallet to another network goes back to the one it starts on.
+    if (returnToStartingNetwork(environment)) return;
     start();
   };
 
@@ -288,6 +313,8 @@ const App = ({ environment }: { environment: Environment }) => {
     requests.attach(current.channel);
     return new XoLoans(requests, chain, pendingStore, keyStore, pageAddress(), undefined, desk);
   }, [usable, chain, status.state === 'connected']);
+
+  if (moving !== undefined) return <Loading>Your wallet is on {networkWords(moving).name}. Changing this page to it…</Loading>;
 
   if (desk === undefined && environment.network === 'mainnet') {
     return (

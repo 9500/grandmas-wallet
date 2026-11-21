@@ -10,10 +10,14 @@
  * own starting point. It is done once in a row: if the check is stuck again right after, the page says so.
  */
 
-/** The names of the engine's header stores: those of the Electrum layer, one per chain. */
-export const isEngineHeaderStore = (name: string): boolean => name.startsWith('Electrum');
+import { isMainnetName, networkName, storageNetwork } from './network.js';
 
-/** The mark in the tab's session storage, kept across the reload. */
+/** The names of the engine's header stores: those of the Electrum layer, one per chain, of the page's network only. */
+export const isEngineHeaderStore = (name: string, mainnet = storageNetwork() === 'mainnet'): boolean => name.startsWith('Electrum') && isMainnetName(name) === mainnet;
+
+/** The mark in the tab's session storage, kept across the reload: one for each network. */
+export const headerResetMark = (): string => networkName('gw2-engine-headers');
+/** The chipnet name of the mark, as before. */
 export const HEADER_RESET_MARK = 'gw2-engine-headers';
 
 type Marks = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -24,8 +28,8 @@ type Databases = Pick<IDBFactory, 'databases' | 'deleteDatabase'>;
  * If it may, the store is marked for deletion at the next load.
  */
 export const markHeadersForReset = (marks: Marks): boolean => {
-  if (marks.getItem(HEADER_RESET_MARK) !== null) return false;
-  marks.setItem(HEADER_RESET_MARK, 'pending');
+  if (marks.getItem(headerResetMark()) !== null) return false;
+  marks.setItem(headerResetMark(), 'pending');
   return true;
 };
 
@@ -34,9 +38,9 @@ export const markHeadersForReset = (marks: Marks): boolean => {
  * The mark stays (as done) until an account opens, so that a check stuck again is not dealt with in a loop.
  */
 export const resetMarkedHeaders = async (marks: Marks, databases: Databases): Promise<string[]> => {
-  if (marks.getItem(HEADER_RESET_MARK) !== 'pending') return [];
-  marks.setItem(HEADER_RESET_MARK, 'done');
-  const names = (await databases.databases()).map((entry) => entry.name ?? '').filter(isEngineHeaderStore);
+  if (marks.getItem(headerResetMark()) !== 'pending') return [];
+  marks.setItem(headerResetMark(), 'done');
+  const names = (await databases.databases()).map((entry) => entry.name ?? '').filter((name) => isEngineHeaderStore(name));
   for (const name of names) {
     await new Promise<void>((resolve, reject) => {
       const request = databases.deleteDatabase(name);
@@ -50,4 +54,4 @@ export const resetMarkedHeaders = async (marks: Marks, databases: Databases): Pr
 };
 
 /** An account opened: a later stuck check may be dealt with again. */
-export const clearHeaderResetMark = (marks: Marks): void => marks.removeItem(HEADER_RESET_MARK);
+export const clearHeaderResetMark = (marks: Marks): void => marks.removeItem(headerResetMark());

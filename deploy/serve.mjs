@@ -54,6 +54,22 @@ const ENGINE_SERVERS = {
   mainnet: ['wss://bch.imaginary.cash:50004', 'wss://electrum.imaginary.cash:50004', 'wss://cashnode.bch.ninja:50004', 'wss://fulcrum.greyh.at:50004'],
 };
 
+/**
+ * The networks the page may run on: the configuration's one, or, where it describes more than one under
+ * `networks`, each of those it allows (mainnet only with "mainnetEnabled": true), with what differs by network
+ * taken over the shared entries.
+ */
+const described = config.networks === undefined
+  ? [config]
+  : Object.entries(config.networks)
+      .filter(([name]) => name !== 'mainnet' || config.mainnetEnabled === true)
+      .map(([name, part]) => ({ ...config, ...part, network: name }));
+if (config.networks !== undefined && !described.some((part) => part.network === config.network)) {
+  console.error(`${configPath} starts on ${config.network} but does not describe it under "networks". Not served.`);
+  process.exit(1);
+}
+const servers = [...new Set(described.flatMap((part) => [...(part.chain ?? []), ...(part.stores ?? []), ...(part.relays ?? []), ...(ENGINE_SERVERS[part.network] ?? [])]))];
+
 /** A page may only talk to the servers its configuration names. */
 const contentSecurityPolicy = [
   "default-src 'none'",
@@ -63,7 +79,7 @@ const contentSecurityPolicy = [
   // The QR code scanner reads codes in a worker made from its own code, and a picture chosen from the device.
   "worker-src blob:",
   "img-src 'self' data: blob:",
-  `connect-src 'self' ${[...config.chain, ...config.stores, ...config.relays, ...(ENGINE_SERVERS[config.network] ?? []), ...extra].join(' ')}`,
+  `connect-src 'self' ${[...servers, ...extra].join(' ')}`,
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",

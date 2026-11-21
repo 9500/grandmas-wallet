@@ -2,14 +2,14 @@ import '@grandmas-wallet/ui/styles.css';
 import './jar.css';
 
 import { DappRequests } from '@grandmas-wallet/connect';
-import { type DappCredentials, type DappLink, type LinkStatus, openDappLink } from '@grandmas-wallet/connect/wizard';
-import { type ChainConnection, type Environment, Button, Card, Frame, Loading, Vault, connectChain, formatBch, formatTime, loadEnvironment, plainError, useEvery } from '@grandmas-wallet/ui';
+import { type DappCredentials, type DappLink, type LinkStatus, type WalletOffer, openDappLink } from '@grandmas-wallet/connect/wizard';
+import { type ChainConnection, type Environment, Button, Card, Frame, Loading, Vault, chooseNetwork, connectChain, followWallet, formatBch, formatTime, loadEnvironment, networkWords, plainError, returnToStartingNetwork, useEvery } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { type JarView, networkTime } from './jar.js';
 import type { PlainChain } from './plain.js';
-import { type JarSource, type Kind, type Listing, type Progress, kindOf, plainSource, stageProgress, xoSource } from './source.js';
+import { type JarSource, type Kind, type Listing, type Progress, kindOf, plainSource, stageProgress, walletNetworkOf, xoSource } from './source.js';
 import { type ActionState, type LinkWords, ConnectCard, ConnectedCard, HowItWorks, Intro, JarList, OnItsWay, OpenJarForm, depositName, openName, withdrawName } from './view.js';
 import { type PendingRequest, type PendingStore } from './xo.js';
 
@@ -181,6 +181,30 @@ const App = ({ environment }: { environment: Environment }) => {
   const [chain, setChain] = useState<ChainConnection | undefined>();
   const [chainProblem, setChainProblem] = useState<string | undefined>();
   const [ended, setEnded] = useState<string | undefined>();
+  const [moving, setMoving] = useState<string | undefined>();
+
+  /**
+   * The page works on the network of the wallet that connected: it changes to it where the deployment offers it,
+   * carrying the session over, and otherwise says why it cannot work with the wallet.
+   */
+  const follow = (offered: WalletOffer): Kind | undefined => {
+    const walletNetwork = walletNetworkOf(offered, environment.network, environment.choice?.networks);
+    const decision = walletNetwork === undefined ? { kind: 'same' as const } : followWallet(environment, walletNetwork);
+    if (decision.kind === 'same') return kindOf(offered, environment.network);
+    if (decision.kind === 'refuse') return { kind: 'unusable', reason: decision.reason };
+    setMoving(decision.network);
+    void chooseNetwork(environment, decision.network, (side) => {
+      const credentials = vault.get<DappCredentials>('credentials');
+      if (credentials !== undefined) vault.on(side).set('credentials', credentials);
+      vault.remove('credentials');
+    }).then((moved) => {
+      if (moved) return;
+      setMoving(undefined);
+      const here = networkWords(environment.network).name;
+      setKind({ kind: 'unusable', reason: `Your wallet is on ${networkWords(decision.network).name}; this page stays on ${here}. Switch the wallet to ${here} and connect again.` });
+    });
+    return undefined;
+  };
 
   const start = (credentials?: DappCredentials) => {
     link.current?.close();
@@ -197,7 +221,7 @@ const App = ({ environment }: { environment: Environment }) => {
       onStatus: (next, offered) => {
         setStatus(next);
         if (next.state === 'connected' && offered !== undefined) {
-          setKind(kindOf(offered, environment.network));
+          setKind(follow(offered));
           setResuming(false);
           setEnded(undefined);
         }
@@ -227,6 +251,8 @@ const App = ({ environment }: { environment: Environment }) => {
   const forget = () => {
     vault.remove('credentials');
     vault.remove('pending');
+    // A page that followed a wallet to another network goes back to the one it starts on.
+    if (returnToStartingNetwork(environment)) return;
     start();
   };
 
@@ -241,6 +267,8 @@ const App = ({ environment }: { environment: Environment }) => {
     if (kind.kind === 'plain' && chain !== undefined) return plainSource(chainOf(chain), kind.paths, (request) => current.sign(request));
     return undefined;
   }, [kind, chain, status.state === 'connected']);
+
+  if (moving !== undefined) return <Loading>Your wallet is on {networkWords(moving).name}. Changing this page to it…</Loading>;
 
   if (status.state === 'connected' && kind !== undefined && kind.kind !== 'unusable') {
     if (source !== undefined) return <Jars environment={environment} source={source} peerName={status.peerName ?? 'your wallet'} chain={chain} onDisconnect={forget} />;

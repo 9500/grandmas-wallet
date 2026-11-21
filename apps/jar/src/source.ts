@@ -38,6 +38,21 @@ export const kindOf = (offer: WalletOffer, network: string): Kind => {
   }
 };
 
+/**
+ * The network of the wallet that connected: the one its XO offer names, or the one its addresses are for (a test
+ * network being the page's own, or the deployment's other one when the page is on mainnet). `undefined` where it
+ * cannot be told.
+ */
+export const walletNetworkOf = (offer: WalletOffer, network: string, offered: string[] = [network]): string | undefined => {
+  if (offer.xo !== undefined) return offer.xo.network;
+  try {
+    if (networkOf(readPaths(offer.paths)) === 'mainnet') return 'mainnet';
+    return network !== 'mainnet' ? network : offered.find((other) => other !== 'mainnet');
+  } catch {
+    return undefined;
+  }
+};
+
 /** How far an action has come, for the person waiting. */
 export interface Progress {
   text: string;

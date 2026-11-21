@@ -62,7 +62,7 @@ const Root = () => {
   const mode = modeOf();
   if (mode === undefined) {
     return (
-      <Frame brand={BRAND} role="Grandma's Wallet" environment={session.environment}>
+      <Frame brand={BRAND} role="Grandma's Wallet" environment={session.environment} networkChoice>
         <Start onDone={() => setVersion(version + 1)} />
       </Frame>
     );
@@ -79,7 +79,7 @@ const Root = () => {
   ];
   const changed = () => setVersion(version + 1);
   return (
-    <Frame brand={BRAND} role="Grandma's Wallet" environment={session.environment} nav={nav} current={looked === undefined ? route : 'wallets'} onNavigate={(next) => {
+    <Frame brand={BRAND} role="Grandma's Wallet" environment={session.environment} networkChoice nav={nav} current={looked === undefined ? route : 'wallets'} onNavigate={(next) => {
       if (looked !== undefined) {
         // Another section closes the open wallet; the page loads again without its account.
         openWalletPage(undefined, next === 'wallets' ? '/' : `/${next}`);
