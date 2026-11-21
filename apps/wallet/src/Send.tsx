@@ -1,5 +1,5 @@
 import type { EverythingQuote, HeldToken, PaymentQuote, RecordedPosition, SendableToken, SentEverything, TokenSendQuote, TokenSendRequest } from '@grandmas-wallet/app';
-import { TokenSendError, parseUnits, sendableTokens } from '@grandmas-wallet/app';
+import { type ShownRegistry, TokenSendError, formatUnits, parseUnits, sendableTokens } from '@grandmas-wallet/app';
 import { encodeLockingBytecodeP2sh32 } from '@bitauth/libauth';
 import { InsufficientFundsError } from '@grandmas-wallet/core';
 import {
@@ -29,7 +29,7 @@ import {
   useTask,
 } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useContext, useEffect, useMemo, useState } from 'preact/hooks';
 
 import { Hex } from './ActionReview.js';
 import type { Owner } from './OwnerApp.js';
@@ -37,7 +37,7 @@ import { paymentAddress, tokenAddress } from './scan.js';
 import { WithScan } from './Scanner.js';
 import { takeChosenToken } from './token-choice.js';
 import { CAPABILITY_WORDS, stakeHeadline, tokenStake } from './token-stake.js';
-import { TokenAmount, rawUnits } from './token-words.js';
+import { IssuerClaim, TokenAmount, TokenNames, rawUnits, shortName, tokenUnits } from './token-words.js';
 import './send.css';
 
 type Stage =
@@ -381,28 +381,29 @@ const FeeName = ({ detail }: { detail: string }) => <Named name="Network fee" la
 
 type TokenStage =
   | { at: 'form' }
-  | { at: 'review'; token: SendableToken; request: TokenSendRequest; to: string; quote: TokenSendQuote }
-  | { at: 'sent'; token: SendableToken; to: string; quote: TokenSendQuote; transactionId: string; fee: bigint; bytes: number };
+  | { at: 'review'; token: SendableToken; request: TokenSendRequest; to: string; quote: TokenSendQuote; names?: ShownRegistry }
+  | { at: 'sent'; token: SendableToken; to: string; quote: TokenSendQuote; transactionId: string; fee: bigint; bytes: number; names?: ShownRegistry };
 
 /**
  * What a token is called on this screen: an NFT that a record ties to a template the user trusts, by the template's
- * name for it and the template's name; otherwise what the wallet can say. Fungible tokens are shown by their category.
+ * name for it and the template's name; otherwise what the wallet can say. Fungible tokens are shown by their category, or by
+ * the issuer's name where the token's registry is known.
  */
-export const tokenLabel = (token: SendableToken): string => {
-  if (token.kind === 'fungible') return 'Fungible tokens';
+export const tokenLabel = (token: SendableToken, names?: ShownRegistry): string => {
+  if (token.kind === 'fungible') return names === undefined ? 'Fungible tokens' : shortName(names);
   const held = token.token;
   if (held.meaning === 'position' && held.tokenName !== undefined && held.template !== undefined) return `${held.tokenName} · ${held.template.name}`;
   // Where no record ties it to a template, a note of the second design may still name one.
   if (held.template !== undefined) return `A token of "${held.template.name}"`;
-  return 'An NFT of unknown meaning';
+  return held.registry === undefined ? 'An NFT of unknown meaning' : shortName(held.registry);
 };
 
 /** A line under a token's label: how much there is, or what the NFT is, and what its position holds. */
-const TokenDetail = ({ token, position }: { token: SendableToken; position: RecordedPosition | undefined }) => {
+const TokenDetail = ({ token, position, names }: { token: SendableToken; position: RecordedPosition | undefined; names?: ShownRegistry | undefined }) => {
   if (token.kind === 'fungible') {
     return (
       <>
-        <TokenAmount amount={token.amount} />
+        <TokenAmount amount={token.amount} names={names} />
         {token.coins > 1 && ` in ${token.coins} coins`} · <Hex value={token.category} head={6} tail={4} />
       </>
     );
@@ -420,7 +421,7 @@ const TokenDetail = ({ token, position }: { token: SendableToken; position: Reco
       {held.amount > 0n && (
         <>
           {' '}
-          · with <TokenAmount amount={held.amount} />
+          · with <TokenAmount amount={held.amount} names={held.registry} />
         </>
       )}
       {position?.status === 'open' && position.satoshis !== undefined && (
@@ -458,6 +459,11 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
   const [understood, setUnderstood] = useState(false);
   const task = useTask();
   const network = owner.session.network;
+  const namesOf = useContext(TokenNames);
+  /** The issuer's words for a token, where its registry is known: a fungible token's by its category; an NFT's as the list gives them. */
+  const namesFor = (entry: SendableToken): ShownRegistry | undefined => (entry.kind === 'fungible' ? namesOf(entry.category) : entry.token.registry);
+  const names = token === undefined ? undefined : namesFor(token);
+  const decimals = token?.kind === 'fungible' ? (names?.decimals ?? 0) : 0;
 
   const pick = (next: string) => {
     setKey(next);
@@ -479,16 +485,17 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
         if (error instanceof PlainAddressError) setPlain(true);
         else found.to = (error as Error).message;
       }
-      // Raw units: no template gives tokens decimals.
-      const units = token.kind === 'fungible' ? parseUnits(amount, 0) : 0n;
+      // In the token's units where its registry is known, else raw units; nothing is rounded.
+      const units = token.kind === 'fungible' ? parseUnits(amount, decimals) : 0n;
       if (typeof units === 'string') found.amount = units;
-      else if (token.kind === 'fungible' && units > token.amount) found.amount = `The wallet can send ${rawUnits(token.amount)} of these tokens now.`;
+      else if (token.kind === 'fungible' && units > token.amount) found.amount = `The wallet can send ${tokenUnits(token.amount, names)} of these tokens now.`;
       setErrors(found);
       if (locking === undefined || typeof units === 'string' || found.amount !== undefined) return;
       const request: TokenSendRequest = token.kind === 'fungible' ? { kind: 'fungible', category: token.category, amount: units, to: locking } : { kind: 'nft', outpoint: token.token.outpoint, to: locking };
       try {
         setUnderstood(false);
-        setStage({ at: 'review', token, request, to: to.trim(), quote: await owner.wallet.quoteTokens(request) });
+        // The names are those known now: the review does not change while it is open.
+        setStage({ at: 'review', token, request, to: to.trim(), quote: await owner.wallet.quoteTokens(request), ...(names === undefined ? {} : { names }) });
         window.scrollTo(0, 0);
       } catch (error) {
         if (error instanceof InsufficientFundsError) {
@@ -520,9 +527,9 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
       if (stage.at !== 'review') return;
       progress('Signing and sending');
       const sent = await owner.wallet.sendTokens(stage.request);
-      const what = stage.token.kind === 'fungible' ? rawUnits(stage.quote.sends.amount) : tokenLabel(stage.token);
+      const what = stage.token.kind === 'fungible' ? tokenUnits(stage.quote.sends.amount, stage.names) : tokenLabel(stage.token);
       owner.sent(`Sent ${what} to ${shorten(stage.to.replace(/^[a-z]+:/, ''), 10, 6)}`, sent);
-      setStage({ at: 'sent', token: stage.token, to: stage.to, quote: sent.quote, transactionId: sent.transactionId, fee: sent.feeSatoshis, bytes: sent.bytes });
+      setStage({ at: 'sent', token: stage.token, to: stage.to, quote: sent.quote, transactionId: sent.transactionId, fee: sent.feeSatoshis, bytes: sent.bytes, ...(stage.names === undefined ? {} : { names: stage.names }) });
     });
 
   const move = (where: 'vault' | 'earlier') =>
@@ -553,8 +560,8 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
               <span class="field-label">Token</span>
               <div class="token-picker" role="radiogroup" aria-label="Token">
                 {sendable.map((entry) => (
-                  <Choice type="radio" name="token" checked={entry.key === token.key} onChange={() => pick(entry.key)} title={tokenLabel(entry)}>
-                    <TokenDetail token={entry} position={positionOf(entry)} />
+                  <Choice type="radio" name="token" checked={entry.key === token.key} onChange={() => pick(entry.key)} title={tokenLabel(entry, namesFor(entry))}>
+                    <TokenDetail token={entry} position={positionOf(entry)} names={namesFor(entry)} />
                   </Choice>
                 ))}
               </div>
@@ -591,17 +598,17 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
                 {token.kind === 'fungible' && (
                   <div class="field">
                     <div class="field-head">
-                      <InfoLabel htmlFor="token-amount" label="About this token's units" info={<TokenAmountInfo token={token} />}>
+                      <InfoLabel htmlFor="token-amount" label="About this token's units" info={<TokenAmountInfo token={token} names={names} />}>
                         Amount
                       </InfoLabel>
-                      <Available>{rawUnits(token.amount)}</Available>
+                      <Available>{tokenUnits(token.amount, names)}</Available>
                     </div>
                     <div class="amount-row">
                       <div class="input-unit token-unit">
-                        <TextInput id="token-amount" numeric value={amount} onInput={setAmount} placeholder="0" invalid={errors.amount !== undefined} />
-                        <span>units</span>
+                        <TextInput id="token-amount" numeric value={amount} onInput={setAmount} placeholder={decimals === 0 ? '0' : `0.${'0'.repeat(decimals)}`} invalid={errors.amount !== undefined} />
+                        <span>{names?.symbol ?? 'units'}</span>
                       </div>
-                      <Button kind="quiet" small onClick={() => setAmount(token.amount.toString())}>
+                      <Button kind="quiet" small onClick={() => setAmount(decimals === 0 ? token.amount.toString() : formatUnits(token.amount, decimals).replace(/,/g, ''))}>
                         Max
                       </Button>
                     </div>
@@ -669,7 +676,7 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
           <Card title="Sent" tone="good">
             <KeyValues
               entries={[
-                ['Sent', <SentTokens token={stage.token} quote={stage.quote} />],
+                ['Sent', <SentTokens token={stage.token} quote={stage.quote} names={stage.names} />],
                 [<>Network fee<small>{stage.bytes} bytes</small></>, <Sat satoshis={stage.fee} />],
               ]}
             />
@@ -701,27 +708,36 @@ const TokenSend = ({ owner, chosen }: { owner: Owner; chosen?: string }) => {
 type Fungible = Extract<SendableToken, { kind: 'fungible' }>;
 
 /** Behind the amount's "?": the token's units, and what is not yet available. */
-const TokenAmountInfo = ({ token }: { token: Fungible }) => {
+const TokenAmountInfo = ({ token, names }: { token: Fungible; names: ShownRegistry | undefined }) => {
   const elsewhere = token.vault + token.earlier;
   return (
     <>
-      <span>In whole units, up to {rawUnits(token.amount)}.</span>
-      {elsewhere > 0n && <span>{rawUnits(elsewhere)} more {token.vault > 0n ? 'at vault addresses' : 'at addresses of an earlier phone'} {token.vault > 0n && token.earlier > 0n ? 'and elsewhere ' : ''}are moved to an ordinary address before they can be sent.</span>}
-      {token.withNfts > 0n && <span>{rawUnits(token.withNfts)} more are on coins with an NFT, and move only with it.</span>}
+      {names === undefined ? (
+        <span>In whole units, up to {rawUnits(token.amount)}.</span>
+      ) : (
+        <>
+          <span>
+            In {names.symbol}, with {names.decimals === 1 ? 'one decimal' : `${names.decimals} decimals`}, up to {tokenUnits(token.amount, names)}: {rawUnits(token.amount)}.
+          </span>
+          <span>The token's issuer chose the name and the decimals and published them on the chain. The wallet checked that they are what the issuer published, not that they are true.</span>
+        </>
+      )}
+      {elsewhere > 0n && <span>{tokenUnits(elsewhere, names)} more {token.vault > 0n ? 'at vault addresses' : 'at addresses of an earlier phone'} {token.vault > 0n && token.earlier > 0n ? 'and elsewhere ' : ''}are moved to an ordinary address before they can be sent.</span>}
+      {token.withNfts > 0n && <span>{tokenUnits(token.withNfts, names)} more are on coins with an NFT, and move only with it.</span>}
     </>
   );
 };
 
 /** What goes, in words. */
-const SentTokens = ({ token, quote }: { token: SendableToken; quote: TokenSendQuote }) => {
-  if (token.kind === 'fungible') return <TokenAmount amount={quote.sends.amount} />;
+const SentTokens = ({ token, quote, names }: { token: SendableToken; quote: TokenSendQuote; names?: ShownRegistry | undefined }) => {
+  if (token.kind === 'fungible') return <TokenAmount amount={quote.sends.amount} names={names} />;
   return (
     <span class="token-sent">
       {tokenLabel(token)}
       {quote.sends.amount > 0n && (
         <>
           {', with '}
-          <TokenAmount amount={quote.sends.amount} />
+          <TokenAmount amount={quote.sends.amount} names={token.token.registry} />
         </>
       )}
     </span>
@@ -729,7 +745,7 @@ const SentTokens = ({ token, quote }: { token: SendableToken; quote: TokenSendQu
 };
 
 const TokenReview = ({ stage }: { stage: Extract<TokenStage, { at: 'review' }> }) => {
-  const { quote, token } = stage;
+  const { quote, token, names } = stage;
   const rows: [ComponentChildren, ComponentChildren][] = [
     [
       <>
@@ -747,7 +763,13 @@ const TokenReview = ({ stage }: { stage: Extract<TokenStage, { at: 'review' }> }
         </small>
       </>,
       <strong>
-        <SentTokens token={token} quote={quote} />
+        <SentTokens token={token} quote={quote} names={names} />
+        {names !== undefined && token.kind === 'fungible' && (
+          <>
+            {' '}
+            <IssuerClaim names={names} amount={quote.sends.amount} category={token.category} />
+          </>
+        )}
       </strong>,
     ],
     ['To', <span class="mono">{shorten(stage.to, 16, 8)}</span>],
@@ -755,7 +777,7 @@ const TokenReview = ({ stage }: { stage: Extract<TokenStage, { at: 'review' }> }
   if (quote.tokenChange !== undefined) {
     rows.push([
       <Named name="Comes back as token change" label="Where the rest goes" detail="To a new change address of this wallet." />,
-      <TokenAmount amount={quote.tokenChange.amount} />,
+      <TokenAmount amount={quote.tokenChange.amount} names={names} />,
     ]);
   }
   rows.push([<Named name="Bitcoin Cash with the token" label="About the Bitcoin Cash with the token" detail="The least an output with a token may hold; it goes to the receiver." />, <Sat satoshis={quote.sends.satoshis} />]);
@@ -763,8 +785,8 @@ const TokenReview = ({ stage }: { stage: Extract<TokenStage, { at: 'review' }> }
   rows.push([<Named name={<strong>Leaves the wallet</strong>} label="About what leaves the wallet" detail="In Bitcoin Cash: the fee and what goes with the token." />, <strong><Amount satoshis={quote.leavesSatoshis} exact /></strong>]);
   return (
     <div class="stack-s">
-      <Hero label="You send" to={stage.to} unit={token.kind === 'fungible' ? (quote.sends.amount === 1n ? 'unit' : 'units') : ''}>
-        {token.kind === 'fungible' ? quote.sends.amount.toLocaleString('en-US') : tokenLabel(token)}
+      <Hero label="You send" to={stage.to} unit={token.kind === 'fungible' ? (names?.symbol ?? (quote.sends.amount === 1n ? 'unit' : 'units')) : ''}>
+        {token.kind === 'fungible' ? formatUnits(quote.sends.amount, names?.decimals ?? 0) : tokenLabel(token)}
       </Hero>
       <KeyValues entries={rows} />
       {token.kind === 'nft' && token.token.meaning === 'unknown' && token.token.capability === 'none' && <p class="small muted">Nothing here says what this token stands for. It goes whole, as it is.</p>}

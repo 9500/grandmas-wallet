@@ -13,9 +13,9 @@ import type { Owner } from './OwnerApp.js';
 import { CONNECTION_ADDRESS } from './scan.js';
 import { CameraIcon, ScanDialog } from './Scanner.js';
 import { chooseToken } from './token-choice.js';
-import { tokenTitle } from './token-stake.js';
+import { titledByRegistry, tokenTitle } from './token-stake.js';
 import { type Connection, keep, kept } from './session.js';
-import { TokenAmount } from './token-words.js';
+import { IssuerClaim, TokenAmount } from './token-words.js';
 import './apps.css';
 
 /**
@@ -831,12 +831,14 @@ const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void 
   const [recorded, setRecorded] = useState<RecordedPosition[]>([]);
   const task = useTask();
   const count = owner.balance?.tokens.length;
-  const read = () =>
+  const read = (again = false) =>
     task.run('read', async () => {
       // Positions from the wallet's records, each checked against the chain, and every token the wallet holds.
       const [held, positions] = await Promise.all([apps.applications.tokens(), apps.applications.recordedPositions()]);
       setRecorded(positions);
       setTokens(held);
+      // Each category's registry is looked at once while the page is open, and again on "Read again"; the list never waits for it.
+      void apps.registries.refresh(held.map((token) => token.category), again);
     });
   useEffect(() => {
     void read();
@@ -851,7 +853,7 @@ const Tokens = ({ owner, onView }: { owner: Owner; onView: (view: View) => void 
         info="Tokens this wallet holds, with what each controls where a template you trust says so. Every token is kept and moves with the wallet in a recovery, whether or not its meaning is known."
         aside={
           tokens !== undefined && tokens.length > 0 && (
-            <Button small kind="quiet" task={task} name="read" onClick={() => void read()}>
+            <Button small kind="quiet" task={task} name="read" onClick={() => void read(true)}>
               Read again
             </Button>
           )
@@ -1034,9 +1036,15 @@ export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldTo
           <div class="token-title">
             {title}
             {of !== undefined && <span class="token-of"> · {of}</span>}
+            {titledByRegistry(token) && token.registry !== undefined && (
+              <>
+                {' '}
+                <IssuerClaim names={token.registry} amount={token.amount} category={token.category} />
+              </>
+            )}
           </div>
           <div class="small muted token-id">
-            {token.capability === undefined ? <TokenAmount amount={token.amount} /> : token.capability === 'none' ? 'NFT' : `NFT, ${token.capability}`} · <Hex value={token.category} />
+            {token.capability === undefined ? <TokenAmount amount={token.amount} names={token.registry} /> : token.capability === 'none' ? 'NFT' : `NFT, ${token.capability}`} · <Hex value={token.category} />
             {token.commitment !== '' && (
               <>
                 {' '}
@@ -1046,7 +1054,7 @@ export const TokenRow = ({ owner, token, onView }: { owner: Owner; token: HeldTo
             {token.capability !== undefined && token.amount > 0n && (
               <>
                 {' '}
-                · with <TokenAmount amount={token.amount} />
+                · with <TokenAmount amount={token.amount} names={token.registry} />
               </>
             )}
           </div>

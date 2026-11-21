@@ -1,5 +1,6 @@
 import {
   type Output,
+  type TransactionCommon,
   binToHex,
   decodeTransactionBch,
   encodeTransactionBch,
@@ -154,6 +155,33 @@ export class SimulatedChain implements ChainReader {
     const transactionId = binToHex(hashTransactionUiOrder(new TextEncoder().encode(`elsewhere ${this.elsewhere} ${outpoints.join()}`)));
     this.adopt(entries.map(({ output }, index) => ({ transactionId, index, output })));
     return outpoints.map((_, index) => `${transactionId}:${index}`);
+  }
+
+  /**
+   * Take in a transaction of someone else's as it is, without checking its scripts or its tokens: the coins it spends
+   * that are unspent here are spent, and its outputs are made. For transactions whose signatures do not matter to a
+   * test, such as a token issuer's. Returns its identifier.
+   */
+  include(transaction: TransactionCommon): string {
+    const encoded = encodeTransactionBch(transaction);
+    const transactionId = binToHex(hashTransactionUiOrder(encoded));
+    const spent: { outpoint: string; entry: { output: Output; createdMs: number } }[] = [];
+    for (const input of transaction.inputs) {
+      const outpoint = `${binToHex(input.outpointTransactionHash)}:${input.outpointIndex}`;
+      const entry = this.unspent.get(outpoint);
+      if (entry === undefined) continue;
+      spent.push({ outpoint, entry });
+      this.unspent.delete(outpoint);
+      this.remember(entry.output.lockingBytecode, transactionId);
+    }
+    this.spentBy.set(transactionId, spent);
+    transaction.outputs.forEach((output, index) => {
+      this.unspent.set(`${transactionId}:${index}`, { output, createdMs: this.nowMs });
+      this.remember(output.lockingBytecode, transactionId);
+    });
+    this.transactions.set(transactionId, binToHex(encoded));
+    this.record(transactionId);
+    return transactionId;
   }
 
   balanceOf(lockingBytecode: Uint8Array): bigint {

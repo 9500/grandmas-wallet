@@ -1,5 +1,7 @@
 import type { HeldToken, RecordedPosition } from '@grandmas-wallet/app';
 
+import { shortName } from './token-words.js';
+
 /**
  * What goes with an NFT when it is sent, from what the wallet knows by itself: the record that ties it to a position,
  * the template's names, and for a position at a script of its own what that script holds on chain now (proposal
@@ -32,9 +34,14 @@ export interface TokenStake {
 /**
  * What a token is called in the wallet's list (proposal section 17): an NFT that a record ties to a position by the
  * template's name for it, or the template's name; a token that no record ties to anything by the name of the template
- * a note of the second design gives for it, where the note gives one; otherwise as a token of unknown meaning.
+ * a note of the second design gives for it, where the note gives one; then by the issuer's name from the token's registry,
+ * where one is known; otherwise as a token of unknown meaning.
  */
-export const tokenTitle = (token: HeldToken): string => (token.meaning === 'unknown' ? (token.template?.name ?? 'A token of unknown meaning') : (token.tokenName ?? token.template?.name ?? 'A token'));
+export const tokenTitle = (token: HeldToken): string =>
+  token.meaning === 'unknown' ? (token.template?.name ?? (token.registry === undefined ? 'A token of unknown meaning' : shortName(token.registry))) : (token.tokenName ?? token.template?.name ?? 'A token');
+
+/** Whether the title is the issuer's name for the token, from its registry: it then has the issuer's "?" beside it. */
+export const titledByRegistry = (token: HeldToken): boolean => token.meaning === 'unknown' && token.template === undefined && token.registry !== undefined;
 
 /**
  * What sending this NFT gives away.

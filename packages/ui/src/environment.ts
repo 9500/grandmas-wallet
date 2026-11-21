@@ -1,4 +1,4 @@
-import type { AppChain } from '@grandmas-wallet/app';
+import type { AppChain, RegistriesConfig } from '@grandmas-wallet/app';
 import { linkKind } from '@grandmas-wallet/app/links';
 import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { ChainPool } from '@grandmas-wallet/chipnet/pool';
@@ -30,6 +30,8 @@ export interface Environment {
    * file a page is served with carries it; nothing on the page turns it on.
    */
   mainnetEnabled?: boolean;
+  /** Token names from registries checked against the chain (`chain`), or none (`off`, or no entry). */
+  registries?: RegistriesConfig;
 }
 
 /** A configuration for mainnet that does not carry the parameter allowing it. */

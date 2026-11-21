@@ -4,6 +4,7 @@ import './set-up.css';
 
 import { type Output, binToHex, encodeLockingBytecodeP2sh32 as p2sh32, generateBip39Mnemonic, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
 import {
+  type ShownRegistry,
   type ActionFinding,
   type ActionPreview,
   type ApplicationAction,
@@ -28,6 +29,7 @@ import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
 import { ActionReview } from './ActionReview.js';
+import { TokenNames } from './token-words.js';
 import { Apps, TokenListView } from './Apps.js';
 import { Receive } from './Receive.js';
 import { Backup, Recovery } from './Recovery.js';
@@ -63,7 +65,7 @@ import { Welcome } from './Welcome.js';
  */
 
 const CATEGORY = '5c1d8c7d635141a15d9d41747ebe30422ca50237c41c54c45714d09114439382';
-const UNITS = 'e7979ccdae259293c7d0bee45ce8b7ad7660ea99477f802ed6a5161b0d30e6b8';
+const UNITS = '5d0c1e7a92b4f6038ce1a7d29b40f5e6c3a8172d9e04b6f1a35c8e27d1f09b4a';
 /** What the wallet found about each action of a template: here, that what it leaves comes back. */
 const comesBack = (actions: TemplateSummary['actions']): ActionFinding[] => actions.map(({ action, name }) => ({ action, role: 'holder', name, finding: 'comes back', outputs: [] }));
 const lendingActions: TemplateSummary['actions'] = [
@@ -94,7 +96,18 @@ const open: HeldToken = {
   template: { identifier: template.identifier, name: template.name },
   tokenName: 'Example key',
 };
-const unknown: HeldToken = { category: UNITS, commitment: '', amount: 10_000n, place: 'address', outpoint: `${'c53e3c4bc0de782ba4791fa3c0b80fad8c650b525160d4ff1b475e5129cea3b1'}:6`, satoshis: 1_000n, meaning: 'unknown' };
+/**
+ * With `&registry`, the fungible tokens have registries checked against the chain, as the wallet keeps them: invented
+ * names, symbols and decimals, written here as an issuer would publish them.
+ */
+const REGISTRIES: Record<string, ShownRegistry> = new URLSearchParams(window.location.search).has('registry')
+  ? {
+      [UNITS]: { name: 'Sample Cents of a Long Issuer Name', symbol: 'SCENT', decimals: 2 },
+      a1d53bd8fa94e1c3a42e6d5c3e6d0b0a6b9f0e2c5d17c8f9e3b1a20475c6d8e9: { name: 'Garden Credits', symbol: 'GARDEN', decimals: 3 },
+    }
+  : {};
+const withRegistry = (token: HeldToken): HeldToken => (REGISTRIES[token.category] === undefined ? token : { ...token, registry: REGISTRIES[token.category] as ShownRegistry });
+const unknown: HeldToken = withRegistry({ category: UNITS, commitment: '', amount: 10_000n, place: 'address', outpoint: `${'c53e3c4bc0de782ba4791fa3c0b80fad8c650b525160d4ff1b475e5129cea3b1'}:6`, satoshis: 1_000n, meaning: 'unknown' });
 
 const borrowing: ActionPreview = {
   template,
@@ -343,7 +356,7 @@ const SetUpFixture = ({ kind }: { kind: 'bank' | 'friend' }) => {
 // ------------------------------------------------------------------ sending and receiving tokens
 
 const DOLLARS = 'a1d53bd8fa94e1c3a42e6d5c3e6d0b0a6b9f0e2c5d17c8f9e3b1a20475c6d8e9';
-const dollars: HeldToken = { category: DOLLARS, commitment: '', amount: 25_000n, place: 'address', outpoint: `${'7b'.repeat(32)}:1`, satoshis: 1_000n, meaning: 'unknown' };
+const dollars: HeldToken = withRegistry({ category: DOLLARS, commitment: '', amount: 25_000n, place: 'address', outpoint: `${'7b'.repeat(32)}:1`, satoshis: 1_000n, meaning: 'unknown' });
 /** A key whose position sits at a script many users share: its record names no script, and the application's page. */
 const SEND_TICKET = 'd7'.repeat(32);
 const ticket: HeldToken = { category: SEND_TICKET, commitment: '', capability: 'minting', amount: 0n, place: 'address', outpoint: `${'d8'.repeat(32)}:0`, satoshis: 1_000n, meaning: 'position', template: { identifier: 'b6'.repeat(32), name: 'Example cloakroom (test network)' }, tokenName: 'Ticket' };
@@ -802,6 +815,7 @@ const navigation =
       };
 
 render(
+  <TokenNames.Provider value={(category) => REGISTRIES[category]}>
   <Frame brand="Grandma's Wallet" role="Fixtures" environment={FIXTURE_ENVIRONMENT} {...navigation}>
     <div class="stack">
       {show === 'send-token' ? (
@@ -852,6 +866,7 @@ render(
         </div>
       )}
     </div>
-  </Frame>,
+  </Frame>
+  </TokenNames.Provider>,
   document.getElementById('app') as HTMLElement,
 );

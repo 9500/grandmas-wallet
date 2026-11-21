@@ -1,5 +1,5 @@
 import { hexToBin } from '@bitauth/libauth';
-import { type ActionConsent, type ActionOutcome, type ApplicationAction, type OwnerWallet, Applications, applicationArchive, applicationConnector, walletAnnouncement } from '@grandmas-wallet/app';
+import { type ActionConsent, type ActionOutcome, type ApplicationAction, type OwnerWallet, type ShownRegistry, Applications, TokenRegistries, applicationArchive, applicationConnector, httpRegistryFetch, shownRegistry, walletAnnouncement } from '@grandmas-wallet/app';
 import type { Offer, Proposal, WalletConnector } from '@grandmas-wallet/connect';
 import { type LinkStatus, type WalletLink, newLinkKey, openWalletLink, pairingOf } from '@grandmas-wallet/connect/wizard';
 import type { SeedKeys } from '@grandmas-wallet/core';
@@ -113,6 +113,10 @@ export interface ApplicationsPart {
   end(pairing: string): void;
   /** Close a connection and open it again with the same key. */
   retry(pairing: string): void;
+  /** Token names, symbols and decimals from registries checked against the chain; the screens only write them. */
+  registries: TokenRegistries;
+  /** What the screens write for a category, as kept now; never waits. */
+  names: (category: string, commitment?: string) => ShownRegistry | undefined;
   /** Changes whenever the templates, the tokens or the ledger may have changed. */
   version: number;
   changed(): void;
@@ -132,8 +136,27 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
   const sent = useRef(onSent);
   sent.current = onSent;
 
+  const registries = useMemo(
+    () =>
+      new TokenRegistries({
+        chain: session.chain,
+        fetch: httpRegistryFetch,
+        kept: () => kept('registries'),
+        store: (state) => keep('registries', state),
+        ...(session.environment.registries === undefined ? {} : { config: session.environment.registries }),
+      }),
+    [],
+  );
+  useEffect(() => {
+    const stop = registries.watch(changed);
+    // On opening the wallet: each held category is looked at once.
+    void applications.tokens().then((held) => registries.refresh(held.map((token) => token.category)), () => undefined);
+    return stop;
+  }, []);
+
   const applications = useMemo(() => {
     const made = new PageApplications(wallet.parts, {
+      registry: (category) => registries.known(category),
       archive: applicationArchive({
         arrangement: () => kept('arrangement'),
         storeAt: session.storeAt,
@@ -222,6 +245,8 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
 
   return {
     applications,
+    registries,
+    names: (category, commitment) => shownRegistry(registries.known(category), commitment),
     connector,
     connections,
     statuses,

@@ -1,4 +1,4 @@
-import { binToHex } from '@bitauth/libauth';
+import { binToHex, sha256, utf8ToBin } from '@bitauth/libauth';
 import { type BuiltTransaction, type KeyPair, type Utxo, buildTransaction, p2pkhInput, p2pkhLockingBytecode } from '@grandmas-wallet/core';
 
 import { type ParyonContracts, type ParyonDeployment, paryonContracts } from './deployment.js';
@@ -44,7 +44,35 @@ export interface LocalDeploymentParameters {
   /** PUSD cents each Borrowing thread can lend. */
   supply?: bigint;
   threads?: number;
+  /**
+   * A token registry to publish for PUSD on the transaction that makes its first outputs, a link of PUSD's authchain:
+   * the file, and the address it can be had at. As an issuer publishes one; wallets that read registries show PUSD by it.
+   */
+  registry?: { file: Uint8Array; uri: string };
 }
+
+/** A registry file (Bitcoin Cash Metadata Registries) for the local deployment's PUSD, as Paryon's chipnet one is written. */
+export const localRegistry = (category: string): Uint8Array =>
+  utf8ToBin(
+    JSON.stringify(
+      {
+        $schema: 'https://cashtokens.org/bcmr-v2.schema.json',
+        version: { major: 1, minor: 0, patch: 0 },
+        latestRevision: '2026-01-01T00:00:00.000Z',
+        registryIdentity: { name: 'ParyonUSD (local)', description: 'A deployment of Paryon\'s contracts on a local test chain.' },
+        identities: { [category]: { '2026-01-01T00:00:00.000Z': { name: 'ParyonUSD (local)', description: 'PUSD on a local test chain.', token: { category, symbol: 'PUSDLOCAL', decimals: 2 } } } },
+      },
+      null,
+      2,
+    ),
+  );
+
+/** The output that publishes a registry: OP_RETURN, `BCMR`, the file's SHA-256 and its address. */
+const publicationOutput = (registry: { file: Uint8Array; uri: string }): Utxo['output'] => {
+  const uri = utf8ToBin(registry.uri);
+  if (uri.length > 75) throw new Error('The registry\'s address is too long for this output.');
+  return { lockingBytecode: Uint8Array.of(0x6a, 0x04, 0x42, 0x43, 0x4d, 0x52, 0x20, ...sha256.hash(registry.file), uri.length, ...uri), valueSatoshis: 0n };
+};
 
 /** Any valid public key will do: nobody updates the price here. */
 const ORACLE_KEY = '02d09db08af1ff4e8453919cc866a4be427d7bfe18f2c05e5444c196fcf6fd2818';
@@ -85,6 +113,7 @@ export const localDeployment = (parameters: LocalDeploymentParameters): LocalDep
         thread(contracts.price.lockingBytecode, { category: P, amount: 0n, nft: { capability: 'mutable', commitment: Uint8Array.of(0x00, ...paddedNumber(BigInt(1_000 + index), 4), ...paddedNumber(parameters.price, 4)) } }),
       ),
       ...Array.from({ length: threads }, () => thread(contracts.manage.lockingBytecode, { category: P, amount: 0n, nft: { capability: 'none', commitment: MANAGE_FUNCTION_COMMITMENT } })),
+      ...(parameters.registry === undefined ? [] : [publicationOutput(parameters.registry)]),
     ],
     changeLockingBytecode: funderLocking,
   });

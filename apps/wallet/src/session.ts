@@ -9,6 +9,7 @@ import {
   type PendingSetUp,
   type PendingTakeover,
   type RecoveryArrangement,
+  type RegistryState,
   type StoreAt,
   type WatchLog,
   OwnerWallet,
@@ -117,6 +118,8 @@ export interface Kept {
   arrival: { from: 'takeover' | 'move' | 'restore'; missing: string[]; searched?: 'quick' | 'full'; swept?: boolean };
   watchLog: WatchLog;
   activity: Activity[];
+  /** Token names from registries, checked against the chain: on this device only, never in the backup. */
+  registries: RegistryState;
   /** Developer mode: whether it is on, and the transactions this phone sent with the engine's handle to each one's invitation. */
   developer: boolean;
   invitations: KeptInvitation[];

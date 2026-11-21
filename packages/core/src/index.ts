@@ -15,3 +15,4 @@ export * from './history.js';
 export * from './keys.js';
 export * from './wallet-addresses.js';
 export * from './template.js';
+export * from './token-registry.js';

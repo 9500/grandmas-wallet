@@ -2,10 +2,10 @@ import { type ActionPreview, type MovedOutput, type TemplateSummary, matchNfts, 
 import { InsufficientFundsError } from '@grandmas-wallet/core';
 import { Amount, Choice, Icon, Info, KeyValues, More, Notice, Sat, Status, formatBch, formatSatoshis, formatTime, plainError, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
-import { useState } from 'preact/hooks';
+import { useContext, useState } from 'preact/hooks';
 
 import { type Refusal, leavingLine, leavingWords } from './review-gate.js';
-import { rawUnits } from './token-words.js';
+import { TokenNames, frozenNames, rawUnits, tokenUnits } from './token-words.js';
 
 /**
  * What the user sees before deciding on an action of an application's template. At the top, a picture of the
@@ -135,7 +135,7 @@ export const TheirWords = ({ words }: { words: ActionPreview['words'] }) => (
 
 /** A token that moves, in words: an amount in raw units, or an NFT, and its category. */
 export const TokenWords = ({ token }: { token: NonNullable<MovedOutput['token']> }) => {
-  const amount = rawUnits(token.amount);
+  const amount = tokenUnits(token.amount, useContext(TokenNames)(token.category));
   return (
     <span class="token-words">
       {token.nft === undefined ? `${amount} of token ` : `${token.nft.capability === 'none' ? 'NFT' : `NFT (${token.nft.capability})`} of token `}
@@ -231,16 +231,19 @@ export const ways = (figures: ActionPreview['figures']): { out: Way; back: Way }
 const empty = (way: Way): boolean => way.satoshis === 0n && way.fungible.length === 0 && way.nfts.length === 0;
 
 /** A token as a small chip: an amount in raw units, or an NFT, with its category. */
-const TokenChip = ({ category, amount, nft, sign }: { category: string; amount?: bigint; nft?: Moving['nft']; sign?: '+' | '−' }) => (
-  <span class={`chip${nft === undefined ? '' : ' nft'}`}>
-    <span class="chip-dot" aria-hidden="true" />
-    <span class="chip-text">
-      {sign}
-      {nft === undefined ? rawUnits(amount ?? 0n) : nft.capability === 'none' ? 'NFT' : `NFT (${nft.capability})`}
+const TokenChip = ({ category, amount, nft, sign }: { category: string; amount?: bigint; nft?: Moving['nft']; sign?: '+' | '−' }) => {
+  const names = useContext(TokenNames)(category);
+  return (
+    <span class={`chip${nft === undefined ? '' : ' nft'}`}>
+      <span class="chip-dot" aria-hidden="true" />
+      <span class="chip-text">
+        {sign}
+        {nft === undefined ? tokenUnits(amount ?? 0n, names) : nft.capability === 'none' ? 'NFT' : `NFT (${nft.capability})`}
+      </span>
+      <Hex value={category} head={4} tail={4} />
     </span>
-    <Hex value={category} head={4} tail={4} />
-  </span>
-);
+  );
+};
 
 const WayItems = ({ way }: { way: Way }) =>
   empty(way) ? (
@@ -478,7 +481,7 @@ export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) =
                   Of token <Hex value={entry.category} />
                 </small>
               </>,
-              <span class={`token-net ${entry.amount > 0n ? 'up' : 'down'}`}>{`${entry.amount > 0n ? '+' : '−'}${rawUnits(entry.amount)}`}</span>,
+              <NetTokens category={entry.category} amount={entry.amount} />,
             ])}
           />
         </div>
@@ -574,9 +577,23 @@ const TheTemplate = ({ summary }: { summary: TemplateSummary }) => (
  * An action, for a decision: the picture and the headline, what asks for care, the action in the template's
  * words, and folded, the figures in full and the template.
  */
+/** By how much the wallet's tokens of a category go up or down; the raw amount behind a tap where the token's units are shown. */
+const NetTokens = ({ category, amount }: { category: string; amount: bigint }) => {
+  const names = useContext(TokenNames)(category);
+  return (
+    <span class={`token-net ${amount > 0n ? 'up' : 'down'}`} title={names === undefined ? undefined : rawUnits(amount)}>
+      {`${amount > 0n ? '+' : '−'}${tokenUnits(amount, names)}`}
+    </span>
+  );
+};
+
 export const ActionReview = ({ preview, summary, tick }: { preview: ActionPreview; summary?: TemplateSummary; tick?: Tick | undefined }) => {
   const template = summary ?? preview.template;
+  // The figures of a review are those known when it opens: a registry that resolves later does not change them.
+  const live = useContext(TokenNames);
+  const [names] = useState(() => frozenNames(live, categoriesOf(preview)));
   return (
+    <TokenNames.Provider value={names}>
     <div class="review stack">
       <div class="review-summary">
         <Picture preview={preview} />
@@ -589,7 +606,14 @@ export const ActionReview = ({ preview, summary, tick }: { preview: ActionPrevie
         <TheTemplate summary={template} />
       </div>
     </div>
+    </TokenNames.Provider>
   );
+};
+
+/** Every token category a review shows. */
+const categoriesOf = (preview: ActionPreview): string[] => {
+  const { figures } = preview;
+  return [...figures.tokensNet.map((entry) => entry.category), ...[...figures.tokensSpent, ...figures.toWallet, ...figures.toOthers, ...figures.applicationInputs].flatMap((output) => (output.token === undefined ? [] : [output.token.category]))];
 };
 
 /**
