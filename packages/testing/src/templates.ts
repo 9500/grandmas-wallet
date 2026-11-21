@@ -420,5 +420,118 @@ export const ruledBoxTemplate = {
   },
 } as const;
 
+/*
+ * Templates for the findings of stage 21:
+ *
+ * - **Pool with a rule**: the keyed pool, whose pool the wallet follows by a rule given as an expression. The pool takes
+ *   a key of the device, so the wallet cannot tell whether what it puts there comes back.
+ * - **Envelope**: coins left for someone else. One party, the giver, puts coins at a script that the keeper's key
+ *   unlocks; the template says at the script that the keeper keeps that key. Given in the giver's role, nothing of the
+ *   giver's is tied to its device; in the keeper's role, the coins are tied to the keeper's key.
+ * - **Envelope without owners**: the envelope, with no role named at its script as keeping the key.
+ * - **Joint envelope**: the envelope opened by a key of each party together, each kept by its own role.
+ */
+
+/** The keyed pool, whose pool the wallet follows by a rule given as an expression. */
+export const ruledPoolTemplate = {
+  ...keyedPoolTemplate,
+  ...view('Pool with a rule', 'Coins in a pool that the key of the device that opened it unlocks. Whether a wallet follows a pool depends on what it holds.'),
+  lockingScripts: {
+    poolLockingScript: {
+      ...keyedPoolTemplate.lockingScripts.poolLockingScript,
+      roles: { provider: { ...keyedPoolTemplate.lockingScripts.poolLockingScript.roles.provider, relevant: '$(<amount> 10000 OP_GREATERTHAN)' } },
+    },
+  },
+} as const;
+
+const twoRoles = (name: string, description: string, variables: string[], transaction: string) => ({
+  ...view(name, description),
+  roles: { giver: { requirements: { variables } }, keeper: { requirements: { variables } } },
+  requirements: { participants: [{ role: 'giver', slots: { min: 0, max: 1 } }, { role: 'keeper', slots: { min: 0, max: 1 } }] },
+  transaction,
+});
+
+/** Coins left at a script that the keeper's key unlocks; the template says at the script that the keeper keeps it. */
+export const envelopeTemplate = {
+  $schema: SCHEMA,
+  ...view('Envelope', 'Coins left for someone. Only the keeper\'s key opens the envelope.'),
+  version: '1',
+  supported: ['BCH_2026_05'],
+  roles: { giver: view('Giver', 'Leaves coins in an envelope.'), keeper: view('Keeper', 'Holds the key that opens the envelope.') },
+  start: [
+    { action: 'give', role: 'giver' },
+    { action: 'give', role: 'keeper' },
+  ],
+  actions: {
+    give: twoRoles('Leave an envelope', 'Put coins in an envelope that the keeper\'s key opens.', ['amount', 'keeperKeyHash'], 'giveTransaction'),
+    collect: {
+      ...view('Open the envelope', 'Take the coins out with the keeper\'s key.'),
+      roles: { keeper: { requirements: { variables: ['holder'], secrets: ['keeperKey'] } } },
+      requirements: { participants: [one('keeper')] },
+      transaction: 'collectTransaction',
+    },
+  },
+  transactions: {
+    giveTransaction: { ...view('Envelope left', 'An envelope of $(<amount>) satoshis was left.'), inputs: [], outputs: [{ output: 'envelopeOutput' }], version: 2, locktime: 0 },
+    collectTransaction: { ...view('Envelope opened', 'An envelope was opened.'), inputs: [{ input: 'envelopeInput' }], outputs: [{ output: 'collectedOutput' }], version: 2, locktime: 0 },
+  },
+  inputs: { envelopeInput: { ...view('Envelope', 'Opened with the keeper\'s key.'), unlockingScript: 'unlockEnvelope' } },
+  outputs: {
+    envelopeOutput: { ...view('Envelope', '$(<amount>) satoshis in an envelope.'), lockingScript: 'envelopeLockingScript', valueSatoshis: '$(<amount>)' },
+    collectedOutput: { ...view('Collected', 'What the envelope held.'), lockingScript: '$(<holder>)' },
+  },
+  lockingScripts: {
+    envelopeLockingScript: {
+      ...view('Envelope', 'Opened by the keeper\'s key.'),
+      lockingType: 'p2sh',
+      lockingBytecode: 'envelopeBytecode',
+      unlockingBytecode: 'unlockEnvelope',
+      roles: {
+        giver: { selectable: false, actions: [] },
+        keeper: { state: { secrets: ['keeperKey'] }, balance: { satoshis: true }, selectable: false, actions: [{ action: 'collect', role: 'keeper' }] },
+      },
+    },
+  },
+  scripts: {
+    envelopeBytecode: 'OP_DUP OP_HASH160 <keeperKeyHash> OP_EQUALVERIFY OP_CHECKSIG',
+    unlockEnvelope: '<keeperKey.schnorr_signature.all_outputs> <keeperKey.public_key>',
+  },
+  variables: {
+    keeperKey: { ...view('Keeper\'s key', 'The key that opens the envelope.'), type: 'private_key' },
+    keeperKeyHash: { ...view('Keeper', 'The hash of the keeper\'s public key.'), type: 'bytes' },
+    amount: { ...view('Amount', 'Satoshis.'), type: 'satoshis' },
+    holder: { ...view('Holder', 'Where the coins go.'), type: 'locking_script' },
+  },
+} as const;
+
+/** The envelope with no role named at its script as keeping the key. */
+export const unownedEnvelopeTemplate = {
+  ...envelopeTemplate,
+  ...view('Envelope without owners', 'Coins left for someone. A key opens the envelope; the template does not say whose.'),
+  lockingScripts: {
+    envelopeLockingScript: {
+      ...envelopeTemplate.lockingScripts.envelopeLockingScript,
+      roles: { giver: envelopeTemplate.lockingScripts.envelopeLockingScript.roles.giver, keeper: { ...envelopeTemplate.lockingScripts.envelopeLockingScript.roles.keeper, state: {} } },
+    },
+  },
+} as const;
+
+/** The envelope opened by the giver's key and the keeper's together, each kept by its own role. */
+export const jointEnvelopeTemplate = {
+  ...envelopeTemplate,
+  ...view('Joint envelope', 'Coins left for two. The giver\'s key and the keeper\'s key open the envelope together.'),
+  lockingScripts: {
+    envelopeLockingScript: {
+      ...envelopeTemplate.lockingScripts.envelopeLockingScript,
+      roles: { ...envelopeTemplate.lockingScripts.envelopeLockingScript.roles, giver: { state: { secrets: ['giverKey'] }, selectable: false, actions: [] } },
+    },
+  },
+  scripts: {
+    envelopeBytecode: '<giverKey.public_key> OP_CHECKSIGVERIFY <keeperKey.public_key> OP_CHECKSIG',
+    unlockEnvelope: '<keeperKey.schnorr_signature.all_outputs> <giverKey.schnorr_signature.all_outputs>',
+  },
+  variables: { ...envelopeTemplate.variables, giverKey: { ...view('Giver\'s key', 'The giver\'s half of the envelope\'s lock.'), type: 'private_key' } },
+} as const;
+
 /** A template as an application would send it: its text. */
 export const templateText = (template: unknown): string => JSON.stringify(template);
