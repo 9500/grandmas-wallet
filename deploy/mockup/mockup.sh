@@ -179,7 +179,7 @@ services() {
   mkdir -p "$UNITS"
   local words=() command=""; mapfile -t words < <(service_command "$checkout")
   for word in "${words[@]}"; do command+="${command:+ }$(quote "$word")"; done
-  unit "$NODE_UNIT" "mockup network node (Bitcoin Cash Node, regtest)" "$(quote "$checkout/deploy/mockup/mockup.sh") run-node -daemon=0" "" "Environment=$(quote "MOCKUP_DIR=$DIR") $(quote "REGTEST_DIR=$PROGRAMS")"
+  unit "$NODE_UNIT" "mockup network node (Bitcoin Cash Node, regtest)" "/bin/bash $(quote "$checkout/deploy/mockup/mockup.sh") run-node -daemon=0" "" "Environment=$(quote "MOCKUP_DIR=$DIR") $(quote "REGTEST_DIR=$PROGRAMS")"
   unit "$FULCRUM_UNIT" "Fulcrum on the mockup network" "\"$FULCRUM\" \"$DIR/fulcrum/fulcrum.conf\"" "After=$NODE_UNIT
 Requires=$NODE_UNIT" ""
   unit "$SERVICE_UNIT" "mockup network service (miner, clock, play coins)" "$command" "After=$NODE_UNIT network-online.target
