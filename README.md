@@ -29,7 +29,7 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 - **The wallet's own templates** define its controller, its addresses and its payments: [docs/templates/](docs/templates/).
 - **Applications arrive as templates.** The wallet's code names no application, and an application needs nothing but its XO template. The wallet carries out a template's actions, shows its own figures before anything is signed, and stores the template and a record of each position in the backup before it signs. After a recovery it reads those records, lets the chain confirm them, and lists what the owner holds again.
 - **ParyonUSD as an XO template.** [A template](packages/paryon/frozen/paryon-loan-v1-chipnet-fast-periods-6.json) for Paryon's public loan contracts, used unchanged: making a loan key, borrowing, managing and closing are actions of it.
-- **Invitations.** [docs/xo-invitations.md](docs/xo-invitations.md) lists the invitations of complete runs of the second design on chipnet, shows how to open one in XO's debug tool, and says how to produce them with the third. In the wallet and on the recoverer's page, developer mode saves the invitation of any transaction that browser sent.
+- **Invitations.** [docs/xo-invitations.md](docs/xo-invitations.md) lists the invitations of complete runs on chipnet (the wallet's whole life, a Savings Jar and a ParyonUSD loan, each through the loss of a device), shows how to open one in XO's debug tool, and says how to produce them again. In the wallet and on the recoverer's page, developer mode saves the invitation of any transaction that browser sent.
 
 ## Designs
 

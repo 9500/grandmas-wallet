@@ -2,24 +2,24 @@
 
 Written by the run itself (`scripts/run-b.ts chipnet`). The owner's wallet, the recoverer and the new device, each on the XO engine with the wallet's templates, on chipnet. Each part ran in a process of its own with an empty engine state. Every transaction was built and signed by the engine from what the wallet's code decided, and passed this project's check before it was sent.
 
-- Wallet identity: `21d3ba89a120bc222f224071af7fd576c4a3bc93c56cea718552b9bd7e983e9f`
-- Repository at commit `8616e45`
-- Started 2026-11-19T19:39:59.201Z
+- Wallet identity: `cefe5c399aef242be367b4218f87bb6a10769d8fd63ad343843e9340e5fa2a6d`
+- Repository at commit `0dd4fda`
+- Started 2026-11-21T20:56:08.970Z
 - The XO invitation behind each transaction an account of the run sent, as the engine serializes it for sharing: `docs/runs/invitations/stage-5-chipnet/`, with `index.json` naming the template, action and role of each.
 - The engine ran as published, with no local change.
 - The engine was given one server. With three, the first start of the run of 17 November ended while waiting for a block: the engine's network package asks every server for a new block's header and takes the first answer, and a server that had not seen the block yet answered first, with nothing.
 
 | Step | Transaction | Bytes | Fee (sat) | Note | Invitation |
 | --- | --- | --- | --- | --- | --- |
-| create | `e22c9e0a045cc0abaef5c42f19e312a32dd6f55e1d59eeb12f7a8b97ba2f9bad` | 343 | 343 | the controller and the rest | [create](invitations/stage-5-chipnet/01-the-owner-s-device-create-e22c9e0a.json) |
-| pay | `b7ccd85adacda202ed285b48d651155e48267891f35b171b82db10e4e43e6ddc` | 384 | 384 | an everyday payment by key | [pay](invitations/stage-5-chipnet/03-the-owner-s-device-pay-b7ccd85a.json) |
-| request | `d55b7ea309c8899a8fdf6831cf5f20864e52695468519a548b5ab441cbff5a93` | 991 | 991 | the recoverer names the new device's key; paid from its balance in the same transaction | [pay](invitations/stage-5-chipnet/04-the-recoverer-pay-d55b7ea3.json) |
-| complete | `e4fdbe7b32a5edf8bc37853c5ee22c80f3e96e14fd0ef58595dc3732753f53d5` | 970 | 970 | after the waiting period (6 minutes); no coin has moved | [pay](invitations/stage-5-chipnet/05-the-recoverer-pay-e4fdbe7b.json) |
-| sweep | `4cab778245f084bd67b15c9dbb49d76024123ea9cf939d8e508e07aff7002587` | 2177 | 2177 | 5 coins of the earlier seed, the vault coin and the NFT among them, to an address of the new seed | [approve](invitations/stage-5-chipnet/06-the-new-device-approve-4cab7782.json) |
-| pay | `b53cd876ab01385bcfd09cb4286c55a72a5895c35dfb81a8a016dd2507207822` | 384 | 384 | the new owner pays from what it swept, by its own key | [pay](invitations/stage-5-chipnet/07-the-new-device-pay-b53cd876.json) |
-| send the NFT | `9898fe6ba8f8d9a9315a08e8e8a45cc1ec131906747bf8811f148cfffd6c9486` | 717 | 717 | unchanged; the fee from another coin | [pay](invitations/stage-5-chipnet/08-the-new-device-pay-9898fe6b.json) |
-| close | `2a394fffde918e3e7af3d4f9aef5c5b796a5466e20045bcad1ab3710298a9553` | 977 | 977 | everything, and the controller's value, back to the address that paid for the run | [close](invitations/stage-5-chipnet/09-the-new-device-close-2a394fff.json) |
-| return the recoverer's balance | `0ebe22021200dbd9552b818a0bab2af9fc9da562b7486da21c902dd836e901b5` | 185 | 185 | what the recoverer did not use | [pay](invitations/stage-5-chipnet/10-the-recoverer-pay-0ebe2202.json) |
+| create | `da8263510e3adfd55be4d9c000fccb070ed3733d4341ed59d211ee5d07edf91a` | 343 | 343 | the controller and the rest | [create](invitations/stage-5-chipnet/01-the-owner-s-device-create-da826351.json) |
+| pay | `3a9b1528c391aca4b338b548f9e1e08285207b623a63a9263b3a5606357c98a5` | 384 | 384 | an everyday payment by key | [pay](invitations/stage-5-chipnet/03-the-owner-s-device-pay-3a9b1528.json) |
+| request | `a407dea4c4d140968a6a279d326327f2642445a0406abacfaafc6ae82056a5f0` | 991 | 991 | the recoverer names the new device's key; paid from its balance in the same transaction | [pay](invitations/stage-5-chipnet/04-the-recoverer-pay-a407dea4.json) |
+| complete | `223f6b31697d6db22a7a02e1e58a6a3a375c5ee3860d7984ebaad0c1a277d03c` | 970 | 970 | after the waiting period (8 minutes); no coin has moved | [pay](invitations/stage-5-chipnet/05-the-recoverer-pay-223f6b31.json) |
+| sweep | `0c6d1a63f7d82fb09c7f74d96452ffebc078aeff647cc83e2cd0f83a7c7adf0c` | 2177 | 2177 | 5 coins of the earlier seed, the vault coin and the NFT among them, to an address of the new seed | [approve](invitations/stage-5-chipnet/06-the-new-device-approve-0c6d1a63.json) |
+| pay | `073157360b59af8b2bf923829d823cff5a1e8bfaaa8a7719be44f9543e940c68` | 384 | 384 | the new owner pays from what it swept, by its own key | [pay](invitations/stage-5-chipnet/07-the-new-device-pay-07315736.json) |
+| send the NFT | `a3b2801a906913441b6bb5fdd69f77badbf8ece752fe49bf3997dbb4f197845b` | 717 | 717 | unchanged; the fee from another coin | [pay](invitations/stage-5-chipnet/08-the-new-device-pay-a3b2801a.json) |
+| close | `046c70c916c573e0737ef133306e389d109587c581b85288a5340a1bb25419cb` | 977 | 977 | everything, and the controller's value, back to the address that paid for the run | [close](invitations/stage-5-chipnet/09-the-new-device-close-046c70c9.json) |
+| return the recoverer's balance | `aae069778b10c96631616f534aa9a3f1e99d26ecfb224936fb0318c0d7a43bd5` | 185 | 185 | what the recoverer did not use | [pay](invitations/stage-5-chipnet/10-the-recoverer-pay-aae06977.json) |
 
 Also observed:
 
@@ -31,4 +31,4 @@ Also observed:
 - The full pass over both seeds (42000 addresses) took 12 seconds; the wallet was then "fully-found".
 - After the sweep the new device holds everything at its own addresses: 92712 satoshis, and the NFT, which it reports as a token of unknown meaning. Its coins pay for cancelling a request: true.
 - The controller's history: requestRecovery, finalizeRecovery, ownerAuthorize, then closed. It has had 2 owners.
-- The funding address held 60561375 satoshis before the run and holds 60551300 after it: the run cost 10075 satoshis in fees. Nothing is left anywhere else.
+- The funding address held 159954606 satoshis before the run and holds 159944249 after it: the run cost 10357 satoshis in fees. Nothing is left anywhere else.

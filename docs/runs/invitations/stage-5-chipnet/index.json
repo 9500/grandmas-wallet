@@ -1,7 +1,7 @@
 [
   {
-    "file": "01-the-owner-s-device-create-e22c9e0a.json",
-    "transactionId": "e22c9e0a045cc0abaef5c42f19e312a32dd6f55e1d59eeb12f7a8b97ba2f9bad",
+    "file": "01-the-owner-s-device-create-da826351.json",
+    "transactionId": "da8263510e3adfd55be4d9c000fccb070ed3733d4341ed59d211ee5d07edf91a",
     "account": "the owner's device",
     "templateName": "Grandma's Wallet controller",
     "templateIdentifier": "a6998934ebc12728630ccd54e4d28f879484f6c4432f855eb14499c16bf59fc8",
@@ -9,8 +9,8 @@
     "role": "owner"
   },
   {
-    "file": "02-the-owner-s-device-pay-d2198be7.json",
-    "transactionId": "d2198be7e36127121a6268186e20b24d3838e297d8cad17ae926432a37e06b40",
+    "file": "02-the-owner-s-device-pay-ba9c071e.json",
+    "transactionId": "ba9c071e36476a3e8cbabc230504112a5701653854f8a9353137a2a241724455",
     "account": "the owner's device",
     "templateName": "Grandma's Wallet actions",
     "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
@@ -18,8 +18,8 @@
     "role": "owner"
   },
   {
-    "file": "03-the-owner-s-device-pay-b7ccd85a.json",
-    "transactionId": "b7ccd85adacda202ed285b48d651155e48267891f35b171b82db10e4e43e6ddc",
+    "file": "03-the-owner-s-device-pay-3a9b1528.json",
+    "transactionId": "3a9b1528c391aca4b338b548f9e1e08285207b623a63a9263b3a5606357c98a5",
     "account": "the owner's device",
     "templateName": "Grandma's Wallet actions",
     "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
@@ -27,8 +27,8 @@
     "role": "owner"
   },
   {
-    "file": "04-the-recoverer-pay-d55b7ea3.json",
-    "transactionId": "d55b7ea309c8899a8fdf6831cf5f20864e52695468519a548b5ab441cbff5a93",
+    "file": "04-the-recoverer-pay-a407dea4.json",
+    "transactionId": "a407dea4c4d140968a6a279d326327f2642445a0406abacfaafc6ae82056a5f0",
     "account": "the recoverer",
     "templateName": "Grandma's Wallet actions",
     "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
@@ -36,8 +36,8 @@
     "role": "owner"
   },
   {
-    "file": "05-the-recoverer-pay-e4fdbe7b.json",
-    "transactionId": "e4fdbe7b32a5edf8bc37853c5ee22c80f3e96e14fd0ef58595dc3732753f53d5",
+    "file": "05-the-recoverer-pay-223f6b31.json",
+    "transactionId": "223f6b31697d6db22a7a02e1e58a6a3a375c5ee3860d7984ebaad0c1a277d03c",
     "account": "the recoverer",
     "templateName": "Grandma's Wallet actions",
     "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
@@ -45,8 +45,8 @@
     "role": "owner"
   },
   {
-    "file": "06-the-new-device-approve-4cab7782.json",
-    "transactionId": "4cab778245f084bd67b15c9dbb49d76024123ea9cf939d8e508e07aff7002587",
+    "file": "06-the-new-device-approve-0c6d1a63.json",
+    "transactionId": "0c6d1a63f7d82fb09c7f74d96452ffebc078aeff647cc83e2cd0f83a7c7adf0c",
     "account": "the new device",
     "templateName": "Grandma's Wallet controller",
     "templateIdentifier": "a6998934ebc12728630ccd54e4d28f879484f6c4432f855eb14499c16bf59fc8",
@@ -54,8 +54,8 @@
     "role": "owner"
   },
   {
-    "file": "07-the-new-device-pay-b53cd876.json",
-    "transactionId": "b53cd876ab01385bcfd09cb4286c55a72a5895c35dfb81a8a016dd2507207822",
+    "file": "07-the-new-device-pay-07315736.json",
+    "transactionId": "073157360b59af8b2bf923829d823cff5a1e8bfaaa8a7719be44f9543e940c68",
     "account": "the new device",
     "templateName": "Grandma's Wallet actions",
     "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
@@ -63,8 +63,8 @@
     "role": "owner"
   },
   {
-    "file": "08-the-new-device-pay-9898fe6b.json",
-    "transactionId": "9898fe6ba8f8d9a9315a08e8e8a45cc1ec131906747bf8811f148cfffd6c9486",
+    "file": "08-the-new-device-pay-a3b2801a.json",
+    "transactionId": "a3b2801a906913441b6bb5fdd69f77badbf8ece752fe49bf3997dbb4f197845b",
     "account": "the new device",
     "templateName": "Grandma's Wallet actions",
     "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
@@ -72,8 +72,8 @@
     "role": "owner"
   },
   {
-    "file": "09-the-new-device-close-2a394fff.json",
-    "transactionId": "2a394fffde918e3e7af3d4f9aef5c5b796a5466e20045bcad1ab3710298a9553",
+    "file": "09-the-new-device-close-046c70c9.json",
+    "transactionId": "046c70c916c573e0737ef133306e389d109587c581b85288a5340a1bb25419cb",
     "account": "the new device",
     "templateName": "Grandma's Wallet controller",
     "templateIdentifier": "a6998934ebc12728630ccd54e4d28f879484f6c4432f855eb14499c16bf59fc8",
@@ -81,8 +81,8 @@
     "role": "owner"
   },
   {
-    "file": "10-the-recoverer-pay-0ebe2202.json",
-    "transactionId": "0ebe22021200dbd9552b818a0bab2af9fc9da562b7486da21c902dd836e901b5",
+    "file": "10-the-recoverer-pay-aae06977.json",
+    "transactionId": "aae069778b10c96631616f534aa9a3f1e99d26ecfb224936fb0318c0d7a43bd5",
     "account": "the recoverer",
     "templateName": "Grandma's Wallet actions",
     "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",

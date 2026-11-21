@@ -1,7 +1,7 @@
 [
   {
-    "file": "01-test-account-pay-6ac3e9d1.json",
-    "transactionId": "6ac3e9d1f85069a360b3f6f221ffb9b1f29a669a871c522b8e0e27d534809761",
+    "file": "01-test-account-pay-b106ae82.json",
+    "transactionId": "b106ae8263ec591802a03f89519b4bb4f84746779b07e381eeabfe78ee457d1c",
     "account": "test account",
     "templateName": "Grandma's Wallet actions",
     "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",

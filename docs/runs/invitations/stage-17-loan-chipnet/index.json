@@ -1,0 +1,110 @@
+[
+  {
+    "file": "01-the-owner-s-device-create-3817e130.json",
+    "transactionId": "3817e13054dbf172c3b5ea2c8ba6b1ffa5f762d39549e676ece9f46bd72f3d95",
+    "account": "the owner's device",
+    "templateName": "Grandma's Wallet controller",
+    "templateIdentifier": "a6998934ebc12728630ccd54e4d28f879484f6c4432f855eb14499c16bf59fc8",
+    "action": "create",
+    "role": "owner"
+  },
+  {
+    "file": "02-the-owner-s-device-pay-55362ef4.json",
+    "transactionId": "55362ef480faee309a52361a6d41e6f78725cb97006dedf5178fdbfe653c872d",
+    "account": "the owner's device",
+    "templateName": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
+    "action": "pay",
+    "role": "owner"
+  },
+  {
+    "file": "03-the-owner-s-device-createKey-83dacd05.json",
+    "transactionId": "83dacd056dcf3f0a75efb2518c3f92da94332def249de0ea1fafa8344c384d8c",
+    "account": "the owner's device",
+    "templateName": "ParyonUSD loan (chipnet-fast-periods-6)",
+    "templateIdentifier": "aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be",
+    "action": "createKey",
+    "role": "borrower"
+  },
+  {
+    "file": "04-the-owner-s-device-borrow-91bcdc44.json",
+    "transactionId": "91bcdc44e7bd5a87a94bfc84a20cb90de1abfccaa421ae6c8641f17b81000938",
+    "account": "the owner's device",
+    "templateName": "ParyonUSD loan (chipnet-fast-periods-6)",
+    "templateIdentifier": "aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be",
+    "action": "borrow",
+    "role": "borrower"
+  },
+  {
+    "file": "05-the-owner-s-device-manage-b9375be2.json",
+    "transactionId": "b9375be2fa9fcaaa4300fbce66b4ceedbabda29cb209adb8ab25a9e4a7c30c9b",
+    "account": "the owner's device",
+    "templateName": "ParyonUSD loan (chipnet-fast-periods-6)",
+    "templateIdentifier": "aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be",
+    "action": "manage",
+    "role": "borrower"
+  },
+  {
+    "file": "06-the-recoverer-pay-4ca99b01.json",
+    "transactionId": "4ca99b01948ca4e8dd1e087780dda958ae04d338132800c55d1d8e4ef8b7e518",
+    "account": "the recoverer",
+    "templateName": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
+    "action": "pay",
+    "role": "owner"
+  },
+  {
+    "file": "07-the-recoverer-pay-6a754f62.json",
+    "transactionId": "6a754f62236b78734c1e8954ea8dc66b4faafa1b20aa98d1515760ea5c4f96af",
+    "account": "the recoverer",
+    "templateName": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
+    "action": "pay",
+    "role": "owner"
+  },
+  {
+    "file": "08-the-new-device-approve-937eeeeb.json",
+    "transactionId": "937eeeeb3f7baff9c323bd9a20c9a914b3fde20e58a21a523ece384df95bb6b3",
+    "account": "the new device",
+    "templateName": "Grandma's Wallet controller",
+    "templateIdentifier": "a6998934ebc12728630ccd54e4d28f879484f6c4432f855eb14499c16bf59fc8",
+    "action": "approve",
+    "role": "owner"
+  },
+  {
+    "file": "09-the-new-device-close-fac571d6.json",
+    "transactionId": "fac571d672e7a59250c99b5cd87ff0fa2b70cd77763ab10259cf8a52bcd3ee57",
+    "account": "the new device",
+    "templateName": "ParyonUSD loan (chipnet-fast-periods-6)",
+    "templateIdentifier": "aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be",
+    "action": "close",
+    "role": "borrower"
+  },
+  {
+    "file": "10-the-new-device-pay-5a55157a.json",
+    "transactionId": "5a55157a57e6f89e3f32263afd137f3cd75e7d6134abf1fd6aa8b760a07ee31e",
+    "account": "the new device",
+    "templateName": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
+    "action": "pay",
+    "role": "owner"
+  },
+  {
+    "file": "11-the-new-device-close-c11a1001.json",
+    "transactionId": "c11a10010d46cb42d8ddd236a2cd2c539bb652918340a5ce22c8191bb5243005",
+    "account": "the new device",
+    "templateName": "Grandma's Wallet controller",
+    "templateIdentifier": "a6998934ebc12728630ccd54e4d28f879484f6c4432f855eb14499c16bf59fc8",
+    "action": "close",
+    "role": "owner"
+  },
+  {
+    "file": "12-the-recoverer-pay-3e827948.json",
+    "transactionId": "3e827948230e7508f52981a48189340cf01419bc77783a697ab9bf2b9964c7e1",
+    "account": "the recoverer",
+    "templateName": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
+    "action": "pay",
+    "role": "owner"
+  }
+]

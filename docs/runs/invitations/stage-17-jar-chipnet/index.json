@@ -1,0 +1,92 @@
+[
+  {
+    "file": "01-the-owner-s-device-create-82cedc32.json",
+    "transactionId": "82cedc32afc8877dfd53b78fbe5e0cf06adcfcfbf6f8ec7812bec71a621bb22a",
+    "account": "the owner's device",
+    "templateName": "Grandma's Wallet controller",
+    "templateIdentifier": "a6998934ebc12728630ccd54e4d28f879484f6c4432f855eb14499c16bf59fc8",
+    "action": "create",
+    "role": "owner"
+  },
+  {
+    "file": "02-the-owner-s-device-pay-cba9fe68.json",
+    "transactionId": "cba9fe68089eb00eb9c11dadfccb1f0893be3a6e4d61e273d9f9de4066ec9d11",
+    "account": "the owner's device",
+    "templateName": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
+    "action": "pay",
+    "role": "owner"
+  },
+  {
+    "file": "03-the-owner-s-device-open-68fdf1bf.json",
+    "transactionId": "68fdf1bfa5306060142457db4e8bfab3441ad00e7efc134be59ff6ee9ba1abbf",
+    "account": "the owner's device",
+    "templateName": "Savings Jar",
+    "templateIdentifier": "fde627e027ac2474d28ed10f84b255c097e546720771ce264d5cc134efceff25",
+    "action": "open",
+    "role": "saver"
+  },
+  {
+    "file": "04-the-recoverer-pay-1f49a0d7.json",
+    "transactionId": "1f49a0d7a4e180d5b1fc16065ab9ce6a2d735e8135d37f42075ebe00057aeed4",
+    "account": "the recoverer",
+    "templateName": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
+    "action": "pay",
+    "role": "owner"
+  },
+  {
+    "file": "05-the-recoverer-pay-cca64a4b.json",
+    "transactionId": "cca64a4b372228663b5cd727b14e1c1eee77ce5401e5c6ef80bf83d209f4c0d9",
+    "account": "the recoverer",
+    "templateName": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
+    "action": "pay",
+    "role": "owner"
+  },
+  {
+    "file": "06-the-new-device-approve-6a2978cd.json",
+    "transactionId": "6a2978cda20e0d55e9a17e52bc4be1a7ab73e1b78b62982fb19cb2f0abefd1ae",
+    "account": "the new device",
+    "templateName": "Grandma's Wallet controller",
+    "templateIdentifier": "a6998934ebc12728630ccd54e4d28f879484f6c4432f855eb14499c16bf59fc8",
+    "action": "approve",
+    "role": "owner"
+  },
+  {
+    "file": "07-the-new-device-withdraw-140214e5.json",
+    "transactionId": "140214e5d049dd0ce4b7b081c2148458b2ccb493a9a186d95255d3fb35f3daac",
+    "account": "the new device",
+    "templateName": "Savings Jar",
+    "templateIdentifier": "fde627e027ac2474d28ed10f84b255c097e546720771ce264d5cc134efceff25",
+    "action": "withdraw",
+    "role": "saver"
+  },
+  {
+    "file": "08-the-new-device-pay-a2586977.json",
+    "transactionId": "a2586977e13b8ffc04867dac3e8c5daf527599c50882bdbd772e39d2b5f48e61",
+    "account": "the new device",
+    "templateName": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
+    "action": "pay",
+    "role": "owner"
+  },
+  {
+    "file": "09-the-new-device-close-7f39098d.json",
+    "transactionId": "7f39098d8b0d32d57675763ac7b251735aac72487acd6acd33392a552b6de737",
+    "account": "the new device",
+    "templateName": "Grandma's Wallet controller",
+    "templateIdentifier": "a6998934ebc12728630ccd54e4d28f879484f6c4432f855eb14499c16bf59fc8",
+    "action": "close",
+    "role": "owner"
+  },
+  {
+    "file": "10-the-recoverer-pay-ec43f3ae.json",
+    "transactionId": "ec43f3ae5c1b9ced01ee257e15d51a3bf294ea3cf2a88971916aa30923f14f4c",
+    "account": "the recoverer",
+    "templateName": "Grandma's Wallet actions",
+    "templateIdentifier": "1e0dd0b3738c5c47a889b824a04d3673fccfba3bcadf303cde1b49a2a7ca003e",
+    "action": "pay",
+    "role": "owner"
+  }
+]
