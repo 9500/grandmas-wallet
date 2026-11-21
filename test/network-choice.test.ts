@@ -27,7 +27,22 @@ import { headerResetMark, isEngineHeaderStore, markHeadersForReset } from '../pa
  * network's data stays on its own side of the browser. Nothing here reaches a server.
  */
 
-const PRODUCTION = JSON.parse(readFileSync('deploy/config/production.json', 'utf8')) as Record<string, unknown>;
+/** A deployment of one network, in the shape every configuration had before a deployment could describe two. */
+const PRODUCTION: Record<string, unknown> = {
+  network: 'chipnet',
+  walletUrl: 'https://wallet.9500.cash/',
+  recovererUrl: 'https://recoverer.9500.cash/',
+  jarUrl: 'https://jar.9500.cash/',
+  loanUrl: 'https://paryon.9500.cash/',
+  stores: ['https://store1.9500.cash', 'https://store2.9500.cash'],
+  chain: ['wss://chipnet.9500.cash:443', 'wss://chipnet.imaginary.cash:50004'],
+  relays: ['wss://relay.riften.net:443', 'wss://relay.cauldron.quest:443'],
+  explorer: 'https://chipnet.imaginary.cash/tx/',
+  secondsPerBlock: 60,
+  registries: { mode: 'chain' },
+};
+/** The public deployment, which offers mainnet beside chipnet since 21 November 2026 by the owner's decision. */
+const PUBLIC = JSON.parse(readFileSync('deploy/config/production.json', 'utf8')) as Record<string, unknown>;
 const LOCAL = JSON.parse(readFileSync('deploy/config/local.json', 'utf8')) as Record<string, unknown>;
 const MAINNET = JSON.parse(readFileSync('deploy/config/mainnet.example.json', 'utf8')) as Record<string, unknown>;
 const BOTH = JSON.parse(readFileSync('deploy/config/both.example.json', 'utf8')) as Record<string, unknown> & { networks: Record<string, Record<string, unknown>> };
@@ -96,9 +111,9 @@ describe('the configuration describes one network or both', () => {
     expect(() => readEnvironment({ ...BOTH, network: 'testnet4' })).toThrow(/does not describe it/);
   });
 
-  it('the production configuration is not changed by this', () => {
-    expect(PRODUCTION['networks']).toBeUndefined();
-    expect(PRODUCTION['mainnetEnabled']).toBeUndefined();
+  it('the public configuration starts on chipnet and offers mainnet; the example stays marked as one', () => {
+    expect(readEnvironment(PUBLIC)).toMatchObject({ network: 'chipnet', secondsPerBlock: 60, choice: { starting: 'chipnet', networks: ['chipnet', 'mainnet'] } });
+    expect(PUBLIC['mainnetEnabled']).toBe(true);
     expect(String(BOTH['about'])).toMatch(/^AN EXAMPLE/);
   });
 
