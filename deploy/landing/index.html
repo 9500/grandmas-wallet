@@ -30,6 +30,7 @@
     <div class="wrap top-row">
       <a class="brand" href="./"><img src="favicon.svg" alt="" width="28" height="28"> Grandma's Wallet</a>
       <nav class="top-nav" aria-label="Sections">
+        <a href="#where">Networks</a>
         <a href="#pages">Pages</a>
         <a href="#try">What to try</a>
         <a href="#waiting">Waiting period</a>
@@ -46,23 +47,7 @@
           <h1>A Bitcoin Cash wallet you can get back after losing your phone</h1>
           <p class="lead">No seed phrase to write down. Someone you trust, your bank or a person you know, can move the wallet to a new phone. They can only do it in the open, on chain, and after a waiting period in which the old phone can say no.</p>
           <p class="lead">Coins, tokens and positions in applications come along: a savings jar and a ParyonUSD loan survive the move.</p>
-          <div class="where" aria-label="Where to try it">
-            <p class="where-head">The wallet and the recoverer ask where you want to try them.</p>
-            <dl>
-              <div class="where-row mockup">
-                <dt>Mockup <span>play coins</span></dt>
-                <dd>A chain of this site's own. Coins come at the press of a button, and a button moves the chain's clock past the waiting period. A recovery takes a couple of minutes.</dd>
-              </div>
-              <div class="where-row chipnet">
-                <dt>Chipnet <span>test coins</span></dt>
-                <dd>Bitcoin Cash's test network. Coins come from a faucet, and a recovery takes about 15 minutes.</dd>
-              </div>
-              <div class="where-row mainnet">
-                <dt>Mainnet <span>real coins</span></dt>
-                <dd>A recovery takes about a day. Enabled only to meet the requirements of BCH Blaze: nothing here has been audited, coins can be lost, and we do not recommend it.</dd>
-              </div>
-            </dl>
-          </div>
+          <p class="hero-where">Try it with play coins on <a href="#where">a mockup chain</a>, with test coins on chipnet, or on mainnet.</p>
           <p class="hero-links">
             <a class="button primary" href="#try">What to try</a>
             <a class="button" href="design.html" target="_blank" rel="noopener">How it works: design 3 <span aria-hidden="true">↗</span></a>
@@ -81,6 +66,39 @@
           <li><strong>Use it like any wallet.</strong> Pay, receive, connect to applications. Nothing waits for a block.</li>
           <li><strong>Lost the phone?</strong> Your recoverer asks the network to move the wallet to your new phone. After the waiting period, it is yours again, with everything in it.</li>
         </ol>
+      </div>
+    </section>
+
+    <section id="where" class="section where-section">
+      <div class="wrap">
+        <h2>Where to try it</h2>
+        <p class="section-lead">The wallet and the recoverer ask where you want to try them. The pages, the contracts and the steps are the same on all three; what you bring and how long a recovery takes are not.</p>
+        <div class="where">
+          <article class="where-card mockup">
+            <h3>Mockup <span>play coins</span></h3>
+            <p>A chain of this site's own, for a first look.</p>
+            <dl>
+              <div><dt>Coins</dt><dd>At the press of a button</dd></div>
+              <div><dt>A recovery</dt><dd>A couple of minutes: a button moves the chain's clock past the waiting period</dd></div>
+            </dl>
+          </article>
+          <article class="where-card chipnet">
+            <h3>Chipnet <span>test coins</span></h3>
+            <p>Bitcoin Cash's public test network.</p>
+            <dl>
+              <div><dt>Coins</dt><dd>From a faucet; they have no value</dd></div>
+              <div><dt>A recovery</dt><dd>About 15 minutes, with the shortest waiting period</dd></div>
+            </dl>
+          </article>
+          <article class="where-card mainnet">
+            <h3>Mainnet <span>real coins</span></h3>
+            <p>Enabled only to meet the requirements of BCH Blaze. Nothing here has been audited, coins can be lost, and we do not recommend it.</p>
+            <dl>
+              <div><dt>Coins</dt><dd>Real Bitcoin Cash</dd></div>
+              <div><dt>A recovery</dt><dd>About a day, with the usual waiting period</dd></div>
+            </dl>
+          </article>
+        </div>
       </div>
     </section>
 

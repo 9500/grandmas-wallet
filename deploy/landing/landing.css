@@ -117,18 +117,21 @@ q { quotes: '“' '”'; font-weight: 600; }
 .eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--owner); margin-bottom: 12px; }
 h1 { font-size: 40px; letter-spacing: -0.02em; margin-bottom: 18px; max-width: 18ch; }
 .lead { font-size: 19px; color: var(--muted); margin-bottom: 12px; max-width: 56ch; }
-/* Where to try it: the three networks, each with what a visitor brings and how long a recovery takes. */
-.where { margin-top: 20px; max-width: 60ch; }
-.where-head { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
-.where dl { margin: 0; display: grid; gap: 6px; }
-.where-row { display: grid; grid-template-columns: 96px 1fr; gap: 4px 14px; padding: 9px 12px; border: 1px solid var(--line); border-left: 3px solid var(--c); border-radius: 8px; background: var(--bg); }
-.where-row.mockup { --c: var(--owner); }
-.where-row.chipnet { --c: var(--recoverer); }
-.where-row.mainnet { --c: var(--muted); }
-.where dt { font-weight: 700; font-size: 15px; color: var(--ink); }
-.where dt span { display: block; font-weight: 600; font-size: 12px; color: var(--c); }
-.where-row.mainnet dt span { color: var(--muted); }
-.where dd { margin: 0; font-size: 14px; color: var(--muted); }
+/* Where to try it: the three networks side by side, each with what a visitor brings and how long a recovery takes. */
+.hero-where { margin-top: 4px; font-size: 15px; color: var(--muted); }
+.where-section { padding-bottom: 0; }
+.where { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.where-card { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--c); border-radius: 12px; box-shadow: var(--shadow); }
+.where-card.mockup { --c: var(--owner); }
+.where-card.chipnet { --c: var(--recoverer); }
+.where-card.mainnet { --c: var(--muted); }
+.where-card h3 { font-size: 19px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.where-card h3 span { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--c); }
+.where-card p { color: var(--muted); font-size: 15px; }
+.where-card dl { margin: auto 0 0; display: grid; gap: 0; }
+.where-card dl > div { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14.5px; }
+.where-card dt { color: var(--muted); }
+.where-card dd { margin: 0; font-weight: 600; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
 
 /*
@@ -366,12 +369,12 @@ h3 { font-size: 19px; }
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-grid { grid-template-columns: 1fr 260px; gap: 24px 28px; }
   .promise { grid-template-columns: 1fr; gap: 12px; }
+  .where { grid-template-columns: 1fr; gap: 12px; max-width: 640px; }
 }
 
 @media (max-width: 720px) {
   .top-nav { display: none; }
-  .where-row { grid-template-columns: 1fr; }
-  .where dt span { display: inline; margin-left: 6px; }
+  .where { grid-template-columns: 1fr; gap: 12px; }
   .blaze-links strong { flex-basis: 100%; }
   .hero { padding: 32px 0 0; overflow: visible; }
   .hero-grid { grid-template-columns: 1fr; gap: 20px; }
