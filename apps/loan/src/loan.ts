@@ -8,16 +8,21 @@ import {
   MAINNET_V1,
   MINIMUM_DEBT,
   borrowingFee,
+  borrowingFor,
   collateralAtRatio,
   collateralRatio,
+  contractCollateralProblem,
+  formatPrice,
+  formatPusd,
   interestPerPeriod,
-  minimumCollateral,
-  MAXIMUM_INTEREST_RATE,
   paryonContracts,
   paryonTemplateAlone,
   periodAt,
   repaymentAllowed,
 } from '@grandmas-wallet/paryon';
+
+// What Paryon's service checks too lives in packages/paryon; the page uses it from there.
+export { CHIPNET_FASTER_BLOCKS_FROM, borrowingFor, finalLockHeight, formatPrice, formatPusd, interestRateProblem } from '@grandmas-wallet/paryon';
 
 /**
  * What the loan page works out by itself: the template it sends, the prices it reckons with, whether the
@@ -99,16 +104,6 @@ export const MISSED_PERIOD_FEE = 1_500n;
 
 // ------------------------------------------------------------------ amounts as people type them
 
-/** PUSD cents as dollars and cents: 10000 → "100.00". */
-export const formatPusd = (cents: bigint): string => {
-  const negative = cents < 0n;
-  const value = negative ? -cents : cents;
-  return `${negative ? '−' : ''}${(value / 100n).toLocaleString('en-US')}.${(value % 100n).toString().padStart(2, '0')}`;
-};
-
-/** A price in US cents as dollars: 20867 → "$208.67". */
-export const formatPrice = (cents: bigint): string => `$${formatPusd(cents)}`;
-
 /** An amount of PUSD as typed, in cents, or the reason it cannot be read. */
 export const parsePusd = (text: string): bigint | string => {
   const cleaned = text.trim().replace(/[,\s]/g, '').replace(/^\$/, '');
@@ -127,20 +122,6 @@ export const parsePercent = (text: string): number | string => {
 };
 
 // ------------------------------------------------------------------ the chain's heights and Paryon's periods
-
-/** From this height chipnet's blocks come every minute (the tentative upgrade of May 2027). */
-export const CHIPNET_FASTER_BLOCKS_FROM = 332_451;
-
-/**
- * The highest height a lock time may name for the network to take the transaction now, given the height of the
- * chain's last block. On chipnet a lock time given as a height is compared with the height the chain would have
- * at ten-minute blocks; elsewhere with the height itself. One block is kept in hand, for a server a block ahead
- * of the network's nodes.
- */
-export const finalLockHeight = (network: string, height: number): number => {
-  const counted = network === 'chipnet' && height >= CHIPNET_FASTER_BLOCKS_FROM ? CHIPNET_FASTER_BLOCKS_FROM - 1 + Math.floor((height - (CHIPNET_FASTER_BLOCKS_FROM - 1)) / 10) : height;
-  return counted - 1;
-};
 
 /** What the page knows of Paryon's contracts and prices at one moment. */
 export interface Market {
@@ -176,10 +157,6 @@ export const priceBasis = (withoutOracle: boolean | undefined): { short: string;
 
 /** The lower of the lowest stored price and the oracle's latest. */
 export const lowerPrice = (stored: bigint, oracle: bigint | undefined): bigint => (oracle !== undefined && oracle < stored ? oracle : stored);
-
-/** The contract a loan of this debt is opened from: one that can lend it, the most recent period first, then the most it can still lend. */
-export const borrowingFor = (threads: BorrowingThread[], debt: bigint): BorrowingThread | undefined =>
-  threads.filter((thread) => thread.supply >= debt).sort((a, b) => b.period - a.period || (b.supply > a.supply ? 1 : b.supply < a.supply ? -1 : 0))[0];
 
 /** Whether the contracts must be brought up to date before a loan is opened, and what that is about. */
 export type PeriodNeed =
@@ -242,7 +219,7 @@ export const borrowPlan = (debt: bigint, percent: number, market: Pick<Market, '
         ? `This page does not borrow with less than ${least}% collateral at ${priceBasis(market.withoutOracle).short}. Below that a small fall in the price would put the loan near the contracts' limit of 110%, where it can be liquidated.`
         : percent > 1_000
           ? 'Choose a collateral of at most 1,000%.'
-          : collateral < minimumCollateral(debt, used)
+          : contractCollateralProblem(debt, collateral, used) !== undefined
             ? 'The contracts would not take this little collateral.'
             : undefined;
   return problem === undefined ? plan : { ...plan, problem };
@@ -301,19 +278,11 @@ export const collateralProblem = (loan: Pick<LoanView, 'debt' | 'found'>, collat
   if (collateral > now) return undefined;
   const ratio = collateralRatio(collateral, loan.debt, market.lower);
   if (ratio < least) return `With that, the collateral would be worth ${ratio.toFixed(2)}% of the debt at ${formatPrice(market.lower)}. This page keeps a loan at ${least}% or more; take out less.`;
-  if (collateral < minimumCollateral(loan.debt, market.priceThread.state.price)) return 'The contracts would not take this little collateral.';
+  if (contractCollateralProblem(loan.debt, collateral, market.priceThread.state.price) !== undefined) return 'The contracts would not take this little collateral.';
   return undefined;
 };
 
 // ------------------------------------------------------------------ the interest rate
-
-/**
- * A loan's interest rate is a whole number per 10,000,000 of the debt's value per period, from 0 to 32,767. The loan's
- * own key may set any of them (`changeInterest.cash`); there is no waiting time and no limit on how often. The new rate
- * applies from the loan's next interest payment on, which anyone may make once a period has passed (`payInterest.cash`).
- */
-export const interestRateProblem = (rate: number): string | undefined =>
-  !Number.isInteger(rate) || rate < 0 || rate > MAXIMUM_INTEREST_RATE ? `Paryon takes an interest rate from 0 to ${MAXIMUM_INTEREST_RATE.toLocaleString('en-US')}, a whole number per 10,000,000 per period.` : undefined;
 
 /**
  * Paryon's periods in a year: they are counted in blocks of ten minutes, 52,560 a year (on chipnet, with its one-minute

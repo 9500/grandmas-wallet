@@ -132,5 +132,19 @@ export const paryonContracts = (deployment: ParyonDeployment): ParyonContracts =
 /** The period a block height falls in, as the Borrowing contract counts it. */
 export const periodAt = (deployment: ParyonDeployment, height: number): number => Math.floor((height - deployment.startBlockHeight) / deployment.periodLengthBlocks);
 
+/** From this height chipnet's blocks come every minute (the tentative upgrade of May 2027). */
+export const CHIPNET_FASTER_BLOCKS_FROM = 332_451;
+
+/**
+ * The highest height a lock time may name for the network to take the transaction now, given the height of the
+ * chain's last block. On chipnet a lock time given as a height is compared with the height the chain would have
+ * at ten-minute blocks; elsewhere with the height itself. One block is kept in hand, for a server a block ahead
+ * of the network's nodes.
+ */
+export const finalLockHeight = (network: string, height: number): number => {
+  const counted = network === 'chipnet' && height >= CHIPNET_FASTER_BLOCKS_FROM ? CHIPNET_FASTER_BLOCKS_FROM - 1 + Math.floor((height - (CHIPNET_FASTER_BLOCKS_FROM - 1)) / 10) : height;
+  return counted - 1;
+};
+
 /** The first height of a period. */
 export const periodStart = (deployment: ParyonDeployment, period: number): number => deployment.startBlockHeight + period * deployment.periodLengthBlocks;

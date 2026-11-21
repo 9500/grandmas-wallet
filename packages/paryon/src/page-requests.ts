@@ -95,37 +95,55 @@ const base = (template: TemplateNamesAlone, templateAction: LoanRequestAlone['te
   ...(page === undefined ? {} : { page }),
 });
 
+/**
+ * What an action names of Paryon's: the values read from Paryon's coins or worked out as the contracts require, and
+ * the coins by template input. The loan page's requests (versions 1 and 2) send all of it; Paryon's service (version 3,
+ * `service.ts`) supplies its share of the same values, so that both come from one source.
+ */
+export interface ActionParts {
+  variables: Record<string, string | number>;
+  inputs: Record<string, string>;
+  about?: { category: string; spent: boolean };
+}
+/** What an action on a loan names: as any action, and which loan it is about, by its key. */
+export type LoanActionParts = ActionParts & { about: { category: string; spent: boolean } };
+
+/** Making a loan key: Paryon's factory. */
+export const createKeyParts = (factory: Utxo): ActionParts => ({ variables: {}, inputs: { factoryInput: outpoint(factory) } });
+
 /** Make a loan key: the wallet's coin defines its category; Paryon's factory, which the page names, makes it. */
-export const createKeyRequestAlone = (template: TemplateNamesAlone, chosen: { factory: Utxo; page?: string }): LoanRequestAlone => ({
-  ...base(template, 'createKey', chosen.page),
-  variables: {},
-  creates: 'keyCategory',
-  inputs: { factoryInput: outpoint(chosen.factory) },
-});
+export const createKeyRequestAlone = (template: TemplateNamesAlone, chosen: { factory: Utxo; page?: string }): LoanRequestAlone => {
+  const { variables, inputs } = createKeyParts(chosen.factory);
+  return { ...base(template, 'createKey', chosen.page), variables, creates: 'keyCategory', inputs };
+};
+
+/** Moving a Borrowing thread on to the period of a height. */
+export const movePeriodParts = (contracts: ParyonContracts, borrowing: Utxo, lockHeight: number): ActionParts => {
+  const current = decodeBorrowingPeriod(commitmentOf(borrowing, 'Borrowing thread'));
+  const period = periodAt(contracts.deployment, lockHeight);
+  if (period <= current) throw new Error(`The thread is in period ${current} already; height ${lockHeight} is in period ${period}.`);
+  return {
+    variables: { borrowingSupply: String(amountOf(borrowing)), newBorrowingCommitment: binToHex(encodeBorrowingPeriod(period)), lockHeight },
+    inputs: { periodBorrowingInput: outpoint(borrowing) },
+  };
+};
 
 /**
  * Move a Borrowing thread on to the period of a height, so that a loan opened from it is charged no interest for
  * periods before. The lock time is that height; the thread's supply is put back as it is.
  */
 export const movePeriodRequestAlone = (template: TemplateNamesAlone, contracts: ParyonContracts, chosen: { borrowing: Utxo; lockHeight: number; page?: string }): LoanRequestAlone => {
-  const current = decodeBorrowingPeriod(commitmentOf(chosen.borrowing, 'Borrowing thread'));
-  const period = periodAt(contracts.deployment, chosen.lockHeight);
-  if (period <= current) throw new Error(`The thread is in period ${current} already; height ${chosen.lockHeight} is in period ${period}.`);
-  return {
-    ...base(template, 'movePeriod', chosen.page),
-    variables: { borrowingSupply: String(amountOf(chosen.borrowing)), newBorrowingCommitment: binToHex(encodeBorrowingPeriod(period)), lockHeight: chosen.lockHeight },
-    inputs: { periodBorrowingInput: outpoint(chosen.borrowing) },
-  };
+  const { variables, inputs } = movePeriodParts(contracts, chosen.borrowing, chosen.lockHeight);
+  return { ...base(template, 'movePeriod', chosen.page), variables, inputs };
 };
 
-/** Borrow: the key waiting in Paryon's contract and the PUSD go to fresh addresses of the wallet's. */
-export const borrowRequestAlone = (template: TemplateNamesAlone, choice: BorrowChoice & { page?: string }): LoanRequestAlone => {
+/** Borrowing: the values the contracts require for the choice, and Paryon's four coins. */
+export const borrowParts = (choice: BorrowChoice): ActionParts => {
   const priceCommitment = commitmentOf(choice.price, 'price thread');
   const { price } = decodePriceState(priceCommitment);
   const key = choice.enforcer.output.token;
   if (key?.nft?.capability !== 'minting') throw new Error('The coin named as the waiting loan key carries no minting NFT.');
   return {
-    ...base(template, 'borrow', choice.page),
     variables: {
       keyCategory: binToHex(key.category),
       borrowingSupply: String(amountOf(choice.borrowing)),
@@ -138,9 +156,14 @@ export const borrowRequestAlone = (template: TemplateNamesAlone, choice: BorrowC
       startingInterest: binToHex(encodeInterestRate(choice.startingInterest)),
       interestManagerConfiguration: binToHex(encodeInterestManagerConfiguration(choice.interestManager ?? NO_INTEREST_MANAGER)),
     },
-    bindings: { keyHolder: 'receive', tokensHolder: 'receive' },
     inputs: { borrowingInput: outpoint(choice.borrowing), priceInput: outpoint(choice.price), enforcerInput: outpoint(choice.enforcer), proofInput: outpoint(choice.proof) },
   };
+};
+
+/** Borrow: the key waiting in Paryon's contract and the PUSD go to fresh addresses of the wallet's. */
+export const borrowRequestAlone = (template: TemplateNamesAlone, choice: BorrowChoice & { page?: string }): LoanRequestAlone => {
+  const { variables, inputs } = borrowParts(choice);
+  return { ...base(template, 'borrow', choice.page), variables, bindings: { keyHolder: 'receive', tokensHolder: 'receive' }, inputs };
 };
 
 /**
@@ -175,13 +198,30 @@ const onLoan = (coins: LoanCoins, functionInput: 'manageInput' | 'repayInput') =
   };
 };
 
+/** Adding or taking out collateral: the loan then holds `collateral`; its record stays as it is. */
+export const manageParts = (coins: LoanCoins, collateral: bigint): LoanActionParts => {
+  const { about, inputs, variables, record } = onLoan(coins, 'manageInput');
+  return { variables: { ...variables, collateral: String(collateral), loanCommitment: binToHex(record) }, about, inputs };
+};
+
 /** Add or take out collateral: the loan then holds `collateral`. The key goes back to the script it left. */
 export const manageRequestAlone = (template: TemplateNamesAlone, coins: LoanCoins & { collateral: bigint; page?: string }): LoanRequestAlone => {
-  const { about, inputs, variables, record } = onLoan(coins, 'manageInput');
+  const { variables, about, inputs } = manageParts(coins, coins.collateral);
+  return { ...base(template, 'manage', coins.page), variables, bindings: { keyHolder: 'return' }, about, inputs };
+};
+
+/**
+ * Repaying part of the debt: the loan stays open, holds `collateral`, and its record says the debt less the repayment.
+ * @throws when Paryon would not take the repayment, or it would close the loan
+ */
+export const repayParts = (coins: LoanCoins, repay: bigint, collateral: bigint): LoanActionParts => {
+  const { about, inputs, variables, record } = onLoan(coins, 'repayInput');
+  const state = decodeLoanState(record);
+  if (!repaymentAllowed(repay, state.borrowed, state.beingRedeemed) || repay === 0n || repay === state.borrowed) {
+    throw new Error(`A repayment of ${repay} PUSD cents that leaves the loan open is not one Paryon takes from a debt of ${state.borrowed}.`);
+  }
   return {
-    ...base(template, 'manage', coins.page),
-    variables: { ...variables, collateral: String(coins.collateral), loanCommitment: binToHex(record) },
-    bindings: { keyHolder: 'return' },
+    variables: { ...variables, collateral: String(collateral), repayAmount: String(repay), loanCommitment: binToHex(encodeLoanState({ ...state, borrowed: state.borrowed - repay })) },
     about,
     inputs,
   };
@@ -189,18 +229,14 @@ export const manageRequestAlone = (template: TemplateNamesAlone, coins: LoanCoin
 
 /** Repay part of the debt; the loan stays open and holds `collateral`. Paryon takes at least 100.00 PUSD and leaves at least 100.00. */
 export const repayRequestAlone = (template: TemplateNamesAlone, coins: LoanCoins & { repay: bigint; collateral: bigint; page?: string }): LoanRequestAlone => {
+  const { variables, about, inputs } = repayParts(coins, coins.repay, coins.collateral);
+  return { ...base(template, 'repay', coins.page), variables, bindings: { keyHolder: 'return' }, about, inputs };
+};
+
+/** Closing: the whole debt repaid; the loan's record goes to a data output as it is. */
+export const closeParts = (coins: LoanCoins): LoanActionParts => {
   const { about, inputs, variables, record } = onLoan(coins, 'repayInput');
-  const state = decodeLoanState(record);
-  if (!repaymentAllowed(coins.repay, state.borrowed, state.beingRedeemed) || coins.repay === 0n || coins.repay === state.borrowed) {
-    throw new Error(`A repayment of ${coins.repay} PUSD cents that leaves the loan open is not one Paryon takes from a debt of ${state.borrowed}.`);
-  }
-  return {
-    ...base(template, 'repay', coins.page),
-    variables: { ...variables, collateral: String(coins.collateral), repayAmount: String(coins.repay), loanCommitment: binToHex(encodeLoanState({ ...state, borrowed: state.borrowed - coins.repay })) },
-    bindings: { keyHolder: 'return' },
-    about,
-    inputs,
-  };
+  return { variables: { ...variables, loanCommitment: binToHex(record), repayAmount: String(decodeLoanState(record).borrowed) }, about, inputs };
 };
 
 /**
@@ -208,14 +244,8 @@ export const repayRequestAlone = (template: TemplateNamesAlone, coins: LoanCoins
  * a fresh address of the wallet's, since the contracts do not require it to continue at all.
  */
 export const closeRequestAlone = (template: TemplateNamesAlone, coins: LoanCoins & { page?: string }): LoanRequestAlone => {
-  const { about, inputs, variables, record } = onLoan(coins, 'repayInput');
-  return {
-    ...base(template, 'close', coins.page),
-    variables: { ...variables, loanCommitment: binToHex(record), repayAmount: String(decodeLoanState(record).borrowed) },
-    bindings: { keyHolder: 'receive' },
-    about,
-    inputs,
-  };
+  const { variables, about, inputs } = closeParts(coins);
+  return { ...base(template, 'close', coins.page), variables, bindings: { keyHolder: 'receive' }, about, inputs };
 };
 
 /**
@@ -234,23 +264,31 @@ export interface InterestCoins {
 }
 
 /**
+ * Changing the interest rate: the loan's new record as the contract writes it (only the next rate changes), the
+ * collateral as it is, and the rate as the two bytes the contract takes.
+ * @throws when the rate is not one the contracts take
+ */
+export const changeInterestParts = (coins: InterestCoins, rate: number): LoanActionParts => {
+  const record = commitmentOf(coins.loan, 'loan');
+  return {
+    variables: {
+      keySatoshis: String(coins.keySatoshis),
+      collateral: String(coins.loan.output.valueSatoshis),
+      loanCommitment: binToHex(withNextInterestRate(record, rate)),
+      nextInterestRate: binToHex(encodeInterestRate(rate)),
+    },
+    about: { category: coins.keyCategory, spent: true },
+    inputs: { loanInput: outpoint(coins.loan), sidecarInput: outpoint(coins.sidecar), changeInterestInput: outpoint(coins.interestFunction) },
+  };
+};
+
+/**
  * Change the loan's interest rate for the periods to come: `rate` per 10,000,000 of the debt's value per period, a
  * whole number from 0 to 32,767, which the loan's own key may set without limits. The page writes the loan's new
  * record as the contract does (only the next rate changes); the collateral stays as it is; the key goes back to the
  * script it left. The rate charged now stays until the next interest payment makes the new one current.
  */
 export const changeInterestRequestAlone = (template: TemplateNamesAlone, coins: InterestCoins & { rate: number; page?: string }): LoanRequestAlone => {
-  const record = commitmentOf(coins.loan, 'loan');
-  return {
-    ...base(template, 'changeInterest', coins.page),
-    variables: {
-      keySatoshis: String(coins.keySatoshis),
-      collateral: String(coins.loan.output.valueSatoshis),
-      loanCommitment: binToHex(withNextInterestRate(record, coins.rate)),
-      nextInterestRate: binToHex(encodeInterestRate(coins.rate)),
-    },
-    bindings: { keyHolder: 'return' },
-    about: { category: coins.keyCategory, spent: true },
-    inputs: { loanInput: outpoint(coins.loan), sidecarInput: outpoint(coins.sidecar), changeInterestInput: outpoint(coins.interestFunction) },
-  };
+  const { variables, about, inputs } = changeInterestParts(coins, coins.rate);
+  return { ...base(template, 'changeInterest', coins.page), variables, bindings: { keyHolder: 'return' }, about, inputs };
 };

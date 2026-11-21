@@ -222,3 +222,86 @@ export const interestCoins = async (
   if (interestFunction === undefined) throw new Error('Paryon\'s interest function could not be found on the chain just now.');
   return { ...found, interestFunction, keySatoshis };
 };
+
+// ------------------------------------------------------------------------- a coin, a factory, a waiting key
+
+/** `<transaction id>:<output index>` read into its two parts. */
+export const parseOutpoint = (outpoint: string): { transactionId: string; index: number } | undefined => {
+  const match = /^([0-9a-f]{64}):(\d{1,6})$/.exec(outpoint);
+  return match === null ? undefined : { transactionId: match[1] as string, index: Number(match[2]) };
+};
+
+/**
+ * A coin as the chain shows it: read from its transaction, and whether the server lists it as unspent at its script.
+ * Returns `undefined` when the server does not know the transaction or it has no such output.
+ */
+export const readCoin = async (chain: ParyonChain, outpoint: string, reader = new TransactionReader(chain)): Promise<{ coin: LiveOutput; unspent: boolean } | undefined> => {
+  const at = parseOutpoint(outpoint);
+  if (at === undefined) return undefined;
+  let output: Output;
+  try {
+    output = await reader.output(at.transactionId, at.index);
+  } catch {
+    return undefined;
+  }
+  const listed = (await chain.listUnspent(output.lockingBytecode)).find((entry) => entry.transactionId === at.transactionId && entry.index === at.index);
+  return { coin: { transactionHash: hexToBin(at.transactionId), index: at.index, output, height: listed?.height ?? 0 }, unspent: listed !== undefined };
+};
+
+/** The coin of Paryon's key factories a loan key is made with: the first by outpoint. */
+export const firstFactory = (state: Pick<ParyonState, 'loanKeyFactory'>): LiveOutput | undefined => state.loanKeyFactory.slice().sort((a, b) => (outpointOf(a) < outpointOf(b) ? -1 : 1))[0];
+
+/** The Borrowing thread a loan of this debt is opened from: one that can lend it, the most recent period first, then the most it can still lend. */
+export const borrowingFor = (threads: BorrowingThread[], debt: bigint): BorrowingThread | undefined =>
+  threads.filter((thread) => thread.supply >= debt).sort((a, b) => b.period - a.period || (b.supply > a.supply ? 1 : b.supply < a.supply ? -1 : 0))[0];
+
+/** A loan key that was made and waits in Paryon's contract (the origin enforcer) until its loan is opened. */
+export interface MadeKey {
+  /** The key's category, explorer order, hex. */
+  category: string;
+  /** The transaction that made it. */
+  transactionId: string;
+  /** Outputs 2 and 3 of that transaction: the new key, waiting in Paryon's contract, and its proof of origin. */
+  enforcer: Utxo;
+  proof: Utxo;
+}
+
+/** The key a transaction made: its category is the identifier of the transaction whose output the wallet spent first. */
+export const readMadeKey = async (chain: Pick<ParyonChain, 'getTransaction'>, transactionId: string): Promise<MadeKey> => {
+  const text = await chain.getTransaction(transactionId);
+  if (text === undefined) throw new Error('The transaction that made the loan key is not known to the server yet.');
+  const transaction = decodeTransactionBch(hexToBin(text));
+  if (typeof transaction === 'string') throw new Error(transaction);
+  const [first] = transaction.inputs;
+  if (first === undefined) throw new Error('The transaction that made the loan key has no inputs.');
+  const at = (index: number): Utxo => ({ transactionHash: hexToBin(transactionId), index, output: transaction.outputs[index] as Output });
+  return { category: binToHex(first.outpointTransactionHash), transactionId, enforcer: at(2), proof: at(3) };
+};
+
+/** Whether a key that was made is still waiting to be used: its two outputs unspent. */
+export const keyWaiting = async (chain: ParyonChain, key: MadeKey): Promise<boolean> => {
+  const listed = async (utxo: Utxo): Promise<boolean> =>
+    (await chain.listUnspent(utxo.output.lockingBytecode)).some((entry: ListedOutput) => entry.transactionId === binToHex(utxo.transactionHash) && entry.index === utxo.index);
+  const [enforcer, proof] = await Promise.all([listed(key.enforcer), listed(key.proof)]);
+  return enforcer && proof;
+};
+
+/**
+ * The loan key of a category waiting in Paryon's contract, found on chain: an unspent output at the origin enforcer's
+ * script that holds the minting NFT of the category, and beside it, the next output of the same transaction, the
+ * unspent proof of origin of Paryon's factory. Returns `undefined` when no key of the category waits (it was never made,
+ * or a loan was opened with it).
+ */
+export const findWaitingKey = async (chain: ParyonChain, contracts: ParyonContracts, keyCategory: Uint8Array, reader = new TransactionReader(chain)): Promise<MadeKey | undefined> => {
+  const enforcers = await outputsAt(chain, reader, contracts.loanKeyOriginEnforcer.lockingBytecode, listedAs(keyCategory, 'minting'), (output) => hasNft(output, keyCategory, 'minting') && output.token?.nft?.commitment.length === 0);
+  if (enforcers.length === 0) return undefined;
+  const proofsUnspent = new Set((await chain.listUnspent(contracts.loanKeyOriginProof.lockingBytecode)).map((listed) => `${listed.transactionId}:${listed.index}`));
+  for (const enforcer of enforcers) {
+    const transactionId = binToHex(enforcer.transactionHash);
+    if (!proofsUnspent.has(`${transactionId}:${enforcer.index + 1}`)) continue;
+    const proof = await reader.output(transactionId, enforcer.index + 1);
+    if (!same(proof.lockingBytecode, contracts.loanKeyOriginProof.lockingBytecode) || !hasNft(proof, contracts.loanKeyFactoryCategory, 'none')) continue;
+    return { category: binToHex(keyCategory), transactionId, enforcer, proof: { transactionHash: enforcer.transactionHash, index: enforcer.index + 1, output: proof } };
+  }
+  return undefined;
+};

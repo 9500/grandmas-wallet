@@ -7,13 +7,18 @@ import { describe, expect, it } from 'vitest';
 import {
   CHIPNET_FAST_PERIODS_6,
   MAINNET_V1,
+  PARYON_ADDRESSES,
   PARYON_TEMPLATE_VERSION,
   paryonChipnetTemplateText,
   paryonChipnetTemplateTextV1,
+  paryonChipnetTemplateTextV2,
+  paryonChipnetTemplateTextV3,
   paryonContracts,
   paryonDeploymentOn,
   paryonMainnetTemplateText,
   paryonMainnetTemplateTextV1,
+  paryonMainnetTemplateTextV2,
+  paryonMainnetTemplateTextV3,
   paryonTemplateAlone,
 } from '../src/index.js';
 
@@ -55,8 +60,28 @@ describe('the frozen templates', () => {
   const IDENTIFIERS = {
     1: { chipnet: ['aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be', '99b19cdebc79ac9ece0dcd7773f0ce846ec2adabd27e763e781dfb75600aaf61'], mainnet: ['efa0e18915670a6d21a634821d4558a316a4191a219447f615523fde6a6143a5', 'd30ac987f2b7c8862d763ffdba9175290051cabb68ec9a6ff78cbd6ed601a052'] },
     2: { chipnet: ['3fa4baf9f313ee2a5046ae30fdf1f7affc6aca21a29e3f6b38227b4a826e9235', '5736521d3b57ba550dba51625018d76182183f5302418747a0fbe1f982ab01ef'], mainnet: ['30647ea4b817c4e58b32fb4fc104643af9c1e92295729b33d5551dc875569364', '68e9bc50ff7d64ba72c5498ce595f01e39ffa7c13f67cb0b0fd95717ea0ca5c1'] },
+    3: { chipnet: ['160a451f5398db649de7d660855db24113b774559534361f8334cbfe9a583e20', 'f7cdfbc37a81b71dd879bc3c07756151501aea5bfce0f5c51e7147c18d66deab'], mainnet: ['89b1af236ace2e5544f28f286a830186dc742597ddb9a7e7e3a205ad1b48092a', '6b671ec1e9df62b4e3e9f6f8d723effa4bcc69e28e4fe859f7f1cc04dea75b7b'] },
   } as const;
-  const TEXTS = { 1: { chipnet: paryonChipnetTemplateTextV1, mainnet: paryonMainnetTemplateTextV1 }, 2: { chipnet: paryonChipnetTemplateText, mainnet: paryonMainnetTemplateText } } as const;
+  const TEXTS = {
+    1: { chipnet: paryonChipnetTemplateTextV1, mainnet: paryonMainnetTemplateTextV1 },
+    2: { chipnet: paryonChipnetTemplateTextV2, mainnet: paryonMainnetTemplateTextV2 },
+    3: { chipnet: paryonChipnetTemplateTextV3, mainnet: paryonMainnetTemplateTextV3 },
+  } as const;
+
+  it('the names without a version still mean version 2', () => {
+    expect(paryonChipnetTemplateText).toBe(paryonChipnetTemplateTextV2);
+    expect(paryonMainnetTemplateText).toBe(paryonMainnetTemplateTextV2);
+  });
+
+  it('makes version 3 only when it is named, with the service\'s and the page\'s addresses, and fixes its texts and identifiers', () => {
+    for (const deployment of [CHIPNET_FAST_PERIODS_6, MAINNET_V1]) {
+      const which = deployment === MAINNET_V1 ? 'mainnet' : 'chipnet';
+      const made = paryonTemplateAlone(paryonContracts(deployment), 3, PARYON_ADDRESSES);
+      expect(made.texts.template).toBe(TEXTS[3][which]);
+      expect([made.names.identifier, made.names.contentHash]).toEqual(IDENTIFIERS[3][which]);
+      expect((JSON.parse(made.texts.template) as { version: string }).version).toBe('3');
+    }
+  });
 
   it('leaves version 1 of chipnet and mainnet as frozen, text and identifier, reachable only by a name that says so', () => {
     const chipnet = paryonTemplateAlone(paryonContracts(CHIPNET_FAST_PERIODS_6), 1);
@@ -82,7 +107,7 @@ describe('the frozen templates', () => {
   });
 
   it('are the files in frozen/, one for each version and deployment, which XO\'s validator takes', () => {
-    for (const version of [1, 2] as const) {
+    for (const version of [1, 2, 3] as const) {
       for (const deployment of [CHIPNET_FAST_PERIODS_6, MAINNET_V1]) {
         const which = deployment === MAINNET_V1 ? 'mainnet' : 'chipnet';
         const text = readFileSync(new URL(`../frozen/paryon-loan-v${version}-${deployment.name}.json`, import.meta.url), 'utf8');
@@ -94,17 +119,18 @@ describe('the frozen templates', () => {
     }
   });
 
-  for (const version of [1, 2] as const) {
+  for (const version of [1, 2, 3] as const) {
     it(`version ${version}: chipnet's and mainnet's differ only in the deployment's values: the same actions, transactions, inputs, outputs and unlocking scripts`, () => {
       const chipnetText = TEXTS[version].chipnet;
       const mainnetText = TEXTS[version].mainnet;
       const chipnet = JSON.parse(chipnetText) as Record<string, Record<string, unknown>>;
       const mainnet = JSON.parse(mainnetText) as Record<string, Record<string, unknown>>;
-      for (const part of ['actions', 'transactions', 'inputs', 'outputs', 'lockingScripts', 'variables', 'roles', 'start'] as const) expect(Object.keys(mainnet[part] ?? {})).toEqual(Object.keys(chipnet[part] ?? {}));
+      for (const part of ['actions', 'transactions', 'inputs', 'outputs', 'lockingScripts', 'variables', 'roles', 'start', 'resources'] as const) expect(Object.keys(mainnet[part] ?? {})).toEqual(Object.keys(chipnet[part] ?? {}));
       expect(mainnet['actions']).toEqual(chipnet['actions']);
       expect(mainnet['transactions']).toEqual(chipnet['transactions']);
       expect(mainnet['variables']).toEqual(chipnet['variables']);
       expect(mainnet['start']).toEqual(chipnet['start']);
+      expect(mainnet['resources']).toEqual(chipnet['resources']);
       expect(mainnet['lockingScripts']).toEqual(chipnet['lockingScripts']);
       const swap = (text: string): string =>
         text
@@ -117,7 +143,7 @@ describe('the frozen templates', () => {
       // The unlocking scripts are the same; of the contracts' scripts, those without parameters are too.
       const chipnetScripts = chipnet['scripts'] as Record<string, string>;
       const mainnetScripts = mainnet['scripts'] as Record<string, string>;
-      const same = ['unlockWithoutArguments', 'unlockBorrow', 'unlockMovePeriod', 'unlockSharePrice', 'unlockManage', 'unlockRepay', 'originProofBytecode', 'loanBytecode', 'sidecarBytecode', 'manageBytecode', ...(version === 2 ? ['unlockChangeInterest', 'changeInterestBytecode'] : [])];
+      const same = ['unlockWithoutArguments', 'unlockBorrow', 'unlockMovePeriod', 'unlockSharePrice', 'unlockManage', 'unlockRepay', 'originProofBytecode', 'loanBytecode', 'sidecarBytecode', 'manageBytecode', ...(version >= 2 ? ['unlockChangeInterest', 'changeInterestBytecode'] : [])];
       for (const name of same) expect(mainnetScripts[name]).toBe(chipnetScripts[name]);
       for (const name of ['borrowingBytecode', 'priceBytecode', 'loanKeyFactoryBytecode', 'originEnforcerBytecode']) expect(mainnetScripts[name]).not.toBe(chipnetScripts[name]);
       // Nothing in mainnet's text speaks of chipnet or of test coins.
