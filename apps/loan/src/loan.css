@@ -74,6 +74,8 @@
 .inline-form { display: flex; gap: 8px; align-items: flex-start; }
 .inline-form .input-unit { flex: 1 1 auto; min-width: 0; }
 .inline-form button { flex: none; }
+.input-unit.long-unit input { padding-right: 88px; }
+.panel > .summary { margin-bottom: 12px; }
 
 /* a new loan, in three steps */
 .new-steps { display: flex; flex-direction: column; }

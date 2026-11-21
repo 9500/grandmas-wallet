@@ -12,7 +12,7 @@ import { type ActionState, ConnectCard, ConnectedCard, HowItWorks, Independent, 
 
 /*
  * The states of the page, fed from fixed data, for looking at them in a browser without a wallet. Served by the
- * development server only (`fixtures.html?show=connect|new|ready|loans|running`); the build does not include it.
+ * development server only (`fixtures.html?show=connect|new|ready|loans|interest|running`); the build does not include it.
  * `&local` shows the page as it is served for a deployment on a chain of one's own, where no oracle is read.
  */
 
@@ -40,11 +40,12 @@ const A = '5c1d8c7d635141a15d9d41747ebe30422ca50237c41c54c45714d09114439382';
 const B = '2d3f21018a219ed7a0665be8db173d774fa74448b07ec1c12bf459a97f8acd10';
 const C = 'c3346ebbc6b48d6f7b6e36693d79e9ef9f6c99ace86e87e0e1f40ac81bf0d1a3';
 const found = (collateral: bigint): FoundLoan => ({ loan: coin(3, 2, collateral), sidecar: coin(3, 3, 1_000n), state: undefined as never, keyCategory: new Uint8Array(32) });
-const loan = (category: string, debt: bigint, collateral: bigint, rate = 0): LoanView => ({ category, status: 'open', satoshis: collateral, debt, beingRedeemed: 0n, interestRate: rate, found: found(collateral) });
+const loan = (category: string, debt: bigint, collateral: bigint, rate = 0, next = rate): LoanView => ({ category, status: 'open', satoshis: collateral, debt, beingRedeemed: 0n, interestRate: rate, nextInterestRate: next, found: found(collateral) });
 const keys: MadeKey[] = show() === 'ready' ? [{ category: C, transactionId: 'c5'.repeat(32), enforcer: coin(4, 2, 1_000n), proof: coin(4, 3, 1_000n) }] : [];
 const loans: LoanView[] =
-  show() === 'loans' || show() === 'running'
-    ? [loan(A, 100_00n, 59_957_301n), loan(B, 350_00n, 190_000_000n), { category: C, status: 'closed', satoshis: 0n }]
+  show() === 'loans' || show() === 'interest' || show() === 'running'
+    ? // The second loan pays interest, and a new rate is chosen for it from its next interest payment on.
+      [loan(A, 100_00n, 59_957_301n), loan(B, 350_00n, 190_000_000n, 23, 35), { category: C, status: 'closed', satoshis: 0n }]
     : [];
 const state: ActionState =
   show() === 'running'
@@ -73,7 +74,7 @@ render(
         <div class="columns">
           <div class="stack">
             {state.running !== undefined && <OnItsWay title={state.running.title} progress={state.running.progress} />}
-            <LoanList loans={loans} trusted market={market} facts={facts} state={state} onManage={ignore} onRepay={ignore} onClose={ignore} />
+            <LoanList loans={loans} trusted market={market} facts={facts} state={state} desk={desk} opened={show() === 'interest' ? { category: B, panel: 'interest' } : undefined} onManage={ignore} onRepay={ignore} onClose={ignore} onChangeInterest={ignore} />
           </div>
           <div class="stack">
             <NewLoanCard market={market} desk={desk} keys={keys} facts={facts} state={state} onMakeKey={ignore} onMove={ignore} onBorrow={ignore} />

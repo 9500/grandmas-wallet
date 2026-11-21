@@ -8,9 +8,9 @@ import { type Environment, Button, Card, Frame, Loading, Vault, chooseNetwork, f
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { type Desk, type LoanView, type Market, deskFor, formatPusd } from './loan.js';
+import { type Desk, type LoanView, type Market, deskFor, formatPusd, formatYearlyPercent } from './loan.js';
 import { type MadeKey, type PageChain, generalProtocolsOracle, readMarket } from './market.js';
-import { type ActionState, type LinkWords, type Progress, ConnectCard, ConnectedCard, HowItWorks, Independent, Intro, LoanList, LoanNeeds, NewLoanCard, OnItsWay, PricesCard, borrowName, closeName, keyName, manageName, moveName, repayName } from './view.js';
+import { type ActionState, type LinkWords, type Progress, ConnectCard, ConnectedCard, HowItWorks, Independent, Intro, LoanList, LoanNeeds, NewLoanCard, OnItsWay, PricesCard, borrowName, closeName, interestName, keyName, manageName, moveName, repayName } from './view.js';
 import { type KeptKey, type Outcome, type PendingRequest, STAGE_WORDS, XoLoans, xoProblem } from './xo.js';
 
 /**
@@ -193,12 +193,21 @@ const Loans = ({ environment, desk, loans, chain, peerName, onDisconnect }: { en
             market={market}
             facts={facts}
             state={state}
+            desk={desk}
             onManage={(loan, collateral) => {
               const now = loan.found?.loan.output.valueSatoshis ?? 0n;
               const change = collateral > now ? `Adding ${formatBch(collateral - now)} BCH of collateral` : `Taking ${formatBch(now - collateral)} BCH of collateral out`;
               void act(manageName(loan), `${change}; the loan then holds ${formatBch(collateral)} BCH.`, (progress) => loans.manage(loan.category, collateral, ...followTries(progress)), 'The collateral is changed. The key is back where it was in your wallet.');
             }}
             onRepay={(loan, repay) => void act(repayName(loan), `Repaying ${formatPusd(repay)} PUSD of the loan.`, (progress) => loans.repay(loan, repay, ...followTries(progress)), 'Repaid. The PUSD repaid are destroyed; the loan stays open.')}
+            onChangeInterest={(loan, rate) =>
+              void act(
+                interestName(loan),
+                rate === 0 ? 'Changing the loan\'s interest rate to none, from its next interest payment.' : `Changing the loan's interest rate to ${formatYearlyPercent(rate, desk.deployment)} a year, from its next interest payment.`,
+                (progress) => loans.changeInterest(loan.category, rate, ...followTries(progress)),
+                'The interest rate is changed. It applies from the loan\'s next interest payment; the key is back where it was in your wallet.',
+              )
+            }
             onClose={(loan) => void act(closeName(loan), `Repaying ${formatPusd(loan.debt ?? 0n)} PUSD and closing the loan.`, (progress) => loans.close(loan.category, ...followTries(progress)), 'The loan is closed. The collateral is back in your wallet, and so is the key.')}
           />
         </div>

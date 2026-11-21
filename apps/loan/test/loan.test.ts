@@ -16,14 +16,18 @@ import {
   finalLockHeight,
   formatPrice,
   formatPusd,
+  formatYearlyPercent,
   interestEachPeriod,
+  interestEachYear,
   interestRateProblem,
   lowerPrice,
   parsePercent,
   parsePusd,
+  parseYearlyRate,
   partRepayment,
   periodNeed,
   periodOf,
+  periodWords,
   periodsPerYear,
   priceBasis,
   repaymentProblem,
@@ -154,6 +158,69 @@ describe('the interest rate', () => {
     // 200.00 PUSD at $198.49: 100,760,743 satoshis of value; 100 per 10,000,000 of it.
     expect(interestEachPeriod(100, 200_00n, 19_849n)).toBe(1_007n);
     expect(interestEachPeriod(0, 200_00n, 19_849n)).toBe(0n);
+  });
+});
+
+describe('the interest rate as a person types and reads it', () => {
+  const LOCAL = { ...CHIPNET_FAST_PERIODS_6, periodLengthBlocks: 10 };
+
+  it('writes a rate as an exact yearly percentage, agreeing with Paryon\'s own figure', () => {
+    expect(formatYearlyPercent(1_096, MAINNET_V1)).toBe('4.0004%');
+    expect(formatYearlyPercent(1, MAINNET_V1)).toBe('0.00365%');
+    expect(formatYearlyPercent(32_767, MAINNET_V1)).toBe('119.59955%');
+    expect(formatYearlyPercent(0, MAINNET_V1)).toBe('0%');
+    expect(formatYearlyPercent(23, CHIPNET_FAST_PERIODS_6)).toBe('4.0296%');
+    expect(formatYearlyPercent(32_767, CHIPNET_FAST_PERIODS_6)).toBe('5,740.7784%');
+    expect(formatYearlyPercent(1, LOCAL)).toBe('0.05256%');
+    for (const rate of [0, 1, 7, 1_096, 1_699, 32_767]) {
+      for (const deployment of [MAINNET_V1, CHIPNET_FAST_PERIODS_6, LOCAL]) expect(Number(formatYearlyPercent(rate, deployment).replace(/[,%]/g, ''))).toBeCloseTo(yearlyPercent(rate, deployment), 9);
+    }
+  });
+
+  it('reads a yearly percentage as the nearest whole rate the contracts take, and says when it lies between two', () => {
+    expect(parseYearlyRate('4.0004', MAINNET_V1)).toEqual({ rate: 1_096, rounded: false });
+    expect(parseYearlyRate('4', MAINNET_V1)).toEqual({ rate: 1_096, rounded: true });
+    expect(parseYearlyRate(' 4.5 % ', MAINNET_V1)).toEqual({ rate: 1_233, rounded: true });
+    expect(parseYearlyRate('.00365', MAINNET_V1)).toEqual({ rate: 1, rounded: false });
+    // Half a step rounds up, less than half down.
+    expect(parseYearlyRate('0.00182', MAINNET_V1)).toEqual({ rate: 0, rounded: true });
+    expect(parseYearlyRate('0.00183', MAINNET_V1)).toEqual({ rate: 1, rounded: true });
+    expect(parseYearlyRate('4', CHIPNET_FAST_PERIODS_6)).toEqual({ rate: 23, rounded: true });
+    expect(parseYearlyRate('4.0296', CHIPNET_FAST_PERIODS_6)).toEqual({ rate: 23, rounded: false });
+  });
+
+  it('reaches 0 and the highest rate, and refuses beyond them', () => {
+    expect(parseYearlyRate('0', MAINNET_V1)).toEqual({ rate: 0, rounded: false });
+    expect(parseYearlyRate('119.59955', MAINNET_V1)).toEqual({ rate: 32_767, rounded: false });
+    expect(parseYearlyRate('119.6', MAINNET_V1)).toEqual({ rate: 32_767, rounded: true });
+    expect(parseYearlyRate('119.60137', MAINNET_V1)).toEqual({ rate: 32_767, rounded: true });
+    expect(parseYearlyRate('119.60138', MAINNET_V1)).toBe('Paryon takes a rate from 0% to 119.59955% a year.');
+    expect(parseYearlyRate('5740.7784', CHIPNET_FAST_PERIODS_6)).toEqual({ rate: 32_767, rounded: false });
+    expect(parseYearlyRate('6000', CHIPNET_FAST_PERIODS_6)).toBe('Paryon takes a rate from 0% to 5,740.7784% a year.');
+  });
+
+  it('gives back the same rate for every percentage it writes', () => {
+    for (const deployment of [MAINNET_V1, CHIPNET_FAST_PERIODS_6, LOCAL]) {
+      for (const rate of [0, 1, 2, 23, 1_096, 32_766, 32_767]) expect(parseYearlyRate(formatYearlyPercent(rate, deployment).replace(/,/g, ''), deployment)).toEqual({ rate, rounded: false });
+    }
+  });
+
+  it('refuses what is not a percentage', () => {
+    expect(parseYearlyRate('', MAINNET_V1)).toBe('Enter a rate.');
+    expect(parseYearlyRate('.', MAINNET_V1)).toMatch(/for example 4 or 4\.5/);
+    expect(parseYearlyRate('-1', MAINNET_V1)).toMatch(/for example 4 or 4\.5/);
+    // A comma is not read as a decimal point, nor dropped.
+    expect(parseYearlyRate('4,5', MAINNET_V1)).toMatch(/for example 4 or 4\.5/);
+    expect(parseYearlyRate('4.000041', MAINNET_V1)).toBe('Enter the rate with at most five decimal places.');
+  });
+
+  it('says what a rate costs a loan in a year at one price, and how long a period is', () => {
+    expect(interestEachYear(100, 200_00n, 19_849n, MAINNET_V1)).toBe(1_007n * 365n);
+    expect(interestEachYear(100, 200_00n, 19_849n, CHIPNET_FAST_PERIODS_6)).toBe(1_007n * 17_520n);
+    expect(interestEachYear(0, 200_00n, 19_849n, MAINNET_V1)).toBe(0n);
+    expect(periodWords(MAINNET_DESK)).toBe('about a day');
+    expect(periodWords(CHIPNET_DESK)).toBe('about 30 minutes');
+    expect(periodWords({ deployment: LOCAL, paryons: false })).toBe('10 blocks');
   });
 });
 
