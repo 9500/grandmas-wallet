@@ -1272,7 +1272,7 @@ contract VaultAddress(bytes32 tag) {
     </ul></div>
     <div><h4>Design 2, and what is still to run</h4><ul>
       <li>With design 2's template and declaration, the same course ran on chipnet, in browsers with the public pages, and an unmodified Cashonize opened and emptied a jar with the same page and contract.</li>
-      <li>For design 3, the course in browsers and the run on chipnet (run G of the plan) are still to be made.</li>
+      <li>Design 3 ran the course in browsers on the local node, and on chipnet with the public pages on 20 November 2026 (run G of the plan): after the recovery the new phone trusted the stored template, listed the jar from its record as open, and emptied it from its own list. Of the 183 requests its browser had made by then, none went to the jar's page. The same page opened and emptied a jar with the unmodified Cashonize wallet.</li>
     </ul></div>
   </div>
 </section>
@@ -1315,7 +1315,7 @@ contract VaultAddress(bytes32 tag) {
       <li>The run calls the page's code without a browser, and cost 16,179 satoshis in network fees.</li>
     </ul></div>
     <div><h4>Not run, and what to know</h4><ul>
-      <li>For design 3, the course in browsers and the loan on Paryon's chipnet deployment (run H of the plan) are still to be made.</li>
+      <li>Design 3 ran the course in browsers on the local node, and on Paryon's chipnet deployment with the public pages on 20 and 21 November 2026 (run H of the plan): a key made with the tick, 100.00 PUSD borrowed, collateral added; after the recovery the wallet showed "Open the application to do this" with the page's address, and the page on the new phone found and closed the loan. The first closing was refused by the network because someone else had spent a coin of Paryon's that it named; the page now asks again at once in that case.</li>
       <li>Design 2 ran a loan on Paryon's chipnet deployment <code>chipnet-fast-periods-6</code> on 18 November 2026, by plain script, through the wallet from the template with its declaration, and from the loan page in browsers; the new phone closed the recovered loan with the page not opened.</li>
       <li>A repayment that leaves the loan open has not been sent. It takes a loan of 200 PUSD; it passes in the virtual machine against the live outputs.</li>
       <li>The deployment's keepers have stopped: its stored price was near $275 while the oracle signed $208. The page reckons at the lower price and takes nothing under 115%.</li>
@@ -1428,11 +1428,11 @@ contract VaultAddress(bytes32 tag) {
     <tr><td>The check against the chain; open, closed, not confirmed, held</td><td><span class="pill ok">Built</span> Tested on the simulated chain; run on the local node through the engine with the real recovery flow (stages 13 and 17).</td></tr>
     <tr><td>An application from its template alone; the declaration removed</td><td><span class="pill ok">Built</span> Tested on the simulated chain (stage 14). A test finds no reader of a declaration and no application's name in the wallet's or the recoverer's code.</td></tr>
     <tr><td>Findings for each action</td><td><span class="pill ok">Built</span> Tested on the simulated chain (stage 15).</td></tr>
-    <tr><td>The wallet's screens for these</td><td><span class="pill part">Pictured</span> Built and pictured on a phone and a desktop from the fixtures page (stage 16); not yet run through the engine or with the two applications.</td></tr>
-    <tr><td>Savings Jar and ParyonUSD without declarations</td><td><span class="pill part">Run on the local node</span> Through the engine and the real recovery flow, calling the pages' code without a browser (stage 17).</td></tr>
-    <tr><td>Both courses in browsers</td><td><span class="pill unk">Not yet run</span></td></tr>
-    <tr><td>Both courses on chipnet (runs G and H)</td><td><span class="pill unk">Not yet run</span></td></tr>
-    <tr><td>Public demonstration</td><td><span class="pill unk">Design 2</span> The public sites show design 2.</td></tr>
+    <tr><td>The wallet's screens for these</td><td><span class="pill ok">Run on chipnet</span> Built (stage 16), and pictured from the runs in browsers on the local node and on chipnet.</td></tr>
+    <tr><td>Savings Jar and ParyonUSD without declarations</td><td><span class="pill ok">Run on chipnet</span> Through the engine and the real recovery flow, on the local node and on chipnet (stage 17).</td></tr>
+    <tr><td>Both courses in browsers</td><td><span class="pill ok">Run</span> On the local node, with the wallet's, the recoverer's and the two applications' pages. The new phone emptied the jar from its own list with the jar's page never opened; the loan was closed from its page on the new phone.</td></tr>
+    <tr><td>Both courses on chipnet (runs G and H)</td><td><span class="pill ok">Run on chipnet</span> On 20 and 21 November 2026, with the public pages. The loan's run did not go straight through: its first closing was refused because someone else had spent a coin of Paryon's that it named, and it was closed on a second request. The Savings Jar page was also used with the unmodified Cashonize wallet.</td></tr>
+    <tr><td>Public demonstration</td><td><span class="pill ok">Design 3</span> The public sites show design 3 since 20 November 2026.</td></tr>
     <tr><td>A recoverer other than this project's page</td><td><span class="pill unk">Not built</span> The role is stated.</td></tr>
   </table>
   </div>
