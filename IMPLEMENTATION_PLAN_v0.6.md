@@ -158,7 +158,13 @@ Asked for by the owner on 20 November 2026, to meet the requirements of BCH Blaz
 
 **Public since 21 November 2026 (01:26 UTC), by the owner's decision:** the public pages offer mainnet beside chipnet, starting on chipnet, from commit `65d34d4`. In a browser the public wallet showed the choice, the statement and the band, and its first screen on mainnet.
 
-Still open, and the owner's to decide: anything that spends on mainnet, the wallet's own header check there (a wallet opens its account only once it is created),  a first loan on mainnet (the least needs about 0.77 BCH at the proposed margin), letting the borrower choose the interest rate there, and checking the page's words on redemptions against Paryon's documentation.
+**First use on mainnet (21 November 2026), with about 0.5 EUR of the owner's coins.** A helper set a wallet up, the wallet received 20,000 sat and paid 5,000 out, and a Savings Jar of 2,000 sat was opened, with its record in both stores before the opening was sent: eight transactions in 89 seconds, 2,581 sat in fees ([record](docs/runs/mainnet-first-run.md)). The wallet's own header check passed on mainnet. One defect was found and corrected: the review of the opening showed the jar's key, which the action itself makes, as a row of zeros; it now reads "new, made by this action". The same night the phone was treated as lost: a new phone asked the helper, and her recovery request went into block 978237 ([record](docs/runs/mainnet-recovery-started.md)). The waiting period of this wallet is the mainnet default, 169 units of 512 seconds, and ends when the chain's median time passes 01:21:28 UTC on 22 November. The run stopped there on purpose. What follows it: completing the move, the sweep to the new phone, the jar listed from its record and emptied, the wallet closed, and every coin returned to the address the coins came from.
+
+Still open:
+
+- The rest of that recovery on mainnet, once the waiting period has passed.
+- The wallet page has no screen for changing the waiting period of a wallet that exists; the layer under the page can do it. A wallet set up with a day's period keeps it.
+- The owner's to decide: a first loan on mainnet (the least needs about 0.77 BCH at the proposed margin; not wanted for now), letting the borrower choose the interest rate there, and checking the page's words on redemptions against Paryon's documentation.
 
 ## Stage 21 — More actions recognised as coming back
 
@@ -212,4 +218,4 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 36 | Where the pages of this version are served for the chipnet runs | Decided, 20 November 2026 | At the public addresses, in place of the second design's pages |
 | 37 | The wait for the engine to list the coins of an action just sent | Decided, 20 November 2026 | Accepted |
 | 38 | Token names and units from a registry (BCMR) | Built, 21 November 2026 | From the chain only, as `docs/token-registries.md` proposed |
-| 39 | Mainnet | Built, 21 November 2026 | `"mainnetEnabled": true` beside `"network": "mainnet"` in the served configuration; off without it; a warning on every page. Nothing has been spent on mainnet |
+| 39 | Mainnet | Built, 21 November 2026 | `"mainnetEnabled": true` beside `"network": "mainnet"` in the served configuration; off without it; a warning on every page. Public beside chipnet. A first use ran on mainnet with small amounts; its recovery is started and waits out a day's period |
