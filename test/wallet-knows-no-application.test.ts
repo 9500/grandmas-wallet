@@ -90,6 +90,20 @@ describe('the wallet and the recoverer', () => {
     expect(withoutComments('/* a declaration */ const a = 1; // no declaration').some((line) => DECLARATION.test(line))).toBe(false);
   });
 
+  it('TR13: their code names no token: no category of a token the tests or the demonstrations use, and no symbol', () => {
+    // The demonstration's token on chipnet, its staking receipt, and their names and symbols; the registry the wallet reads is the token's own.
+    const TOKENS = /e7979ccdae259293|b48e931a1389d37e|PUSDTEST|ParyonUSD|\bXDOL\b|Example Dollar/i;
+    const mentioning = sources.flatMap((path) =>
+      readFileSync(path, 'utf8')
+        .split('\n')
+        .flatMap((line, index) => (TOKENS.test(line) ? [`${path.slice(root.length)}:${index + 1}: ${line.trim().slice(0, 160)}`] : [])),
+    );
+    expect(mentioning).toEqual([]);
+    // No list of tokens is built in: the only list of symbols is the specification's reserved ones.
+    const lists = sources.filter((path) => /\.(ts|tsx)$/.test(path) && /symbol['"]?\s*:\s*['"][A-Z0-9-]+['"]/.test(readFileSync(path, 'utf8')));
+    expect(lists.map((path) => path.slice(root.length))).toEqual([]);
+  });
+
   it('PR21: their code names no application', () => {
     const mentioning = sources.flatMap((path) =>
       readFileSync(path, 'utf8')

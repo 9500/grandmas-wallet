@@ -14,6 +14,7 @@ import {
 } from '@grandmas-wallet/archive';
 import {
   type AccountCoin,
+  type RegistryToken,
   type FollowedScript,
   type PreparedTransaction,
   type ReadTemplate,
@@ -47,6 +48,14 @@ import { coinsAt } from './positions.js';
 import { type RecoveryArrangement, type StoreAt, writeRecord } from './recovery-flow.js';
 import { type PositionRecordCheck, type PositionRecordVerdict, checkPositionRecord, recordsDue, samePosition, sameRecord, sameNft } from './position-records.js';
 import { type PresentedTexts, type TemplateNames, readPresented } from './template-check.js';
+import { type ShownRegistry, shownRegistry } from './token-registry.js';
+
+/** Two held categories shown with the same symbol are each marked, so that the screens write the category beside it. */
+const markSameSymbols = (held: HeldToken[]): HeldToken[] => {
+  const categories = new Map<string, Set<string>>();
+  for (const token of held) if (token.registry !== undefined) categories.set(token.registry.symbol, (categories.get(token.registry.symbol) ?? new Set()).add(token.category));
+  return held.map((token) => (token.registry !== undefined && (categories.get(token.registry.symbol)?.size ?? 0) > 1 ? { ...token, registry: { ...token.registry, sameSymbol: true } } : token));
+};
 
 /**
  * Applications (proposal sections 12 to 14): carrying out an action of a template the wallet has never
@@ -508,6 +517,11 @@ export interface HeldToken {
   template?: { identifier: string; name: string };
   /** For an NFT a record ties to a template the user trusts: the template's name for the output that made it. The template's claim. */
   tokenName?: string;
+  /**
+   * The issuer's words for the category, from its registry as checked against the chain and kept on this device: for
+   * the screens only. Absent for an NFT a record ties to a position, which keeps the template's name.
+   */
+  registry?: ShownRegistry;
 }
 
 interface PlannedInput {
@@ -731,6 +745,8 @@ export class Applications {
        * that count are listed as positions.
        */
       checkRecord?: PositionRecordCheck;
+      /** The issuer's words for a category, as kept on this device (`TokenRegistries.known`). Never waited for. */
+      registry?: (category: string) => RegistryToken | undefined;
     } = {},
   ) {}
 
@@ -2138,8 +2154,10 @@ export class Applications {
       const record = token.nft === undefined ? undefined : (records.find((entry) => entry.token?.category === category && this.keptById(entry.templateIdentifier) !== undefined) ?? records.find((entry) => entry.token?.category === category));
       const note = record === undefined ? this.state.notes.find((candidate) => candidate.category === category) : undefined;
       const identifier = record?.templateIdentifier ?? note?.templateIdentifier;
+      const registry = shownRegistry(this.options.registry?.(category), base.commitment);
+      const named = registry === undefined ? {} : { registry };
       if (identifier === undefined) {
-        held.push({ ...base, meaning: 'unknown' });
+        held.push({ ...base, meaning: 'unknown', ...named });
         continue;
       }
       const kept = this.keptById(identifier);
@@ -2147,6 +2165,7 @@ export class Applications {
         const tokenName = record === undefined ? undefined : recordTokenName(readTemplate(kept.text).definition, record);
         held.push({
           ...base,
+          ...(record === undefined ? named : {}),
           meaning: record === undefined ? 'unknown' : 'position',
           template: { identifier, name: kept.name },
           ...(tokenName === undefined ? {} : { tokenName }),
@@ -2166,9 +2185,10 @@ export class Applications {
               ? `${said} the template "${suggested.name}" made this token. You stopped trusting that template.`
               : `${said} the template "${suggested.name}" made this token. An earlier owner of the wallet stored that template; it is not trusted on this device yet.`,
         ...(suggested === undefined ? {} : { template: { identifier: suggested.identifier, name: suggested.name } }),
+        ...named,
       });
     }
-    return held;
+    return markSameSymbols(held);
   }
 
   private keptById(identifier: string): KeptTemplate | undefined {

@@ -20,3 +20,4 @@ export * from './findings.js';
 export * from './position-records.js';
 export * from './application-session.js';
 export * from './token-send.js';
+export * from './token-registry.js';

@@ -63,7 +63,7 @@ import { Welcome } from './Welcome.js';
  */
 
 const CATEGORY = '5c1d8c7d635141a15d9d41747ebe30422ca50237c41c54c45714d09114439382';
-const UNITS = 'e7979ccdae259293c7d0bee45ce8b7ad7660ea99477f802ed6a5161b0d30e6b8';
+const UNITS = '5d0c1e7a92b4f6038ce1a7d29b40f5e6c3a8172d9e04b6f1a35c8e27d1f09b4a';
 /** What the wallet found about each action of a template: here, that what it leaves comes back. */
 const comesBack = (actions: TemplateSummary['actions']): ActionFinding[] => actions.map(({ action, name }) => ({ action, role: 'holder', name, finding: 'comes back', outputs: [] }));
 const lendingActions: TemplateSummary['actions'] = [
