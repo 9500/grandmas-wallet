@@ -164,7 +164,7 @@ Agreed by the owner on 21 November 2026, for after stages 19 and 20. The wallet 
 - **A script that takes a key of another party only.** Where the template says which role keeps which key of a script, a key that only another role keeps is not counted as the device's. A template that does not say whose key it is stays refused.
 - A rule given as an expression is evaluated by the wallet only once XO says how such a rule is evaluated; the question is in the notes for XO.
 
-**Done when** tests on the simulated chain show both cases carried out and the neighbouring cases still refused: the same script with a key of the wallet's role, and a template that names no role for its key.
+**Done when** tests on the simulated chain show both cases carried out and the neighbouring cases still refused: the same script with a key of the wallet's role, and a template that names no role for its key. **Done on 21 November 2026** (PR26, PR27): the two applications' templates get the same finding for every action as before.
 
 ## Which stage closes which test
 
@@ -175,8 +175,9 @@ Agreed by the owner on 21 November 2026, for after stages 19 and 20. The wallet 
 | 14 | PR13–PR18, PR21, PR22 |
 | 15 | PR08, PR09 |
 | 17 | PR19, PR20 |
+| 21 | PR26, PR27 |
 
-All 25 tests that this version adds to the proposal's section 21 are in this table once. The tests of the second design are in the table of version 0.4; the proposal's section 21 says which of them this version retires or replaces.
+All 27 tests that this version adds to the proposal's section 21 are in this table once. The tests of the second design are in the table of version 0.4; the proposal's section 21 says which of them this version retires or replaces.
 
 `scripts/test-record.mjs` reads the statements of the tests from the proposal of version 0.6.
 
