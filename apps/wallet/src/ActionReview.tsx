@@ -1,4 +1,4 @@
-import { type ActionPreview, type MovedOutput, type TemplateSummary, matchNfts, thisWalletRefuses } from '@grandmas-wallet/app';
+import { type ActionPreview, type MovedOutput, type TemplateSummary, matchNfts, previewCategories, thisWalletRefuses } from '@grandmas-wallet/app';
 import { InsufficientFundsError } from '@grandmas-wallet/core';
 import { Amount, Choice, Icon, Info, KeyValues, More, Notice, Sat, Status, formatBch, formatSatoshis, formatTime, plainError, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
@@ -604,7 +604,7 @@ export const ActionReview = ({ preview, summary, tick }: { preview: ActionPrevie
   const template = summary ?? preview.template;
   // The figures of a review are those known when it opens: a registry that resolves later does not change them.
   const live = useContext(TokenNames);
-  const [names] = useState(() => frozenNames(live, categoriesOf(preview)));
+  const [names] = useState(() => frozenNames(live, previewCategories(preview)));
   return (
     <TokenNames.Provider value={names}>
     <div class="review stack">
@@ -621,12 +621,6 @@ export const ActionReview = ({ preview, summary, tick }: { preview: ActionPrevie
     </div>
     </TokenNames.Provider>
   );
-};
-
-/** Every token category a review shows. */
-const categoriesOf = (preview: ActionPreview): string[] => {
-  const { figures } = preview;
-  return [...figures.tokensNet.map((entry) => entry.category), ...[...figures.tokensSpent, ...figures.toWallet, ...figures.toOthers, ...figures.applicationInputs].flatMap((output) => (output.token === undefined ? [] : [output.token.category]))];
 };
 
 /**

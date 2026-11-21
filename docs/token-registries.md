@@ -160,6 +160,7 @@ Tests, numbered in the proposal's section 21 when the stage starts:
 | TR12 | After a recovery | The new device resolves again and shows the same; nothing of it was in the backup |
 | TR13 | Wallet code searched for a token's category or symbol | None |
 | TR14 | `mode` off or absent | No request beyond today's; raw units |
+| TR15 | A review of an action that brings a category the wallet does not hold: its registry resolves within the bound; it takes longer; the category is already resolved or known to have none | The review opens in the token's units; it opens in raw units after the bound and does not fail; no request and no wait |
 
 **Done when** these pass on the simulated chain, the loan course in browsers on the local node shows the borrowed amount in the token's units, and on chipnet the public wallet shows PUSD as "PUSDTEST" with two decimals.
 
@@ -191,14 +192,14 @@ Tests, numbered in the proposal's section 21 when the stage starts:
 | The walk, the fetch, what is kept, what the screens are given | `packages/app/src/token-registry.ts` (`TokenRegistries`, `httpRegistryFetch`, `shownRegistry`); `HeldToken.registry` in `applications.ts` |
 | Screens | `apps/wallet/src/token-words.tsx` (`TokenNames`, `tokenUnits`, `IssuerClaim`, `frozenNames`), `token-stake.ts`, `Apps.tsx`, `Send.tsx`, `ActionReview.tsx`; wired in `connections.ts` and `OwnerApp.tsx` |
 | Configuration and policy | `registries` in `packages/ui/src/environment.ts`; `"registries": { "mode": "chain" }` in `deploy/config/production.json` and `local.json`; one line in `deploy/serve.mjs` |
-| Tests | TR01 to TR12 and TR14 in `test/token-registries.test.ts`, TR13 in `test/wallet-knows-no-application.test.ts`; the screens in `scripts/registry-screens.ts`; the check against chipnet in `scripts/registry-check.ts` |
+| Tests | TR01 to TR12, TR14 and TR15 in `test/token-registries.test.ts`, TR13 in `test/wallet-knows-no-application.test.ts`; the screens in `scripts/registry-screens.ts`; the check against chipnet in `scripts/registry-check.ts` |
 | The local node | `localRegistry` and the `registry` parameter of `packages/paryon/src/local-deployment.ts`; `scripts/stage-17-loan-browser.ts` serves the file as an IPFS gateway would |
 
 Where building differed from sections 5 to 7:
 
 - **Staying current costs two requests, not one:** the authhead's transaction is read again for the script of its output 0, then that script's unspent coins. Keeping the script would make it one.
 - **What is kept** is in the wallet page's own storage under its own name (`registries`), not beside the kept templates: the templates' state is the applications', and keeping the two apart keeps registry data out of everything that is written to the backup.
-- **The categories of a review are not looked up by the review.** A review shows the names known when it opens (TR11), so a category the wallet does not hold yet, such as PUSD at the first borrowing, is in raw units in that review; it is resolved once the wallet holds it, when the token list is read.
+- **The categories of a review are looked up before it opens, for at most 4 seconds.** A review shows the names known when it opens (TR11). So before it opens, for a request from an application's page and for an action started from the wallet's own list alike, the wallet looks up each category the review will write that nothing is kept of yet on the device, those coming to the wallet and those leaving it, and opens the review when that has ended or after 4 seconds, whichever comes first, with what is not resolved by then in raw units. Meanwhile the wallet shows its ordinary waiting state for the request. A category already resolved, or found to have no registry, costs no request and no wait; a lookup that fails or is slow never stops a review. A lookup still under way when the review opens goes on and is kept. At the first borrowing, PUSD is therefore in the token's units in the review (TR15). A category that the action itself makes from the wallet's coin is looked up too, before it exists, and is kept as having no registry until the next session.
 - **The content policy** opens `https:` on the wallet's page only, which `deploy/serve.mjs` tells by the folder it serves (`wallet` or `wallet/dist`), and the origin of `ipfsGateway` where one is configured. A local run uses that to serve its registry as a gateway would.
 - **Two held categories with the same symbol** need nothing more on the token list and the Send screen, which write the short category beside every token; `HeldToken.registry.sameSymbol` marks them for any screen that does not.
 - **The registry's name is cut at 20 characters** in lists only; the "?" gives it whole, with the raw amount and the category.

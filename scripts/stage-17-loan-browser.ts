@@ -265,7 +265,7 @@ const connect = async (wallet: Page, loanPage: Page): Promise<void> => {
  * The wallet's review of the page's request: read with its folds closed, pictured, read again with them open, ticked
  * where it asks for the user's tick, and approved. Returns the transaction it sent.
  */
-const approveRequest = async (wallet: Page, what: string, name: string | undefined, tick = false): Promise<string> => {
+const approveRequest = async (wallet: Page, what: string, name: string | undefined, tick = false, shows?: string): Promise<string> => {
   const request = wallet.locator('.request-card').filter({ hasText: 'asks for your decision' }).first();
   await pageShows(request, `the wallet to show the loan page's request (${what})`);
   const approve = request.getByRole('button', { name: 'Approve' });
@@ -276,6 +276,7 @@ const approveRequest = async (wallet: Page, what: string, name: string | undefin
   const first = await textOf(request);
   const ticks = await box.count();
   fact(`${what}: the wallet's review of the page's request, as it first appears${ticks > 0 ? `, with ${ticks} box to tick` : ''}: "${first}"`);
+  if (shows !== undefined && !first.includes(shows)) throw new Error(`${what}: the wallet's review does not show "${shows}" as it first appears. It shows: "${first}"`);
   if (name !== undefined) await picture(wallet, name);
   if (tick) {
     if (await approve.isEnabled()) throw new Error('Approve works before the box is ticked');
@@ -390,7 +391,9 @@ const steps = async (): Promise<void> => {
     log(`   the page: "${await textOf(ready)}"; the borrowing form: "${await textOf(oldLoan.locator('.summary'))}"`);
     await picture(oldLoan, 'page-borrow');
     await oldLoan.getByRole('button', { name: /^Borrow 100\.00 PUSD/ }).click();
-    const borrowed = await approveRequest(old.page, 'Borrowing 100.00 PUSD', 'borrow-review');
+    // The PUSD the wallet receives, in the token's units already in the review of the first borrowing: the wallet looks up
+    // the registry of a category it does not hold before the review opens.
+    const borrowed = await approveRequest(old.page, 'Borrowing 100.00 PUSD', 'borrow-review', false, chipnet ? '100.00 PUSDTEST' : kept.registry === undefined ? undefined : '100.00 PUSDLOCAL');
     label(borrowed, 'The owner\'s phone borrows 100.00 PUSD, on the loan page\'s request: the collateral into Paryon\'s loan contract, the key and the PUSD to the wallet; the key\'s record on both stores before signing');
     await pageDone(oldLoan, 'The loan is open. The PUSD and the loan key are in your wallet.');
     mine(1);

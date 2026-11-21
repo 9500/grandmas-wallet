@@ -157,6 +157,8 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
   const applications = useMemo(() => {
     const made = new PageApplications(wallet.parts, {
       registry: (category) => registries.known(category),
+      // Before a review opens: the registries of its categories not known yet, for a few seconds at most.
+      lookUp: (categories) => registries.lookUpWithin(categories),
       archive: applicationArchive({
         arrangement: () => kept('arrangement'),
         storeAt: session.storeAt,

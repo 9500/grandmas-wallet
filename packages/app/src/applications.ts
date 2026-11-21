@@ -380,6 +380,25 @@ export interface ActionPreview {
 }
 
 /**
+ * Every token category a review of the preview writes, once each: those of the wallet's own tokens first (what it
+ * ends up with, spends and receives), then those of the application's coins and of what goes elsewhere.
+ */
+export const previewCategories = (preview: ActionPreview): string[] => {
+  const { figures } = preview;
+  const outputs = (moved: MovedOutput[]): string[] => moved.flatMap((output) => (output.token === undefined ? [] : [output.token.category]));
+  return [
+    ...new Set([
+      ...figures.tokensNet.map((entry) => entry.category),
+      ...outputs(figures.tokensSpent),
+      ...outputs(figures.toWallet),
+      ...outputs(figures.applicationInputs),
+      ...outputs(figures.toOthers),
+      ...figures.tokensDestroyed.map((entry) => entry.token.category),
+    ]),
+  ];
+};
+
+/**
  * A token that an action does not deliver to the wallet unchanged.
  *
  * - `leaves`: an output that is not the wallet's carries it, as it is or changed.
@@ -747,6 +766,11 @@ export class Applications {
       checkRecord?: PositionRecordCheck;
       /** The issuer's words for a category, as kept on this device (`TokenRegistries.known`). Never waited for. */
       registry?: (category: string) => RegistryToken | undefined;
+      /**
+       * Look up the registries of the categories an action's review writes that the device knows nothing of yet,
+       * ending within a bounded time (`TokenRegistries.lookUpWithin`). A preview is returned when it has ended.
+       */
+      lookUp?: (categories: string[]) => Promise<void>;
     } = {},
   ) {}
 
@@ -1596,6 +1620,14 @@ export class Applications {
    * InsufficientFundsError, with the figures, when the wallet's coins do not cover it
    */
   async preview(request: ApplicationAction): Promise<ActionPreview> {
+    const preview = await this.worked(request);
+    // The registries of the categories the review will write, those the wallet does not know yet, are looked up
+    // first, for a bounded time: a lookup that fails or is slow leaves them in raw units and never fails the review.
+    await this.options.lookUp?.(previewCategories(preview)).catch(() => undefined);
+    return preview;
+  }
+
+  private async worked(request: ApplicationAction): Promise<ActionPreview> {
     this.wallet.requireUsable();
     const { template, kept } = this.templateOf(request);
     const summary = this.summary(template, kept);

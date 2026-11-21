@@ -1,15 +1,16 @@
 import { readFileSync } from 'node:fs';
 
 import { type Output, type TransactionCommon, binToHex, hexToBin, sha256, utf8ToBin } from '@bitauth/libauth';
-import { type RegistriesConfig, type RegistryFetch, type RegistryState, Applications, REGISTRY_LIMITS, TokenRegistries, formatUnits, parseUnits } from '@grandmas-wallet/app';
+import { type ActionPreview, type RegistriesConfig, type RegistryFetch, type RegistryState, Applications, REGISTRY_LIMITS, TokenRegistries, formatUnits, parseUnits, previewCategories, shownRegistry } from '@grandmas-wallet/app';
+import { readTemplate, templateLockingBytecode } from '@grandmas-wallet/core';
 import { type ChainReader, currentSnapshot, isReservedSymbol, p2pkhLockingBytecode, readPublication, readRegistry, registryUrl, shownSymbol } from '@grandmas-wallet/core';
-import { type SimulatedChain, testKey } from '@grandmas-wallet/testing';
+import { type SimulatedChain, lockerClubTemplate, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
-import { type Device, deviceWith } from './support/applications.js';
+import { type Device, deviceWith, presentation, request } from './support/applications.js';
 
 /**
- * Acceptance tests TR01 to TR14 (docs/token-registries.md, section 7): a token's name, symbol and decimals from its
+ * Acceptance tests TR01 to TR15 (docs/token-registries.md, section 7): a token's name, symbol and decimals from its
  * registry, checked against the chain. On the simulated chain, with registry files served from memory. The issuers
  * and their tokens are made here; no application's token is named in the wallet's code (TR13 is in
  * wallet-knows-no-application.test.ts).
@@ -407,6 +408,72 @@ describe('what the screens write', () => {
     expect(tokenUnits(12_345n, review(category))).toBe('12,345 units');
     // A review opened after it resolved shows the token's units.
     expect(tokenUnits(12_345n, frozenNames(live, [category])(category))).toBe('123.45 XDOL');
+  });
+});
+
+describe('the review of an action that brings a token the wallet does not hold', () => {
+  /** The club's door on chain, holding 1,000,000 of its credits, of the issuer's category; joining with 30,000 of them brings them to the wallet. */
+  const joining = (device: Device, category: string) => {
+    const club = presentation({ ...lockerClubTemplate, constants: { ...lockerClubTemplate.constants, clubCategory: { ...lockerClubTemplate.constants.clubCategory, value: category } } });
+    const doorAt = templateLockingBytecode(readTemplate(club.texts.template).definition, 'doorLockingScript', {});
+    const door = { transactionId: hex(sha256.hash(utf8ToBin(category))), index: 2, output: { lockingBytecode: doorAt, valueSatoshis: 1000n, token: { category: hexToBin(category), amount: 1_000_000n, nft: { capability: 'minting' as const, commitment: hexToBin('0700ffff') } } } };
+    device.chain.adopt([door]);
+    return request(club, 'join', 'member', { credits: 30_000, deposit: 20_000, doorCredits: 1_000_000, doorState: '0700ffff', doorNumber: 7 }, { inputs: { doorInput: `${door.transactionId}:${door.index}` } });
+  };
+  /** What the review of the preview writes for the tokens the wallet receives, with the names as known when it opens. */
+  const reviewed = async (preview: ActionPreview, registries: TokenRegistries): Promise<string[]> => {
+    const { frozenNames, tokenUnits } = await import('../apps/wallet/src/token-words.js');
+    const names = frozenNames((category, commitment) => shownRegistry(registries.known(category), commitment), previewCategories(preview));
+    return preview.figures.tokensNet.map(({ category, amount }) => tokenUnits(amount, names(category)));
+  };
+  const withLookUp = (device: Device, registries: TokenRegistries, milliseconds: number): Applications =>
+    new Applications(device.wallet.parts, { registry: (category) => registries.known(category), lookUp: (categories) => registries.lookUpWithin(categories, milliseconds) });
+
+  it('TR15: the registry is looked up before the review opens, within a bound: the token\'s units when it resolves in time, raw units when it does not; a known category is not looked up again', async () => {
+    const device = await deviceWith([200_000n, 200_000n, 200_000n]);
+    const files = new Files();
+    const fast = published(device.chain, files, (category) => registryFile(category, { name: 'Club Credit', symbol: 'CREDIT', decimals: 2 }));
+    const slow = published(device.chain, files, (category) => registryFile(category, { name: 'Slow Credit', symbol: 'SLOW', decimals: 2 }));
+    const none = issuer(device.chain);
+    expect((await device.applications.tokens()).some((held) => [fast.category, slow.category, none.category].includes(held.category))).toBe(false);
+
+    // Resolved within the bound: the review opens in the token's units.
+    const chain = counted(device.chain);
+    let state: RegistryState | undefined;
+    let slowFile: (() => void) | undefined;
+    const fetch: RegistryFetch = async (url) => {
+      if (url.includes(`issuer${made - 1}.`)) await new Promise<void>((resolve) => (slowFile = resolve));
+      return files.fetch(url);
+    };
+    const registries = new TokenRegistries({ chain, fetch, kept: () => state, store: (next) => void (state = next), config: CHAIN, now: () => NOW });
+    const applications = withLookUp(device, registries, 1_000);
+    expect(await reviewed(await applications.preview(joining(device, fast.category)), registries)).toEqual(['300.00 CREDIT']);
+
+    // A category already resolved costs no request and no wait.
+    const asked = [chain.requests, files.requests.length];
+    expect(await reviewed(await withLookUp(device, registries, 60_000).preview(joining(device, fast.category)), registries)).toEqual(['300.00 CREDIT']);
+    expect([chain.requests, files.requests.length]).toEqual(asked);
+
+    // A file that takes longer than the bound: the review opens in raw units, and does not fail.
+    const started = Date.now();
+    const late = await withLookUp(device, registries, 100).preview(joining(device, slow.category));
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(slowFile).toBeDefined();
+    expect(await reviewed(late, registries)).toEqual(['30,000 units']);
+    // The lookup goes on and is kept when it ends: the next review shows the token's units without asking again.
+    const kept = new Promise<void>((resolve) => registries.watch(resolve));
+    slowFile?.();
+    await kept;
+    const afterSlow = [chain.requests, files.requests.length];
+    expect(await reviewed(await withLookUp(device, registries, 60_000).preview(joining(device, slow.category)), registries)).toEqual(['300.00 SLOW']);
+    expect([chain.requests, files.requests.length]).toEqual(afterSlow);
+
+    // A category found to have no registry: raw units, and the next review asks nothing again.
+    expect(await reviewed(await applications.preview(joining(device, none.category)), registries)).toEqual(['30,000 units']);
+    expect(registries.kept(none.category)?.unresolved).toMatch(/publishes no registry/);
+    const afterNone = [chain.requests, files.requests.length];
+    expect(await reviewed(await withLookUp(device, registries, 60_000).preview(joining(device, none.category)), registries)).toEqual(['30,000 units']);
+    expect([chain.requests, files.requests.length]).toEqual(afterNone);
   });
 });
 

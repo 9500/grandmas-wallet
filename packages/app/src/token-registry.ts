@@ -50,6 +50,8 @@ export const REGISTRY_LIMITS = {
   bytes: 2_000_000,
   /** How long one file may take. */
   milliseconds: 10_000,
+  /** How long a review waits for the registries of its categories the wallet knows nothing of yet. */
+  review: 4_000,
 };
 
 /**
@@ -154,6 +156,29 @@ export class TokenRegistries {
       const running = this.running.get(category) ?? this.look(category).finally(() => this.running.delete(category));
       this.running.set(category, running);
       await running.catch(() => undefined);
+    }
+  }
+
+  /**
+   * Look up the categories nothing is kept of yet on this device, and wait for that for at most `milliseconds`: a
+   * review opens with what is known by then, and the categories still unknown in raw units. A category resolved, or
+   * found to have no registry, costs no request and no wait. A lookup still under way when the time is up goes on,
+   * and is kept when it ends. Never throws.
+   */
+  async lookUpWithin(categories: string[], milliseconds: number = REGISTRY_LIMITS.review): Promise<void> {
+    if (!this.on) return;
+    const unknown = [...new Set(categories.map((value) => value.toLowerCase()))].filter((category) => /^[0-9a-f]{64}$/.test(category) && this.kept(category) === undefined);
+    if (unknown.length === 0) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, milliseconds);
+    });
+    // A lookup already under way, such as that of the held categories on opening the wallet, is waited for too.
+    const underWay = unknown.flatMap((category) => this.running.get(category) ?? []);
+    try {
+      await Promise.race([Promise.all([this.refresh(unknown), ...underWay].map((running) => running.catch(() => undefined))), bound]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
