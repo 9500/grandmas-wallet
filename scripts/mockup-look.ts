@@ -246,7 +246,16 @@ try {
   if (problems.length > 0) process.exitCode = 1;
 } catch (error) {
   for (const problem of problems) log(problem);
-  log(`FAILED: ${(error as Error).message.split('\n')[0]}`);
+  log(`FAILED: ${(error as Error).message.split('\n').slice(0, 4).join(' | ')}`);
+  // What every open page showed, for whoever looks into it.
+  let number = 0;
+  for (const context of browser.contexts()) {
+    for (const page of context.pages()) {
+      number += 1;
+      log(`   page ${number} at ${page.url().slice(0, 60)}: "${(await page.locator('main').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300)}"`);
+      if (screens !== undefined) await page.screenshot({ path: `${screens}/mockup-failed-${number}.png`, fullPage: true }).catch(() => undefined);
+    }
+  }
   process.exitCode = 1;
 } finally {
   await browser.close();

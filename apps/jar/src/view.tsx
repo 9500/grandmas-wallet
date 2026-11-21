@@ -450,7 +450,8 @@ export const OpenJarForm = ({ kind, facts, state, onOpen }: { kind: 'xo' | 'plai
   const choose = (next: Preset | 'custom') => {
     setPreset(next);
     const seconds = PRESETS.find((option) => option.value === next)?.seconds;
-    if (seconds !== undefined) setDate(localInput(ahead(Math.floor(Date.now() / 1000), seconds)));
+    // Counted from this device's clock, or from the chain's where that is ahead of it, as on the mockup once its clock was moved on.
+    if (seconds !== undefined) setDate(localInput(ahead(Math.max(facts.now, Math.floor(Date.now() / 1000)), seconds)));
   };
   return (
     <Card title="Open a jar">
