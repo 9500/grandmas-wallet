@@ -51,11 +51,11 @@ Each record lists its transactions in a table whose last column links the invita
 
 ### Follow-up actions
 
-A follow-up action spends a coin that an earlier action of the same template made. Three chains of them are kept here:
+A follow-up action spends a coin that an earlier action of the same template made. A template declares one on the script of that coin, for the role that may carry it out. Two templates here declare them, and the third has the same chain without the declaration:
 
 - **Controller:** `create` makes the controller coin; `approve` spends it and makes its successor; `close` spends that and ends the wallet. In the whole-life run these are files 01, 06 and 09. The `approve` and the `close` are signed by the new device, whose key became the owner's through the recovery in between.
 - **Savings Jar:** `open` makes the jar and its key; `withdraw` spends both. In the jar run these are files 03 and 07. The `open` was signed by the device that was then lost, and the `withdraw` by the new one, from the record the first device stored in the backup.
-- **ParyonUSD loan:** `createKey`, `borrow`, `manage`, `close`, each spending what the one before made. In the loan run these are files 03, 04, 05 and 09.
+- **ParyonUSD loan:** `createKey`, `borrow`, `manage`, `close`, each spending what the one before made. In the loan run these are files 03, 04, 05 and 09. The template lists all of its actions as starting actions and declares none on a script. Paryon's scripts are shared by all its users, so the template marks them as scripts a wallet need not track, and the engine holds no coin of theirs to offer a follow-up on. The wallet finds the loan from its loan key and carries out the next action as a new invitation.
 
 ### Things that may surprise
 
