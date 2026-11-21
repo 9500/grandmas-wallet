@@ -262,6 +262,8 @@ describe('two wallets side by side, never mixed', () => {
     'packages/ui/src/mainnet.tsx': 2,
     // The header-store mark (headerResetMark, per network) and the engine's databases, which the engine names per network.
     'packages/ui/src/engine.ts': 5,
+    // The mark of a tab that gave way to a newer one (TAB_ELSEWHERE_KEY): about the tab, kept in the tab alone, not per network.
+    'packages/ui/src/tab.tsx': 4,
   };
 
   const sourceFiles = (directory: string): string[] =>

@@ -5,6 +5,7 @@ import qrcode from 'qrcode-generator';
 import type { Environment } from './environment.js';
 import { MainnetBand, onMainnet, showMainnetStatement } from './mainnet.js';
 import { NetworkChip } from './network-choice.js';
+import { tabWork } from './tab-work.js';
 
 /*
  * The parts both pages are built from. Wording on them is the pages' own; these only give it a shape.
@@ -225,6 +226,8 @@ export const useTask = () => {
     setBusy(name);
     setError(undefined);
     setStep(undefined);
+    // A newer tab of the page waits for this to end before it takes over (tab.tsx).
+    tabWork.begin();
     try {
       return await work(setStep);
     } catch (problem) {
@@ -232,6 +235,7 @@ export const useTask = () => {
       setError({ name, message: plainError(problem) });
       return undefined;
     } finally {
+      tabWork.end();
       setBusy(undefined);
       setStep(undefined);
     }

@@ -5,6 +5,7 @@ import { ChainPool } from '@grandmas-wallet/chipnet/pool';
 import { type ChainReader, setTestAddressPrefix } from '@grandmas-wallet/core';
 
 import { confirmMainnet } from './mainnet.js';
+import { claimTab } from './tab.js';
 import { MOCKUP, keepDatabasesApart, rememberedNetwork, settleStorageNetwork, storageNetwork } from './network.js';
 
 /**
@@ -106,6 +107,8 @@ export const loadEnvironment = async (): Promise<Environment> => {
   const environment = readEnvironment(await response.json(), rememberedNetwork());
   // The page keeps its data under the names of the network it runs on; it loads again if it began with others.
   if (!settleStorageNetwork(environment.network)) return new Promise<Environment>(() => undefined);
+  // One tab of the page at a time on each network: this one takes its turn before it opens anything (tab.tsx).
+  await claimTab(storageNetwork());
   if (storageNetwork() === 'mockup') keepDatabasesApart();
   // The mockup's addresses are written so that they are not taken for chipnet's.
   if (environment.network === MOCKUP) setTestAddressPrefix('bchreg');

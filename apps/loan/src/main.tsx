@@ -4,7 +4,7 @@ import './loan.css';
 import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { DappRequests, type RequestStage } from '@grandmas-wallet/connect';
 import { type DappCredentials, type DappLink, type LinkStatus, openDappLink } from '@grandmas-wallet/connect/wizard';
-import { type Environment, Button, Card, Frame, Loading, Vault, chooseNetwork, followWallet, formatBch, loadEnvironment, networkWords, plainError, returnToStartingNetwork, useEvery } from '@grandmas-wallet/ui';
+import { type Environment, Button, Card, Frame, Loading, Vault, chooseNetwork, followWallet, formatBch, loadEnvironment, networkWords, plainError, returnToStartingNetwork, TabElsewhere, tabElsewhere, useEvery } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
@@ -390,4 +390,14 @@ const Root = () => {
   );
 };
 
-render(<Root />, document.getElementById('app') as HTMLElement);
+// A tab that gave way to a newer one says so and starts nothing.
+render(
+  tabElsewhere() ? (
+    <Frame brand={BRAND} role={ROLE}>
+      <TabElsewhere what="this page" />
+    </Frame>
+  ) : (
+    <Root />
+  ),
+  document.getElementById('app') as HTMLElement,
+);

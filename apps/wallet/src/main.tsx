@@ -2,7 +2,7 @@ import '@grandmas-wallet/ui/styles.css';
 import './set-up.css';
 
 import type { OwnerWallet, OwnerWalletState } from '@grandmas-wallet/app';
-import { Card, Frame, Loading, plainError } from '@grandmas-wallet/ui';
+import { Card, Frame, Loading, TabElsewhere, plainError, tabElsewhere } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
@@ -127,4 +127,14 @@ const Root = () => {
   }
 };
 
-render(<Root />, document.getElementById('app') as HTMLElement);
+// A tab that gave way to a newer one says so and starts nothing.
+render(
+  tabElsewhere() ? (
+    <Frame brand={BRAND} role="Your wallet">
+      <TabElsewhere what="your wallet" />
+    </Frame>
+  ) : (
+    <Root />
+  ),
+  document.getElementById('app') as HTMLElement,
+);

@@ -1,7 +1,7 @@
 import '@grandmas-wallet/ui/styles.css';
 import './recoverer.css';
 
-import { Card, Frame, Loading, type NavItem, plainError, useRoute, useToast } from '@grandmas-wallet/ui';
+import { Card, Frame, Loading, type NavItem, TabElsewhere, plainError, tabElsewhere, useRoute, useToast } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
@@ -111,4 +111,14 @@ const Root = () => {
   );
 };
 
-render(<Root />, document.getElementById('app') as HTMLElement);
+// A tab that gave way to a newer one says so and starts nothing.
+render(
+  tabElsewhere() ? (
+    <Frame brand={BRAND} role="Grandma's Wallet">
+      <TabElsewhere what="this page" />
+    </Frame>
+  ) : (
+    <Root />
+  ),
+  document.getElementById('app') as HTMLElement,
+);

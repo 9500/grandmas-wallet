@@ -3,7 +3,7 @@ import './jar.css';
 
 import { DappRequests } from '@grandmas-wallet/connect';
 import { type DappCredentials, type DappLink, type LinkStatus, type WalletOffer, openDappLink } from '@grandmas-wallet/connect/wizard';
-import { type ChainConnection, type Environment, Button, Card, Frame, Loading, Vault, chooseNetwork, connectChain, followWallet, formatBch, formatTime, loadEnvironment, networkWords, onMockup, plainError, returnToStartingNetwork, useEvery } from '@grandmas-wallet/ui';
+import { type ChainConnection, type Environment, Button, Card, Frame, Loading, Vault, chooseNetwork, connectChain, followWallet, formatBch, formatTime, loadEnvironment, networkWords, onMockup, TabElsewhere, tabElsewhere, plainError, returnToStartingNetwork, useEvery } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
@@ -334,4 +334,14 @@ const Root = () => {
   );
 };
 
-render(<Root />, document.getElementById('app') as HTMLElement);
+// A tab that gave way to a newer one says so and starts nothing.
+render(
+  tabElsewhere() ? (
+    <Frame brand={BRAND} role={ROLE}>
+      <TabElsewhere what="this page" />
+    </Frame>
+  ) : (
+    <Root />
+  ),
+  document.getElementById('app') as HTMLElement,
+);

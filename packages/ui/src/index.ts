@@ -9,3 +9,4 @@ export * from './mainnet.js';
 export * from './network.js';
 export * from './network-choice.js';
 export * from './mockup.js';
+export * from './tab.js';
