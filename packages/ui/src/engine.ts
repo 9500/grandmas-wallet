@@ -3,7 +3,7 @@ import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { ElectrumWebSocket } from '@electrum-cash/web-socket';
 import { Engine, XO_SUPPORTED_NETWORKS, resolveElectrumServersForNetwork } from '@xo-cash/engine';
 
-import { HEADER_RESET_MARK, clearHeaderResetMark, markHeadersForReset, resetMarkedHeaders } from './engine-headers.js';
+import { clearHeaderResetMark, headerResetMark, markHeadersForReset, resetMarkedHeaders } from './engine-headers.js';
 import type { Environment } from './environment.js';
 
 /**
@@ -124,7 +124,7 @@ export const openAccount = async (
  * coins are not in it (see engine-headers.ts).
  */
 export const recheckChain = (): void => {
-  sessionStorage.setItem(HEADER_RESET_MARK, 'pending');
+  sessionStorage.setItem(headerResetMark(), 'pending');
   location.reload();
 };
 

@@ -34,6 +34,9 @@ mkdir -p "$UNITS" "$DATA"
 NETWORK="$("$NODE" -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(c.network === "mainnet" ? (c.mainnetEnabled === true ? "mainnet" : "refused") : c.network)' "$CONFIG")"
 if [ "$NETWORK" = refused ]; then echo "$CONFIG names mainnet but does not allow it (\"mainnetEnabled\": true)" >&2; exit 2; fi
 if [ "$NETWORK" = mainnet ]; then echo "MAINNET: enabled only to meet the requirements of BCH Blaze. Nothing here has been audited; coins can be lost. This project does not recommend enabling it."; fi
+# A configuration of both networks (`networks`) offers mainnet on the pages only with the same parameter.
+OFFERED="$("$NODE" -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(c.networks === undefined ? c.network : Object.keys(c.networks).filter((n) => n !== "mainnet" || c.mainnetEnabled === true).join(" "))' "$CONFIG")"
+case " $OFFERED " in *" mainnet "*) [ "$NETWORK" = mainnet ] || echo "MAINNET offered on the pages beside $NETWORK: enabled only to meet the requirements of BCH Blaze. Nothing here has been audited; coins can be lost. This project does not recommend enabling it." ;; esac
 
 # The stores answer browser requests only from the wallet and the recoverer pages.
 read -r WALLET_ORIGIN RECOVERER_ORIGIN < <("$NODE" -e '

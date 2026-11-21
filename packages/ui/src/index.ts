@@ -6,3 +6,5 @@ export * from './address.js';
 export * from './info.js';
 export * from './developer.js';
 export * from './mainnet.js';
+export * from './network.js';
+export * from './network-choice.js';

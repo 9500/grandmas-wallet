@@ -14,6 +14,9 @@ const expected = expectAt === -1 ? undefined : parameters[expectAt + 1];
 const configPath = parameters.find((parameter, index) => !parameter.startsWith('--') && index !== expectAt + 1) ?? 'deploy/config/production.json';
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 let failed = false;
+// A configuration of more than one network gives what differs by network under `networks`; mainnet is offered only with "mainnetEnabled": true.
+const offered = config.networks === undefined ? [config.network] : Object.keys(config.networks).filter((name) => name !== 'mainnet' || config.mainnetEnabled === true);
+if (config.networks !== undefined) console.log(`configuration: networks ${offered.join(', ')}, starting on ${config.network}${config.networks.mainnet !== undefined && config.mainnetEnabled !== true ? '; mainnet described but NOT allowed (no "mainnetEnabled": true)' : ''}`);
 if (config.network === 'mainnet') console.log(`configuration: mainnet, ${config.mainnetEnabled === true ? 'allowed by "mainnetEnabled": true' : 'NOT allowed (no "mainnetEnabled": true): the pages refuse to start'}`);
 
 const page = async (name, url, mustMatch) => {
@@ -55,5 +58,6 @@ await page('wallet', config.walletUrl, true);
 await page('recoverer', config.recovererUrl, true);
 if (config.jarUrl !== undefined) await page('savings jar', config.jarUrl, false);
 if (config.loanUrl !== undefined) await page('loan page', config.loanUrl, false);
-for (const url of config.stores) await store(url, new URL(config.walletUrl).origin);
+const stores = new Set(config.networks === undefined ? config.stores : offered.flatMap((name) => config.networks[name].stores ?? config.stores ?? []));
+for (const url of stores) await store(url, new URL(config.walletUrl).origin);
 process.exit(failed ? 1 : 0);

@@ -60,7 +60,7 @@ export const OwnerApp = ({ session, opened, onLost }: { session: Session; opened
   }, []);
   if (wallet === undefined) {
     return (
-      <Frame brand={BRAND} role="Your wallet" environment={session.environment}>
+      <Frame brand={BRAND} role="Your wallet" environment={session.environment} networkChoice>
         {problem === undefined ? (
           <Opening />
         ) : (
@@ -366,7 +366,7 @@ const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: O
   const plain = moved !== undefined || elsewhere || (arrival !== undefined && arrival.swept !== true);
   return (
     <TokenNames.Provider value={apps.names}>
-      <Frame brand={BRAND} role="Your wallet" environment={session.environment} {...(plain ? {} : { nav, current: route, onNavigate: navigate })}>
+      <Frame brand={BRAND} role="Your wallet" environment={session.environment} networkChoice {...(plain ? {} : { nav, current: route, onNavigate: navigate })}>
         {offer}
         {screen}
         {toastElement}

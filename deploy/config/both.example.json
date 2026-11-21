@@ -1,0 +1,23 @@
+{
+  "about": "AN EXAMPLE, not a deployment: production.json with mainnet offered beside chipnet. Mainnet is enabled only to meet the requirements of BCH Blaze; nothing here has been audited; coins can be lost; this project does not recommend enabling it. A new visitor starts on \"network\"; the network label in the header of the wallet and of the recoverer's page lets a person choose the other. Without \"mainnetEnabled\": true, mainnet is not offered and the pages show no choice. Each network may name its own backup stores; one store can keep archives of both.",
+  "network": "chipnet",
+  "mainnetEnabled": true,
+  "walletUrl": "https://wallet.9500.cash/",
+  "recovererUrl": "https://recoverer.9500.cash/",
+  "jarUrl": "https://jar.9500.cash/",
+  "loanUrl": "https://paryon.9500.cash/",
+  "stores": ["https://store1.9500.cash", "https://store2.9500.cash"],
+  "relays": ["wss://relay.riften.net:443", "wss://relay.cauldron.quest:443"],
+  "networks": {
+    "chipnet": {
+      "chain": ["wss://chipnet.9500.cash:443", "wss://chipnet.imaginary.cash:50004"],
+      "explorer": "https://chipnet.imaginary.cash/tx/",
+      "secondsPerBlock": 60
+    },
+    "mainnet": {
+      "chain": ["wss://bch.imaginary.cash:50004", "wss://electrum.imaginary.cash:50004", "wss://fulcrum.greyh.at:50004"],
+      "explorer": "https://blockchair.com/bitcoin-cash/transaction/",
+      "secondsPerBlock": 600
+    }
+  }
+}

@@ -96,7 +96,7 @@ const Root = () => {
   }
 
   const frame = (children: preact.ComponentChildren) => (
-    <Frame brand={BRAND} role="Your wallet" environment={session.environment}>
+    <Frame brand={BRAND} role="Your wallet" environment={session.environment} networkChoice>
       {children}
     </Frame>
   );

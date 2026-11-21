@@ -122,6 +122,34 @@ code, .mono { font-family: var(--mono); font-size: 0.875em; overflow-wrap: anywh
 }
 .netchip.test { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); color: var(--warn); }
 
+/* The choice of network, where the deployment offers one: the label opens a small menu. */
+.netchoice { position: relative; flex: none; display: inline-flex; }
+button.netchip.choosable {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 28px; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 600; line-height: 1.2; padding: 3px 9px; background: var(--surface);
+}
+button.netchip.choosable:not(.test) { color: var(--ink); }
+button.netchip.choosable:hover:not(:disabled) { background: var(--sunken); }
+.netchip-caret { width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.netmenu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 220px;
+  display: flex; flex-direction: column; padding: 4px; border-radius: var(--r-m);
+  background: var(--surface); border: 1px solid var(--line); box-shadow: 0 8px 24px rgb(23 33 43 / 14%);
+}
+.rail-foot .netmenu { right: auto; left: 0; top: auto; bottom: calc(100% + 6px); }
+button.netmenu-item {
+  display: flex; align-items: center; justify-content: flex-start; gap: 0; width: 100%; min-height: 44px; padding: 8px 14px 8px 32px;
+  position: relative; background: transparent; border: 0; border-radius: var(--r-s); color: var(--ink);
+  font-size: 14px; font-weight: 600; text-align: left;
+}
+button.netmenu-item:hover:not(:disabled) { background: var(--sunken); }
+button.netmenu-item.current::before {
+  content: ''; position: absolute; left: 12px; top: 50%; width: 5px; height: 9px; margin-top: -6px;
+  border-right: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(45deg);
+}
+.netmenu-coins { color: var(--muted); font-weight: 500; white-space: pre; }
+button.netmenu-item.real .netmenu-coins { color: var(--bad); }
+
 .content { width: 100%; max-width: 640px; margin: 0 auto; padding: 16px 16px 32px; }
 .with-nav .content { padding-bottom: calc(var(--nav-h) + 32px + env(safe-area-inset-bottom)); }
 .narrow .content { max-width: 560px; }

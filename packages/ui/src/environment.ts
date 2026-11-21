@@ -5,6 +5,7 @@ import { ChainPool } from '@grandmas-wallet/chipnet/pool';
 import type { ChainReader } from '@grandmas-wallet/core';
 
 import { confirmMainnet } from './mainnet.js';
+import { rememberedNetwork, settleStorageNetwork } from './network.js';
 
 /**
  * Where an application finds everything outside itself. Read from
@@ -32,6 +33,29 @@ export interface Environment {
   mainnetEnabled?: boolean;
   /** Token names from registries checked against the chain (`chain`), or none (`off`, or no entry). */
   registries?: RegistriesConfig;
+  /**
+   * Where the deployment describes more than one network and allows more than one: the networks a person may
+   * choose between on the page, and the one a new visitor starts on. Absent where there is no choice.
+   */
+  choice?: NetworkChoice;
+}
+
+export interface NetworkChoice {
+  starting: string;
+  networks: string[];
+}
+
+/**
+ * What differs by network, in a configuration that describes more than one (`networks`). Any entry of the
+ * configuration may be given there; these are the usual ones.
+ */
+export interface NetworkPart {
+  chain: string[];
+  explorer: string;
+  secondsPerBlock: number;
+  stores?: string[];
+  relays?: string[];
+  [entry: string]: unknown;
 }
 
 /** A configuration for mainnet that does not carry the parameter allowing it. */
@@ -43,23 +67,43 @@ export class MainnetNotEnabledError extends Error {
 }
 
 /**
- * Check a page's configuration as read from `config.json`.
+ * Check a page's configuration as read from `config.json`, and resolve the network the page runs on.
  *
- * @throws MainnetNotEnabledError for `"network": "mainnet"` without `"mainnetEnabled": true`
+ * A configuration of one network names it in `network` and gives its servers beside it. A configuration of more
+ * than one gives what differs by network under `networks` (`{ "chipnet": {…}, "mainnet": {…} }`), and `network`
+ * names the one a new visitor starts on; `chosen`, the network remembered in this browser, is taken where the
+ * deployment allows it. Mainnet is allowed only with `"mainnetEnabled": true`, in either shape.
+ *
+ * @throws MainnetNotEnabledError for a page that would start on mainnet without `"mainnetEnabled": true`
  */
-export const readEnvironment = (config: unknown): Environment => {
+export const readEnvironment = (config: unknown, chosen?: string): Environment => {
   if (typeof config !== 'object' || config === null) throw new Error('This site is not configured: config.json is not an object.');
-  const environment = config as Environment;
+  const environment = config as Environment & { networks?: unknown };
   if (typeof environment.network !== 'string') throw new Error('This site is not configured: config.json names no network.');
   if (environment.network === 'mainnet' && environment.mainnetEnabled !== true) throw new MainnetNotEnabledError();
-  return environment;
+  if (environment.networks === undefined) return environment;
+  const { networks, ...shared } = environment;
+  if (typeof networks !== 'object' || networks === null) throw new Error('This site is not configured: "networks" in config.json is not an object.');
+  const parts = networks as Record<string, NetworkPart>;
+  const starting = environment.network;
+  if (parts[starting] === undefined) throw new Error(`This site is not configured: config.json starts on ${starting} but does not describe it under "networks".`);
+  const allowed = Object.keys(parts).filter((name) => !(name === 'mainnet' && environment.mainnetEnabled !== true));
+  const network = chosen !== undefined && allowed.includes(chosen) ? chosen : starting;
+  const resolved: Environment = { ...shared, ...parts[network], network } as Environment;
+  if (allowed.length > 1) resolved.choice = { starting, networks: allowed };
+  return resolved;
 };
 
-/** Read the page's configuration. On mainnet, the user confirms the warning first (see mainnet.tsx). */
+/**
+ * Read the page's configuration, on the network chosen in this browser where the deployment allows a choice. On
+ * mainnet, the user confirms the warning first (see mainnet.tsx).
+ */
 export const loadEnvironment = async (): Promise<Environment> => {
   const response = await fetch('/config.json', { cache: 'no-store' });
   if (!response.ok) throw new Error('This site is not configured: config.json is missing.');
-  const environment = readEnvironment(await response.json());
+  const environment = readEnvironment(await response.json(), rememberedNetwork());
+  // The page keeps its data under the names of the network it runs on; it loads again if it began with others.
+  if (!settleStorageNetwork(environment.network)) return new Promise<Environment>(() => undefined);
   if (environment.network === 'mainnet') await confirmMainnet();
   return environment;
 };

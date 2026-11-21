@@ -4,6 +4,7 @@ import qrcode from 'qrcode-generator';
 
 import type { Environment } from './environment.js';
 import { MainnetBand, onMainnet, showMainnetStatement } from './mainnet.js';
+import { NetworkChip } from './network-choice.js';
 
 /*
  * The parts both pages are built from. Wording on them is the pages' own; these only give it a shape.
@@ -66,12 +67,6 @@ export interface NavItem<Route extends string = string> {
   flag?: boolean;
 }
 
-const networkLabel = (environment: Environment | undefined): { text: string; test: boolean } | undefined => {
-  if (environment === undefined) return undefined;
-  if (environment.network === 'mainnet') return { text: 'Mainnet', test: false };
-  return { text: environment.network, test: true };
-};
-
 /**
  * The page's frame. With navigation: a bar at the bottom on phones and a rail at the side on wide screens.
  * Without: a single narrow column, for the steps before there is a wallet.
@@ -83,24 +78,20 @@ export const Frame = <Route extends string>({
   nav,
   current,
   onNavigate,
+  networkChoice,
   children,
 }: {
   brand: string;
   role: string;
   environment?: Environment | undefined;
+  /** The network label opens the choice of network, where the deployment offers one. */
+  networkChoice?: boolean;
   nav?: NavItem<Route>[];
   current?: Route;
   onNavigate?: (route: Route) => void;
   children: ComponentChildren;
 }) => {
-  const network = networkLabel(environment);
-  const chip =
-    network === undefined ? null : (
-      <span class={`netchip${network.test ? ' test' : ''}`} title={network.test ? 'A test network: its coins have no value.' : undefined}>
-        {network.text}
-        {network.test && <span class="chip-more"> · test coins</span>}
-      </span>
-    );
+  const chip = environment === undefined ? null : <NetworkChip environment={environment} choosable={networkChoice === true} />;
   const mark = <span class="brand-mark" aria-hidden="true">{brand.slice(0, 1)}</span>;
   const brandBlock = (
     <div class="brand">
