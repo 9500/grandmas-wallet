@@ -27,7 +27,7 @@ The pages are open at the same moment, as they would be in person or on a call. 
 
 ## 1. The recoverer starts
 
-On the recoverer's page, choose **I'm helping someone I know** (a bank chooses **I'm a bank**), enter a name (say, Anna) and press **Continue**. Under **Settings**, choose the waiting period **about 9 minutes**, the one for trying things out, and a starting balance (20,000 satoshis leaves room for the jar below), then **Save**. On the first screen, **Your balance** shows an address: send test coins to it. The balance shows them within a few seconds.
+On the recoverer's page, choose **I'm helping someone I know** (a bank chooses **I'm a bank**), enter a name (say, Anna) and press **Continue**. The page then asks for coins, since it pays for every wallet it sets up and for every move to a new phone: **Add coins to your balance** shows an address and what a new wallet takes. Send test coins to it. The page shows them within a few seconds, and **Continue** opens once the balance covers a new wallet; until then the page offers nothing else. Then, under **Settings**, choose the waiting period **about 9 minutes**, the one for trying things out, and a starting balance (20,000 satoshis leaves room for the jar below), then **Save**.
 
 ## 2. Anna sets up Grandma's wallet
 

@@ -148,7 +148,7 @@ try {
   await wideRecoverer.getByTestId('mode-friend').click();
   await wideRecoverer.getByLabel('Your name, as their wallet shows it').fill('Anna');
   await wideRecoverer.getByRole('button', { name: 'Continue' }).click();
-  await see(wideRecoverer, 'wide-recoverer-people', 'No wallets yet.');
+  await see(wideRecoverer, 'wide-recoverer-fund', 'Add coins to your balance');
   await chip(wideRecoverer).click();
   await see(wideRecoverer, 'wide-recoverer-menu', () => wideRecoverer.locator('.netmenu'));
   await shot(wideRecoverer, 'network-choice-recoverer-desktop.png');

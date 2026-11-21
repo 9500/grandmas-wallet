@@ -1,8 +1,8 @@
-import { type SetUpRecord, describeDelay } from '@grandmas-wallet/app';
+import { type SetUpRecord, creationCost, describeDelay } from '@grandmas-wallet/app';
 import { Amount, Button, Card, Field, Loading, More, Notice, PageHead, QrCode, Status, TextInput, Value, useTask } from '@grandmas-wallet/ui';
 import { useEffect, useState } from 'preact/hooks';
 
-import { FundsCard, useFunds } from './Funds.js';
+import { FundsCard, useBalance, useFunds } from './Funds.js';
 import { type DeskState, setNextLabel, setUpDesk, setUpRecords, useChanges, useDesk } from './offered-session.js';
 import { type Session, kept, modeOf, recovererLink, settingsOf } from './session.js';
 
@@ -19,6 +19,36 @@ export const NewWallet = ({ session, onDone }: { session: Session; onDone: () =>
   const [label, setLabel] = useState('');
   const [shown, setShown] = useState(bank);
   const { funds, problem } = useFunds(session);
+  const balance = useBalance(funds);
+  const each = creationCost(BigInt(settingsOf().startingSatoshis));
+  // The code is offered once the balance covers a new wallet: a phone that scans it is answered with a transaction
+  // this page pays for. A phone that is on the code's session already is answered whatever the balance says.
+  const [covered, setCovered] = useState(() => kept('deskSession')?.walletPublicKey !== undefined);
+  useEffect(() => {
+    if (!covered && balance !== undefined && balance >= each) setCovered(true);
+  }, [balance, each]);
+  if (!covered) {
+    return (
+      <div class="stack">
+        <PageHead title={bank ? 'New customer' : 'Help someone set up'}>{bank ? 'A customer\'s wallet is created from your balance when their phone scans your code.' : 'Their wallet is made from your balance when their phone scans your code and you say yes.'}</PageHead>
+        <div class="grid two">
+          <Card title="Add coins to your balance first">
+            {balance === undefined ? (
+              <p class="muted">The code is shown once this page has read your balance.</p>
+            ) : (
+              <div class="stack-s" data-testid="add-coins-first">
+                <Status tone="warn" title={<>Your balance holds <Amount satoshis={balance} exact /></>}>
+                  A new wallet takes about <Amount satoshis={each} exact />: the <Amount satoshis={BigInt(settingsOf().startingSatoshis)} exact /> its owner starts with, and the network's fees.
+                </Status>
+                <p class="small muted">Send coins to the address of your balance. The code is shown here as soon as they arrive; a phone that scanned it before would be left waiting.</p>
+              </div>
+            )}
+          </Card>
+          <FundsCard session={session} funds={funds} problem={problem} />
+        </div>
+      </div>
+    );
+  }
   if (!shown) {
     return (
       <div class="stack">
@@ -42,10 +72,11 @@ export const NewWallet = ({ session, onDone }: { session: Session; onDone: () =>
       </div>
     );
   }
-  return <CodeScreen session={session} bank={bank} label={label} onDone={onDone} />;
+  // The next phone's code is offered on the same terms as the first.
+  return <CodeScreen session={session} bank={bank} label={label} onDone={onDone} onNext={() => balance !== undefined && balance < each && setCovered(false)} />;
 };
 
-const CodeScreen = ({ session, bank, label, onDone }: { session: Session; bank: boolean; label: string; onDone: () => void }) => {
+const CodeScreen = ({ session, bank, label, onDone, onNext }: { session: Session; bank: boolean; label: string; onDone: () => void; onNext: () => void }) => {
   const desk = useDesk(session, { kind: 'set up' });
   useChanges();
   const [code, setCode] = useState<string | undefined>();
@@ -101,8 +132,8 @@ const CodeScreen = ({ session, bank, label, onDone }: { session: Session; bank: 
             New wallets get <Amount satoshis={BigInt(settings.startingSatoshis)} exact /> and a waiting period of {describeDelay(settings.challengeDelay)}. Change these in the settings.
           </p>
           <div class="actions">
-            {served && <Button kind="secondary" onClick={() => desk.renew()}>Next {bank ? 'customer' : 'phone'}</Button>}
-            {!served && joinedOnly && <Button kind="secondary" onClick={() => desk.renew()}>New code</Button>}
+            {served && <Button kind="secondary" onClick={() => { desk.renew(); onNext(); }}>Next {bank ? 'customer' : 'phone'}</Button>}
+            {!served && joinedOnly && <Button kind="secondary" onClick={() => { desk.renew(); onNext(); }}>New code</Button>}
             <Button kind="quiet" onClick={onDone}>
               Done
             </Button>

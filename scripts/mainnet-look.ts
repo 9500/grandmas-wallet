@@ -84,19 +84,16 @@ try {
   await recoverer.getByTestId('mode-friend').click();
   await recoverer.getByLabel('Your name, as their wallet shows it').fill('Anna');
   await recoverer.getByRole('button', { name: 'Continue' }).click();
-  await see(recoverer, 'recoverer-no-wallets', 'No wallets yet.');
+  await see(recoverer, 'recoverer-fund', 'Add coins to your balance');
   const headerFrom = Date.now();
   const funds = await valueOf(recoverer, 'funds-address', { what: "the recoverer's balance account: the engine's header check from its checkpoint", seconds: 240 });
   const balance = await valueOf(recoverer, 'funds-balance', { what: "the recoverer's balance read from the chain", seconds: 60 });
   log(`recoverer: header check and balance in ${((Date.now() - headerFrom) / 1000).toFixed(1)} s; balance ${balance} satoshis at ${funds}`);
   await shot(recoverer, 'mainnet-recoverer-phone.png');
-  await recoverer.getByTestId('new-wallet').click();
-  await recoverer.getByLabel('Who are you helping?').fill('Grandma');
-  await recoverer.getByRole('button', { name: 'Show the code' }).click();
-  await see(recoverer, 'recoverer-code', /Waiting for their phone to scan the code/);
-  const code = await valueOf(recoverer, 'recoverer-code', { what: 'the code', seconds: 20 });
+  // With an empty balance the page offers nothing else: no code is shown, so the set-up over a session is not looked at here.
+  log(`recoverer: "Continue" ${(await recoverer.getByRole('button', { name: 'Continue' }).isDisabled()) ? 'is not open' : 'IS OPEN'} with a balance of ${balance} satoshis`);
 
-  // The wallet: the statement, then the first screen, then the set-up asked over the recoverer's code.
+  // The wallet: the statement, then the first screen.
   const wallet = await open(phone, 'wallet');
   await wallet.goto('http://localhost:8601/');
   await see(wallet, 'wallet-statement', 'This page uses real Bitcoin Cash');
@@ -105,21 +102,6 @@ try {
   await see(wallet, 'wallet-welcome', 'Welcome');
   await shot(wallet, 'mainnet-wallet-welcome-phone.png');
   log(`wallet: after the statement, the first screen; header chip "${(await wallet.locator('.netchip').first().innerText()).trim()}", band "${(await wallet.locator('.mainnet-band').first().innerText()).trim()}"`);
-  await wallet.getByRole('button', { name: 'Someone I trust is setting it up' }).click();
-  const cancel = wallet.locator('dialog.scan-dialog').getByRole('button', { name: 'Cancel' });
-  await cancel.waitFor({ state: 'visible', timeout: 20_000 }).then(() => cancel.click(), () => undefined);
-  await wallet.getByText('No camera?').first().click();
-  await wallet.locator('#code-text').fill(code);
-  await wallet.getByRole('button', { name: 'Use it' }).click();
-  await see(recoverer, 'recoverer-asked', "Set up Grandma's wallet with", { what: 'the set-up request over the relays', seconds: 60 });
-  await see(wallet, 'wallet-waiting', 'Waiting for Anna to say yes', { what: 'the session over the relays', seconds: 60 });
-  await shot(wallet, 'mainnet-wallet-setup-phone.png');
-  log('wallet: took the code in and asked over the session; the recoverer read the request for mainnet keys');
-  if (balance === '0') {
-    await recoverer.getByRole('button', { name: 'Set it up' }).click();
-    await see(recoverer, 'recoverer-refuses', /Send at least [\d,]+ satoshis to your address/);
-    log(`recoverer with an empty balance refuses: "${((await recoverer.getByText(/Send at least/).first().textContent()) ?? '').replace(/\s+/g, ' ').trim()}"`);
-  }
   // The statement again from the band.
   await wallet.locator('.mainnet-band').first().click();
   await see(wallet, 'wallet-statement-again', 'This page uses real Bitcoin Cash');

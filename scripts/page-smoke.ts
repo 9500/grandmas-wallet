@@ -1,9 +1,9 @@
 // A look at the pages of a deployment without coins, for checking a build or a release before anyone relies on it:
-// the recoverer's page starts as someone helping a person they know, reads its balance from the chain and shows its
-// code; the wallet page takes the code in as a person without a camera would and asks over the session the code
-// offers; the recoverer's page asks "Set up Grandma's wallet?", and, with an empty balance, refuses to set it up
-// with what it would take. The Savings Jar page and the loan page, where the configuration names them, each show
-// the address a wallet connects with. Nothing is paid and nothing is sent to the chain.
+// the recoverer's page starts as someone helping a person they know, asks for coins as the second step of its first
+// run, reads its balance from the chain, and, with an empty balance, offers nothing else; the wallet page starts
+// and offers to be set up. The Savings Jar page and the loan page, where the configuration names them, each show
+// the address a wallet connects with. Nothing is paid and nothing is sent to the chain. The session between a
+// phone and the recoverer's code needs a funded recoverer, and is not part of this look.
 //
 // usage (from the repository's root):
 //   npx tsx scripts/page-smoke.ts <configuration file> [--headed]
@@ -53,38 +53,22 @@ try {
   await recoverer.getByTestId('mode-friend').click();
   await recoverer.getByLabel('Your name, as their wallet shows it').fill('Anna');
   await recoverer.getByRole('button', { name: 'Continue' }).click();
-  await see(recoverer, 'No wallets yet.');
+  await see(recoverer, 'Add coins to your balance');
   const funds = await valueOf(recoverer, 'funds-address');
   const balance = await valueOf(recoverer, 'funds-balance');
-  log(`the recoverer's page starts; its balance, read from the chain, is ${balance} satoshis at ${funds}`);
-
-  await recoverer.getByTestId('new-wallet').click();
-  await recoverer.getByLabel('Who are you helping?').fill('Grandma');
-  await recoverer.getByRole('button', { name: 'Show the code' }).click();
-  await see(recoverer, /Waiting for their phone to scan the code/);
-  const code = await valueOf(recoverer, 'recoverer-code');
-  log(`it shows its code, ${code.length} characters`);
+  log(`the recoverer's page starts and asks for coins; its balance, read from the chain, is ${balance} satoshis at ${funds}`);
+  if (balance === '0') {
+    const held = await recoverer.getByRole('button', { name: 'Continue' }).isDisabled();
+    const offered = (await recoverer.getByTestId('new-wallet').count()) + (await recoverer.getByRole('link', { name: 'Set up' }).count());
+    if (!held || offered > 0) throw new Error('with an empty balance the recoverer\'s page offers to go on');
+    log('with an empty balance it offers nothing else: "Continue" is not open, and no code is shown');
+  }
 
   const wallet = await open('wallet');
   await wallet.goto(config.walletUrl);
-  await wallet.getByRole('button', { name: 'Someone I trust is setting it up' }).click();
-  // The scanner opens by itself; without a camera the code is pasted.
-  const cancel = wallet.locator('dialog.scan-dialog').getByRole('button', { name: 'Cancel' });
-  await cancel.waitFor({ state: 'visible', timeout: 30_000 }).then(() => cancel.click(), () => undefined);
-  await wallet.getByText('No camera?').first().click();
-  await wallet.locator('#code-text').fill(code);
-  await wallet.getByRole('button', { name: 'Use it' }).click();
-  await see(recoverer, 'Set up Grandma\'s wallet with', 120_000);
-  await see(wallet, 'Waiting for Anna to say yes', 120_000);
-  log('the wallet page took the code in and asked over the session; the recoverer\'s page asks "Set up Grandma\'s wallet?"');
-
-  if (balance === '0') {
-    await recoverer.getByRole('button', { name: 'Set it up' }).click();
-    await see(recoverer, /Send at least [\d,]+ satoshis to your address/);
-    log(`with an empty balance it refuses: "${((await recoverer.getByText(/Send at least/).first().textContent()) ?? '').replace(/\s+/g, ' ').trim()}"`);
-  } else {
-    log('the balance is not empty: the set-up is left unanswered, so that nothing is paid');
-  }
+  await see(wallet, 'Someone I trust is setting it up');
+  await see(wallet, 'I have a code from my bank');
+  log('the wallet page starts and offers to be set up by a bank or by someone the owner trusts');
 
   for (const [name, url] of [['Savings Jar', config.jarUrl], ['loan', config.loanUrl]] as const) {
     if (url === undefined) continue;

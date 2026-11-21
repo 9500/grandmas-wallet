@@ -48,7 +48,7 @@ export const useBalance = (funds: RecovererFunds | undefined, again?: unknown): 
  * While the account opens: how far the check of block headers has come, and, when it takes long, a way to make
  * that check afresh. Nothing of the recoverer's is in what is made afresh.
  */
-const Opening = () => {
+export const Opening = () => {
   const [started] = useState(() => Date.now());
   const [, setTick] = useState(0);
   useEvery(1_000, () => setTick((count) => count + 1), []);

@@ -61,6 +61,8 @@ export interface Kept {
   current: string;
   incoming: { kind: LinkField | 'enroll'; text: string };
   mode: Mode;
+  /** The first run is done: the balance has once covered a new wallet. */
+  started: boolean;
   settings: Settings;
   /** The twelve words of the recoverer's own coins: its one balance, from which it creates wallets and pays every fee. */
   fundsWords: string;

@@ -48,7 +48,7 @@
 // 1280x800 go to docs/screens/.
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-import { type Device, RECOVERER, WALLET, argument, blockSection, chipnet, click, completeTakeover, course, firstSteps, localPages, newPhoneAsks, openDesk, openDeskWorking, pagesUsed, recordFile, reviewEverything, root, see, sendAllOfBalance, tick, valueOf, wait } from './browser-course.js';
+import { type Device, LIMIT, RECOVERER, WALLET, argument, blockSection, chainShows, chipnet, click, completeTakeover, course, firstSteps, localPages, newPhoneAsks, openDesk, openDeskWorking, pagesUsed, recordFile, reviewEverything, root, see, sendAllOfBalance, tick, valueOf, wait } from './browser-course.js';
 
 const until = Number(argument('until') ?? '99');
 /** Continue a run that stopped at step 10 or 11, with the browser profiles it left on disk. */
@@ -240,6 +240,12 @@ const toStepNine = async (): Promise<{ recoverer: Device; newer: Device } | unde
   await ben.page.getByTestId('mode-friend').click();
   await ben.page.getByLabel('Your name, as their wallet shows it').fill('Ben');
   await click(ben.page, 'Continue');
+  // A recoverer's page offers its code once its balance covers a new wallet, so Ben's balance is paid first.
+  await see(ben.page, 'Add coins to your balance');
+  await chainShows(ben.page.getByTestId('funds-address'), 'Ben\'s page to open its account (its engine\'s header check)', LIMIT.header);
+  log(`   ${theCourse.pay(await valueOf(ben.page, 'funds-address'), 20_000)}`);
+  await chainShows(ben.page.locator('[data-testid="funds-balance"]:not([data-value="0"])'), 'the payment to reach Ben\'s balance on his page', LIMIT.coin);
+  await click(ben.page, 'Continue');
   await ben.page.getByTestId('new-wallet').click();
   await click(ben.page, 'Show the code');
   await see(ben.page, 'Waiting for their phone to scan the code', 60_000);
@@ -272,6 +278,8 @@ const toStepNine = async (): Promise<{ recoverer: Device; newer: Device } | unde
   await ben.page.goto(RECOVERER);
   await see(ben.page, 'Quiet', 60_000);
   await shot(ben.page, 'recoverer-wallets');
+  // Ben's balance was paid so that his page would show its code. Nothing else in the run is paid from it, so it goes back.
+  log(`   Ben sent what his balance holds on: ${(await sendAllOfBalance(ben.page, elsewhere())) ?? 'it held nothing'}`);
 
   return { recoverer, newer };
 };

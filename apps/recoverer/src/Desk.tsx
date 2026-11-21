@@ -228,7 +228,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
             </Card>
           )}
           {/* After a recovery that has been handed over, the wallet's new phone can be lost in its turn. */}
-          {standing?.kind === 'quiet' && !(view?.takenOver === true && looked.kept.pending !== undefined) && <LostPhone session={session} identity={identity} recoverer={recoverer} toast={toast} onTaken={() => setLooked(wallets()[identity] ?? looked)} />}
+          {standing?.kind === 'quiet' && !(view?.takenOver === true && looked.kept.pending !== undefined) && <LostPhone session={session} identity={identity} recoverer={recoverer} balance={balance} toast={toast} onTaken={() => setLooked(wallets()[identity] ?? looked)} />}
           <TaskStatus task={task} name="handover" />
         </div>
         <div class="stack">
@@ -254,7 +254,7 @@ export const Desk = ({ session, identity, looked: first, toast }: { session: Ses
  * takeover request over the session; the page saves it for this wallet and asks the network to move the wallet to
  * the new phone at once. Whoever pressed the button has made sure who is asking. The waiting period then runs.
  */
-const LostPhone = ({ session, identity, recoverer, toast, onTaken }: { session: Session; identity: string; recoverer: RecovererWallet | undefined; toast: (text: string) => void; onTaken: () => void }) => {
+const LostPhone = ({ session, identity, recoverer, balance, toast, onTaken }: { session: Session; identity: string; recoverer: RecovererWallet | undefined; balance: bigint | undefined; toast: (text: string) => void; onTaken: () => void }) => {
   const [showing, setShowing] = useState(false);
   const bank = modeOf() === 'bank';
   const label = wallets()[identity]?.label;
@@ -275,14 +275,23 @@ const LostPhone = ({ session, identity, recoverer, toast, onTaken }: { session: 
     });
     return () => handleTakeovers(undefined);
   }, [showing, recoverer]);
+  // The code is offered once the balance covers the request the page sends when the new phone has scanned it.
+  const short = balance !== undefined && balance < recoveryFees().request;
   if (!showing) {
     return (
       <Card flat>
-        <div class="row spread">
-          <span class="small muted">If the owner lost their phone, their new phone scans a code here.</span>
-          <Button kind="secondary" onClick={() => setShowing(true)}>
-            {title}
-          </Button>
+        <div class="stack-s">
+          <div class="row spread">
+            <span class="small muted">If the owner lost their phone, their new phone scans a code here.</span>
+            <Button kind="secondary" disabled={balance === undefined || short} onClick={() => setShowing(true)}>
+              {title}
+            </Button>
+          </div>
+          {short && (
+            <Notice tone="warn">
+              Your balance holds <Sat satoshis={balance} />; asking the network to move a wallet costs about <Sat satoshis={recoveryFees().request} />. Add coins to your balance first.
+            </Notice>
+          )}
         </div>
       </Card>
     );

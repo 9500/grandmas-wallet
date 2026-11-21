@@ -12,7 +12,7 @@ import { resumeDesk, useArrivals } from './offered-session.js';
 import { Requests } from './Requests.js';
 import { type Session, boot, kept, modeOf, openWalletPage, wallets } from './session.js';
 import { Settings } from './Settings.js';
-import { Start } from './Start.js';
+import { Start, started } from './Start.js';
 import { Wallets } from './Wallets.js';
 
 export const BRAND = 'Recoverer';
@@ -32,7 +32,7 @@ const Root = () => {
       (booted) => {
         setSession(booted);
         // A phone that was being set up when the page was loaded again is answered on the same session.
-        if (kept('current') === undefined && modeOf() !== undefined) resumeDesk(booted, { kind: 'set up' });
+        if (kept('current') === undefined && started()) resumeDesk(booted, { kind: 'set up' });
       },
       (error: unknown) => setProblem(plainError(error)),
     );
@@ -60,10 +60,11 @@ const Root = () => {
     );
   }
   const mode = modeOf();
-  if (mode === undefined) {
+  // Until the first run is done, the page offers nothing but it: how it works, and coins for its balance.
+  if (mode === undefined || !started()) {
     return (
       <Frame brand={BRAND} role="Grandma's Wallet" environment={session.environment} networkChoice>
-        <Start onDone={() => setVersion(version + 1)} />
+        <Start session={session} onDone={() => setVersion(version + 1)} />
       </Frame>
     );
   }

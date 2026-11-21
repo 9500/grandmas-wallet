@@ -960,6 +960,19 @@ export const firstSteps = async (
   await recoverer.page.getByLabel('Your name, as their wallet shows it').fill('Anna');
   await shoot(recoverer.page, 'recoverer-start');
   await click(recoverer.page, 'Continue');
+  // The first run's second step: the page offers nothing else until her balance covers a new wallet.
+  await see(recoverer.page, 'Add coins to your balance');
+  await shoot(recoverer.page, 'recoverer-fund');
+  // Her balance's address is shown once the page has opened its account, after its engine's header check.
+  await chainShows(recoverer.page.getByTestId('funds-address'), 'the recoverer\'s page to open its account (its engine\'s header check)', LIMIT.header);
+  const fundsAddress = await valueOf(recoverer.page, 'funds-address');
+  await keepStorage(recoverer);
+  log(`   Anna's balance is funded at ${fundsAddress}; what her page keeps, her words among it, is copied to ${work.startsWith(root) ? work.slice(root.length) : work}storage-recoverer.json first`);
+  log(`   ${pay(fundsAddress, amounts.balance)}`);
+  const balance = recoverer.page.locator('[data-testid="funds-balance"]:not([data-value="0"])');
+  await chainShows(balance, 'the payment to reach Anna\'s balance on her page', LIMIT.coin);
+  log(`   Anna's page shows her balance: ${(await balance.first().getAttribute('data-value')) ?? ''} satoshis`);
+  await click(recoverer.page, 'Continue');
   await see(recoverer.page, 'No wallets yet.');
   if (firstUse) {
     // A first use keeps what the page proposes: on mainnet a waiting period of about a day.
@@ -974,15 +987,6 @@ export const firstSteps = async (
     log('   friend mode; new wallets get 100,000 satoshis and a waiting period of about 9 minutes');
     await recoverer.page.getByRole('link', { name: 'People' }).first().click();
   }
-  // Her balance's address is shown once the page has opened its account, after its engine's header check.
-  await chainShows(recoverer.page.getByTestId('funds-address'), 'the recoverer\'s page to open its account (its engine\'s header check)', LIMIT.header);
-  const fundsAddress = await valueOf(recoverer.page, 'funds-address');
-  await keepStorage(recoverer);
-  log(`   Anna's balance is funded at ${fundsAddress}; what her page keeps, her words among it, is copied to ${work.startsWith(root) ? work.slice(root.length) : work}storage-recoverer.json first`);
-  log(`   ${pay(fundsAddress, amounts.balance)}`);
-  const balance = recoverer.page.locator('[data-testid="funds-balance"]:not([data-value="0"])');
-  await chainShows(balance, 'the payment to reach Anna\'s balance on her page', LIMIT.coin);
-  log(`   Anna's page shows her balance: ${(await balance.first().getAttribute('data-value')) ?? ''} satoshis`);
   await shoot(recoverer.page, 'recoverer-empty');
 
   // 2 ------------------------------------------------------------------
