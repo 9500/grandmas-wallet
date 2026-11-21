@@ -351,8 +351,8 @@ const SetUpFixture = ({ kind }: { kind: 'bank' | 'friend' }) => {
     run().catch((error: unknown) => setProblem((error as Error).message));
   }, [recipient]);
   if (recipient === undefined) return <ScanCode title={kind === 'bank' ? 'Scan your bank\'s code' : 'Scan the code on their screen'} hint={<TryItHint environment={{ ...FIXTURE_ENVIRONMENT, recovererUrl: 'https://recoverer.example/' }} kind={kind} />} onRead={setRecipient} onBack={() => undefined} />;
-  if (created) return <Ready name={recipient.name} startingSatoshis={20_000n} onOpen={() => undefined} />;
-  return <SettingUpView name={recipient.name || 'your helper'} kind={kind} stage={stage} challengeDelay={delay} problem={problem} onRetry={() => setProblem(undefined)} onAgain={() => setRecipient(undefined)} />;
+  if (created) return <Ready name={recipient.name} startingSatoshis={20_000n} challengeDelay={delay} onOpen={() => undefined} />;
+  return <SettingUpView name={recipient.name || 'your helper'} kind={kind} stage={stage} problem={problem} onRetry={() => setProblem(undefined)} onAgain={() => setRecipient(undefined)} />;
 };
 
 // ------------------------------------------------------------------ sending and receiving tokens
@@ -845,7 +845,7 @@ render(
       ) : show === 'setup-bank' || show === 'setup-friend' ? (
         <SetUpFixture kind={show === 'setup-bank' ? 'bank' : 'friend'} />
       ) : show === 'ready' ? (
-        <Ready name="Example Bank" startingSatoshis={20_000n} onOpen={ignore} />
+        <Ready name="Example Bank" startingSatoshis={20_000n} challengeDelay={{ unit: 'time512', value: 169 }} onOpen={ignore} />
       ) : show === 'tokens' ? (
         <div class="grid two apps-layout">
           <Card title="Tokens" cls="tokens-card">

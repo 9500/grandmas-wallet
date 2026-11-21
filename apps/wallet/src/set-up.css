@@ -12,6 +12,7 @@
 .set-up-balance .balance-main { font-size: 40px; }
 .set-up-protected { text-align: center; color: var(--muted); }
 .set-up-protected strong { color: var(--ink); }
+.set-up-move { margin: -8px 0 0; }
 
 .welcome .set-up-head { margin: 24px 0 8px; }
 .welcome .choice-card { min-height: 64px; justify-content: center; align-items: center; text-align: center; font-size: 18px; }

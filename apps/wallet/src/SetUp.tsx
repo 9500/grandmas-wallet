@@ -39,7 +39,7 @@ export const SetUp = ({ session, kind, onBack, onDone }: { session: Session; kin
     // After a reload on this screen the wallet is opened from what the phone kept.
     // A wallet that does not open here is opened by the wallet's own screen, which says what is wrong.
     const open = () => (wallet.current === undefined ? void openWallet(session).then(onDone, () => onDone()) : onDone(wallet.current));
-    return <Ready name={setUp.recipient.name} startingSatoshis={BigInt(setUp.done.startingSatoshis)} onOpen={open} />;
+    return <Ready name={setUp.recipient.name} startingSatoshis={BigInt(setUp.done.startingSatoshis)} challengeDelay={setUp.offer?.challengeDelay} onOpen={open} />;
   }
   return (
     <SettingUp
@@ -126,7 +126,7 @@ const SettingUp = ({ session, setUp, store, onOpened, onAgain, onBack }: { sessi
       stopped = true;
     };
   }, [attempt]);
-  return <SettingUpView name={name} kind={setUp.kind} stage={stage} challengeDelay={setUp.offer?.challengeDelay} problem={problem} onRetry={() => setAttempt(attempt + 1)} onAgain={onAgain} onBack={onBack} />;
+  return <SettingUpView name={name} kind={setUp.kind} stage={stage} problem={problem} onRetry={() => setAttempt(attempt + 1)} onAgain={onAgain} onBack={onBack} />;
 };
 
 /** What "Setting up…" shows, and a refusal or a page that did not answer, with the way on. */
@@ -134,7 +134,6 @@ export const SettingUpView = ({
   name,
   kind,
   stage,
-  challengeDelay,
   problem,
   onRetry,
   onAgain,
@@ -143,7 +142,6 @@ export const SettingUpView = ({
   name: string;
   kind: 'bank' | 'friend';
   stage: string;
-  challengeDelay?: ChallengeDelay | undefined;
   problem?: string | undefined;
   onRetry: () => void;
   onAgain: () => void;
@@ -182,18 +180,12 @@ export const SettingUpView = ({
         <h1>Setting up…</h1>
         <p class="muted">{stage === 'waiting' && kind === 'friend' ? `Waiting for ${name} to say yes` : `With ${name}`}</p>
       </div>
-      {challengeDelay !== undefined && (
-        <p class="small muted center">
-          Waiting period {describeDelay(challengeDelay)}{' '}
-          <Info label="What the waiting period is">If you lose this phone, they can move your wallet to a new one. They have to ask in public first, and for this long this phone can say no. They can never spend your coins.</Info>
-        </p>
-      )}
     </div>
   );
 };
 
-/** "Your wallet is ready": the balance and who protects it, and the way in. */
-export const Ready = ({ name, startingSatoshis, onOpen }: { name: string; startingSatoshis: bigint; onOpen: () => void }) => (
+/** "Your wallet is ready": the balance, who protects it and how long a move to a new phone waits, and the way in. */
+export const Ready = ({ name, startingSatoshis, challengeDelay, onOpen }: { name: string; startingSatoshis: bigint; challengeDelay?: ChallengeDelay | undefined; onOpen: () => void }) => (
   <div class="stack set-up" data-testid="wallet-ready">
     <div class="set-up-head">
       <h1>Your wallet is ready</h1>
@@ -209,6 +201,7 @@ export const Ready = ({ name, startingSatoshis, onOpen }: { name: string; starti
       Protected by <strong>{name || 'your recoverer'}</strong>{' '}
       <Info label="What protected means">If you lose this phone, they can move your wallet to a new one after a waiting period, during which this phone can say no. They can see what the wallet holds and can never spend from it.</Info>
     </p>
+    {challengeDelay !== undefined && <p class="small muted center set-up-move">A move to a new phone takes {describeDelay(challengeDelay)}</p>}
     <div class="set-up-actions">
       <Button block onClick={onOpen}>
         Open my wallet
