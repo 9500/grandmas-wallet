@@ -11,14 +11,24 @@ import {
   type RecoverableWalletAddress,
   type Role,
   type SeedKeys,
+  type SharedActionFinish,
+  type SharedActionStart,
+  type SharedInvitationStarted,
+  type SharedInvitationTaken,
+  type TemplateValues,
   type TransactionRequest,
+  type Utxo,
   type VaultWalletAddress,
   type WalletBackend,
   type WalletTemplateName,
   ADDRESS_KIND,
+  InvitationNotTakenError,
   buildTransaction,
   checkBeforeSending,
   controllerScript,
+  invitationFromText,
+  invitationParts,
+  invitationToText,
   p2pkhInput,
   p2pkhLockingBytecode,
   readTemplate,
@@ -35,6 +45,9 @@ import {
 } from '@grandmas-wallet/core';
 
 import type { SimulatedChain } from './simulated-chain.js';
+
+/** An XO invitation as the engine's types give it, read from core's reader so that this package needs no engine. */
+type Invitation = ReturnType<typeof invitationFromText>;
 
 /**
  * The wallet's backend without the XO engine: the same keys, derived by this project's own code, and this
@@ -71,6 +84,8 @@ export class KeyBackend implements WalletBackend {
   private nextHandle = 0;
   /** Templates that are not the wallet's own, by identifier. */
   private readonly imported = new Map<string, ReadTemplate>();
+  /** Invitations started for another participant to join, by identifier. */
+  private readonly shared = new Map<string, { invitation: Invitation; entity: string; request: SharedActionStart; coins: AccountCoin[] }>();
 
   /**
    * @param keys - the seed's keys. For a recoverer, the credential's: the recovery key in the place of the
@@ -229,6 +244,156 @@ export class KeyBackend implements WalletBackend {
     for (const input of inputs) this.held.add(input);
     this.prepared.set(invitationIdentifier, { hex: hex(built.encoded), inputs });
     return { invitationIdentifier, transactionId: built.transactionId, transactionHex: hex(built.encoded), bytes: built.encoded.length, feeSatoshis: built.feeSatoshis };
+  }
+
+  /**
+   * Start an invitation another participant joins, as the engine would: one commit of the wallet's entity with its
+   * role, its values tagged with that role and its coins, which are held. The commit carries no real signature: this
+   * backend holds no XO key, and its `takeShared` compares the wallet's commits whole instead.
+   */
+  async startShared(request: SharedActionStart): Promise<SharedInvitationStarted> {
+    const template = this.imported.get(request.template);
+    if (template === undefined) throw new Error('This account does not hold that template.');
+    this.nextHandle += 1;
+    const invitationIdentifier = `shared-${this.nextHandle}`;
+    const now = Date.now();
+    const variables = Object.entries(typedValues(template.definition, request.variables ?? {})).map(([variableIdentifier, value]) => ({ variableIdentifier, roleIdentifier: request.role, value }));
+    const inputs = request.inputs.map(({ coin, inputIdentifier }) => ({ outpointTransactionHash: coin.utxo.transactionHash, outpointIndex: coin.utxo.index, ...(inputIdentifier === undefined ? {} : { inputIdentifier }) }));
+    const invitation = {
+      invitationIdentifier,
+      createdAtTimestamp: now,
+      templateIdentifier: request.template,
+      actionIdentifier: request.action,
+      commits: [
+        {
+          commitIdentifier: `${invitationIdentifier}-1`,
+          previousCommitIdentifier: undefined,
+          entityIdentifier: `entity-${invitationIdentifier}`,
+          createdAtTimestamp: now,
+          expiresAtTimestamp: now + 3_600_000,
+          signature: 'test-backend',
+          data: { roleIdentifier: request.role, ...(variables.length === 0 ? {} : { variables }), ...(inputs.length === 0 ? {} : { inputs }) },
+        },
+      ],
+    } as Invitation;
+    const coins = request.inputs.map(({ coin }) => coin);
+    for (const coin of coins) this.held.add(`${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`);
+    this.shared.set(invitationIdentifier, { invitation, entity: `entity-${invitationIdentifier}`, request, coins });
+    return { invitationIdentifier, text: invitationToText(invitation) };
+  }
+
+  /**
+   * Take the invitation back as the engine's `updateInvitation` would: the commits held come first and unchanged
+   * (where the engine verifies signatures, this backend compares them whole), and each later commit follows the one
+   * before. Nothing the other participant added is judged.
+   */
+  async takeShared(invitationIdentifier: string, text: string): Promise<SharedInvitationTaken> {
+    const started = this.shared.get(invitationIdentifier);
+    if (started === undefined) throw new InvitationNotTakenError('This account started no such invitation, or has put it aside.', 'not-started');
+    let received: Invitation;
+    try {
+      received = invitationFromText(text);
+    } catch (error) {
+      throw new InvitationNotTakenError(`The invitation cannot be read: ${(error as Error).message.slice(0, 200)}`, 'changed');
+    }
+    const held = started.invitation;
+    const alone = (commit: Invitation['commits'][number] | undefined): string => (commit === undefined ? '' : invitationToText({ ...held, commits: [commit] }));
+    if (received.invitationIdentifier !== held.invitationIdentifier || received.templateIdentifier !== held.templateIdentifier || received.actionIdentifier !== held.actionIdentifier) {
+      throw new InvitationNotTakenError('The invitation is another one.', 'not-valid');
+    }
+    if (held.commits.some((commit, index) => alone(commit) !== alone(received.commits[index]))) throw new InvitationNotTakenError('A commit the wallet made was changed: its signature would not verify.', 'not-valid');
+    for (let index = held.commits.length; index < received.commits.length; index++) {
+      if (received.commits[index]?.previousCommitIdentifier !== received.commits[index - 1]?.commitIdentifier) throw new InvitationNotTakenError('A commit does not follow the one before it.', 'not-valid');
+    }
+    started.invitation = received;
+    const { own, others } = invitationParts(received, started.entity);
+    return { invitationIdentifier, own, others };
+  }
+
+  /**
+   * The wallet's part after the other participant's, built as the engine builds it: the values merged with the last
+   * writer winning; every item placed where it says or where the template places it, the others after them in the
+   * order they were committed; an output's stated fields over what the template works out. Then signed and checked
+   * before sending as `prepare` does.
+   */
+  async finishShared(request: SharedActionFinish): Promise<PreparedTransaction> {
+    const { invitationIdentifier } = request;
+    const started = this.shared.get(invitationIdentifier);
+    if (started === undefined) throw new Error('This account started no such invitation, or has put it aside.');
+    try {
+      const template = this.imported.get(started.request.template);
+      if (template === undefined) throw new Error('This account does not hold that template.');
+      const { definition } = template;
+      const { invitation } = started;
+      const merged: TemplateValues = {};
+      for (const commit of invitation.commits) for (const variable of commit.data.variables ?? []) merged[variable.variableIdentifier] = typeof variable.value === 'boolean' ? String(variable.value) : variable.value;
+      const values = typedValues(definition, merged);
+      const shape = templateTransaction(definition, started.request.action, values);
+      const inputPlace = new Map(shape.inputs.map(({ input, index }) => [input, index]));
+      const outputPlace = new Map(shape.outputs.map(({ output, index }) => [output, index]));
+      const asRequest: TransactionRequest = { template: started.request.template, action: started.request.action, role: started.request.role, variables: merged, inputs: [], outputs: [] };
+      const ownCoins = new Map([...started.coins, ...request.inputs.map(({ coin }) => coin)].map((coin) => [`${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`, coin]));
+      const theirCoins = new Map<string, Utxo>(request.theirCoins.map((utxo) => [`${hex(utxo.transactionHash)}:${utxo.index}`, utxo]));
+      const inputs: { spec: InputSpec; place: number | undefined }[] = [];
+      const outputs: { output: Output; place: number | undefined }[] = [];
+      for (const commit of invitation.commits) {
+        const own = commit.entityIdentifier === started.entity;
+        for (const input of commit.data.inputs ?? []) {
+          if (input.mergesWith !== undefined) throw new Error('This backend does not merge items of different commits.');
+          const outpoint = `${hex(input.outpointTransactionHash ?? new Uint8Array())}:${input.outpointIndex ?? -1}`;
+          const place = input.transactionIndex ?? (input.inputIdentifier === undefined ? undefined : inputPlace.get(input.inputIdentifier));
+          if (own) {
+            const coin = ownCoins.get(outpoint);
+            if (coin === undefined) throw new Error('The invitation names a coin of the wallet\'s that it did not bring.');
+            inputs.push({ spec: this.inputFor(coin, asRequest, input.inputIdentifier), place });
+          } else {
+            const utxo = theirCoins.get(outpoint);
+            if (utxo === undefined) throw new Error('The invitation names a coin of the other participant\'s that the wallet did not read.');
+            const unlocking = input.unlockingBytecode ?? new Uint8Array();
+            inputs.push({ spec: { utxo, sequence: input.sequenceNumber ?? 0, unlock: () => unlocking }, place });
+          }
+        }
+        for (const output of commit.data.outputs ?? []) {
+          if (output.mergesWith !== undefined) throw new Error('This backend does not merge items of different commits.');
+          const place = output.transactionIndex ?? (output.outputIdentifier === undefined ? undefined : outputPlace.get(output.outputIdentifier));
+          const compiled = output.outputIdentifier === undefined ? undefined : templateOutput(definition, output.outputIdentifier, values);
+          const lockingBytecode = output.lockingBytecode ?? compiled?.lockingBytecode;
+          const valueSatoshis = output.valueSatoshis === undefined ? compiled?.valueSatoshis : BigInt(output.valueSatoshis);
+          if (lockingBytecode === undefined || valueSatoshis === undefined) throw new Error('An output of the invitation has no script or no value.');
+          const token = output.token === undefined ? compiled?.token : (output.token as Output['token']);
+          outputs.push({ output: { lockingBytecode, valueSatoshis, ...(token === undefined ? {} : { token }) }, place });
+        }
+      }
+      for (const { coin, inputIdentifier } of request.inputs) inputs.push({ spec: this.inputFor(coin, asRequest, inputIdentifier), place: inputIdentifier === undefined ? undefined : inputPlace.get(inputIdentifier) });
+      for (const output of request.outputs) {
+        outputs.push('outputIdentifier' in output ? { output: templateOutput(definition, output.outputIdentifier, values), place: outputPlace.get(output.outputIdentifier) } : { output, place: undefined });
+      }
+      const byPlace = <Item extends { place: number | undefined }>(items: Item[]): Item[] => items.map((item, order) => ({ item, order })).sort((a, b) => (a.item.place ?? Infinity) - (b.item.place ?? Infinity) || a.order - b.order).map(({ item }) => item);
+      const built = buildTransaction({
+        inputs: byPlace(inputs).map(({ spec }) => spec),
+        outputs: byPlace(outputs).map(({ output }) => output),
+        locktime: shape.locktime,
+        signingType: ENGINE_SIGNING_TYPE,
+        // As for an action of an application's template in `prepare`.
+        allowTokenBurn: true,
+      });
+      const check = checkBeforeSending(built);
+      if (check !== true) throw new Error(`The transaction fails the check before sending: ${check}`);
+      const held = [...ownCoins.keys()];
+      for (const outpoint of held) this.held.add(outpoint);
+      this.shared.delete(invitationIdentifier);
+      this.prepared.set(invitationIdentifier, { hex: hex(built.encoded), inputs: held });
+      return { invitationIdentifier, transactionId: built.transactionId, transactionHex: hex(built.encoded), bytes: built.encoded.length, feeSatoshis: built.feeSatoshis };
+    } catch (error) {
+      await this.abandonShared(invitationIdentifier);
+      throw error;
+    }
+  }
+
+  async abandonShared(invitationIdentifier: string): Promise<void> {
+    for (const coin of this.shared.get(invitationIdentifier)?.coins ?? []) this.held.delete(`${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`);
+    this.shared.delete(invitationIdentifier);
+    await this.discard(invitationIdentifier);
   }
 
   async send(prepared: PreparedTransaction): Promise<string> {

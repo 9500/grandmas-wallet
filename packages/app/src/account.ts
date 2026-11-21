@@ -1,4 +1,5 @@
 import { binToHex, decodeTransactionBch, hash160, hexToBin } from '@bitauth/libauth';
+import { checkJoinedInvitation } from '@grandmas-wallet/connect';
 import {
   type AccountCoin,
   type FollowedScript,
@@ -6,17 +7,23 @@ import {
   type PreparedTransaction,
   type RecoverableWalletAddress,
   type Role,
+  type SharedActionFinish,
+  type SharedActionStart,
+  type SharedInvitationStarted,
+  type SharedInvitationTaken,
   type TransactionRequest,
   type VaultWalletAddress,
   type WalletBackend,
   type WalletTemplateName,
   ADDRESS_KIND,
+  InvitationNotTakenError,
   checkBeforeSending,
+  invitationParts,
   typedValues,
 } from '@grandmas-wallet/core';
 import type { Engine } from '@xo-cash/engine';
 import type { XOTemplate } from '@xo-cash/types';
-import { serializeInvitation } from '@xo-cash/utils';
+import { deserializeInvitation, serializeInvitation } from '@xo-cash/utils';
 
 import { WALLET_TEMPLATES } from './templates.js';
 
@@ -106,6 +113,8 @@ export class Account implements WalletBackend {
   private readonly preparedAs = new Map<string, { templateIdentifier: string; templateName: string; action: string; role: string }>();
   /** Told of every transaction the account sends, with its invitation. */
   private onSent: ((sent: SentInvitation) => void | Promise<void>) | undefined;
+  /** Invitations started for another participant to join, not yet finished or put aside, by their identifier. */
+  private readonly shared = new Map<string, { text: string; entityIdentifier: string; templateIdentifier: string; templateName: string; action: string; role: string; coins: AccountCoin[] }>();
 
   private constructor(
     private readonly engine: Engine,
@@ -382,6 +391,124 @@ export class Account implements WalletBackend {
       await this.discard(invitationIdentifier);
       throw error;
     }
+  }
+
+  /**
+   * Start an invitation that another participant joins: the wallet's values, tagged with its role, and the coins it
+   * brings in its first commit, which the engine holds for it. No item is given a place: the template's places hold
+   * only for items without one, and the wallet's own items follow in their order.
+   */
+  async startShared(request: SharedActionStart): Promise<SharedInvitationStarted> {
+    const { identifier: templateIdentifier, definition } = this.templateOf(request.template);
+    const variables = Object.entries(request.variables ?? {}).map(([variableIdentifier, value]) => ({ variableIdentifier, roleIdentifier: request.role, value }));
+    const inputs = request.inputs.map(({ coin, inputIdentifier }) => ({
+      outpointTransactionHash: coin.utxo.transactionHash,
+      outpointIndex: coin.utxo.index,
+      ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
+    }));
+    const stored = await this.engine.createInvitation({
+      templateIdentifier,
+      actionIdentifier: request.action,
+      intent: intentFor(definition, request.action, request.role),
+      variables,
+      inputs,
+    } as Parameters<Engine['createInvitation']>[0]);
+    const { invitationIdentifier } = stored.invitation;
+    const text = serializeInvitation(stored.invitation);
+    this.shared.set(invitationIdentifier, {
+      text,
+      entityIdentifier: stored.entityIdentifier,
+      templateIdentifier,
+      templateName: (definition as { name?: string }).name ?? '',
+      action: request.action,
+      role: request.role,
+      coins: request.inputs.map(({ coin }) => coin),
+    });
+    return { invitationIdentifier, text };
+  }
+
+  /**
+   * Take back the invitation the other participant joined. It has to be the invitation that was sent with one commit
+   * appended (`checkJoinedInvitation`); the engine's `updateInvitation` then checks every commit's signature and the
+   * history (`acceptInvitation` would check neither). Nothing the other participant added is judged here.
+   * @throws InvitationNotTakenError
+   */
+  async takeShared(invitationIdentifier: string, text: string): Promise<SharedInvitationTaken> {
+    const started = this.shared.get(invitationIdentifier);
+    if (started === undefined) throw new InvitationNotTakenError('This account started no such invitation, or has put it aside.', 'not-started');
+    const joined = checkJoinedInvitation(started.text, text);
+    if (!joined.ok) throw new InvitationNotTakenError(joined.reason, 'changed');
+    let received;
+    try {
+      received = deserializeInvitation(text);
+    } catch (error) {
+      throw new InvitationNotTakenError(`The invitation cannot be read: ${String((error as Error).message).slice(0, 200)}`, 'changed');
+    }
+    try {
+      await this.engine.updateInvitation(received);
+    } catch (error) {
+      throw new InvitationNotTakenError(`The engine refused the invitation: ${String((error as Error).message).replace(/\s+/g, ' ').slice(0, 300)}`, 'not-valid');
+    }
+    const { own, others } = invitationParts(received, started.entityIdentifier);
+    return { invitationIdentifier, own, others };
+  }
+
+  /**
+   * The wallet's part after the other participant's: its coins and outputs, each without a place, then its
+   * signatures. The transaction is built and checked before sending as `prepare` checks it, with the other
+   * participant's coins as the wallet read them from the chain. Nothing is sent.
+   * @throws if the engine cannot build it, or if it fails the check before sending; the invitation is then put aside
+   */
+  async finishShared(request: SharedActionFinish): Promise<PreparedTransaction> {
+    const { invitationIdentifier } = request;
+    const started = this.shared.get(invitationIdentifier);
+    if (started === undefined) throw new Error('This account started no such invitation, or has put it aside.');
+    try {
+      const inputs = request.inputs.map(({ coin, inputIdentifier }) => ({
+        outpointTransactionHash: coin.utxo.transactionHash,
+        outpointIndex: coin.utxo.index,
+        ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
+      }));
+      // As in `prepare`: an output of the template carries the account's role.
+      const outputs = request.outputs.map((output) => ('outputIdentifier' in output ? { ...output, roleIdentifier: started.role } : output));
+      if (inputs.length > 0 || outputs.length > 0) {
+        await this.engine.appendInvitation(invitationIdentifier, { ...(inputs.length === 0 ? {} : { inputs }), ...(outputs.length === 0 ? {} : { outputs }) } as unknown as Parameters<Engine['appendInvitation']>[1]);
+      }
+      for (const index of await this.engine.listOwnInputIndexes(invitationIdentifier)) await this.engine.signInvitation(invitationIdentifier, index);
+      const { builtTransaction } = await this.engine.executeAction(invitationIdentifier, { broadcastTransaction: false });
+      const transaction = decodeTransactionBch(hexToBin(builtTransaction.serializedTransaction));
+      if (typeof transaction === 'string') throw new Error(`The engine built something that is not a transaction: ${transaction}`);
+      // Every input is a coin the wallet planned: its own, or one of the other participant's as read from the chain.
+      const known = new Map([...started.coins, ...request.inputs.map(({ coin }) => coin)].map((coin) => [`${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`, coin.utxo.output]));
+      for (const utxo of request.theirCoins) known.set(`${hex(utxo.transactionHash)}:${utxo.index}`, utxo.output);
+      const sourceOutputs = transaction.inputs.map((input) => known.get(`${hex(input.outpointTransactionHash)}:${input.outpointIndex}`));
+      if (transaction.inputs.length !== known.size || sourceOutputs.some((output) => output === undefined)) throw new Error('The engine built a transaction with other inputs than the ones planned.');
+      const spent = sourceOutputs as NonNullable<(typeof sourceOutputs)[number]>[];
+      const check = checkBeforeSending({ transaction, sourceOutputs: spent });
+      if (check !== true) {
+        throw new Error(`The transaction fails the check before sending: ${check}`, { cause: { transactionHex: builtTransaction.serializedTransaction, sourceOutputs: spent } });
+      }
+      this.shared.delete(invitationIdentifier);
+      this.preparedAs.set(invitationIdentifier, { templateIdentifier: started.templateIdentifier, templateName: started.templateName, action: started.action, role: started.role });
+      const inputTotal = spent.reduce((sum, output) => sum + output.valueSatoshis, 0n);
+      const outputTotal = transaction.outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n);
+      return {
+        invitationIdentifier,
+        transactionId: builtTransaction.transactionHash,
+        transactionHex: builtTransaction.serializedTransaction,
+        bytes: builtTransaction.serializedTransaction.length / 2,
+        feeSatoshis: inputTotal - outputTotal,
+      };
+    } catch (error) {
+      await this.abandonShared(invitationIdentifier);
+      throw error;
+    }
+  }
+
+  /** Put aside an invitation started for another participant, and free the coins the engine held for it. */
+  async abandonShared(invitationIdentifier: string): Promise<void> {
+    this.shared.delete(invitationIdentifier);
+    await this.discard(invitationIdentifier);
   }
 
   /** Send a prepared transaction. Returns its identifier. */

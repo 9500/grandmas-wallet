@@ -2,6 +2,7 @@ import type { Output } from '@bitauth/libauth';
 
 import type { Utxo } from './builder.js';
 import type { KeyedAddressKind } from './keys.js';
+import type { CommitPart } from './shared-invitation.js';
 import type { TemplateValues } from './template.js';
 import type { RecoverableWalletAddress, VaultWalletAddress } from './wallet-addresses.js';
 
@@ -70,7 +71,99 @@ export interface PreparedTransaction {
   feeSatoshis: bigint;
 }
 
-export interface WalletBackend {
+/**
+ * An invitation another participant joins: the wallet starts it with its own part, sends it, takes it back with the
+ * other participant's part, and finishes it with its fee and change (docs/xo-service.md). The wallet's code checks
+ * what the other participant added between taking and finishing; the backend takes nothing on trust beyond what
+ * the engine itself checks.
+ */
+export interface SharedActionStart {
+  /** An imported template, by its identifier. */
+  template: string;
+  action: string;
+  /** The role the wallet takes. Its values are tagged with it. */
+  role: string;
+  /** The wallet's own values: bytes as hex, amounts as whole numbers. */
+  variables?: Record<string, string | number | bigint>;
+  /**
+   * The coins the wallet brings in its first commit, such as the token the action is about, in order. A coin that
+   * stands for a template input names it. No coin is given a place: the template's places and the order of the
+   * wallet's items decide where each goes.
+   */
+  inputs: { coin: AccountCoin; inputIdentifier?: string }[];
+}
+
+/** An invitation the wallet started, ready to be sent. */
+export interface SharedInvitationStarted {
+  /** The backend's handle to it, as for a prepared transaction. */
+  invitationIdentifier: string;
+  /** The invitation in XO's own serialization, as it is sent. */
+  text: string;
+}
+
+/** The invitation as the backend took it back: the wallet's own commits and those the other participant added. */
+export interface SharedInvitationTaken {
+  invitationIdentifier: string;
+  own: CommitPart[];
+  others: CommitPart[];
+}
+
+/** The wallet's part after the other participant's. */
+export interface SharedActionFinish {
+  invitationIdentifier: string;
+  /**
+   * The wallet's coins that pay, after the coins of its first commit, in order. A coin that stands for a template
+   * input names it.
+   */
+  inputs: { coin: AccountCoin; inputIdentifier?: string }[];
+  /**
+   * The wallet's outputs, in order after the other participant's: an output of the template in the wallet's role by
+   * name, or any output given whole, such as its change at the exact fee.
+   */
+  outputs: ({ outputIdentifier: string } | Output)[];
+  /** The other participant's coins as the wallet read them from the chain, for the check before sending. */
+  theirCoins: Utxo[];
+}
+
+/** Why the backend did not take an invitation back. */
+export class InvitationNotTakenError extends Error {
+  constructor(
+    message: string,
+    /**
+     * `not-started`: the backend holds no such invitation of its own; `changed`: it is not the invitation that was
+     * sent with something appended; `not-valid`: the engine refused it (a signature, the history, a value an
+     * earlier commit set).
+     */
+    readonly code: 'not-started' | 'changed' | 'not-valid',
+  ) {
+    super(message);
+    this.name = 'InvitationNotTakenError';
+  }
+}
+
+export interface SharedActionBackend {
+  /**
+   * Start an invitation for an action of an imported template: the wallet's values, tagged with its role, and the
+   * coins it brings, which are held for it. Nothing is signed.
+   */
+  startShared(request: SharedActionStart): Promise<SharedInvitationStarted>;
+  /**
+   * Take back the invitation the other participant joined: it has to be the one that was sent with commits
+   * appended, and the engine checks every signature and the history. Nothing is judged beyond that.
+   * @throws InvitationNotTakenError
+   */
+  takeShared(invitationIdentifier: string, text: string): Promise<SharedInvitationTaken>;
+  /**
+   * Add the wallet's coins and outputs, sign the wallet's inputs, build, and check the transaction before it is
+   * sent, as `prepare` does. Nothing is sent: the result goes to `send` like any prepared transaction.
+   * @throws if the engine cannot build it, or if it fails the check before sending; the invitation is then put aside
+   */
+  finishShared(request: SharedActionFinish): Promise<PreparedTransaction>;
+  /** Put the invitation aside and free the coins it held: on a refusal, a failure or a time limit. */
+  abandonShared(invitationIdentifier: string): Promise<void>;
+}
+
+export interface WalletBackend extends SharedActionBackend {
   /** The account's key for the controller: the first key under the controller template. The same seed always gives the same one. */
   controllerKey(role: Role): Promise<{ publicKey: Uint8Array; keyHash: Uint8Array }>;
   /** The account's address for ordinary coins: the funding address of an owner, the fee address of a recoverer. */

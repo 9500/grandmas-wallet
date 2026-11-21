@@ -47,6 +47,7 @@ import type { ReservedAddress, Sent, TokenCoin, WalletParts } from './owner-wall
 import { coinsAt } from './positions.js';
 import { type RecoveryArrangement, type StoreAt, writeRecord } from './recovery-flow.js';
 import { type PositionRecordCheck, type PositionRecordVerdict, checkPositionRecord, recordsDue, samePosition, sameRecord, sameNft } from './position-records.js';
+import { builtDifference, coinScriptOf, inputBytes, sameToken } from './planned.js';
 import { type PresentedTexts, type TemplateNames, readPresented } from './template-check.js';
 import { type ShownRegistry, shownRegistry } from './token-registry.js';
 
@@ -656,8 +657,6 @@ const tokenMoved = (token: NonNullable<Output['token']>): NonNullable<MovedOutpu
   ...(token.nft === undefined ? {} : { nft: { capability: token.nft.capability, commitment: hex(token.nft.commitment) } }),
 });
 const moved = (output: Output): MovedOutput => ({ satoshis: output.valueSatoshis, ...(output.token === undefined ? {} : { token: tokenMoved(output.token) }) });
-const sameToken = (a: Output['token'], b: Output['token']): boolean =>
-  a !== undefined && b !== undefined && hex(a.category) === hex(b.category) && a.amount === b.amount && a.nft?.capability === b.nft?.capability && hex(a.nft?.commitment ?? new Uint8Array()) === hex(b.nft?.commitment ?? new Uint8Array());
 /** An NFT as the wallet's figures show it: its category and, where it has one, its capability and commitment, as hex. */
 export interface NftShown {
   category: string;
@@ -702,9 +701,6 @@ export const matchNfts = <T extends NftShown, U extends NftShown>(inputs: T[], o
   }
   return { notCarriedOn: inputs.filter((input, index) => input.nft !== undefined && used[index] !== true), notExplained: outputs.filter((output, at) => output.nft !== undefined && free[at] === true) };
 };
-const sameOutput = (a: Output, b: Output): boolean =>
-  hex(a.lockingBytecode) === hex(b.lockingBytecode) && a.valueSatoshis === b.valueSatoshis && (a.token === undefined ? b.token === undefined : sameToken(a.token, b.token));
-const inputBytes = (unlocking: Uint8Array): number => 32 + 4 + (unlocking.length < 0xfd ? 1 : 3) + unlocking.length + 4;
 const sum = (values: bigint[]): bigint => values.reduce((total, value) => total + value, 0n);
 const outpointOf = (utxo: Utxo): string => `${hex(utxo.transactionHash)}:${utxo.index}`;
 /** Fungible amounts by category. */
@@ -1571,19 +1567,7 @@ export class Applications {
     if (!/^[0-9a-f]{64}$/.test(transactionId) || !/^\d{1,5}$/.test(index)) return refuse(`The request names the coin for "${name}" in a form this wallet does not read.`);
     const output = await this.namedOutput(outpoint);
     if (output === undefined) return refuse(`The coin the request names for "${name}" is not on chain.`);
-    const unlocking = (definition.inputs?.[input] as { unlockingScript?: string } | undefined)?.unlockingScript;
-    const scripts = Object.entries(definition.lockingScripts ?? {})
-      .map(([identifier, script]) => ({ identifier, first: (script as { unlockingBytecode?: string }).unlockingBytecode === unlocking }))
-      .sort((a, b) => Number(b.first) - Number(a.first))
-      .map(({ identifier }) => identifier);
-    const lockingScript = scripts.find((candidate) => {
-      try {
-        return hex(templateLockingBytecode(definition, candidate, values)) === hex(output.lockingBytecode);
-      } catch (error) {
-        if (!(error instanceof TemplateError)) throw error;
-        return false;
-      }
-    });
+    const lockingScript = coinScriptOf(definition, input, output.lockingBytecode, values);
     if (lockingScript === undefined) return refuse(`The coin the request names for "${name}" is at no script of the template "${definition.name ?? ''}", made with the values of this action. It is refused.`);
     const unspent = (await this.wallet.chain.listUnspent(output.lockingBytecode)).some((listed) => listed.transactionId === transactionId && listed.index === Number(index));
     if (!unspent) return refuse(`The coin the request names for "${name}" is spent.`);
@@ -1728,21 +1712,8 @@ export class Applications {
   private check(plan: Plan, prepared: PreparedTransaction): void {
     const transaction = decodeTransactionBch(hexToBin(prepared.transactionHex));
     if (typeof transaction === 'string') throw new Error(`What was built is not a transaction: ${transaction}`);
-    const differs = (what: string): never => {
-      throw new Error(`The transaction that was built differs from the one the wallet worked out and showed: ${what}. Nothing was sent.`);
-    };
-    if (transaction.locktime !== plan.locktime) differs('its lock time');
-    if (transaction.outputs.length !== plan.outputs.length) differs('the number of its outputs');
-    plan.outputs.forEach(({ output }, index) => {
-      if (!sameOutput(output, transaction.outputs[index] as Output)) differs(`output ${index}`);
-    });
-    if (transaction.inputs.length !== plan.inputs.length) differs('the number of its inputs');
-    plan.inputs.forEach((input, index) => {
-      const built = transaction.inputs[index];
-      if (built === undefined || hex(built.outpointTransactionHash) !== hex(input.coin.utxo.transactionHash) || built.outpointIndex !== input.coin.utxo.index) return differs(`input ${index}`);
-      if (input.kind === 'application' && (built.sequenceNumber !== input.sequence || hex(built.unlockingBytecode) !== hex(input.unlocking ?? new Uint8Array()))) differs(`how input ${index} is unlocked`);
-      return undefined;
-    });
+    const what = builtDifference(plan, transaction);
+    if (what !== undefined) throw new Error(`The transaction that was built differs from the one the wallet worked out and showed: ${what}. Nothing was sent.`);
   }
 
   /**
