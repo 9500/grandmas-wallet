@@ -15,13 +15,24 @@
 //
 // No recovery declaration is read anywhere: none is sent, stored or kept, and the run checks that.
 //
-// Each part is a process of its own with an empty engine state, as a device session would be. What the run knows
-// between parts is in .local-runs/stage-17-jar-local.json; the stores are directories beside it. A run that stops
-// is continued with the same command; `--new` starts again.
+// One script, two chains: the local node (regtest) and chipnet. Only what a chain needs differs, as in run B
+// (scripts/run-b.ts): where the first coins come from, how a block comes about, and how the waiting period and the
+// jar's date pass. On the local node the run makes its blocks and moves the chain's clock; on chipnet it is paid from
+// the saved funding key, never makes a block, waits for one only where a confirmation is needed, and lets the
+// waiting period and the jar's date pass on the chain's own clock.
 //
-// usage (from packages/app, with the local node running; see deploy/regtest/regtest.sh):
-//   npx tsx ../../scripts/stage-17-jar-run.ts
-// The log is written to docs/runs/stage-17-jar-local-node.md.
+// Each part is a process of its own with an empty engine state, as a device session would be. What the run knows
+// between parts is in .local-runs/stage-17-jar-local.json (on chipnet .chipnet/stage-17-jar-chipnet.json); the
+// stores are directories beside it. Every step is written to that file once it is carried out. A run that stops is
+// continued with the same command; `--new` starts again (on chipnet only once the earlier run has finished, and its
+// file is kept under another name).
+//
+// usage (from packages/app):
+//   npx tsx ../../scripts/stage-17-jar-run.ts [local]       with the local node running (deploy/regtest/regtest.sh)
+//   npx tsx ../../scripts/stage-17-jar-run.ts chipnet       paid from the key in .chipnet/funder-design-2.json
+//   npx tsx ../../scripts/stage-17-jar-run.ts chipnet --dry reads chipnet and says what a run would need; sends nothing
+// The log is written to docs/runs/stage-17-jar-local-node.md (on chipnet docs/runs/stage-17-jar-chipnet.md, with the
+// invitations in docs/runs/invitations/stage-17-jar-chipnet/).
 import 'fake-indexeddb/auto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -33,7 +44,8 @@ import { type ChainReader, type KeyPair, type Utxo, buildTransaction, checkBefor
 import { Engine, XO_SUPPORTED_NETWORKS } from '@xo-cash/engine';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
-import { invitationFiles, writeInvitationFiles } from './invitation-files.js';
+import { invitationDirectory, invitationFiles, writeInvitationFiles } from './invitation-files.js';
+import { chipnetFunder, coinsFor, electrumEndpoint, engineServers, iso, medianTime as medianTimeAt, runArguments, startOver } from './stage-17-chain.js';
 import {
   type OwnerWalletState,
   type RecordedPosition,
@@ -58,22 +70,32 @@ import { JAR_TEMPLATE } from '../apps/jar/src/jar.js';
 import { XoJars, memoryStore } from '../apps/jar/src/xo.js';
 import { pageLink } from './stage-17-page-link.js';
 // @ts-expect-error a plain script: the engine's settings for the local chain, and the node's RPC
-import { regtestServers, rpc, mine, BURN } from '../spikes/xo-engine/regtest.mjs';
+import { rpc, mine, BURN } from '../spikes/xo-engine/regtest.mjs';
 
 const hex = binToHex;
 const root = fileURLToPath(new URL('..', import.meta.url));
-const [phase] = process.argv.slice(2).filter((word) => !word.startsWith('--'));
 /** The exit code of a part that stopped at a step of its own and said why. */
 const STOPPED = 3;
 const PHASES = ['the owner opens a jar', 'the recoverer recovers', 'the new device empties the jar from its record', 'the recoverer returns its balance', 'the run returns what is left'];
-const runDirectory = `${root}.local-runs`;
+const { chainName, local, phase, dry, fresh } = runArguments(PHASES, 'stage-17-jar-run.ts');
+const runDirectory = local ? `${root}.local-runs` : `${root}.chipnet`;
 mkdirSync(runDirectory, { recursive: true });
-const stateFile = `${runDirectory}/stage-17-jar-local.json`;
-const storeDirectory = `${runDirectory}/stage-17-jar-stores`;
-const invitations = `${runDirectory}/invitations/stage-17-jar/`;
-const logFile = `${root}docs/runs/stage-17-jar-local-node.md`;
+const stateFile = `${runDirectory}/stage-17-jar-${local ? 'local' : 'chipnet'}.json`;
+const storeDirectory = `${runDirectory}/stage-17-jar-${local ? '' : 'chipnet-'}stores`;
+/** The XO invitation behind every transaction an account of the run sends, a file each (scripts/invitation-files.ts). */
+const invitations = local ? `${runDirectory}/invitations/stage-17-jar/` : invitationDirectory('stage-17-jar-chipnet', false);
+const logFile = `${root}docs/runs/stage-17-jar-${local ? 'local-node' : 'chipnet'}.md`;
 /** Where the page says it is served from; the run has no web server, and the address is only kept in the record. */
 const PAGE = 'https://jar.example/';
+/** What the run pays out at most at one time on chipnet: the wallet's funding, the payment to it, and the fees. */
+const CHIPNET_NEEDS = 200_000n;
+/**
+ * How far ahead the jar's date is set, in seconds: on the local chain of its last block's time, as before; on chipnet
+ * of this machine's clock (or of the last block's, if that is ahead), the soonest that is still ahead when the jar is
+ * opened. The chain's clock trails the blocks by about six of them, and the recovery after the opening takes ten
+ * minutes or more, so on chipnet the date has passed, or nearly, by the time the new device empties the jar.
+ */
+const JAR_DATE_AHEAD = local ? 300 : 60;
 
 interface Entry { step: string; transactionId: string; bytes: number; fee: string; note: string }
 interface Facts {
@@ -88,6 +110,8 @@ interface Facts {
   jar?: { unlockTime: number; category?: string };
   record?: PositionRecordEntry;
   steps: Record<string, { transactionIds: string[]; data?: Record<string, number | string> }>;
+  /** A payment of the funder, written down before it is sent, by the step it belongs to. */
+  pending?: Record<string, { transactionId: string; hex: string }>;
   finished: string[];
   held?: string;
   funderAtStart?: string;
@@ -97,13 +121,36 @@ interface Facts {
 
 // ------------------------------------------------------------------ the driver: one process for each part
 
-if (phase === undefined) {
-  if (process.argv.includes('--new')) {
-    rmSync(stateFile, { force: true });
-    rmSync(storeDirectory, { recursive: true, force: true });
+if (phase === undefined && dry) {
+  // A look at chipnet before a run: what the funding key holds, the chain's clock, the date the jar would get, and
+  // what the run would pay out. Nothing is written and nothing is sent.
+  const server = await Electrum.connect(electrumEndpoint(false));
+  try {
+    const funderLocking = p2pkhLockingBytecode(chipnetFunder().keyHash);
+    const coins = await server.listUnspent(funderLocking, 'exclude');
+    const tokens = await server.listUnspent(funderLocking, 'only');
+    const balance = coins.reduce((sum, coin) => sum + coin.valueSatoshis, 0n);
+    const tip = await server.tip();
+    const median = await medianTimeAt(server, tip.height);
+    const now = Math.floor(Date.now() / 1000);
+    const date = Math.max(now, tip.time) + JAR_DATE_AHEAD;
+    const servers = await engineServers(false);
+    console.log(`chipnet at ${electrumEndpoint(false)}: tip ${tip.height}, its time ${iso(tip.time)}, the chain's clock (median of eleven) ${iso(median)}, ${now - median} s behind this machine's.`);
+    console.log(`The engine would be given ${servers.length} server: ${servers.map((entry) => `${entry.host} ${JSON.stringify(entry.transports)}`).join(', ')}.`);
+    console.log(`The funding key holds ${balance} satoshis in ${coins.length} coins without tokens, and ${tokens.length} coins with tokens (left alone by the run).`);
+    console.log(`The run pays out at most about ${CHIPNET_NEEDS} satoshis at a time (80,000 to the wallet's funding address, 60,000 to an address it gives out, the fees); everything but the network fees comes back. ${balance >= CHIPNET_NEEDS ? 'The key holds enough.' : 'The key holds TOO LITTLE.'}`);
+    console.log(`A run started now would give the jar the date ${iso(date)}. The network accepts emptying it once the chain's clock has passed that date, about ${iso(date + (now - median) + 60)} by this machine's if the chain's clock keeps trailing by ${now - median} s; the emptying comes after the recovery, ten minutes or more after the opening, so a wait for the date of a few minutes at most is expected.`);
+    console.log(existsSync(stateFile) ? `A run is under way: ${stateFile.slice(root.length)} (finished: ${(JSON.parse(readFileSync(stateFile, 'utf8')) as Facts).finished.join(', ') || 'nothing yet'}). The same command without --dry continues it.` : `No run is under way; ${stateFile.slice(root.length)} does not exist.`);
+  } finally {
+    await server.disconnect().catch(() => undefined);
   }
+  process.exit(0);
+}
+
+if (phase === undefined) {
+  if (fresh) startOver(local, stateFile, storeDirectory, PHASES);
   if (!existsSync(stateFile)) rmSync(invitations, { recursive: true, force: true });
-  if (!existsSync(stateFile) && Number(execFileSync(`${root}deploy/regtest/regtest.sh`, ['cli', 'getblockcount'], { encoding: 'utf8' })) > 1500) {
+  if (local && !existsSync(stateFile) && Number(execFileSync(`${root}deploy/regtest/regtest.sh`, ['cli', 'getblockcount'], { encoding: 'utf8' })) > 1500) {
     console.error('The local chain is long and its block rewards are small. Start a new one: deploy/regtest/regtest.sh reset');
     process.exit(1);
   }
@@ -114,10 +161,10 @@ if (phase === undefined) {
       continue;
     }
     // A part that ends without saying why (the engine's packages can end the process) is continued, a few times.
-    let result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), next], { stdio: 'inherit' });
+    let result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), chainName, next], { stdio: 'inherit' });
     for (let again = 0; again < 3 && result.status !== 0 && result.status !== STOPPED; again += 1) {
       console.log(`"${next}" ended unexpectedly; continuing it`);
-      result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), next], { stdio: 'inherit' });
+      result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), chainName, next], { stdio: 'inherit' });
     }
     if (result.status !== 0) {
       console.error(`Stopped in "${next}". The same command continues the run.`);
@@ -128,16 +175,18 @@ if (phase === undefined) {
   const written = invitationFiles(invitations);
   const invitationOf = (transactionId: string): string => {
     const found = written.find((entry) => entry.transactionId === transactionId);
-    return found === undefined ? '' : `${found.action} (${found.templateName})`;
+    if (found === undefined) return '';
+    // On chipnet the files are kept in git beside the record, and the table links each.
+    return local ? `${found.action} (${found.templateName})` : `[${found.action}](invitations/stage-17-jar-chipnet/${found.file})`;
   };
   const revision = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const changed = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).split('\n').filter((line) => line.trim() !== '' && !line.includes('docs/runs/') && !line.includes('.chipnet'));
   writeFileSync(
     logFile,
     [
-      '# Stage 17 run on the local node: the Savings Jar without a declaration, through the loss of a device (PR19)',
+      `# Stage 17 run on ${local ? 'the local node' : 'chipnet'}: the Savings Jar without a declaration, through the loss of a device (PR19)`,
       '',
-      'Written by the run itself (`scripts/stage-17-jar-run.ts`). The owner\'s wallet, the recoverer and the new device, each on the unmodified XO engine, against the local node in regtest mode with the public networks\' relay rules. Each part ran in a process of its own with an empty engine state. The Savings Jar reached the wallet as its template of version 4 alone, as a text, in the requests of the jar\'s page: the page\'s own code (`apps/jar/src/xo.ts`), connected to the wallet\'s connector for applications over a session in memory, every message through JSON and back as it travels; only the relay was left out. Every transaction of the jar is an invitation of that template, built and signed by the engine, and was compared with what the wallet\'s own code had worked out before it was sent. The backup stores are two directories of the run, read and written as a store server\'s are. No recovery declaration was sent, stored, kept or read anywhere in the run.',
+      `Written by the run itself (\`scripts/stage-17-jar-run.ts${local ? '' : ' chipnet'}\`). The owner's wallet, the recoverer and the new device, each on the unmodified XO engine, ${local ? 'against the local node in regtest mode with the public networks\' relay rules' : 'on chipnet, paid from the funding address and with everything returned to it at the end; no block was made by the run, and the waiting period and the jar\'s date passed on the chain\'s own clock'}. Each part ran in a process of its own with an empty engine state. The Savings Jar reached the wallet as its template of version 4 alone, as a text, in the requests of the jar's page: the page's own code (\`apps/jar/src/xo.ts\`), connected to the wallet's connector for applications over a session in memory, every message through JSON and back as it travels; only the relay was left out. Every transaction of the jar is an invitation of that template, built and signed by the engine, and was compared with what the wallet's own code had worked out before it was sent. The backup stores are two directories of the run, read and written as a store server's are. No recovery declaration was sent, stored, kept or read anywhere in the run.`,
       '',
       `- Wallet identity: \`${facts.identity}\``,
       `- Jar key (token category): \`${facts.jar?.category}\`; the jar's date: ${new Date((facts.jar?.unlockTime ?? 0) * 1000).toISOString()}`,
@@ -145,6 +194,12 @@ if (phase === undefined) {
       `- The page's address in its requests: ${PAGE}`,
       `- Repository at commit \`${revision}\`${changed.length === 0 ? '' : `, with uncommitted changes to ${changed.map((line) => line.slice(3)).join(', ')}`}`,
       `- Started ${facts.startedAt}`,
+      ...(local
+        ? []
+        : [
+            `- The XO invitation behind each transaction an account of the run sent, as the engine serializes it for sharing: \`${invitations.slice(root.length)}\`, with \`index.json\` naming the template, action and role of each.`,
+            '- The engine ran as published, with no local change, given one server (chipnet.9500.cash), as in run B.',
+          ]),
       '',
       'The position record the earlier device wrote before the opening was signed, as the new device read it from a store:',
       '',
@@ -201,12 +256,22 @@ const once = async (name: string, work: () => Promise<{ transactionIds?: string[
   return facts.steps[name]?.data ?? {};
 };
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-const until = async <T>(what: string, check: () => Promise<T | undefined | false>, patienceMs = 60_000, everyMs = 500): Promise<T> => {
+/**
+ * How long the run waits for a server or the engine to list what was just sent. On chipnet a confirmation is waited
+ * for longer (`BLOCK_PATIENCE_MS`), and the waiting period and the jar's date as long as the chain's clock needs.
+ */
+const PATIENCE_MS = local ? 60_000 : 5 * 60_000;
+const BLOCK_PATIENCE_MS = local ? 60_000 : 20 * 60_000;
+/** A wait, always bounded: one that runs out stops the part, saying what it waited for; the same command continues. */
+const until = async <T>(what: string, check: () => Promise<T | undefined | false>, patienceMs = PATIENCE_MS, everyMs = local ? 500 : 5_000): Promise<T> => {
   const deadline = Date.now() + patienceMs;
+  let announced = false;
   for (;;) {
     const found = await check();
     if (found !== undefined && found !== false) return found;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    if (Date.now() > deadline) throw new Error(`timed out after ${Math.round(patienceMs / 1000)} s waiting for ${what}; the same command continues the run`);
+    if (!announced && !local) say(`  waiting for ${what} (at most until ${new Date(deadline).toISOString().slice(11, 19)} UTC)`);
+    announced = true;
     await wait(everyMs);
   }
 };
@@ -218,7 +283,7 @@ const RECOVERER_COINS = 5_000n;
 const ownerSeed = deriveSeedKeys(facts.words.owner, 'testnet', numbers);
 const newSeed = deriveSeedKeys(facts.words.next, 'testnet', numbers);
 
-const server = await Electrum.connect('ws://127.0.0.1:60403');
+const server = await Electrum.connect(electrumEndpoint(local));
 /** The chain as the wallet reads it, with every lookup counted. */
 const lookups = { history: 0, transactions: 0, unspent: 0 };
 const chain: ChainReader = {
@@ -232,35 +297,66 @@ const counted = async <T>(work: () => Promise<T>): Promise<{ result: T; history:
   return { result, history: lookups.history - before.history, transactions: lookups.transactions - before.transactions, unspent: lookups.unspent - before.unspent };
 };
 
-if (facts.localFunder === undefined) {
+// The key that pays for the run and gets everything back: on the local chain one of the run's own, paid by a block
+// reward; on chipnet the saved funding key.
+if (local && facts.localFunder === undefined) {
   facts.localFunder = hex(crypto.getRandomValues(new Uint8Array(32)));
   keep();
 }
-const funder: KeyPair = keyPairFromPrivateKey(hexToBin(facts.localFunder));
+const funder: KeyPair = local ? keyPairFromPrivateKey(hexToBin(facts.localFunder as string)) : chipnetFunder();
 const funderLocking = p2pkhLockingBytecode(funder.keyHash);
+/** A block: made on demand on the local chain; on chipnet none is made, and one is awaited only where a confirmation is needed. */
 const block = async (): Promise<void> => {
-  await mine(1, BURN);
+  if (local) await mine(1, BURN);
 };
 const confirmed = async (transactionId: string): Promise<void> => {
-  await mine(1, BURN);
-  await until(`the first confirmation of ${transactionId.slice(0, 12)}…`, async () => ((await server.confirmations(transactionId)) ?? 0) > 0);
+  if (local) await mine(1, BURN);
+  await until(`the first confirmation of ${transactionId.slice(0, 12)}…`, async () => ((await server.confirmations(transactionId)) ?? 0) > 0, BLOCK_PATIENCE_MS, local ? 500 : 10_000);
 };
 const funderCoins = async (): Promise<Utxo[]> =>
   (await server.listUnspent(funderLocking, 'exclude')).map((entry) => ({ transactionHash: hexToBin(entry.transactionId), index: entry.index, output: { lockingBytecode: funderLocking, valueSatoshis: entry.valueSatoshis } }));
-const funderPays = async (outputs: Output[], options: { burn?: boolean; extraInputs?: Utxo[] } = {}): Promise<string> => {
-  const coins = await until('the funder\'s coins', async () => { const found = await funderCoins(); return found.length > 0 ? found : undefined; });
-  const built = buildTransaction({ inputs: [...coins, ...(options.extraInputs ?? [])].map((coin) => p2pkhInput(coin, funder)), outputs, changeLockingBytecode: funderLocking, allowTokenBurn: options.burn === true });
-  const check = checkBeforeSending(built);
-  if (check !== true) throw new Error(`a payment of the funder fails the check before sending: ${check}`);
-  const result = await server.broadcast(hex(built.encoded));
-  if (!result.accepted && !/already/i.test(result.reason)) throw new Error(`a payment of the funder was refused: ${result.reason}`);
-  await until('the funder\'s change', async () => (await server.getTransaction(built.transactionId)) !== undefined);
-  await wait(1_200);
-  return built.transactionId;
+/**
+ * A payment of the funder, with its change back to the funder. It is written to the run's file under the step's name
+ * before it is sent, so that a part that stops right after sending it finds it there and does not pay again.
+ */
+const funderPays = async (step: string, outputs: Output[], options: { burn?: boolean; extraInputs?: Utxo[] } = {}): Promise<string> => {
+  const pending = facts.pending?.[step];
+  if (pending !== undefined) {
+    if ((await server.getTransaction(pending.transactionId)) === undefined) {
+      const again = await server.broadcast(pending.hex);
+      if (!again.accepted && !/already/i.test(again.reason)) throw new Error(`the funder's payment for "${step}", written down before it was sent, is not on the chain and was refused when sent again (${again.reason}); look at ${pending.transactionId} before continuing`);
+    }
+    return pending.transactionId;
+  }
+  for (let attempt = 1; ; attempt += 1) {
+    const coins = await until('the funder\'s coins', async () => { const found = await funderCoins(); return found.length > 0 ? found : undefined; });
+    const chosen = coinsFor(local, coins, outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n));
+    const built = buildTransaction({ inputs: [...chosen, ...(options.extraInputs ?? [])].map((coin) => p2pkhInput(coin, funder)), outputs, changeLockingBytecode: funderLocking, allowTokenBurn: options.burn === true });
+    const check = checkBeforeSending(built);
+    if (check !== true) throw new Error(`a payment of the funder fails the check before sending: ${check}`);
+    facts.pending = { ...facts.pending, [step]: { transactionId: built.transactionId, hex: hex(built.encoded) } };
+    keep();
+    const result = await server.broadcast(hex(built.encoded));
+    if (!result.accepted && !/already/i.test(result.reason)) {
+      // Refused: it was not sent, and is no longer pending.
+      facts.pending = Object.fromEntries(Object.entries(facts.pending).filter(([name]) => name !== step));
+      keep();
+      // On chipnet another run may pay from the same key: a coin spent meanwhile is a reason to build the payment again.
+      if (!local && /missing|spent|conflict/i.test(result.reason) && attempt < 4) {
+        say(`  a payment of the funder was refused ("${result.reason.slice(0, 80)}"); building it again`);
+        await wait(5_000);
+        continue;
+      }
+      throw new Error(`a payment of the funder was refused: ${result.reason}`);
+    }
+    await until('the funder\'s change', async () => (await server.getTransaction(built.transactionId)) !== undefined);
+    await wait(local ? 1_200 : 2_000);
+    return built.transactionId;
+  }
 };
 
 const openAccount = async (words: string, who: string): Promise<Account> =>
-  Account.open(await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers: await regtestServers() }), { onSent: writeInvitationFiles(invitations, who) });
+  Account.open(await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers: await engineServers(local) }), { onSent: writeInvitationFiles(invitations, who) });
 let account: Account | undefined;
 
 /** A backup store kept as a directory of the run: sealed blobs under their own names, as a store server keeps them. */
@@ -305,10 +401,7 @@ const noDeclaration = async (applications: Applications, where: string): Promise
   if (kept.length > 0) throw new Error(`${where} keeps a template with a declaration, or another template`);
   return `${where} keeps ${applications.templates.length} template, the jar's of version 4, with no declaration`;
 };
-const medianTime = async (height: number): Promise<number> => {
-  const times = await Promise.all(Array.from({ length: 11 }, (_, back) => server.headerTime(Math.max(height - back, 0))));
-  return times.sort((a, b) => a - b)[5] as number;
-};
+const medianTime = (height: number): Promise<number> => medianTimeAt(server, height);
 const describePosition = (position: RecordedPosition | undefined): string =>
   position === undefined ? 'nothing' : `"${position.status}"${position.reason === undefined ? '' : ` (${position.reason})`}, ${position.satoshis ?? 0n} satoshis in ${position.coins ?? 0} coin(s), from ${position.standing === 'own' ? 'a record of its own' : 'a record of the earlier seed'}`;
 
@@ -318,27 +411,37 @@ try {
   say(phase);
 
   if (phase === 'the owner opens a jar') {
-    await once('the funder gets a block reward', async () => {
-      await mine(1, hex(funderLocking));
-      await mine(100, BURN);
-      return undefined;
-    });
+    if (local) {
+      await once('the funder gets a block reward', async () => {
+        await mine(1, hex(funderLocking));
+        await mine(100, BURN);
+        return undefined;
+      });
+    }
     if (facts.funderAtStart === undefined) {
       const coins = await until('the funder\'s coins', async () => { const found = await funderCoins(); return found.length > 0 ? found : undefined; });
       facts.funderAtStart = String(coins.reduce((sum, coin) => sum + coin.output.valueSatoshis, 0n));
       keep();
+      if (!local && BigInt(facts.funderAtStart) < CHIPNET_NEEDS) throw new Error(`The funding address holds ${facts.funderAtStart} satoshis; the run needs ${CHIPNET_NEEDS}. Nothing was paid.`);
     }
     account = await openAccount(facts.words.owner, "the owner's device");
     const wallet = await OwnerWallet.open({ backend: account, chain, seed: ownerSeed, ...(facts.ownerState === undefined ? {} : { state: facts.ownerState }), save: (state) => { facts.ownerState = state; keep(); } });
     const funding = await wallet.fundingAddress();
-    await once('the wallet is funded', async () => ({ transactionIds: [await funderPays([{ lockingBytecode: funding, valueSatoshis: 80_000n }])] }));
+    await once('the wallet is funded', async () => ({ transactionIds: [await funderPays('the wallet is funded', [{ lockingBytecode: funding, valueSatoshis: 80_000n }])] }));
     if ((await wallet.creationStep()) !== 'created') {
       await until('the funding coin in the engine', async () => (await wallet.creationStep()) !== 'not funded');
       await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
-      await wallet.pay([{ lockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), valueSatoshis: RECOVERER_COINS }]);
-      facts.identity = wallet.stored.identity as string;
-      keep();
     }
+    facts.identity = wallet.stored.identity as string;
+    keep();
+    // The recoverer's balance, paid from the run's own coins, once the engine lists what the creation left; a part
+    // that stopped after the creation pays it when continued.
+    const paidRecoverer = await once('the recoverer gets its balance', async () => {
+      const before = await until('what the creation left, in the engine', async () => { const now = (await wallet.balance()).recoverable; return now >= RECOVERER_COINS + 1_000n ? now : undefined; });
+      const sent = await wallet.pay([{ lockingBytecode: p2pkhLockingBytecode(credential.feeKey.keyHash), valueSatoshis: RECOVERER_COINS }]);
+      // What the wallet holds once the engine lists the payment's change.
+      return { transactionIds: [sent.transactionId], data: { recoverable: String(before - RECOVERER_COINS - sent.feeSatoshis) } };
+    });
     for (const [step, transactionId, about] of [
       ['prepare', wallet.stored.creation.prepareTransactionId, 'the wallet pays itself, to have a coin that is output 0; this transaction is the identity'],
       ['create', wallet.stored.creation.createTransactionId, 'the controller and the rest'],
@@ -348,13 +451,13 @@ try {
       record(step, { transactionId, bytes, feeSatoshis: BigInt(bytes) }, about);
     }
     const created = await once('the wallet holds its first coin', async () => {
-      const first = await until('the wallet\'s first coin', async () => { const now = await wallet.balance(); return now.recoverable > 0n ? now : undefined; });
+      const first = await until('the wallet\'s first coin', async () => { const now = await wallet.balance(); return now.recoverable === BigInt(paidRecoverer['recoverable'] as string) ? now : undefined; });
       return { data: { recoverable: String(first.recoverable) } };
     });
     const arrived = BigInt(created['recoverable'] as string) + 60_000n;
     const identity = hexToBin(facts.identity as string);
     const given = await once('an address is given out', async () => ({ data: { first: (await wallet.receiveAddress()).address.number } }));
-    await once('someone pays the wallet', async () => ({ transactionIds: [await funderPays([{ lockingBytecode: wallet.address(0, given['first'] as number).lockingBytecode, valueSatoshis: 60_000n }])] }));
+    await once('someone pays the wallet', async () => ({ transactionIds: [await funderPays('someone pays the wallet', [{ lockingBytecode: wallet.address(0, given['first'] as number).lockingBytecode, valueSatoshis: 60_000n }])] }));
     await block();
     await until('the coin in the wallet', async () => (await wallet.balance()).recoverable === arrived);
 
@@ -364,11 +467,18 @@ try {
     }
     const applications = new Applications(wallet.parts, { archive: applicationArchive({ arrangement: () => facts.ownerArrangement, storeAt, seed: ownerSeed, identity, chain }) });
     if (facts.jar === undefined) {
-      facts.jar = { unlockTime: (await server.tip()).time + 300 };
+      // The soonest date the run allows: a few minutes ahead of the chain's last block (on chipnet, of this machine's
+      // clock too, should the last block be older). The recovery after the opening takes longer than that on chipnet,
+      // so the chain's clock has passed the date by the time the new device empties the jar.
+      const tip = await server.tip();
+      facts.jar = { unlockTime: (local ? tip.time : Math.max(tip.time, Math.floor(Date.now() / 1000))) + JAR_DATE_AHEAD };
       keep();
     }
     const { unlockTime } = facts.jar;
     await once('the owner opens a jar', async () => {
+      // A key in the wallet already means a jar was opened by a part that stopped before writing it down: the run
+      // does not open a second one.
+      if ((await wallet.balance()).tokens.length > 0) throw new Error('the wallet holds a token already, but the run has no record of opening the jar; look at the wallet before continuing');
       // The jar's page, connected to the wallet: its own code makes the request, the wallet shows it, the user approves.
       const link = pageLink(applications, 'the jar page');
       const page = new XoJars(link.requests, memoryStore(), { listUnspent: (lockingBytecode) => server.listUnspent(lockingBytecode) }, PAGE);
@@ -420,12 +530,18 @@ try {
         await confirmed(requested.transactionId);
       }
       await until('the request in the engine', async () => (await recoverer.state()).status === 'pending');
-      // The waiting period: 512 seconds of the chain's own time, moved on as the earlier runs do.
-      const now = (await rpc('getblockheader', await rpc('getbestblockhash'))).time as number;
-      await rpc('setmocktime', now + 700);
-      await mine(11, BURN);
+      // The waiting period: 512 seconds of the chain's own time. On the local chain it is moved on as the earlier runs
+      // do; on chipnet it passes as blocks come.
+      if (local) {
+        const now = (await rpc('getblockheader', await rpc('getbestblockhash'))).time as number;
+        await rpc('setmocktime', now + 700);
+        await mine(11, BURN);
+      }
+      // The network counts the waiting period on the chain's own clock: the median of the last eleven block times,
+      // from the block before the one that holds the request. The recoverer waits for that, then completes.
+      const startedWaiting = Date.now();
       await until(
-        'the waiting period on the chain\'s clock',
+        'the waiting period on the chain\'s clock (512 seconds of it after the request\'s block)',
         async () => {
           const request = (await readControllerHistory(chain, identity)).transactions.at(-1);
           const confirmations = request === undefined ? 0 : ((await server.confirmations(request.transactionId)) ?? 0);
@@ -433,7 +549,8 @@ try {
           const tip = await server.tip();
           return (await medianTime(tip.height)) >= (await medianTime(tip.height - confirmations)) + 512;
         },
-        10 * 60_000,
+        local ? 10 * 60_000 : 40 * 60_000,
+        local ? 500 : 30_000,
       );
       const completed = await until(
         'the waiting period to pass',
@@ -445,10 +562,11 @@ try {
             throw error;
           }
         },
-        10 * 60_000,
+        local ? 10 * 60_000 : 20 * 60_000,
+        local ? 500 : 30_000,
       );
-      record('complete', completed, 'after the waiting period; no coin has moved');
-      await rpc('setmocktime', 0);
+      record('complete', completed, `after the waiting period${local ? '' : ` (${Math.round((Date.now() - startedWaiting) / 60_000)} minutes)`}; no coin has moved`);
+      if (local) await rpc('setmocktime', 0);
       await block();
     }
   }
@@ -515,18 +633,27 @@ try {
       const position = await until('the jar listed from the record', async () => { const [found] = await applications.recordedPositions(); return found?.status === 'open' ? found : undefined; });
       note(`The new device lists the jar from the record: ${describePosition(position)}; the template offers "${position.actions?.join('", "')}" at the jar.`, 'the jar listed from the record');
 
+      // The network takes the withdrawal once the median time of the last eleven blocks has passed the jar's date. On
+      // the local chain the clock is moved on; on chipnet it passes as blocks come, and the run waits for it, no longer
+      // than until the date and twenty minutes more.
       const dateHasPassed = async (): Promise<void> => {
+        const waitedFrom = Date.now();
+        const clock = await medianTime((await server.tip()).height);
         await until(
-          'the jar\'s date on the chain\'s clock',
+          `the chain's clock (${iso(clock)} now) to pass the jar's date ${iso(unlockTime)}`,
           async () => {
             if ((await medianTime((await server.tip()).height)) > unlockTime) return true;
-            await rpc('setmocktime', unlockTime + 700);
-            await mine(11, BURN);
-            await rpc('setmocktime', 0);
+            if (local) {
+              await rpc('setmocktime', unlockTime + 700);
+              await mine(11, BURN);
+              await rpc('setmocktime', 0);
+            }
             return false;
           },
-          10 * 60_000,
+          local ? 10 * 60_000 : Math.max(0, unlockTime - clock) * 1000 + 20 * 60_000,
+          local ? 500 : 15_000,
         );
+        if (!local) note(`When the new device came to empty the jar, the chain's clock was ${iso(clock)}, ${clock > unlockTime ? `already past the jar's date ${iso(unlockTime)}: the recovery before it had taken longer than the time to the date, and no wait was needed` : `before the jar's date ${iso(unlockTime)}; the run waited ${Math.round((Date.now() - waitedFrom) / 60_000)} minutes for it to pass`}.`, 'the jar\'s date on chipnet');
       };
       await once('the new device empties the jar by itself', async () => {
         await dateHasPassed();
@@ -582,7 +709,8 @@ try {
 
   if (phase === 'the run returns what is left') {
     await once('the key is destroyed', async () => {
-      const nfts = await until('the key at the funder', async () => { const found = await server.listUnspent(funderLocking, 'only'); return found.length > 0 ? found : undefined; });
+      // The jar's key alone: on chipnet the funding key may hold tokens of other runs, which are left as they are.
+      const nfts = await until('the key at the funder', async () => { const found = (await server.listUnspent(funderLocking, 'only')).filter((entry) => entry.token?.category === facts.jar?.category); return found.length > 0 ? found : undefined; });
       const extra: Utxo[] = nfts.map((entry) => ({
         transactionHash: hexToBin(entry.transactionId),
         index: entry.index,
@@ -592,7 +720,7 @@ try {
           token: { amount: entry.token?.amount ?? 0n, category: hexToBin(entry.token?.category ?? ''), ...(entry.token?.nft === undefined ? {} : { nft: { capability: entry.token.nft.capability, commitment: hexToBin(entry.token.nft.commitment) } }) },
         },
       }));
-      return { transactionIds: [await funderPays([], { burn: true, extraInputs: extra })] };
+      return { transactionIds: [await funderPays('the key is destroyed', [], { burn: true, extraInputs: extra })] };
     });
     await block();
     const identity = hexToBin(facts.identity as string);
@@ -614,7 +742,7 @@ try {
       if (found.length > 0) left.push(`${found.length} coins at addresses of a seed`);
     }
     const spent = BigInt(facts.funderAtStart as string) - total;
-    note(`The funding address held ${facts.funderAtStart} satoshis before the run and holds ${total} after it: the run cost ${spent} satoshis in fees. ${left.length === 0 ? 'Nothing is left anywhere else.' : `LEFT BEHIND: ${left.join('; ')}.`}`);
+    note(`The funding address held ${facts.funderAtStart} satoshis before the run and holds ${total} after it: the run cost ${spent} satoshis in fees${local ? '' : ' (if no other run paid from the same key meanwhile)'}. ${left.length === 0 ? 'Nothing is left anywhere else.' : `LEFT BEHIND: ${left.join('; ')}.`}`);
     if (left.length > 0) throw new Error(`coins were left behind: ${left.join('; ')}`);
   }
   if (!facts.finished.includes(phase)) facts.finished.push(phase);
@@ -623,7 +751,7 @@ try {
   say(`FAILED: ${(error as Error).name}: ${String((error as Error).message).slice(0, 700)}\n${String((error as Error).stack).split('\n').slice(1, 5).join('\n')}`);
   process.exitCode = STOPPED;
 } finally {
-  await rpc('setmocktime', 0).catch(() => undefined);
+  if (local) await rpc('setmocktime', 0).catch(() => undefined);
   await server.disconnect().catch(() => undefined);
   await account?.close();
   process.exit();
