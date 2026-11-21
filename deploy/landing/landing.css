@@ -71,6 +71,27 @@ q { quotes: '“' '”'; font-weight: 600; }
 
 .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
 
+/* ------------------------------------------------------------------ entry banner */
+
+/*
+ * What BCH Blaze asks of an entry's home page, above everything else: the presentation, the source, and the
+ * CashTokens address that takes EMBER2026 tokens as votes. It scrolls away; the bar under it stays.
+ */
+.blaze { background: var(--owner-soft); border-bottom: 1px solid var(--line); font-size: 14px; }
+.blaze-row { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 4px 28px; padding-top: 9px; padding-bottom: 9px; }
+.blaze-links { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 18px; }
+.blaze-links a { font-weight: 600; white-space: nowrap; }
+.blaze-vote { min-width: 0; }
+.blaze-vote summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; cursor: pointer; list-style: none; }
+.blaze-vote summary::-webkit-details-marker { display: none; }
+.blaze-vote summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.blaze-label { color: var(--muted); }
+.blaze-address { overflow-wrap: anywhere; user-select: all; cursor: text; }
+.blaze-qr-toggle { color: var(--owner); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.blaze-qr-toggle::after { content: ' ▾'; }
+.blaze-vote[open] .blaze-qr-toggle::after { content: ' ▴'; }
+.blaze-vote .qr { display: block; width: 168px; height: 168px; margin: 8px 0 4px; border-radius: 8px; border: 1px solid var(--line); }
+
 /* ------------------------------------------------------------------ top bar */
 
 .top {
@@ -336,6 +357,7 @@ h3 { font-size: 19px; }
 
 @media (max-width: 720px) {
   .top-nav { display: none; }
+  .blaze-links strong { flex-basis: 100%; }
   .hero { padding: 32px 0 0; overflow: visible; }
   .hero-grid { grid-template-columns: 1fr; gap: 20px; }
   .hero-text { padding-bottom: 36px; }
