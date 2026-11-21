@@ -3,8 +3,13 @@ import { type BorrowingThread, type PriceThread, borrowingFee, collateralRatio, 
 import { describe, expect, it } from 'vitest';
 
 import {
+  CHIPNET_DESK,
   DEFAULT_PERCENT,
+  MAINNET_DESK,
   SAFE_PERCENT,
+  collateralPercents,
+  deskFor,
+  liquidationPrice,
   borrowPlan,
   borrowingFor,
   collateralProblem,
@@ -126,3 +131,39 @@ describe('managing a loan', () => {
     expect(collateralProblem(loan, safe - 1_000n, market)).toMatch(/115% or more/);
   });
 });
+
+describe('on mainnet', () => {
+  it('uses Paryon\'s deployment mainnet-v1 and its own template, whose oracle is the one read on chipnet', () => {
+    expect(deskFor({ network: 'mainnet' })).toBe(MAINNET_DESK);
+    expect(MAINNET_DESK.deployment.name).toBe('mainnet-v1');
+    expect(MAINNET_DESK.paryons).toBe(true);
+    expect(MAINNET_DESK.template.names.identifier).toBe('efa0e18915670a6d21a634821d4558a316a4191a219447f615523fde6a6143a5');
+    expect(CHIPNET_DESK.template.names.identifier).toBe('aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be');
+    // The page reads General Protocols' oracle with chipnet's deployment; the key is the same on mainnet.
+    expect(MAINNET_DESK.deployment.oraclePublicKey).toBe(CHIPNET_DESK.deployment.oraclePublicKey);
+  });
+
+  it('proposes 150% collateral and takes no less than 130%; on test networks 125% and 115%', () => {
+    expect(collateralPercents('mainnet')).toEqual({ proposed: 150, least: 130 });
+    expect(collateralPercents('chipnet')).toEqual({ proposed: DEFAULT_PERCENT, least: SAFE_PERCENT });
+    const market = { lower: 19_383n, priceThread: priceAt(19_383n) };
+    expect(borrowPlan(100_00n, 129, market, 130).problem).toMatch(/less than 130% collateral/);
+    expect(borrowPlan(100_00n, 130, market, 130).problem).toBeUndefined();
+    // Not even at the contracts' line, which the contracts themselves would take.
+    expect(borrowPlan(100_00n, 110, market, 130).problem).toMatch(/limit of 110%, where it can be liquidated/);
+  });
+
+  it('says what the smallest loan needs at the day\'s price: about 0.57 BCH at the line, 0.77 at 150%', () => {
+    const price = 19_383n;
+    expect(borrowPlan(100_00n, 110, { lower: price, priceThread: priceAt(price) }, 100).collateral).toBe(56_750_761n);
+    // The contracts' own least, one satoshi more for their rounding.
+    expect(minimumCollateral(100_00n, price)).toBe(56_750_762n);
+    expect(borrowPlan(100_00n, 150, { lower: price, priceThread: priceAt(price) }, 130).collateral).toBe(77_387_402n);
+    expect(borrowingFee(100_00n, price)).toBe(128_979n);
+    // At 150% the loan reaches the line when BCH falls to about $142.14, some 27% lower.
+    expect(liquidationPrice(77_387_402n, 100_00n)).toBe(14_215n);
+    expect(collateralRatio(77_387_402n, 100_00n, 14_215n)).toBeGreaterThanOrEqual(110);
+    expect(collateralRatio(77_387_402n, 100_00n, 14_214n)).toBeLessThan(110);
+  });
+});
+

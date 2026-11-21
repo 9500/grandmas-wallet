@@ -281,9 +281,12 @@ describe('applications follow the wallet', () => {
     expect(followWallet(readEnvironment({ ...BOTH, mainnetEnabled: undefined }), 'mainnet').kind).toBe('refuse');
   });
 
-  it('the loan page stays off on mainnet: it does not change to it', () => {
+  it('a page can name networks it does not work on, and then refuses them', () => {
     expect(followWallet(both, 'mainnet', ['mainnet'])).toEqual({ kind: 'refuse', reason: 'Your wallet is on Mainnet, and this page works on Chipnet only. Switch the wallet to Chipnet and connect again.' });
-    expect(readFileSync('apps/loan/src/main.tsx', 'utf8')).toMatch(/followWallet\(environment, walletNetwork, \['mainnet'\]\)/);
+  });
+
+  it('the loan page follows a wallet to mainnet, where Paryon has a deployment', () => {
+    expect(readFileSync('apps/loan/src/main.tsx', 'utf8')).toMatch(/followWallet\(environment, walletNetwork\)/);
   });
 
   it('the wallet\'s network is the one its announcement names', () => {

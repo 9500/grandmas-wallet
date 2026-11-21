@@ -52,6 +52,36 @@ export const CHIPNET_FAST_PERIODS_6: ParyonDeployment = {
   timeLockRedemption: 1,
 };
 
+/**
+ * Paryon's deployment on mainnet, live since 30 April 2026. Its parameters were read on 21 November 2026 from three
+ * public sources, which agree exactly: Paryon's verification tool (github.com/ParyonUSD/verify_contract_deployment,
+ * `config.ts`, commit 0f704ed2), Paryon's documentation (paryonusd.com/docs/technical/contract-verification, "the
+ * canonical mainnet-v1 deployment configuration as published in @paryonusd/library"), and Paryon's web application
+ * (`paryonusd.com/app`), the only one that names `apiBaseUrl`. The addresses they give hold the deployment's live
+ * outputs: ten Borrowing threads, five price threads (the guarded price contract, used since block 972,003), five
+ * key factories and the manage function's coins.
+ */
+export const MAINNET_V1: ParyonDeployment = {
+  name: 'mainnet-v1',
+  network: 'mainnet',
+  apiBaseUrl: 'https://mainnet-v1.paryonusd.com',
+  tokenIds: {
+    paryon: '2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544',
+    pool: '7708645a7f30e97003573d9322202960a560a87527bef3666a30044a0dfdfa81',
+    redeemer: '649b2d862f01a904addf9095ae64860a59071544ee4a3695f14cbbc75571f930',
+    loanKeyFactory: 'f07165f2c3448ced3bf0b33f9048ceb7567a2c07adb60d8f11b301c42db97405',
+    oracleMigrationKey: '7776202e8f4eca51d5e634799c66c6a87076cc6efcc64c1322e7e880c71f6d30',
+  },
+  oraclePublicKey: '02d09db08af1ff4e8453919cc866a4be427d7bfe18f2c05e5444c196fcf6fd2818',
+  protocolFeeLockingBytecode: 'aa207c7a248c794af2cdf1b1a66a2311347c45b177fcb3aad730a7823c9e32fc754087',
+  startBlockHeight: 948_406,
+  periodLengthBlocks: 144,
+  timeLockRedemption: 12,
+};
+
+/** Paryon's own deployment on a network, if it has one. */
+export const paryonDeploymentOn = (network: string): ParyonDeployment | undefined => (network === 'mainnet' ? MAINNET_V1 : network === 'chipnet' ? CHIPNET_FAST_PERIODS_6 : undefined);
+
 /** A token category as contracts see it: reversed. */
 export const categoryForScript = (category: Uint8Array): Uint8Array => category.slice().reverse();
 

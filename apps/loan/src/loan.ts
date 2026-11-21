@@ -5,6 +5,7 @@ import {
   type ParyonDeployment,
   type PriceThread,
   CHIPNET_FAST_PERIODS_6,
+  MAINNET_V1,
   MINIMUM_DEBT,
   borrowingFee,
   collateralAtRatio,
@@ -47,16 +48,18 @@ export const CHIPNET_DESK = deskOf(CHIPNET_FAST_PERIODS_6, true);
 export const DEPLOYMENT: ParyonDeployment = CHIPNET_DESK.deployment;
 export const CONTRACTS = CHIPNET_DESK.contracts;
 export const LOAN_TEMPLATE = CHIPNET_DESK.template;
+/** Paryon's public contracts through their deployment on mainnet, `mainnet-v1`: what the page uses on mainnet. */
+export const MAINNET_DESK = deskOf(MAINNET_V1, true);
 
 /**
- * The deployment the page uses on a network: the one its configuration names (`paryon`), which is how the page is
- * served for a chain of one's own with Paryon's contracts deployed on it; otherwise Paryon's own on chipnet.
- * @returns `undefined` where the network has none, and always on mainnet
+ * The deployment the page uses on a network: on mainnet and on chipnet, Paryon's own; elsewhere the one its
+ * configuration names (`paryon`), which is how the page is served for a chain of one's own with Paryon's contracts
+ * deployed on it.
+ * @returns `undefined` where the network has none
  */
 export const deskFor = (environment: { network: string; paryon?: unknown }): Desk | undefined => {
-  // Paryon's deployment on mainnet is not named in this code and cannot be checked from it: the page is off there,
-  // also for a deployment its configuration names.
-  if (environment.network === 'mainnet') return undefined;
+  // On mainnet only Paryon's own deployment, named and checked in this code, is used; a configuration cannot name another.
+  if (environment.network === 'mainnet') return MAINNET_DESK;
   const named = environment.paryon as Partial<ParyonDeployment> | undefined;
   if (named !== undefined && typeof named === 'object' && typeof named.name === 'string' && typeof named.tokenIds?.paryon === 'string' && typeof named.tokenIds.loanKeyFactory === 'string') {
     return deskOf(named as ParyonDeployment, false);
@@ -64,10 +67,28 @@ export const deskFor = (environment: { network: string; paryon?: unknown }): Des
   return environment.network === 'chipnet' ? CHIPNET_DESK : undefined;
 };
 
-/** What the page proposes: collateral worth 125% of the debt at the lower of the two prices. */
+/**
+ * On test networks: collateral worth 125% of the debt at the lower of the two prices is proposed, and less than
+ * 115% refused. The coins have no value there, and the margin above the contracts' 110% is what a person needs to
+ * see the course through: a fall of 12% in the price brings a loan at 125% to the line.
+ */
 export const DEFAULT_PERCENT = 125;
-/** Below this, at the lower of the two prices, the page refuses to borrow or to take collateral out. */
+/** Below this, at the lower of the two prices, the page refuses to borrow or to take collateral out (test networks). */
 export const SAFE_PERCENT = 115;
+/**
+ * On mainnet, with real BCH: 150% is proposed and less than 130% refused. A loan at 150% reaches the contracts'
+ * 110% after a fall of about 27% in the price, one at 130% after about 15%; BCH has fallen that much within days.
+ * Paryon's own application also asks for well above 110%.
+ */
+export const MAINNET_DEFAULT_PERCENT = 150;
+export const MAINNET_SAFE_PERCENT = 130;
+/** The collateral the page proposes, and the least it accepts, on a network. */
+export const collateralPercents = (network: string): { proposed: number; least: number } =>
+  network === 'mainnet' ? { proposed: MAINNET_DEFAULT_PERCENT, least: MAINNET_SAFE_PERCENT } : { proposed: DEFAULT_PERCENT, least: SAFE_PERCENT };
+/** The contracts' line: a loan whose collateral is worth less than this share of its debt can be liquidated by anyone. */
+export const LIQUIDATION_PERCENT = 110;
+/** The price, in US cents per BCH, at which a loan's collateral would be worth only 110% of its debt. */
+export const liquidationPrice = (collateral: bigint, debt: bigint): bigint => (collateral === 0n ? 0n : (debt * BigInt(LIQUIDATION_PERCENT) * 1_000_000n + collateral - 1n) / collateral);
 /** What the coin that carries the loan key holds, and the one that carries the PUSD. They come with the loan. */
 export const KEY_SATOSHIS = 1_000n;
 export const TOKEN_SATOSHIS = 1_000n;
@@ -199,7 +220,7 @@ export interface BorrowPlan {
   problem?: string;
 }
 
-export const borrowPlan = (debt: bigint, percent: number, market: Pick<Market, 'lower' | 'priceThread' | 'withoutOracle'>): BorrowPlan => {
+export const borrowPlan = (debt: bigint, percent: number, market: Pick<Market, 'lower' | 'priceThread' | 'withoutOracle'>, least: number = SAFE_PERCENT): BorrowPlan => {
   const used = market.priceThread.state.price;
   const collateral = collateralAtRatio(debt, market.lower, BigInt(percent));
   const fee = borrowingFee(debt, used);
@@ -215,8 +236,8 @@ export const borrowPlan = (debt: bigint, percent: number, market: Pick<Market, '
   const problem =
     debt < MINIMUM_DEBT
       ? `Paryon lends at least ${formatPusd(MINIMUM_DEBT)} PUSD.`
-      : percent < SAFE_PERCENT
-        ? `This page does not borrow with less than ${SAFE_PERCENT}% collateral at ${priceBasis(market.withoutOracle).short}. Below that a small fall in the price would put the loan near the contracts' limit of 110%, where it can be liquidated.`
+      : percent < least
+        ? `This page does not borrow with less than ${least}% collateral at ${priceBasis(market.withoutOracle).short}. Below that a small fall in the price would put the loan near the contracts' limit of 110%, where it can be liquidated.`
         : percent > 1_000
           ? 'Choose a collateral of at most 1,000%.'
           : collateral < minimumCollateral(debt, used)
@@ -269,13 +290,13 @@ export const repaymentProblem = (loan: Pick<LoanView, 'debt' | 'beingRedeemed'>,
 };
 
 /** Why the loan cannot hold this much collateral, or `undefined`. Adding is always allowed; taking out keeps it safe. */
-export const collateralProblem = (loan: Pick<LoanView, 'debt' | 'found'>, collateral: bigint, market: Pick<Market, 'lower' | 'priceThread'>): string | undefined => {
+export const collateralProblem = (loan: Pick<LoanView, 'debt' | 'found'>, collateral: bigint, market: Pick<Market, 'lower' | 'priceThread'>, least: number = SAFE_PERCENT): string | undefined => {
   if (loan.debt === undefined || loan.found === undefined) return 'The loan could not be read from the chain.';
   const now = loan.found.loan.output.valueSatoshis;
   if (collateral === now) return 'That is what the loan holds now.';
   if (collateral > now) return undefined;
   const ratio = collateralRatio(collateral, loan.debt, market.lower);
-  if (ratio < SAFE_PERCENT) return `With that, the collateral would be worth ${ratio.toFixed(2)}% of the debt at ${formatPrice(market.lower)}. This page keeps a loan at ${SAFE_PERCENT}% or more; take out less.`;
+  if (ratio < least) return `With that, the collateral would be worth ${ratio.toFixed(2)}% of the debt at ${formatPrice(market.lower)}. This page keeps a loan at ${least}% or more; take out less.`;
   if (collateral < minimumCollateral(loan.debt, market.priceThread.state.price)) return 'The contracts would not take this little collateral.';
   return undefined;
 };

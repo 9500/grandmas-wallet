@@ -1,5 +1,5 @@
 import type { RequestStage } from '@grandmas-wallet/connect';
-import { collateralRatio } from '@grandmas-wallet/paryon';
+import { MINIMUM_DEBT, borrowingFee, collateralAtRatio, collateralRatio } from '@grandmas-wallet/paryon';
 import { Amount, Button, Card, Field, HandOff, KeyValues, More, Notice, Pill, Segmented, Spinner, TemplateOffer, Status, Steps, type Step, formatBch, formatSatoshis, formatTime, parseBch, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
@@ -11,12 +11,13 @@ import {
   type Market,
   type PeriodNeed,
   CHIPNET_DESK,
-  DEFAULT_PERCENT,
-  SAFE_PERCENT,
+  LIQUIDATION_PERCENT,
   borrowPlan,
+  collateralPercents,
   collateralProblem,
   formatPrice,
   formatPusd,
+  liquidationPrice,
   parsePercent,
   parsePusd,
   partRepayment,
@@ -104,7 +105,11 @@ export const Intro = () => (
 export const Independent = ({ desk = CHIPNET_DESK, off = false }: { desk?: Desk | undefined; off?: boolean }) => (
   <div class="independent" role="note">
     <strong>An independent implementation of a front end for Paryon's contracts, not affiliated with Paryon in any way.</strong> This page is not Paryon's site and is not made, reviewed or endorsed by Paryon.{' '}
-    {off ? null : desk.paryons ? (
+    {off ? null : desk.paryons && desk.deployment.network === 'mainnet' ? (
+      <>
+        It is a demonstration that uses Paryon's public contracts unchanged, through their deployment on mainnet, <span class="mono">{desk.deployment.name}</span>. The collateral is real BCH: a loan can be liquidated or redeemed, and the BCH can be lost.
+      </>
+    ) : desk.paryons ? (
       <>
         It is a demonstration on chipnet, Bitcoin Cash's test network, and uses Paryon's public contracts unchanged, through their test deployment <span class="mono">{desk.deployment.name}</span>. Only test coins, which have no value, are used.
       </>
@@ -272,20 +277,67 @@ export const PricesCard = ({ market, problem, desk = CHIPNET_DESK }: { market: (
   </Card>
 );
 
+/**
+ * Said on mainnet beside a new loan. Redemptions there are frequent, and Paryon's contracts take the loans at the lowest
+ * interest first; this page opens every loan with no interest, the lowest there is.
+ */
+export const Redemptions = () => (
+  <Notice tone="warn">
+    This loan is opened with no interest, the lowest rate there is, and on mainnet redemptions take the loans with the lowest rate first. Anyone holding PUSD may then redeem it against this loan: part or all of the debt is paid off with their PUSD, and BCH worth as much at Paryon's price is taken from the collateral. You keep the PUSD you borrowed, but not that BCH.
+  </Notice>
+);
+
+/**
+ * Before a wallet is connected: the prices, and what the smallest loan Paryon makes needs now, at the line where the
+ * contracts liquidate and at what this page proposes.
+ */
+export const LoanNeeds = ({ market, problem, desk, network }: { market: Market | undefined; problem?: string | undefined; desk: Desk; network: string }) => {
+  const { proposed, least } = collateralPercents(network);
+  const at = (percent: number) => (market === undefined ? 0n : collateralAtRatio(MINIMUM_DEBT, market.lower, BigInt(percent)));
+  const fee = market === undefined ? 0n : borrowingFee(MINIMUM_DEBT, market.priceThread.state.price);
+  return (
+    <Card title={`What a loan of ${formatPusd(MINIMUM_DEBT)} PUSD needs now`}>
+      {market === undefined ? (
+        problem === undefined ? (
+          <p class="muted">
+            <Spinner /> {desk.paryons ? 'Reading Paryon\'s contracts and the oracle…' : 'Reading Paryon\'s contracts…'}
+          </p>
+        ) : (
+          <Notice tone="bad">{problem}</Notice>
+        )
+      ) : (
+        <>
+          <p class="small muted">Paryon lends at least {formatPusd(MINIMUM_DEBT)} PUSD. At {formatPrice(market.lower)} a BCH, {priceBasis(market.withoutOracle).short}:</p>
+          <KeyValues
+            entries={[
+              [<>Collateral at {LIQUIDATION_PERCENT}%<small>The contracts' line: at once liquidable</small></>, <Amount satoshis={at(LIQUIDATION_PERCENT)} />],
+              [<>Collateral at {least}%<small>The least this page accepts</small></>, <Amount satoshis={at(least)} />],
+              [<strong>Collateral at {proposed}%<small>What this page proposes</small></strong>, <strong><Amount satoshis={at(proposed)} /></strong>],
+              [<>Paryon's fee<small>0.25% of the debt, at least 1,000 sat</small></>, <Amount satoshis={fee} />],
+            ]}
+          />
+          {network === 'mainnet' && <p class="small muted">The collateral is real BCH. With {proposed}% the loan reaches the contracts' line of {LIQUIDATION_PERCENT}% if BCH falls below {formatPrice(liquidationPrice(at(proposed), MINIMUM_DEBT))}; there anyone may liquidate it and the collateral is lost.</p>}
+          {network === 'mainnet' && <Redemptions />}
+        </>
+      )}
+    </Card>
+  );
+};
+
 // ------------------------------------------------------------------ loans
 
 const percent = (value: number | undefined): string => (value === undefined ? '—' : `${value.toFixed(2)}%`);
 
 const LoanPill = ({ loan }: { loan: LoanView }) => (loan.status === 'open' ? <Pill tone="good">Open</Pill> : loan.status === 'closed' ? <Pill>Closed</Pill> : <Pill tone="warn">Not known</Pill>);
 
-const CollateralPanel = ({ loan, market, busy, onManage, onClose }: { loan: LoanView; market: Market; busy: boolean; onManage: (collateral: bigint) => void; onClose: () => void }) => {
+const CollateralPanel = ({ loan, market, least, busy, onManage, onClose }: { loan: LoanView; market: Market; least: number; busy: boolean; onManage: (collateral: bigint) => void; onClose: () => void }) => {
   const [direction, setDirection] = useState<'add' | 'take'>('add');
   const [amount, setAmount] = useState('');
   const [tried, setTried] = useState(false);
   const now = loan.found?.loan.output.valueSatoshis ?? 0n;
   const parsed = parseBch(amount);
   const target = typeof parsed === 'bigint' ? (direction === 'add' ? now + parsed : now - parsed) : undefined;
-  const problem = typeof parsed === 'string' ? parsed : target === undefined || target <= 0n ? 'That is more than the loan holds.' : collateralProblem(loan, target, market);
+  const problem = typeof parsed === 'string' ? parsed : target === undefined || target <= 0n ? 'That is more than the loan holds.' : collateralProblem(loan, target, market, least);
   const ratio = target === undefined || target <= 0n || loan.debt === undefined || loan.debt === 0n ? undefined : collateralRatio(target, loan.debt, market.lower);
   return (
     <div class="panel">
@@ -397,6 +449,7 @@ export const LoanItem = ({
   const open = loan.status === 'open' && loan.debt !== undefined && loan.found !== undefined;
   const range = partRepayment(loan);
   const lowerRatio = market === undefined ? undefined : ratioOf(loan, market.lower);
+  const { least } = collateralPercents(facts.network);
   return (
     <li class="loan" data-testid="loan">
       <div class="loan-top">
@@ -408,12 +461,12 @@ export const LoanItem = ({
           <KeyValues
             entries={[
               [<>Collateral</>, <Amount satoshis={loan.found?.loan.output.valueSatoshis ?? 0n} exact />],
-              [market === undefined ? <>Worth</> : <>Worth, at {formatPrice(market.lower)}<small>{priceBasis(market.withoutOracle).explained}</small></>, <span class={`ratio${lowerRatio !== undefined && lowerRatio < SAFE_PERCENT ? ' low' : ''}`}>{percent(lowerRatio)} of the debt</span>],
+              [market === undefined ? <>Worth</> : <>Worth, at {formatPrice(market.lower)}<small>{priceBasis(market.withoutOracle).explained}</small></>, <span class={`ratio${lowerRatio !== undefined && lowerRatio < least ? ' low' : ''}`}>{percent(lowerRatio)} of the debt</span>],
               ...(market === undefined || market.lower === market.priceThread.state.price ? [] : [[<>Worth, at the stored {formatPrice(market.priceThread.state.price)}</>, `${percent(ratioOf(loan, market.priceThread.state.price))} of the debt`] as [ComponentChildren, ComponentChildren]]),
               [<>Interest</>, loan.interestRate === 0 || loan.interestRate === undefined ? 'None' : `${(loan.interestRate / 100_000).toFixed(3)}% a period`],
             ]}
           />
-          {lowerRatio !== undefined && lowerRatio < SAFE_PERCENT && <Notice tone="warn">The collateral is worth less than {SAFE_PERCENT}% of the debt at {priceBasis(market?.withoutOracle).short}. Add collateral, or repay, before the price falls further: at 110% the contracts let anyone liquidate the loan.</Notice>}
+          {lowerRatio !== undefined && lowerRatio < least && <Notice tone="warn">The collateral is worth less than {least}% of the debt at {priceBasis(market?.withoutOracle).short}. Add collateral, or repay, before the price falls further: at 110% the contracts let anyone liquidate the loan.</Notice>}
           <div class="loan-key small muted">
             Loan key <span class="mono">{shorten(loan.category, 8, 6)}</span>, in your wallet
           </div>
@@ -438,6 +491,7 @@ export const LoanItem = ({
             <CollateralPanel
               loan={loan}
               market={market}
+              least={least}
               busy={busy}
               onManage={(collateral) => {
                 setPanel(undefined);
@@ -561,14 +615,15 @@ export const NewLoanCard = ({
   onMove: (need: Extract<PeriodNeed, { needed: true }>) => void;
   onBorrow: (key: MadeKey, plan: BorrowPlan, need: Extract<PeriodNeed, { needed: false }>) => void;
 }) => {
+  const percents = collateralPercents(facts.network);
   const [amount, setAmount] = useState('100');
-  const [ratio, setRatio] = useState(String(DEFAULT_PERCENT));
+  const [ratio, setRatio] = useState(String(percents.proposed));
   const [tried, setTried] = useState(false);
   const busy = state.running !== undefined;
   const debt = parsePusd(amount);
   const chosen = parsePercent(ratio);
   const need = market === undefined || typeof debt === 'string' ? undefined : periodNeed(market, debt);
-  const plan = market === undefined || typeof debt === 'string' || typeof chosen === 'string' ? undefined : borrowPlan(debt, chosen, market);
+  const plan = market === undefined || typeof debt === 'string' || typeof chosen === 'string' ? undefined : borrowPlan(debt, chosen, market, percents.least);
   const [key] = keys ?? [];
   const upToDate = need !== undefined && need.needed === false;
   return (
@@ -607,7 +662,9 @@ export const NewLoanCard = ({
           ) : (
             <>
               <p class="small">
-                {desk.paryons
+                {desk.paryons && desk.deployment.network === 'mainnet'
+                  ? `Paryon's contracts count time in periods of ${desk.deployment.periodLengthBlocks.toLocaleString('en-US')} blocks, about a day, and a loan pays interest for each period from the one it starts in. The contract that would lend to you was last moved on ${need.behind.toLocaleString('en-US')} periods ago; Paryon's keepers usually move them on at the start of each period.`
+                  : desk.paryons
                   ? `Paryon's contracts count time in periods of about half an hour, and a loan pays interest for each period from the one it starts in. The contract that would lend to you was last moved on ${need.behind.toLocaleString('en-US')} periods ago, because Paryon's keepers on this test network have stopped.`
                   : `Paryon's contracts count time in periods of ${desk.deployment.periodLengthBlocks.toLocaleString('en-US')} blocks, and a loan pays interest for each period from the one it starts in. The contract that would lend to you was last moved on ${need.behind.toLocaleString('en-US')} periods ago: on this chain of its own nobody moves Paryon's contracts on.`}{' '}
                 A loan opened from it now could be charged a fee for each of those periods, up to {formatSatoshis(need.atMost)} satoshis.
@@ -630,7 +687,7 @@ export const NewLoanCard = ({
               <span>PUSD</span>
             </div>
           </Field>
-          <Field label="Collateral" id="loan-ratio" error={tried ? (typeof chosen === 'string' ? chosen : plan?.problem) : undefined} hint={`Worth this much of the debt at ${priceBasis(market?.withoutOracle).short}. ${DEFAULT_PERCENT}% is proposed; this page takes no less than ${SAFE_PERCENT}%.`}>
+          <Field label="Collateral" id="loan-ratio" error={tried ? (typeof chosen === 'string' ? chosen : plan?.problem) : undefined} hint={`Worth this much of the debt at ${priceBasis(market?.withoutOracle).short}. ${percents.proposed}% is proposed; this page takes no less than ${percents.least}%. At ${LIQUIDATION_PERCENT}% the contracts let anyone liquidate the loan.`}>
             <div class="input-unit">
               <input id="loan-ratio" type="text" inputMode="numeric" autocomplete="off" value={ratio} aria-invalid={tried && (typeof chosen === 'string' || plan?.problem !== undefined)} onInput={(event) => setRatio((event.currentTarget as HTMLInputElement).value)} />
               <span>%</span>
@@ -643,11 +700,13 @@ export const NewLoanCard = ({
                   [<>Collateral</>, <Amount satoshis={plan.collateral} exact />],
                   [<>Worth, at {formatPrice(market.lower)}</>, `${percent(plan.ratioAtLower)} of the debt`],
                   ...(market.lower === market.priceThread.state.price ? [] : [[<>Worth, at the stored {formatPrice(market.priceThread.state.price)}</>, `${percent(plan.ratioAtStored)} of the debt`] as [ComponentChildren, ComponentChildren]]),
+                  [<>Liquidated if BCH falls below<small>Where the collateral is worth {LIQUIDATION_PERCENT}% of the debt</small></>, formatPrice(liquidationPrice(plan.collateral, plan.debt))],
                   [<>Paryon's fee<small>0.25% of the debt at the stored price, at least 1,000 sat</small></>, <Amount satoshis={plan.fee} exact />],
                   [<strong>Leaves your wallet, about</strong>, <strong><Amount satoshis={plan.total} /></strong>],
                 ]}
               />
               <p class="small muted">Plus the network's fee. You receive {formatPusd(plan.debt)} PUSD and the loan's key; the 2,000 satoshis that carry them are counted above. No interest is set on the loan.</p>
+              {facts.network === 'mainnet' && <Redemptions />}
             </div>
           )}
           <Button

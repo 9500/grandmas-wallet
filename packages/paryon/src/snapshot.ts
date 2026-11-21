@@ -2,20 +2,24 @@
 // on chain at the time, and check it in the virtual machine without a server.
 //
 // usage (from the repository's root):
-//   npx tsx packages/paryon/src/snapshot.ts [file]     default: packages/paryon/test/fixtures/chipnet-live.json
+//   npx tsx packages/paryon/src/snapshot.ts [file]     default: packages/paryon/test/fixtures/<network>-live.json
+// For Paryon's mainnet deployment, set NETWORK=mainnet: only outputs are read; nothing is sent.
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { binToHex } from '@bitauth/libauth';
 
 import { Electrum } from '../../chipnet/src/electrum.js';
-import { CHIPNET_FAST_PERIODS_6, paryonContracts } from './deployment.js';
+import { paryonContracts, paryonDeploymentOn } from './deployment.js';
 import { type LiveOutput, readParyonState } from './live.js';
 
-const file = process.argv[2] ?? fileURLToPath(new URL('../test/fixtures/chipnet-live.json', import.meta.url));
-const server = await Electrum.connect(process.env['ELECTRUM'] ?? 'wss://chipnet.9500.cash:443');
+const network = process.env['NETWORK'] ?? 'chipnet';
+const deployment = paryonDeploymentOn(network);
+if (deployment === undefined) throw new Error(`Paryon has no deployment on ${network}.`);
+const file = process.argv[2] ?? fileURLToPath(new URL(`../test/fixtures/${network}-live.json`, import.meta.url));
+const server = await Electrum.connect(process.env['ELECTRUM'] ?? (network === 'mainnet' ? 'wss://electrum.imaginary.cash:50004' : 'wss://chipnet.9500.cash:443'));
 try {
-  const contracts = paryonContracts(CHIPNET_FAST_PERIODS_6);
+  const contracts = paryonContracts(deployment);
   const state = await readParyonState(server, contracts);
   const tip = await server.tip();
   const written = (output: LiveOutput) => ({

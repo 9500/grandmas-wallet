@@ -159,8 +159,8 @@ try {
       await page.getByRole('button', { name: 'Copy address' }).first().waitFor({ state: 'visible', timeout: 20_000 });
       log('jar: after the statement it shows the address a wallet connects with');
     } else {
-      await see(page, 'loan-off', 'Off on mainnet');
-      log(`loan: "${((await page.getByText(/stays off on mainnet/).first().textContent()) ?? '').trim()}"`);
+      await see(page, 'loan-needs', /Collateral at 150%/, { what: "Paryon's contracts on mainnet and the oracle's price", seconds: 120 });
+      log(`loan: "${((await page.locator('.card', { hasText: 'needs now' }).first().innerText()) ?? '').replace(/\s+/g, ' ').trim()}"`);
     }
     await shot(page, `mainnet-${name}-phone.png`);
   }

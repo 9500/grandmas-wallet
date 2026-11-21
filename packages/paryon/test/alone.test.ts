@@ -9,7 +9,9 @@ import { type Device, deviceWith, finishCopying } from '../../../test/support/ap
 import {
   type LoanRequestAlone,
   type ParyonChain,
+  type ParyonDeployment,
   CHIPNET_FAST_PERIODS_6,
+  MAINNET_V1,
   borrow,
   borrowRequestAlone,
   closeLoan,
@@ -17,6 +19,7 @@ import {
   collateralAtRatio,
   createKeyRequestAlone,
   createLoanKey,
+  decodeBorrowingPeriod,
   decodeLoanState,
   decodePriceState,
   findLoan,
@@ -26,7 +29,10 @@ import {
   minimumCollateral,
   movePeriodRequestAlone,
   paryonChipnetTemplateText,
+  paryonMainnetTemplateText,
   paryonContracts,
+  periodAt,
+  periodStart,
   paryonTemplateAlone,
   repayRequestAlone,
 } from '../src/index.js';
@@ -35,16 +41,12 @@ import {
  * PR20 on the simulated chain: a ParyonUSD loan through this project's wallet with no recovery declaration
  * (proposal section 15.3). The wallet is sent the Paryon template alone; every request is what the loan's page
  * sends in version 2 of `xo_v1` (`page-requests.ts`), naming each of Paryon's coins by outpoint and giving the
- * values it read from them. Paryon's live chipnet outputs are as they were recorded (`fixtures/chipnet-live.json`);
+ * values it read from them. It runs for each of Paryon's own deployments, chipnet's and mainnet's, whose live outputs
+ * are as they were recorded (`fixtures/chipnet-live.json`, `fixtures/mainnet-live.json`);
  * the simulated chain evaluates every input of every transaction in the virtual machine before it takes it.
  *
  * Each transaction is compared with what the builders of step 1 make for the same choices, byte for byte.
  */
-
-const contracts = paryonContracts(CHIPNET_FAST_PERIODS_6);
-const alone = paryonTemplateAlone(contracts);
-const hex = binToHex;
-const PAGE = 'https://loan.example/';
 
 interface RecordedOutput {
   transactionId: string;
@@ -53,7 +55,13 @@ interface RecordedOutput {
   lockingBytecode: string;
   token?: { category: string; amount: string; nft?: { capability: 'none' | 'mutable' | 'minting'; commitment: string } };
 }
-const recorded = JSON.parse(readFileSync(new URL('fixtures/chipnet-live.json', import.meta.url), 'utf8')) as Record<'borrowing' | 'price' | 'loanKeyFactory' | 'manage', RecordedOutput[]> & { tip: { height: number } };
+const runOn = (deployment: ParyonDeployment): void => {
+const contracts = paryonContracts(deployment);
+const alone = paryonTemplateAlone(contracts);
+const hex = binToHex;
+const PAGE = 'https://loan.example/';
+
+const recorded = JSON.parse(readFileSync(new URL(`fixtures/${deployment.network}-live.json`, import.meta.url), 'utf8')) as Record<'borrowing' | 'price' | 'loanKeyFactory' | 'manage', RecordedOutput[]> & { tip: { height: number } };
 const outputOf = (entry: RecordedOutput): Output => ({
   lockingBytecode: hexToBin(entry.lockingBytecode),
   valueSatoshis: BigInt(entry.valueSatoshis),
@@ -69,7 +77,10 @@ const first = <T>(items: T[]): T => {
 };
 const PRICE = first(recorded.price.slice().sort((a, b) => Number(decodePriceState(hexToBin(b.token?.nft?.commitment ?? '')).price - decodePriceState(hexToBin(a.token?.nft?.commitment ?? '')).price)));
 const STORED_PRICE = decodePriceState(hexToBin(PRICE.token?.nft?.commitment ?? '')).price;
-const LOCK_HEIGHT = recorded.tip.height;
+// The tip's height, or where every Borrowing thread is already in the tip's period (as on mainnet), the first height
+// of the next period, so that a thread is moved on.
+const tipPeriod = periodAt(deployment, recorded.tip.height);
+const LOCK_HEIGHT = recorded.borrowing.some((entry) => decodeBorrowingPeriod(hexToBin(entry.token?.nft?.commitment ?? '')) < tipPeriod) ? recorded.tip.height : periodStart(deployment, tipPeriod + 1);
 
 /** A request of the page's, as the wallet's session turns it into an action (`actionOf`). */
 const asked = (request: LoanRequestAlone): ApplicationAction => ({
@@ -164,9 +175,10 @@ describe('a ParyonUSD loan from the template alone (PR20)', () => {
   const COLLATERAL = collateralAtRatio(DEBT, STORED_PRICE, 125n);
 
   it('PY02: the template sent is the frozen one, alone; it holds no key', () => {
-    expect(alone.texts).toEqual({ template: paryonChipnetTemplateText });
-    expect(alone.names.identifier).toBe('aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be');
-    expect(paryonChipnetTemplateText).not.toContain('private_key');
+    const frozen = deployment === MAINNET_V1 ? paryonMainnetTemplateText : paryonChipnetTemplateText;
+    expect(alone.texts).toEqual({ template: frozen });
+    expect(alone.names.identifier).toBe(deployment === MAINNET_V1 ? 'efa0e18915670a6d21a634821d4558a316a4191a219447f615523fde6a6143a5' : 'aeeaed2e63426a0e0a8fb5fd7db8744c7a880f1b5a6df4521170a701ef8bd8be');
+    expect(frozen).not.toContain('private_key');
   });
 
   it('PY02: a wallet without a coin that can define the key pays itself first, and the key is made with what is left over at output 0', async () => {
@@ -431,3 +443,6 @@ describe('a ParyonUSD loan through the loss of the device, from the page alone (
     expect(await findLoan(pageChain(taken), contracts, hexToBin(keyCategory))).toBeUndefined();
   });
 });
+};
+
+for (const deployment of [CHIPNET_FAST_PERIODS_6, MAINNET_V1]) describe(deployment.name, () => runOn(deployment));

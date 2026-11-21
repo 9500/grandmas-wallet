@@ -8,7 +8,7 @@
 export * from './amounts.js';
 export * from './contract.js';
 export * from './deployment.js';
-export { paryonChipnetTemplateText } from './frozen.js';
+export { paryonChipnetTemplateText, paryonMainnetTemplateText } from './frozen.js';
 export * from './live.js';
 export * from './local-deployment.js';
 export * from './oracle.js';

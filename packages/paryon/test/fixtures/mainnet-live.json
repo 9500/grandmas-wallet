@@ -1,0 +1,692 @@
+{
+ "deployment": "mainnet-v1",
+ "readAt": "2026-11-21T01:09:18.586Z",
+ "server": "wss://electrum.imaginary.cash:50004",
+ "tip": {
+  "height": 978229,
+  "time": 1795223069
+ },
+ "borrowing": [
+  {
+   "transactionId": "0e80516af23edb9b3fb14047b4dbe7e1b462134d1ed4f4d2de672030cdd64061",
+   "index": 0,
+   "height": 978215,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20202e730617933a8577e8589b44c43a0d2b8598d94925a82310ab56504ae9bccd87",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "922337203648437038",
+    "nft": {
+     "capability": "minting",
+     "commitment": "cf000000"
+    }
+   }
+  },
+  {
+   "transactionId": "194ea8dbb0ddb3f9b801597712e12c97420fa1bacf950d60f4a63015e676efdf",
+   "index": 0,
+   "height": 978215,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20202e730617933a8577e8589b44c43a0d2b8598d94925a82310ab56504ae9bccd87",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "922337203638828811",
+    "nft": {
+     "capability": "minting",
+     "commitment": "cf000000"
+    }
+   }
+  },
+  {
+   "transactionId": "1e52cbb147f900bccb0d4a9779c66cd815c081a3adcaf9a5459b47119fc896b0",
+   "index": 0,
+   "height": 978215,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20202e730617933a8577e8589b44c43a0d2b8598d94925a82310ab56504ae9bccd87",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "922337203652108921",
+    "nft": {
+     "capability": "minting",
+     "commitment": "cf000000"
+    }
+   }
+  },
+  {
+   "transactionId": "51e445ca70babc4d06f3c7c0e264feead1b07b042f651914c4797bdba6e92060",
+   "index": 0,
+   "height": 978215,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20202e730617933a8577e8589b44c43a0d2b8598d94925a82310ab56504ae9bccd87",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "922337203653566796",
+    "nft": {
+     "capability": "minting",
+     "commitment": "cf000000"
+    }
+   }
+  },
+  {
+   "transactionId": "6a57a58f5573eb5f3acb684e4ba95e5a0bc04af7e7a6ecb800dbfd6c2729fade",
+   "index": 0,
+   "height": 978215,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20202e730617933a8577e8589b44c43a0d2b8598d94925a82310ab56504ae9bccd87",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "922337203657647989",
+    "nft": {
+     "capability": "minting",
+     "commitment": "cf000000"
+    }
+   }
+  },
+  {
+   "transactionId": "6e3d5875ced47cbef2f1c7b7cc2cfad72e35fd45538bec12527cc946bde7be40",
+   "index": 0,
+   "height": 978215,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20202e730617933a8577e8589b44c43a0d2b8598d94925a82310ab56504ae9bccd87",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "922337203658274453",
+    "nft": {
+     "capability": "minting",
+     "commitment": "cf000000"
+    }
+   }
+  },
+  {
+   "transactionId": "98f450608bf28d912669e5456b58ab4ed41e1f5887cfdbd19ba2dd7fc28a2ff2",
+   "index": 0,
+   "height": 978215,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20202e730617933a8577e8589b44c43a0d2b8598d94925a82310ab56504ae9bccd87",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "922337203647994948",
+    "nft": {
+     "capability": "minting",
+     "commitment": "cf000000"
+    }
+   }
+  },
+  {
+   "transactionId": "a3093d115dbf349574399a6066c828beebfe8543beb1309cf5641fd1f21752cb",
+   "index": 0,
+   "height": 978215,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20202e730617933a8577e8589b44c43a0d2b8598d94925a82310ab56504ae9bccd87",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "922337203655526302",
+    "nft": {
+     "capability": "minting",
+     "commitment": "cf000000"
+    }
+   }
+  },
+  {
+   "transactionId": "ab0d304f38fcb9140548ea2d618ddd966fb53336f224bcaad3980363782d13db",
+   "index": 0,
+   "height": 978215,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20202e730617933a8577e8589b44c43a0d2b8598d94925a82310ab56504ae9bccd87",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "922337203662367970",
+    "nft": {
+     "capability": "minting",
+     "commitment": "cf000000"
+    }
+   }
+  },
+  {
+   "transactionId": "b7a4e8cd77948971acae975acf1fc77930036c96f26b2484b48cc51b5f11c209",
+   "index": 0,
+   "height": 978215,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20202e730617933a8577e8589b44c43a0d2b8598d94925a82310ab56504ae9bccd87",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "922337203658631506",
+    "nft": {
+     "capability": "minting",
+     "commitment": "cf000000"
+    }
+   }
+  }
+ ],
+ "price": [
+  {
+   "transactionId": "08c5970baac1417ce4d14338aa650c00098d887dcfc6444d203548cc001bdd4b",
+   "index": 0,
+   "height": 0,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa205d07e6b4d0dd7170ddbb2926f0649d4b108d921ef9ab432803e8add10fa9e41587",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "mutable",
+     "commitment": "00dc881d00604b0000"
+    }
+   }
+  },
+  {
+   "transactionId": "700d6e57d0204ab1a032038e426fffeceefaca6e68d5641dc8bfbcf448e5bae2",
+   "index": 0,
+   "height": 0,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa205d07e6b4d0dd7170ddbb2926f0649d4b108d921ef9ab432803e8add10fa9e41587",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "mutable",
+     "commitment": "00dc881d00604b0000"
+    }
+   }
+  },
+  {
+   "transactionId": "79e67028738be0ba4aedfed7e3a55101d1024c276321cc51f73ed629024628eb",
+   "index": 0,
+   "height": 0,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa205d07e6b4d0dd7170ddbb2926f0649d4b108d921ef9ab432803e8add10fa9e41587",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "mutable",
+     "commitment": "00dc881d00604b0000"
+    }
+   }
+  },
+  {
+   "transactionId": "8a479c83d053001a19acdd591f8d66bdd02b31210100841e55d4943577ffa2d4",
+   "index": 0,
+   "height": 0,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa205d07e6b4d0dd7170ddbb2926f0649d4b108d921ef9ab432803e8add10fa9e41587",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "mutable",
+     "commitment": "00dc881d00604b0000"
+    }
+   }
+  },
+  {
+   "transactionId": "b351c042b3abe4896d9b299c29cd56264e3bb79f817ec4e3bd9de7e8944642b3",
+   "index": 0,
+   "height": 0,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa205d07e6b4d0dd7170ddbb2926f0649d4b108d921ef9ab432803e8add10fa9e41587",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "mutable",
+     "commitment": "00dc881d00604b0000"
+    }
+   }
+  }
+ ],
+ "loanKeyFactory": [
+  {
+   "transactionId": "665531d615b9e766eb412c749ad3f9775e7f2f06b9dfc821cd8f8bda0da204cc",
+   "index": 1,
+   "height": 973991,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20944b657e5a77d5d3b09f9e4f47a0f642ef7dc624ab5bf14a8381d2e025c85e9c87",
+   "token": {
+    "category": "f07165f2c3448ced3bf0b33f9048ceb7567a2c07adb60d8f11b301c42db97405",
+    "amount": "0",
+    "nft": {
+     "capability": "minting",
+     "commitment": ""
+    }
+   }
+  },
+  {
+   "transactionId": "74b8e7273b61b7c3f2de227207dc7450593dfaefd31bca90d35eb82483bfdf17",
+   "index": 1,
+   "height": 973991,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20944b657e5a77d5d3b09f9e4f47a0f642ef7dc624ab5bf14a8381d2e025c85e9c87",
+   "token": {
+    "category": "f07165f2c3448ced3bf0b33f9048ceb7567a2c07adb60d8f11b301c42db97405",
+    "amount": "0",
+    "nft": {
+     "capability": "minting",
+     "commitment": ""
+    }
+   }
+  },
+  {
+   "transactionId": "828ec6cee303c7fa612fcf9416cd6b86c6cf1ba717cb804253a4c26c64c0c4d0",
+   "index": 1,
+   "height": 973991,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20944b657e5a77d5d3b09f9e4f47a0f642ef7dc624ab5bf14a8381d2e025c85e9c87",
+   "token": {
+    "category": "f07165f2c3448ced3bf0b33f9048ceb7567a2c07adb60d8f11b301c42db97405",
+    "amount": "0",
+    "nft": {
+     "capability": "minting",
+     "commitment": ""
+    }
+   }
+  },
+  {
+   "transactionId": "c9a34c6b7fb3b3ae52597a7ef60cd85dbbe6af61da24de97a7445e03cb69720d",
+   "index": 1,
+   "height": 973991,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20944b657e5a77d5d3b09f9e4f47a0f642ef7dc624ab5bf14a8381d2e025c85e9c87",
+   "token": {
+    "category": "f07165f2c3448ced3bf0b33f9048ceb7567a2c07adb60d8f11b301c42db97405",
+    "amount": "0",
+    "nft": {
+     "capability": "minting",
+     "commitment": ""
+    }
+   }
+  },
+  {
+   "transactionId": "dc504fbd3be8ada33e0ccc56518014f9558b4de608bcb3f5bb8c023d0652fbca",
+   "index": 1,
+   "height": 973991,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa20944b657e5a77d5d3b09f9e4f47a0f642ef7dc624ab5bf14a8381d2e025c85e9c87",
+   "token": {
+    "category": "f07165f2c3448ced3bf0b33f9048ceb7567a2c07adb60d8f11b301c42db97405",
+    "amount": "0",
+    "nft": {
+     "capability": "minting",
+     "commitment": ""
+    }
+   }
+  }
+ ],
+ "manage": [
+  {
+   "transactionId": "7afeea78f89b20b6bfcb0cceb79e414df2db7e59b81d96bde323799d509149e2",
+   "index": 1,
+   "height": 977489,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "881c18f4d0af09fef4b46ffed668f39d3fa1dd480ab72d04e3ee3fd453badb73",
+   "index": 1,
+   "height": 977489,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "8e53650bf7e16ceb6a75a78f3e6a7e2abd91557b4ec7d452a3fa5b2b69bc6726",
+   "index": 3,
+   "height": 977524,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "309d8ff540fb0807eaf797b9c066a8f744585f3552221e6ff81189242e9b9d80",
+   "index": 3,
+   "height": 977534,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "cd85a32eba9b04057164f33949d726ca2781d85d22b7566f16772afadba876e9",
+   "index": 1,
+   "height": 977596,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "9e5d7315c7895ed38c9e9c2bb0d438ae43b06da95549ae07a587d7e2959d5350",
+   "index": 1,
+   "height": 977614,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "26229d75c88b076d976a337707b9f2d979784fc5dbda6c25765aee1b84877d50",
+   "index": 3,
+   "height": 977666,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "508560b167fa2f8f2b750d24fb91144f3ea1c6b204ce670942f4391580f69f9d",
+   "index": 3,
+   "height": 977865,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "0d4eefd0c1b11eb014a41012df35d10d8987fd1aa6e5293d4443074d0e57c7ba",
+   "index": 1,
+   "height": 978091,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "b7f48129b8a657853daeb10d1b106ac2349daa4779d50f39c0d3634662e48e36",
+   "index": 1,
+   "height": 978092,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "dacad09112aedd3da3a9b06bb0f60eed9c96ce072ffeab97ec6706f3e5936cd7",
+   "index": 1,
+   "height": 978092,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "d14cbd6b7f9b9ae024c9b6c81ac85806943d18e2c5d8328fca4e6d49da2b9043",
+   "index": 3,
+   "height": 978107,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "6334da1f6b2e700a9e62efff8107bf8ed90d6d5c616b5fc57e270512e1335cb3",
+   "index": 1,
+   "height": 978108,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "9babbc9f0cd188359d9269e15ac14d02a63bbe51ac17def7297abbdbb477ad92",
+   "index": 1,
+   "height": 978130,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "3406f9368ba254ed35130d9bf8b3b1e5eae85899fb6735e2a5c08c6d8acd5b5c",
+   "index": 1,
+   "height": 978174,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "6589e6a99d92de465e48f2f74465c0eb22c65bc784802a2e6b498a0767047565",
+   "index": 1,
+   "height": 978174,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "a9c27a8c68f817050b3d75cdd33af18d2d498ced4169fb36b4450ba9e127cf28",
+   "index": 1,
+   "height": 978174,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "11e29479a7abc84bf60f6c65c569b3a0b84ed8eb22de2877abf0ea4ecea4171f",
+   "index": 1,
+   "height": 978176,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "3011e4196eba99f22840fbc9f3ebf22402253c536ed65f494a28511222818d77",
+   "index": 3,
+   "height": 978183,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "3fac441f78a4c3bba0ca70cf5f078c94519f5d4072899f24da5b62ad3efdc6eb",
+   "index": 3,
+   "height": 978185,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "07fca5c3c6388c8d3cf570622c608f769b12e3ecaf849f762e74672db849abde",
+   "index": 3,
+   "height": 978209,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "f32f870534176fc69a004a5b98b2bceb52c867d299bcd2a5037af473a3b07eea",
+   "index": 3,
+   "height": 978209,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "22eda049c11ab19bdd0783402600dcf6b945fc1a4001cd032acba255659e8386",
+   "index": 1,
+   "height": 978217,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "5f37ad24a6aa39a46d7377d6d9f40f72d652bcee07bab2fbcf41ee11a0052ed0",
+   "index": 1,
+   "height": 978217,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  },
+  {
+   "transactionId": "7046c2d135342379762b66751b713d3ee94aaaff12fe2ad89a3e44e3aff2f1c9",
+   "index": 1,
+   "height": 978217,
+   "valueSatoshis": "1000",
+   "lockingBytecode": "aa209c76359f2a145a0b5864425a796882cef7230bf98e23886e2bf0416bff411ef787",
+   "token": {
+    "category": "2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544",
+    "amount": "0",
+    "nft": {
+     "capability": "none",
+     "commitment": "02"
+    }
+   }
+  }
+ ]
+}
