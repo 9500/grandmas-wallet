@@ -15,9 +15,19 @@ import { TokenNames, frozenNames, rawUnits, tokenUnits } from './token-words.js'
  * full and the template. Nothing here knows any application: every name comes from the template.
  */
 
-/** A long hexadecimal value, shortened; a tap shows it whole. */
+/**
+ * The identifier the wallet's figures carry for a token the action makes from a coin the wallet first pays itself:
+ * it is known only once that payment is made, so the figures are worked out with zeros in its place.
+ */
+export const NOT_YET_MADE = '00'.repeat(32);
+/** How a value is shown that is the identifier of a token not made yet, or `undefined` for any other value. */
+export const notYetMadeWords = (value: string): string | undefined => (value.toLowerCase() === NOT_YET_MADE ? 'new, made by this action' : undefined);
+
+/** A long hexadecimal value, shortened; a tap shows it whole. A token's identifier not known yet is said in words. */
 export const Hex = ({ value, head = 8, tail = 6 }: { value: string; head?: number; tail?: number }) => {
   const [whole, setWhole] = useState(false);
+  const words = notYetMadeWords(value);
+  if (words !== undefined) return <span class="word-value">{words}</span>;
   if (value.length <= head + tail + 1) return <span class="mono">{value}</span>;
   return (
     <button type="button" class={`hex${whole ? ' whole' : ''}`} title={whole ? 'Show shortened' : value} aria-label={whole ? undefined : `${value}, shortened. Show in full.`} onClick={() => setWhole(!whole)}>
@@ -416,6 +426,9 @@ export const TokensLeaving = ({ leaving, tick }: { leaving: NonNullable<ActionPr
   );
 };
 
+/** Said where the wallet pays itself first: what the review cannot show yet, and why. */
+export const PAYING_ITSELF_IDENTIFIER = 'The new token\'s identifier comes from that payment, so it is shown here as new; an address made with it, such as where coins go to others, is worked out again with it before anything is signed.';
+
 /** What asks for care: tokens that leave the wallet, a template taken in now, tokens destroyed, paying itself first, a time. */
 const Cautions = ({ preview, summary, tick }: { preview: ActionPreview; summary: TemplateSummary; tick?: Tick | undefined }) => {
   const { figures } = preview;
@@ -426,7 +439,7 @@ const Cautions = ({ preview, summary, tick }: { preview: ActionPreview; summary:
       {figures.tokensDestroyed.length > 0 && <Destroyed figures={figures} />}
       {figures.payingItself !== undefined && (
         <Notice tone="warn">
-          This wallet has no coin that can start a new token. It first pays itself, in a transaction of its own with a fee of <Sat satoshis={figures.payingItself.feeSatoshis} />, and then carries out the action.
+          This wallet has no coin that can start a new token. It first pays itself, in a transaction of its own with a fee of <Sat satoshis={figures.payingItself.feeSatoshis} />, and then carries out the action. {PAYING_ITSELF_IDENTIFIER}
         </Notice>
       )}
       {figures.notBefore !== undefined && (
