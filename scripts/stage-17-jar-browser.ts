@@ -19,6 +19,16 @@
 //   npx tsx scripts/stage-17-jar-browser.ts chipnet [--screens] [--headed] [--until <step>] [--from 5|7|8|9] [--record-only]
 // --record-only writes the record again from what the run kept, and runs nothing.
 //
+// The first use of a wallet, with small amounts and the recoverer's proposed settings (see scripts/browser-course.ts),
+// stopped with the jar open: the wallet, its jar and the recoverer's kit stay as they are, and only what is left at
+// the run's key goes back. On the local node, to prove the steps:
+//   npx tsx scripts/stage-17-jar-browser.ts local --first-use --directory <name> --record <file name>
+// and on mainnet, with real coins, everything kept in the folder named:
+//   npx tsx scripts/stage-17-jar-browser.ts mainnet --folder <absolute path> --funder <funding key file> --screens --record mainnet-first-run.md
+// The first use adds to step 3 a small payment out of the wallet, to the run's key, and ends after step 4. The pages
+// are served at the ports of the run (8700 and on, on mainnet), so that a later part opens the same profiles' data at
+// the same addresses with `--from 5`.
+//
 // The pages, a relay and two backup stores are served on this machine on ports of the run's own (see
 // scripts/browser-course.ts; 8301 to 8304, 8311 and 8312 unless --ports says otherwise). The run pays from a key of
 // its own, given 460,000 satoshis at the start and emptied back to the funding address at the end (scripts/run-key.ts). The run makes the blocks
@@ -29,14 +39,16 @@
 // 1280x800 go to docs/screens/ as live-jar-*.png. On chipnet the blocks, the waiting period and the jar's date take
 // their real time; the profiles and the log are under .chipnet/stage-17-jar-browser-chipnet/, the record is
 // docs/runs/stage-17-jar-browser-chipnet.md and the pictures are chipnet-jar-*.png.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 
 import { hexToBin } from '@bitauth/libauth';
 import { controllerScript } from '@grandmas-wallet/core';
 import { savingsJarScript } from '@grandmas-wallet/savings-jar';
 import type { Locator, Page } from 'playwright';
 
-import { PAGE_WAIT, type Device, JAR, LIMIT, RECOVERER, WALLET, argument, chainShows, chipnet, clearLeftovers, click, completeTakeover, config, course, firstSteps, newPhoneAsks, openDeskWorking, pageShows, pagesUsed, recordFile, reviewEverything, root, see, sendAllOfBalance, servedFrom, untilChain, untilPage, valueOf } from './browser-course.js';
+import { type ArchiveStore, readArchive, readRecord } from '@grandmas-wallet/archive';
+
+import { PAGE_WAIT, type Device, JAR, LIMIT, RECOVERER, WALLET, argument, chainShows, chipnet, clearLeftovers, click, completeTakeover, config, confirmStatement, course, firstSteps, firstUse, mainnet, newPhoneAsks, openDeskWorking, pageShows, pagesUsed, publicChain, recordFile, reviewEverything, root, see, takeScreens, walletKey, sendAllOfBalance, servedFrom, untilChain, untilPage, valueOf } from './browser-course.js';
 import { type LedgerTransaction, addressOf, chainClock, chainHeight, ledgerSection, runTransactions } from './browser-ledger.js';
 import { type RequestLog, controllerLabels, flat, localPayerLocking, lockingOf, openFolds, recordRequests, requestsSection, textOf, walletKept, walletPlaces } from './browser-live.js';
 
@@ -45,8 +57,16 @@ const until = Number(argument('until') ?? '99');
 const recordOnly = process.argv.includes('--record-only');
 const from = Number(argument('from') ?? (recordOnly ? '9' : '1'));
 if (![1, 5, 7, 8, 9].includes(from)) throw new Error('A run continues from step 5, 7, 8 or 9.');
+/**
+ * What a first use pays, in satoshis: Anna's balance (the wallet's creation with the page's proposed starting
+ * balance of 10,000, and room for a recovery's two transactions later), a payment to the owner, a payment out of
+ * the wallet, and the smallest first amount the Savings Jar page takes.
+ */
+const SMALL = { need: 80_000, balance: 30_000, receive: 20_000, payOut: 5_000, jar: 2_000 };
+/** The first part of a first use: from step 1 to the open jar. A first use continued with `--from` runs the later steps as the course does. */
+const firstPart = firstUse && (from === 1 || recordOnly);
 // What the run pays: 400,000 satoshis to Anna's balance and 50,000 to the owner, with room for the fees.
-const theCourse = course({ directory: 'stage-17-jar-browser', continuing: from > 1, until, ports: 8300, need: 460_000 });
+const theCourse = course({ directory: 'stage-17-jar-browser', continuing: from > 1, until: firstPart ? Math.min(until, 4) : until, ports: 8300, need: firstPart ? SMALL.need : 460_000 });
 const { work, started, lines, log, mine, passTime, prepare, device, watchPage, close, shot, state, begin, elsewhere, keepStorage } = theCourse;
 const noShot = async (): Promise<void> => undefined;
 const JAR_ORIGIN = new URL(JAR).origin;
@@ -73,6 +93,16 @@ interface Kept {
   startedAt?: number;
   /** On chipnet: which release of the public pages each part of the run used. */
   served?: string[];
+  /** In a first use: the funding address's holdings when the run started and when it ended, as its server said. */
+  fundingBefore?: string;
+  fundingAfter?: string;
+  /** In a first use: the position record of the jar as read back from the backup stores, and when each store had it. */
+  positionRecord?: string[];
+  /** In a first use: how long each step took, in seconds. */
+  durations?: string[];
+  /** In a first use: when Approve was clicked for the jar and when the wallet said "Done", in milliseconds since 1970. */
+  approvedAt?: number;
+  doneAt?: number;
 }
 const keptFile = `${work}jar.json`;
 const kept: Kept =
@@ -80,8 +110,8 @@ const kept: Kept =
     ? (JSON.parse(readFileSync(keptFile, 'utf8')) as Kept)
     : { startHeight: await chainHeight(), category: '', unlockTime: 0, jarAddress: '', fundsAddress: '', labels: {}, facts: [], continued: [], screens: [] };
 /** The names of the pictures and of the record: of the local node, or of chipnet. */
-const where = chipnet ? 'chipnet' : 'local-node';
-const prefix = chipnet ? 'chipnet-jar' : 'live-jar';
+const where = mainnet ? 'mainnet' : chipnet ? 'chipnet' : 'local-node';
+const prefix = mainnet ? 'mainnet-jar' : chipnet ? 'chipnet-jar' : 'live-jar';
 const save = (): void => writeFileSync(keptFile, JSON.stringify(kept, null, 1));
 save();
 const fact = (line: string): void => {
@@ -94,6 +124,7 @@ const label = (transactionId: string, what: string): void => {
   save();
 };
 const picture = async (page: Page, name: string): Promise<void> => {
+  if (!takeScreens) return;
   await shot(page, `${prefix}-${name}`);
   if (!kept.screens.includes(name)) kept.screens.push(name);
   save();
@@ -110,6 +141,7 @@ const keyRow = (page: Page): Locator => page.locator('li.token').filter({ has: p
 /** Connect the wallet to the Savings Jar page open in another tab: the page's address is pasted into the wallet. */
 const connect = async (wallet: Page, jarPage: Page): Promise<void> => {
   await jarPage.goto(JAR);
+  await confirmStatement(jarPage, log, 'the Savings Jar page');
   const address = jarPage.locator('.value-text[data-value^="wiz:"]').first();
   // A page that was connected to this wallet in a part of the run that stopped takes that session up again by itself.
   const resumed = jarPage.getByText(/^Connected to /).first();
@@ -147,18 +179,146 @@ const connect = async (wallet: Page, jarPage: Page): Promise<void> => {
   log(`   the Savings Jar page: "${await textOf(jarPage.locator('.status-title'))}"`);
 };
 
+// ------------------------------------------------------------------ what a first use adds
+
+/** How long each part took, said in the log and kept for the record. */
+let partStarted = Date.now();
+const timed = (part: string): void => {
+  const seconds = Math.round((Date.now() - partStarted) / 1000);
+  partStarted = Date.now();
+  kept.durations = [...(kept.durations ?? []), `${part}: ${seconds} s`];
+  save();
+  log(`   (${part} took ${seconds} s)`);
+};
+
+/** The run's key's address, read from its file (only the address). */
+const runKeyAddress = (): string => (JSON.parse(readFileSync(theCourse.keyFile, 'utf8')) as { address: string }).address;
+
+/** Step 3 of a first use goes on: the owner pays a small amount out of the wallet, to the run's key, from the Send screen. */
+const payOut = async (old: Device): Promise<void> => {
+  const to = runKeyAddress();
+  await old.page.getByRole('link', { name: 'Send' }).first().click();
+  await old.page.getByLabel('To').fill(to);
+  await old.page.getByLabel('Amount').fill((SMALL.payOut / 1e8).toFixed(8).replace(/0+$/, ''));
+  await click(old.page, 'Review');
+  await see(old.page, 'Check and send');
+  const review = await textOf(old.page.locator('.card').filter({ hasText: 'Check and send' }));
+  log(`   the review of the payment: "${review}"`);
+  log(`   about to send ${SMALL.payOut.toLocaleString('en-US')} satoshis from the wallet to the run's key ${to}`);
+  await click(old.page, /^Send$/);
+  const sent = await valueOf(old.page, 'sent-transaction');
+  const card = await textOf(old.page.locator('.card').filter({ hasText: /^Sent/ }));
+  label(sent, `The owner pays ${SMALL.payOut.toLocaleString('en-US')} sat out of the wallet, to the run's key, from the Send screen`);
+  log(`   sent: transaction ${sent}; the wallet says "${card}"`);
+  fact(`An ordinary payment out of the wallet: ${SMALL.payOut.toLocaleString('en-US')} sat to the run's key from the Send screen (transaction \`${sent}\`). Its review said: "${review}"`);
+};
+
+/** What the phone's browser sends while it is watched: records to the backup stores, transactions to the network. */
+const sending: { at: number; what: string }[] = [];
+const watchSending = (owner: Device): void => {
+  owner.context.on('request', (asked) => {
+    if (asked.method() === 'POST' && /\/v1\/archives\/[0-9a-f]+\/blobs$/.test(asked.url())) sending.push({ at: Date.now(), what: `a record to the store at ${new URL(asked.url()).host}` });
+  });
+  owner.page.on('websocket', (socket) =>
+    socket.on('framesent', (frame) => {
+      const text = typeof frame.payload === 'string' ? frame.payload : frame.payload.toString('utf8');
+      if (text.includes('blockchain.transaction.broadcast')) sending.push({ at: Date.now(), what: `a transaction to the server ${new URL(socket.url()).host}` });
+    }),
+  );
+};
+
+/** A backup store read from the folder it keeps its blobs in (apps/archive-store), without its server. */
+const diskStore = (directory: string, name: string): ArchiveStore => ({
+  name,
+  put: () => Promise.reject(new Error('read only')),
+  list: async (archive) => (existsSync(`${directory}/${archive}`) ? readdirSync(`${directory}/${archive}`).filter((blob) => /^[0-9a-f]{64}$/.test(blob)) : []),
+  get: async (archive, blob) => (existsSync(`${directory}/${archive}/${blob}`) ? new Uint8Array(readFileSync(`${directory}/${archive}/${blob}`)) : undefined),
+});
+
+/** The blobs on the run's two backup stores, on disk, with when each was written. */
+const storeBlobs = (): Map<string, number> => {
+  const found = new Map<string, number>();
+  for (const store of ['store1', 'store2']) {
+    const directory = `${work}${store}`;
+    if (!existsSync(directory)) continue;
+    for (const archive of readdirSync(directory)) {
+      const folder = `${directory}/${archive}`;
+      if (!statSync(folder).isDirectory()) continue;
+      for (const blob of readdirSync(folder)) if (/^[0-9a-f]{64}$/.test(blob)) found.set(`${store}/${blob}`, statSync(`${folder}/${blob}`).mtimeMs);
+    }
+  }
+  return found;
+};
+
+/**
+ * The position record of the jar, read back from the run's backup stores with the archive key the wallet keeps, and
+ * when each store wrote it to disk, against when the phone sent the transaction and when the wallet said "Done".
+ */
+const positionRecordRead = async (before: Map<string, number> | undefined, approvedAt: number, doneAt: number, opened: string): Promise<void> => {
+  kept.approvedAt = approvedAt;
+  kept.doneAt = doneAt;
+  const after = (s: number): string => `${((s - approvedAt) / 1000).toFixed(1)} s`;
+  const items = (JSON.parse(readFileSync(`${work}storage-old-phone.json`, 'utf8')) as Record<string, Record<string, string>>)[new URL(WALLET).origin] ?? {};
+  const arrangement = JSON.parse(items[walletKey('arrangement')] ?? '{}') as { archive?: { archiveId: string; contentKey: string } };
+  const lines: string[] = [];
+  if (arrangement.archive === undefined) {
+    lines.push('The wallet\'s archive key was not found in what its page keeps, so the stores were not read.');
+  } else {
+    // Read from the stores' own folders, as the stores serve them: so that it can be read again when they are not running.
+    const contents = await readArchive(hexToBin(arrangement.archive.archiveId), hexToBin(arrangement.archive.contentKey), ['store1', 'store2'].map((name, index) => diskStore(`${work}${name}`, `${name} (${config.stores[index] ?? ''})`)));
+    // Read again after the run: what the stores wrote from Approve to "Done", by the times of their files.
+    const written = [...storeBlobs()].filter(([name, at]) => (before === undefined ? at >= approvedAt - 1_500 && at <= doneAt + 1_500 : !before.has(name)));
+    for (const blob of contents.blobs) {
+      if (blob.blob.type !== 'record') continue;
+      let record;
+      try {
+        record = readRecord(blob.blob.signed, mainnet ? 'mainnet' : 'testnet');
+      } catch {
+        continue;
+      }
+      const entry = record.entry;
+      if (entry.kind !== 'position' || entry.token?.category !== kept.category) continue;
+      const onDisk = written.filter(([name]) => name.endsWith(blob.blobId)).map(([name, at]) => `${name.split('/')[0]} wrote it ${after(at)} after Approve`);
+      lines.push(
+        `The position record of the jar's key, read back from ${blob.stores.join(' and ')} with the wallet's archive key and its signature checked (a ${record.network} record of the wallet \`${record.identity}\`): blob \`${blob.blobId}\`; ${onDisk.length === 0 ? 'it was on the stores before Approve' : onDisk.join(', ')}.`,
+        `What it says: template \`${entry.templateIdentifier}\`; the token ${entry.token.category} (${entry.token.capability}, commitment ${entry.token.commitment === '' ? 'none' : entry.token.commitment}); script \`${entry.lockingScriptIdentifier ?? '(none named)'}\`, the wallet's role \`${entry.roleIdentifier ?? '(none named)'}\`; the script's values ${JSON.stringify(entry.variables ?? {})}; the action's other values ${JSON.stringify(entry.values)}; the page ${entry.applicationPage ?? '(none named)'}.`,
+      );
+    }
+    if (lines.length === 0) lines.push(`No position record of the jar's key was found on the stores (${contents.blobs.length} blobs read${contents.problems.length === 0 ? '' : `; ${contents.problems.join('; ')}`}).`);
+    if (contents.problems.length > 0) lines.push(`Reading the stores: ${contents.problems.join('; ')}.`);
+    lines.push(`Written to the stores' disks between Approve and "Done": ${written.length === 0 ? 'nothing' : written.map(([name, at]) => `${name.split('/')[0]} ${name.split('/')[1]?.slice(0, 12)}… at ${after(at)}`).join(', ')}.`);
+  }
+  const seen = sending.filter((entry) => entry.at >= approvedAt - 1_000 && entry.at <= doneAt + 1_000);
+  const earlier = (kept.positionRecord ?? []).find((line) => line.startsWith('What the phone\'s browser sent'));
+  if (before === undefined && earlier !== undefined) lines.push(earlier);
+  else lines.push(`What the phone's browser sent between Approve and "Done" (${after(doneAt)}), in order: ${seen.length === 0 ? 'nothing seen' : seen.map((entry) => `${entry.what} at ${after(entry.at)}`).join('; ')}. The transaction the wallet named is \`${opened}\`.`);
+  kept.positionRecord = lines;
+  save();
+  for (const line of lines) log(`   ${line}`);
+};
+
 // ------------------------------------------------------------------ the run
 
 const steps = async (): Promise<void> => {
   let recoverer: Device;
   let next: Device | undefined;
   if (from === 1) {
-    const reached = await firstSteps(theCourse, noShot, async (old) => keepStorage(old));
+    const reached = await firstSteps(theCourse, noShot, async (old) => keepStorage(old), firstUse ? { balance: SMALL.balance, receive: SMALL.receive } : undefined);
     if (reached === undefined) return;
     const { old } = reached;
     recoverer = reached.recoverer;
     kept.fundsAddress = await valueOf(recoverer.page, 'funds-address').catch(() => '');
     save();
+    if (firstUse) {
+      timed('steps 1 to 3 up to the payment received');
+      await picture(old.page, 'wallet-home');
+      await payOut(old);
+      await keepStorage(old);
+      await keepStorage(recoverer);
+      timed('the payment out of the wallet');
+      // What the phone's browser sends, timed: the records it gives the backup stores and the transactions it gives the network.
+      watchSending(old);
+    }
 
     // 4 ------------------------------------------------------------------
     if (!begin('The owner connects the wallet to the Savings Jar page and opens a jar from it; the wallet lists it')) return;
@@ -167,19 +327,28 @@ const steps = async (): Promise<void> => {
     await connect(old.page, oldJar);
     await chainShows(oldJar.getByText(/^No jars (yet|to show)\./), 'the Savings Jar page to look for jars', LIMIT.read);
     log(`   the jar page lists: "${await textOf(oldJar.locator('.card').filter({ hasText: 'Your jars' }).locator('p'))}"`);
-    // The date: some minutes ahead of the chain's clock and of this machine's, so that it is still ahead after the
-    // waiting period of the takeover has moved the chain's clock on.
     const clock = await chainClock();
     const now = Math.floor(Date.now() / 1000);
-    kept.unlockTime = Math.ceil((Math.max(now, clock.tip, clock.median) + 25 * 60) / 60) * 60;
-    save();
     log(`   the chain's clock: last block ${iso(clock.tip)}, median time ${iso(clock.median)}; this machine ${iso(now)}`);
-    const local = await oldJar.evaluate((seconds) => {
-      const date = new Date(seconds * 1000);
-      return [date.getFullYear(), '-', date.getMonth() + 1, '-', date.getDate(), 'T', date.getHours(), ':', date.getMinutes()].map((part) => (typeof part === 'number' && part < 10 ? `0${part}` : String(part))).join('');
-    }, kept.unlockTime);
-    await oldJar.locator('#jar-amount').fill('0.0003');
-    await oldJar.locator('#jar-date').fill(local);
+    if (firstUse) {
+      // The smallest first amount the page takes, and the soonest of the dates it offers to choose.
+      await oldJar.locator('#jar-amount').fill((SMALL.jar / 1e8).toFixed(8).replace(/0+$/, ''));
+      await oldJar.getByRole('button', { name: '10 minutes', exact: true }).click();
+      const chosen = await oldJar.locator('#jar-date').inputValue();
+      kept.unlockTime = await oldJar.evaluate((value) => Math.floor(new Date(value).getTime() / 1000), chosen);
+      log(`   the date: "10 minutes", the soonest the page offers to choose, gives ${chosen} in the browser's time zone (${iso(kept.unlockTime)}); the hint says "${await textOf(oldJar.locator('#jar-date ~ .hint'))}"`);
+    } else {
+      // The date: some minutes ahead of the chain's clock and of this machine's, so that it is still ahead after the
+      // waiting period of the takeover has moved the chain's clock on.
+      kept.unlockTime = Math.ceil((Math.max(now, clock.tip, clock.median) + 25 * 60) / 60) * 60;
+      const local = await oldJar.evaluate((seconds) => {
+        const date = new Date(seconds * 1000);
+        return [date.getFullYear(), '-', date.getMonth() + 1, '-', date.getDate(), 'T', date.getHours(), ':', date.getMinutes()].map((part) => (typeof part === 'number' && part < 10 ? `0${part}` : String(part))).join('');
+      }, kept.unlockTime);
+      await oldJar.locator('#jar-amount').fill('0.0003');
+      await oldJar.locator('#jar-date').fill(local);
+    }
+    save();
     await see(oldJar, /stays in the jar until/);
     log(`   the form says: "${await textOf(oldJar.locator('.summary'))}" (the date ${iso(kept.unlockTime)})`);
     await click(oldJar, 'Open the jar');
@@ -195,11 +364,15 @@ const steps = async (): Promise<void> => {
     await openFolds(request);
     log(`   the wallet's review of the page's request, every fold opened: "${await textOf(request)}"`);
     fact(`Opening the jar, the wallet showed the page's request with its own figures before anything was signed. With its folds closed, as it first appears: "${first}"`);
+    const blobsBefore = storeBlobs();
+    log('   about to approve: the wallet writes its records to the backup stores, then signs the opening of the jar and sends it');
+    const approvedAt = Date.now();
     await click(old.page, /^Approve$/);
     const done = old.page.locator('.request-card').filter({ hasText: 'Done:' }).first();
     await pageShows(done, '"Done:" after approving the opening of the jar');
+    const doneAt = Date.now();
     const opened = (await done.getByTestId('action-transaction').getAttribute('data-value')) ?? '';
-    label(opened, 'The owner\'s phone opens the jar, on the Savings Jar page\'s request (30,000 sat into the jar, the key to the wallet)');
+    label(opened, `The owner's phone opens the jar, on the Savings Jar page's request (${(firstUse ? SMALL.jar : 30_000).toLocaleString('en-US')} sat into the jar, the key to the wallet)`);
     log(`   approved; the wallet: "${await textOf(done.locator('h2, .card-title'))}", transaction ${opened}`);
     await see(oldJar, 'The jar is open. Its key is in your wallet.');
     const item = oldJar.getByTestId('jar').first();
@@ -221,6 +394,12 @@ const steps = async (): Promise<void> => {
     log(`   the wallet's list: "${row}"; key ${kept.category}`);
     fact(`On the owner's phone the wallet listed the jar from its own record: "${row}". The jar's key is \`${kept.category}\`; the jar's date ${iso(kept.unlockTime)}; its address \`${kept.jarAddress}\` (transaction \`${opened}\`).`);
     await picture(old.page, 'positions-owner');
+    if (firstUse) {
+      await keepStorage(old);
+      await positionRecordRead(blobsBefore, approvedAt, doneAt, opened);
+      timed('step 4, the jar opened and listed');
+      return;
+    }
 
     // 5 ------------------------------------------------------------------
     if (!begin('The phone is lost')) return;
@@ -281,10 +460,10 @@ const steps = async (): Promise<void> => {
   if (state.step < 8) {
     if (!begin('The jar\'s date passes; the new phone empties the jar from its own list, the jar page never opened')) return;
     const clock = await chainClock();
-    if (!chipnet && clock.median <= kept.unlockTime) log(`   ${passTime(kept.unlockTime - clock.tip + 120)}`);
-    // On chipnet the chain's clock passes the date by itself, as blocks come.
-    if (chipnet && clock.median <= kept.unlockTime) log(`   the chain's median time is ${iso(clock.median)}; waiting for it to pass the jar's date ${iso(kept.unlockTime)}`);
-    if (chipnet) {
+    if (!publicChain && clock.median <= kept.unlockTime) log(`   ${passTime(kept.unlockTime - clock.tip + 120)}`);
+    // On chipnet and mainnet the chain's clock passes the date by itself, as blocks come.
+    if (publicChain && clock.median <= kept.unlockTime) log(`   the chain's median time is ${iso(clock.median)}; waiting for it to pass the jar's date ${iso(kept.unlockTime)}`);
+    if (publicChain) {
       const left = Math.max(0, kept.unlockTime - clock.median) * 1000;
       await untilChain(`the chain's median time to pass the jar's date ${iso(kept.unlockTime)} (it trails the blocks' times by about six blocks)`, left + 20 * 60_000, async () => (await chainClock()).median > kept.unlockTime, 15_000);
     }
@@ -351,6 +530,73 @@ const steps = async (): Promise<void> => {
 
 // ------------------------------------------------------------------ the record
 
+/** How the later part goes on from what the first part left on disk: said in the record of a first use. */
+const laterPart = (): string[] => [
+  '## How the later part goes on',
+  '',
+  `Everything of the run is in its folder${mainnet ? ' (`.mainnet/runs/first/` of the main checkout, not in git)' : ''}, written before any coin was sent to an address it controls:`,
+  '',
+  '- `profiles/recoverer/`: the recoverer\'s browser profile (Anna\'s page: her balance, her key for the wallet and its kit); `storage-recoverer.json`: a copy of what her page keeps, her balance\'s words among it.',
+  '- `profiles/old-phone/`: the owner\'s phone, with the wallet page and the Savings Jar page as a second tab; `storage-old-phone.json`: a copy of what both pages keep, the wallet\'s words and its archive key among it.',
+  '- `store1/`, `store2/`: the two backup stores\' data (the wallet\'s sealed records: the recoverer\'s receipt, the template, the jar\'s position record).',
+  '- `run-key.json`: the run\'s key, emptied back to the funding address. `config.json`: the configuration the pages were served with. `jar.json`: what the course knows between its parts (the jar\'s key, date and address, the transactions\' names). `log.txt`, `console.txt`, `blocks.json`, `requests.json`: what the run said.',
+  '',
+  `What a page keeps in a browser is kept by the page's address, so the later part serves the pages and stores at the same addresses: ${WALLET}, ${RECOVERER}, ${JAR}, and the stores ${config.stores.join(' and ')} with their data in \`store1/\` and \`store2/\`. The course does that by itself with the same folder.`,
+  '',
+  `The wallet's waiting period is what the recoverer's page proposed, ${mainnet ? '169 steps of 512 seconds, about a day' : 'one step of 512 seconds on a test network'}: a recovery completes only after it has passed on the chain's clock, counted from the block that holds the request. It can be changed only by the owner's phone, with an update of the controller's settings (the contract's \`ownerUpdate\`, which the wallet makes once the recoverer's prepared receipt for the change is on the backup stores); the wallet page offers no screen for changing it today, so it was not changed.`,
+  '',
+  'Two ways on:',
+  '',
+  '- Emptying the jar without a recovery: open the owner\'s phone\'s profile with the pages served as above; once the chain\'s median time has passed the jar\'s date, the wallet\'s Applications screen offers "Empty a savings jar" on the jar\'s row. No course step does this alone today.',
+  `- The recovery with the jar open, then the emptying from the new phone: \`npx tsx scripts/stage-17-jar-browser.ts ${mainnet ? 'mainnet --folder <the run\'s folder> --funder <funding key file>' : 'local --directory <the run\'s directory>'} --from 5 --screens --record <a new record> --within <minutes>\`. Step 5 leaves the owner's phone closed; step 6 makes a new phone, which asks Anna, and her page sends the request from her balance; the waiting period runs (\`--within\` has to cover it${mainnet ? ': more than 1,440 minutes for about a day' : ''}); she completes the move and the new phone sweeps the coins; step 7 trusts the template from the backup and lists the jar; step 8 waits for the chain's median time to pass the jar's date and empties the jar from the wallet's own list; step 9 sends the wallet's coins and Anna's balance back to the funding address${mainnet ? '. This continuation has not been run on mainnet' : ''}.`,
+  '',
+];
+
+/** The record of a first use: what was done and shown, every transaction, where every coin is, and how the later part goes on. */
+const firstUseRecord = (outcome: string, ledger: string[]): string[] => {
+  const folder = work.startsWith(root) ? work.slice(root.length) : work;
+  const ports = `the wallet ${WALLET}, the recoverer ${RECOVERER}, the Savings Jar ${JAR}, the backup stores ${config.stores.join(' and ')}`;
+  const command = `npx tsx scripts/stage-17-jar-browser.ts ${kept.command ?? ''}`.trim();
+  const cleanCommand = command.replace(/--funder \S+/, '--funder <funding key file>').replace(/--folder \S+/, '--folder <the run\'s folder>');
+  return [
+    mainnet ? '# The first use of the wallet on mainnet: a recoverer, a payment in and out, and a Savings Jar left open' : '# The first use of the wallet, proved on the local node: a recoverer, a payment in and out, and a Savings Jar left open',
+    '',
+    `Written by \`${cleanCommand}\` on ${new Date(kept.startedAt ?? started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${mainnet ? '<the run\'s folder>' : folder}\`; the Savings Jar page is a second tab of the phone that uses it. The pages are this checkout's production builds served on this machine by \`deploy/serve.mjs\` with the content security policy, at ${ports}, ${mainnet ? `with \`deploy/config/mainnet.example.json\` and this machine's addresses (\`"network": "mainnet"\`, \`"mainnetEnabled": true\`), against mainnet's servers ${config.chain.join(', ')}, with a relay on this machine for the sessions between the pages. Each page's statement about mainnet was confirmed once per browser as a person would. Blocks and the chain's clock took their real time; nothing waited for a block.` : 'against the regtest node, with a relay on this machine. The run made the blocks.'} Times in the log are seconds since the start.`,
+    '',
+    `The steps are those of the Savings Jar course in its first use (\`--first-use\`${mainnet ? ', implied on mainnet' : ''}): the recoverer keeps the waiting period and starting balance her page proposes; the amounts are small; the owner receives and pays a small amount out; a jar is opened with the smallest first amount the Savings Jar page takes and the soonest date it offers; the run stops there. The wallet is not closed and its coins are not returned: the wallet, its jar and the recoverer's kit are where the later part starts. Only what was left at the run's key went back to the funding address.`,
+    '',
+    `Outcome: ${outcome}`,
+    ...(kept.continued.length === 0 ? [] : ['', ...kept.continued]),
+    '',
+    'What the run showed:',
+    '',
+    ...kept.facts.map((line) => `- ${line}`),
+    '',
+    ...((kept.positionRecord ?? []).length === 0 ? [] : ['## The position record, before signing', '', ...(kept.positionRecord ?? []).map((line) => `- ${line}`), '']),
+    ...((kept.durations ?? []).length === 0 ? [] : ['## How long each part took', '', ...(kept.durations ?? []).map((line) => `- ${line}`), '']),
+    '## The jar\'s date on the chain',
+    '',
+    kept.unlockTime === 0
+      ? 'No jar was opened.'
+      : `The jar's date is ${iso(kept.unlockTime)}. The network accepts emptying it once the median time of the last eleven blocks has passed that date${mainnet ? ', which on mainnet trails the wall clock by about an hour: about ' + iso(kept.unlockTime + 3_600) + ', give or take the blocks\' times' : ''}. Before then the wallet's "Empty a savings jar" is refused by the network.`,
+    '',
+    '## Transactions and coins',
+    '',
+    `Read from ${mainnet ? 'mainnet\'s server' : 'the local node'} after the run: every transaction in the blocks after height ${kept.startHeight}, where the run started, or not yet in a block, that touches an address of the run (the run's own key, the wallet's addresses, its controller, the jar and the recoverer's balance). The fee is what the inputs held less what the outputs hold; the size is that of the transaction as sent.`,
+    '',
+    ...ledger,
+    ...(kept.fundingBefore === undefined ? [] : [`The funding address: before the run ${kept.fundingBefore}; after it ${kept.fundingAfter ?? '(not read)'}.`, '']),
+    ...(kept.screens.length === 0 ? [] : ['## Pictures', '', `In \`docs/screens/\`, each at 390×844 (\`-phone\`) and 1280×800 (\`-desktop\`): ${kept.screens.map((name) => `\`${prefix}-${name}\``).join(', ')}.`, '']),
+    ...laterPart(),
+    '## Log',
+    '',
+    '```',
+    ...lines,
+    '```',
+    '',
+  ];
+};
+
 const writeRecord = async (outcome: string): Promise<void> => {
   kept.outcome = outcome;
   save();
@@ -358,11 +604,17 @@ const writeRecord = async (outcome: string): Promise<void> => {
   const closing = existsSync(`${work}closing.txt`) ? readFileSync(`${work}closing.txt`, 'utf8').trim() : '';
   // Every transaction of the run, read from the chain, and whose each coin is.
   const wallet = walletKept(work, ['old-phone', 'new-phone'], WALLET);
-  const places = await walletPlaces(wallet);
+  const places = await walletPlaces(wallet, firstPart ? { 'old-phone': 'an address of the wallet (the owner\'s phone\'s seed)' } : undefined);
   const identity = wallet.identity;
   const controller = identity === undefined ? '' : Buffer.from(controllerScript(hexToBin(identity)).lockingBytecode).toString('hex');
   const jarLocking = kept.category === '' ? '' : Buffer.from(savingsJarScript(hexToBin(kept.category), kept.unlockTime).lockingBytecode).toString('hex');
-  const outside = lockingOf(elsewhere());
+  const outside = (() => {
+    try {
+      return lockingOf(elsewhere());
+    } catch {
+      return '';
+    }
+  })();
   const funds = kept.fundsAddress === '' ? '' : lockingOf(kept.fundsAddress);
   const payer = localPayerLocking();
   const ownKey = theCourse.keyLocking();
@@ -371,7 +623,7 @@ const writeRecord = async (outcome: string): Promise<void> => {
   const ledger = await runTransactions(kept.startHeight, [...places.keys(), controller, jarLocking, funds, ownKey]);
   for (const entry of wallet.activity) label(entry.transactionId, `${entry.who === 'old-phone' ? 'The owner\'s phone' : 'The new phone'}: ${entry.what}`);
   const placeOf = (lockingBytecode: string): string | undefined =>
-    lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === jarLocking ? 'the jar' : lockingBytecode === outside ? `the outside address the coins went back to (${addressOf(outside)})` : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === ownKey ? 'the run\'s own key (`scripts/run-key.ts`)' : lockingBytecode === payer ? (chipnet ? 'the funding address (`scripts/chipnet-pay.ts`)' : 'the local payer (`scripts/local-pay.ts`)') : places.get(lockingBytecode);
+    lockingBytecode === controller ? 'the wallet\'s controller (its identity token)' : lockingBytecode === jarLocking ? 'the jar' : lockingBytecode === outside ? (mainnet ? `the funding address (${addressOf(outside)})` : `the outside address the coins went back to (${addressOf(outside)})`) : lockingBytecode === funds ? 'the recoverer\'s balance' : lockingBytecode === ownKey ? 'the run\'s own key (`scripts/run-key.ts`)' : lockingBytecode === payer ? (chipnet ? 'the funding address (`scripts/chipnet-pay.ts`)' : 'the local payer (`scripts/local-pay.ts`)') : places.get(lockingBytecode);
   const ofController = await controllerLabels(identity);
   const labelOf = (transaction: LedgerTransaction): string | undefined => {
     const named = kept.labels[transaction.transactionId] ?? ofController.get(transaction.transactionId);
@@ -382,12 +634,24 @@ const writeRecord = async (outcome: string): Promise<void> => {
     if (touches(controller)) return 'A transaction of the controller';
     if (fromFunds && transaction.outputs.some((output) => output.lockingBytecode === outside)) return 'The recoverer sends her balance back';
     if (fromFunds) return 'Paid from the recoverer\'s balance';
-    if (ownKey !== '' && transaction.inputs.some((input) => input.lockingBytecode === ownKey)) return transaction.outputs.some((output) => output.lockingBytecode === outside) ? 'The run\'s key sends what it holds back to the funding address' : 'The run\'s key pays';
-    if (transaction.inputs.some((input) => input.lockingBytecode === payer)) return chipnet ? 'The funding address pays the run\'s key' : 'The local payer pays the run\'s key';
+    if (ownKey !== '' && transaction.inputs.some((input) => input.lockingBytecode === ownKey)) {
+      if (transaction.outputs.some((output) => output.lockingBytecode === outside)) return 'The run\'s key sends what it holds back to the funding address';
+      if (funds !== '' && transaction.outputs[0]?.lockingBytecode === funds) return 'The run\'s key pays the recoverer\'s balance';
+      if (places.has(transaction.outputs[0]?.lockingBytecode ?? '')) return 'The run\'s key pays the owner\'s wallet';
+      return 'The run\'s key pays';
+    }
+    // Every coin in and out the wallet's own: it pays itself, for a coin a new token can be made from.
+    if (transaction.inputs.every((input) => places.has(input.lockingBytecode)) && transaction.outputs.every((output) => places.has(output.lockingBytecode))) return 'The wallet pays itself (a coin that can start a new token: the jar\'s key)';
+    if (transaction.inputs.some((input) => input.lockingBytecode === payer)) return publicChain ? 'The funding address pays the run\'s key' : 'The local payer pays the run\'s key';
     return undefined;
   };
   const toJarPage = requests.urls().filter((url) => url.startsWith(JAR_ORIGIN));
   const served = (kept.served ?? []).length === 0 ? '' : ` ${(kept.served ?? []).join(' Then, for the part that continued: ')}`;
+  if (firstPart) {
+    writeFileSync(recordFile(`first-use-jar-browser-${where}.md`), firstUseRecord(outcome, ledgerSection(ledger, labelOf, placeOf)).join('\n'));
+    log(`record written to ${recordFile(`first-use-jar-browser-${where}.md`).slice(root.length)}`);
+    return;
+  }
   writeFileSync(
     recordFile(`stage-17-jar-browser-${where}.md`),
     [
@@ -432,6 +696,10 @@ try {
     save();
   }
   if (recordOnly) {
+    // The position record is read again from the stores' folders, where the run's part could not read it.
+    if (firstPart && kept.approvedAt !== undefined && kept.doneAt !== undefined && kept.category !== '' && !(kept.positionRecord ?? []).some((line) => line.startsWith('The position record'))) {
+      await positionRecordRead(undefined, kept.approvedAt, kept.doneAt, Object.keys(kept.labels).find((id) => /opens the jar/.test(kept.labels[id] ?? '')) ?? '');
+    }
     await writeRecord(kept.outcome ?? 'not known');
     process.exit(0);
   }
@@ -442,6 +710,10 @@ try {
     theCourse.note(`       continued from step ${from}`);
   }
   await prepare(['wallet', 'recoverer', 'jar']);
+  if (firstPart) {
+    kept.fundingBefore = theCourse.fundingHolds();
+    save();
+  }
   if (from === 1) theCourse.fundRunKey();
   if (chipnet) {
     const now = await servedFrom([WALLET, RECOVERER, JAR]);
@@ -450,9 +722,19 @@ try {
   }
   log(`   the run starts after block ${kept.startHeight}; the jar page is at ${JAR}, on ${config.network}`);
   await steps();
-  const all = state.step >= 9 && until >= 9;
-  if (all) theCourse.returnCoins();
-  await writeRecord(all ? (kept.continued.length > 0 ? 'every step was carried out, in parts with the same browser profiles (see below).' : 'every step was carried out.') : `stopped after step ${Math.min(state.step, until)}, as asked.`);
+  if (firstPart) {
+    const reached = state.step >= 4 && kept.category !== '';
+    // Only what is left at the run's key goes back; the wallet, its jar and the recoverer's balance stay.
+    if (reached) theCourse.returnCoins();
+    kept.fundingAfter = theCourse.fundingHolds();
+    save();
+    log(`   the funding address: ${kept.fundingAfter}`);
+    await writeRecord(reached ? 'stopped after step 4 with the jar open, as the first use asks; the wallet, its jar and the recoverer\'s balance stay, and what was left at the run\'s key went back to the funding address.' : `stopped after step ${Math.min(state.step, until)}, as asked; nothing was returned.`);
+  } else {
+    const all = state.step >= 9 && until >= 9;
+    if (all) theCourse.returnCoins();
+    await writeRecord(all ? (kept.continued.length > 0 ? 'every step was carried out, in parts with the same browser profiles (see below).' : 'every step was carried out.') : `stopped after step ${Math.min(state.step, until)}, as asked.`);
+  }
 } catch (error) {
   await theCourse.failed(error);
   kept.continued.push(`A part of the run stopped at step ${state.step}: "${String((error as Error).message).split('\n')[0]?.slice(0, 300)}".`);

@@ -8,19 +8,30 @@ import { execFileSync } from 'node:child_process';
 import { binToHex, decodeTransactionBch, hexToBin, lockingBytecodeToCashAddress } from '@bitauth/libauth';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
-import { chipnet, config, root } from './browser-course.js';
+import { config, mainnet, publicChain, root } from './browser-course.js';
 
 const cli = (...parameters: string[]): string => execFileSync(`${root}deploy/regtest/regtest.sh`, ['cli', ...parameters], { encoding: 'utf8' }).trim();
 
 /** The height of the local chain's last block. */
 export const localHeight = (): number => Number(cli('getblockcount'));
 
-/** The chain's server the course reads: the local node's, or the first the configuration names on chipnet. */
-export const chainServer = (): Promise<Electrum> => Electrum.connect(chipnet ? (config.chain[0] as string) : 'ws://127.0.0.1:60403');
+/** The chain's server the course reads: the local node's, or on chipnet and mainnet the first the configuration names that answers. */
+export const chainServer = async (): Promise<Electrum> => {
+  if (!publicChain) return Electrum.connect('ws://127.0.0.1:60403');
+  let problem: unknown;
+  for (const endpoint of config.chain) {
+    try {
+      return await Electrum.connect(endpoint);
+    } catch (error) {
+      problem = error;
+    }
+  }
+  throw new Error(`no server of the configuration answered: ${(problem as Error | undefined)?.message ?? 'none named'}`);
+};
 
-/** The height of the chain's last block, on the local node or on chipnet. */
+/** The height of the chain's last block, on the local node, on chipnet or on mainnet. */
 export const chainHeight = async (): Promise<number> => {
-  if (!chipnet) return localHeight();
+  if (!publicChain) return localHeight();
   const server = await chainServer();
   try {
     return (await server.tip()).height;
@@ -92,7 +103,7 @@ export const runTransactions = async (afterHeight: number, places: string[] = []
     const listed: { transactionId: string; height: number }[] = [];
     // A course names its addresses: then only what touches them is its own, on the local node too, where another
     // course may run at the same time.
-    if (chipnet || places.length > 0) {
+    if (publicChain || places.length > 0) {
       const found = new Map<string, number>();
       for (const place of new Set(places.filter((bytecode) => bytecode !== ''))) {
         for (const entry of await server.getHistory(hexToBin(place))) {
@@ -128,7 +139,7 @@ export const runTransactions = async (afterHeight: number, places: string[] = []
     /** What is unspent at a locking bytecode, as the server lists it, for the chipnet ledger. */
     const unspentAt = new Map<string, Set<string>>();
     const isUnspent = async (transactionId: string, index: number, lockingBytecode: Uint8Array): Promise<boolean> => {
-      if (!chipnet) return cli('gettxout', transactionId, String(index), 'true') !== '';
+      if (!publicChain) return cli('gettxout', transactionId, String(index), 'true') !== '';
       const key = binToHex(lockingBytecode);
       let known = unspentAt.get(key);
       if (known === undefined) {
@@ -173,7 +184,7 @@ export const runTransactions = async (afterHeight: number, places: string[] = []
 
 /** A locking bytecode as an address of the course's chain, for the record. */
 export const addressOf = (lockingBytecode: string): string => {
-  const made = lockingBytecodeToCashAddress({ prefix: chipnet ? 'bchtest' : 'bchreg', bytecode: hexToBin(lockingBytecode) });
+  const made = lockingBytecodeToCashAddress({ prefix: mainnet ? 'bitcoincash' : config.network === 'chipnet' ? 'bchtest' : 'bchreg', bytecode: hexToBin(lockingBytecode) });
   return typeof made === 'string' ? `script ${lockingBytecode.slice(0, 16)}…` : made.address;
 };
 

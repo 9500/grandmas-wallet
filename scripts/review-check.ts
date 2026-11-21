@@ -236,6 +236,12 @@ try {
     check(template.length > 0 && (await card.locator('.lane.out .lane-items').isVisible()) && (await card.locator('.lane.back .lane-items').isVisible()), `${show}: and the application, "${template}", with what goes each way`);
     check(/^Your wallet goes (down|up) by/.test((await card.locator('.headline-label').innerText()).trim()) && (await card.locator('.headline-figure').isVisible()), `${show}: the headline says by how much the wallet goes ${(await card.locator('.headline-label').innerText()).includes('down') ? 'down' : 'up'}: ${(await card.locator('.headline-figure').innerText()).replace(/\s+/g, ' ')}`);
     for (const caution of cautions) check(await card.getByText(caution).first().isVisible(), `${show}: "${caution}" is in view without opening anything`);
+    if (show === 'box-open') {
+      // The key is made from the coin the wallet first pays itself: its identifier is not known yet, and is said in words.
+      const text = await card.innerText();
+      check(!/0000…0000|00000000…000000/.test(text) && (await card.getByText('new, made by this action').count()) >= 2, `${show}: the key not made yet is "new, made by this action", in the picture and in the template's words, never a row of zeros`);
+      check(await card.getByText(/identifier comes from that payment/).isVisible(), `${show}: the notice of paying itself says the identifier comes from that payment`);
+    }
     check(await card.locator('.their-words .quote-title').isVisible(), `${show}: the action's name in the template's words: "${(await card.locator('.their-words .quote-title').innerText()).trim()}"`);
     check(await card.getByText('This wallet\'s own figures').isVisible(), `${show}: "This wallet's own figures" is named, folded`);
     const approve = page.getByRole('button', { name: 'Approve' });

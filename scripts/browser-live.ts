@@ -7,7 +7,7 @@ import { type ChainReader, ADDRESS_KIND, deriveSeedKeys, keyPairFromPrivateKey, 
 import type { BrowserContext, Locator } from 'playwright';
 
 import { walletTemplateNumbers } from '../packages/app/src/templates.js';
-import { chipnet, root } from './browser-course.js';
+import { argument, chipnet, mainnet, root, walletKey } from './browser-course.js';
 import { chainServer } from './browser-ledger.js';
 
 /** Text without its line breaks and repeated spaces. */
@@ -28,7 +28,7 @@ export const lockingOf = (address: string): string => {
  * the funding address of `scripts/chipnet-pay.ts`. Empty before it has a key.
  */
 export const localPayerLocking = (): string => {
-  const file = chipnet ? `${root}.chipnet/funder-design-2.json` : `${root}.local-runs/local-funder.json`;
+  const file = mainnet ? (argument('funder') ?? '') : chipnet ? `${root}.chipnet/funder-design-2.json` : `${root}.local-runs/local-funder.json`;
   if (!existsSync(file)) return '';
   return binToHex(p2pkhLockingBytecode(keyPairFromPrivateKey(hexToBin((JSON.parse(readFileSync(file, 'utf8')) as { privateKey: string }).privateKey)).keyHash));
 };
@@ -116,7 +116,7 @@ export const walletKept = (work: string, phones: string[], walletUrl: string): W
     const file = `${work}storage-${phone}.json`;
     if (!existsSync(file)) continue;
     const items = (JSON.parse(readFileSync(file, 'utf8')) as Record<string, Record<string, string>>)[origin] ?? {};
-    const value = <T>(name: string): T | undefined => (items[`gw2-wallet:${name}`] === undefined ? undefined : (JSON.parse(items[`gw2-wallet:${name}`] as string) as T));
+    const value = <T>(name: string): T | undefined => (items[walletKey(name)] === undefined ? undefined : (JSON.parse(items[walletKey(name)] as string) as T));
     const words = value<string>('words');
     if (words !== undefined) found.words[phone] = words;
     const state = value<{ identity?: string | { $bytes: string } }>('state');
@@ -173,7 +173,7 @@ export const walletPlaces = async (kept: WalletKept, names: Record<string, strin
     };
     const numbers = walletTemplateNumbers();
     for (const [phone, words] of Object.entries(kept.words)) {
-      const seed = deriveSeedKeys(words, 'testnet', numbers);
+      const seed = deriveSeedKeys(words, mainnet ? 'mainnet' : 'testnet', numbers);
       const pass = await quickPass(chain, hexToBin(kept.identity), seed.viewingKey);
       for (const found of pass.found) places.set(binToHex(found.address.lockingBytecode), `${names[phone] ?? phone}${found.address.kind === ADDRESS_KIND.vault ? ' (a vault address)' : ''}`);
     }

@@ -28,7 +28,7 @@ import { type Environment, Button, Card, Field, Frame, PageHead, Pill, TextArea,
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
-import { ActionReview } from './ActionReview.js';
+import { ActionReview, NOT_YET_MADE } from './ActionReview.js';
 import { TokenNames } from './token-words.js';
 import { Apps, TokenListView } from './Apps.js';
 import { Receive } from './Receive.js';
@@ -208,6 +208,8 @@ const box: TemplateSummary = {
   findings: comesBack(boxActions),
 };
 const boxAt = 'aa20'.padEnd(70, '9');
+/** The box's key while the wallet has yet to pay itself the coin it is made from: the figures carry zeros for it. */
+const NEW_BOX_KEY = NOT_YET_MADE;
 
 const boxOpening: ActionPreview = {
   template: box,
@@ -215,7 +217,7 @@ const boxOpening: ActionPreview = {
     action: { name: 'Open a money box', description: 'Make a new box with its key, and pay the first money in. It stays in the box until its date.' },
     outcome: 'A money box was opened with 50000 satoshis.',
     values: [
-      { name: 'Box key', description: 'The token category of the box\'s key.', value: BOX_KEY },
+      { name: 'Box key', description: 'The token category of the box\'s key.', value: NEW_BOX_KEY },
       { name: 'Opens on', description: 'When the box can be emptied, as a Unix time.', value: '1798761600' },
       { name: 'Amount to put in', description: 'Satoshis to put into the box.', value: '50000' },
       { name: 'Key holder', description: 'Where the box\'s key goes: an address of the wallet.', value: 'aa20'.padEnd(70, 'b') },
@@ -232,7 +234,7 @@ const boxOpening: ActionPreview = {
     applicationInputs: [],
     toOthers: [{ name: 'Money box', lockingBytecode: boxAt, satoshis: 50_000n }],
     toWallet: [
-      { kind: 'receive', satoshis: 1_000n, token: { category: BOX_KEY, amount: 0n, nft: { capability: 'none', commitment: '80f55e6b' } } },
+      { kind: 'receive', satoshis: 1_000n, token: { category: NEW_BOX_KEY, amount: 0n, nft: { capability: 'none', commitment: '80f55e6b' } } },
       { kind: 'left over', satoshis: 8_550n },
     ],
     tokensSpent: [],
@@ -596,7 +598,7 @@ const openMoneyBox: ActionPreview = {
   template: moneyBox,
   finding: { action: 'open', role: 'holder', name: 'Open a money box', finding: 'comes back', outputs: [{ output: 'boxOutput', name: 'Money box', lockingScript: 'boxLockingScript', scriptName: 'Money box', keys: [] }] },
   figures: { ...withoutPayingItself, toWallet: [{ kind: 'receive', satoshis: 1_000n, token: { category: MONEY_KEY, amount: 0n, nft: { capability: 'none', commitment: '01' } } }, { kind: 'left over', satoshis: 8_550n }] },
-  words: { ...boxOpening.words, values: boxOpening.words.values.map((value) => (value.value === BOX_KEY ? { ...value, value: MONEY_KEY } : value)) },
+  words: { ...boxOpening.words, values: boxOpening.words.values.map((value) => (value.value === NEW_BOX_KEY ? { ...value, value: MONEY_KEY } : value)) },
   firstUse: false,
   recordsPosition: true,
 };

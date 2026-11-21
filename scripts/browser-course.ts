@@ -38,6 +38,17 @@
 // Each run pays from a key of its own (scripts/run-key.ts), kept in its folder as run-key.json: one payment from the
 // funding address gives it what the run needs, and at the end of a whole run what it holds goes back. A stopped run's
 // coins go back with `npx tsx scripts/run-key.ts return <the run's folder>`.
+//
+// `mainnet` as the first argument runs on mainnet, with real coins: the pages of this checkout are served on this
+// machine with a mainnet configuration that allows it (deploy/config/mainnet.example.json, with this machine's
+// addresses: from `--ports`, 8700 when not given), against mainnet's servers, with two backup stores of the run's own
+// and a relay on this machine. `--folder <absolute path>` names where everything of the run is kept (profiles, the
+// stores' data, the run's key, the log), and `--funder <file>` the owner's funding key. Each page's mainnet statement
+// is confirmed as a person would, once per browser. The waits are those of chipnet, longer where blocks count.
+//
+// `--first-use` (implied by `mainnet`) is a course's first use of a wallet with small amounts: the recoverer keeps
+// the waiting period and starting balance her page proposes, the amounts paid are small, and the course says what
+// it does not do. It runs on the local node too, to prove the same steps before mainnet.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +63,15 @@ import { runKey, runKeyLocking } from './run-key.js';
 
 export const root = fileURLToPath(new URL('..', import.meta.url));
 export const chipnet = process.argv[2] === 'chipnet';
+/** Mainnet, with real coins: pages of this checkout served on this machine, mainnet's servers. */
+export const mainnet = process.argv[2] === 'mainnet';
+/** A chain the run neither makes blocks on nor moves the clock of. */
+export const publicChain = chipnet || mainnet;
+export const networkName: 'chipnet' | 'regtest' | 'mainnet' = mainnet ? 'mainnet' : chipnet ? 'chipnet' : 'regtest';
+/** A first use with small amounts and the recoverer's proposed settings (see the head of this file). */
+export const firstUse = mainnet || process.argv.includes('--first-use');
+/** The name under which the wallet page keeps something in the browser: mainnet's are kept apart from the test networks'. */
+export const walletKey = (name: string): string => `${mainnet ? 'gw2-wallet-mainnet' : 'gw2-wallet'}:${name}`;
 export const argument = (name: string): string | undefined => {
   const index = process.argv.indexOf(`--${name}`);
   return index === -1 ? undefined : (process.argv[index + 1] ?? '');
@@ -62,14 +82,16 @@ export const headed = process.argv.includes('--headed');
 export const viaLinks = process.argv.includes('--links');
 /** On chipnet: the pages of this checkout, served on this machine, instead of the public ones. */
 export const localPages = !chipnet || process.argv.includes('--local-pages');
-const configName = chipnet ? (localPages ? 'local' : 'production') : 'local-regtest';
+const configName = mainnet ? 'mainnet.example' : chipnet ? (localPages ? 'local' : 'production') : 'local-regtest';
 type App = 'wallet' | 'recoverer' | 'jar' | 'loan';
 /** The ports of a run's pages and stores on the local node; on chipnet with the pages of this checkout, those of deploy/config/local.json. */
 let portBase = chipnet ? 8100 : Number(argument('ports') ?? '8300');
 if (!Number.isInteger(portBase) || portBase < 1024 || portBase > 65_000) throw new Error(`--ports takes a port number to count from, such as 8300, not ${argument('ports')}`);
 let PORTS: Record<App, number> = { wallet: portBase + 1, recoverer: portBase + 2, jar: portBase + 3, loan: portBase + 4 };
 let STORE_PORTS = [portBase + 11, portBase + 12] as const;
-const fromFile = JSON.parse(readFileSync(`${root}deploy/config/${configName}.json`, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl: string; loanUrl?: string; stores: string[]; network: string; relays?: string[]; chain: string[] };
+const fromFile = JSON.parse(readFileSync(`${root}deploy/config/${configName}.json`, 'utf8')) as { walletUrl: string; recovererUrl: string; jarUrl: string; loanUrl?: string; stores: string[]; network: string; relays?: string[]; chain: string[]; mainnetEnabled?: boolean; about?: string };
+// The example's words say it is not a deployment; the run's copy says what it is.
+if (mainnet) fromFile.about = 'The pages of a run on mainnet, served on this machine only for that run (scripts/browser-course.ts). Mainnet is enabled only to meet the requirements of BCH Blaze; nothing here has been audited; coins can be lost; this project does not recommend enabling it.';
 const localConfig = (): typeof fromFile => ({
   ...fromFile,
   walletUrl: `http://localhost:${PORTS.wallet}/`,
@@ -121,14 +143,14 @@ export const LIMIT = {
   coin: MINUTE,
   /** A page reading the chain or the backup stores after it opens or after a transaction: tokens, records, loans, receipts. */
   read: MINUTE,
-  /** A block: on the local node the run makes it; on chipnet one comes about every minute, sometimes after several. */
-  block: chipnet ? 15 * MINUTE : MINUTE,
+  /** A block: on the local node the run makes it; on chipnet one comes about every minute, sometimes after several; on mainnet about every ten. */
+  block: mainnet ? 60 * MINUTE : chipnet ? 15 * MINUTE : MINUTE,
   /** The header check of a page's engine after opening an account. */
-  header: chipnet ? 3 * MINUTE : MINUTE,
-  /** The waiting period of a recovery, once a block holds the request: on chipnet the chain's clock passes 512 seconds. */
-  waitingPeriod: chipnet ? 25 * MINUTE : MINUTE,
+  header: publicChain ? 3 * MINUTE : MINUTE,
+  /** The waiting period of a recovery, once a block holds the request: on chipnet the chain's clock passes 512 seconds; on mainnet the default of about a day. */
+  waitingPeriod: mainnet ? 26 * 60 * MINUTE : chipnet ? 25 * MINUTE : MINUTE,
   /** The new phone finding the wallet's coins and sweeping them. */
-  sweep: chipnet ? 5 * MINUTE : 2 * MINUTE,
+  sweep: publicChain ? 5 * MINUTE : 2 * MINUTE,
 };
 const minutes = (milliseconds: number): string => (milliseconds < MINUTE ? `${Math.round(milliseconds / 1000)} s` : `${(milliseconds / MINUTE).toFixed(milliseconds % MINUTE === 0 ? 0 : 1)} min`);
 const clockAt = (at: number): string => new Date(at).toISOString().slice(11, 19);
@@ -222,12 +244,20 @@ const EXTRA: Partial<Record<App, string[]>> = { loan: ['--connect', 'https://ora
  * @param need - what the run's key is given at the start, in satoshis
  */
 export const course = (options: { directory: string; continuing: boolean; until: number; ports?: number; need?: number }) => {
-  defaultPorts(options.ports ?? 8300);
+  defaultPorts(mainnet ? 8700 : (options.ports ?? 8300));
   const directory = argument('directory') ?? options.directory;
   if (!/^[a-z0-9][a-z0-9-]*$/.test(directory)) throw new Error(`--directory takes a plain name, made a directory of the run's own, not ${directory}`);
-  const work = chipnet ? `${root}.chipnet/${directory}-chipnet/` : `${root}.local-runs/${directory}/`;
+  // On mainnet everything of the run is kept in a folder named on the command line, outside this checkout.
+  const folder = argument('folder');
+  if (mainnet && (folder === undefined || !folder.startsWith('/'))) throw new Error('on mainnet --folder names, as an absolute path, the folder where everything of the run is kept');
+  if (mainnet && (argument('funder') === undefined || !existsSync(argument('funder') ?? ''))) throw new Error('on mainnet --funder names the funding key\'s file');
+  /** A path for the log: inside this checkout from its root, outside it whole. */
+  const shown = (path: string): string => (path.startsWith(root) ? path.slice(root.length) : path);
+  /** The funding address that the funding key's file names (on mainnet). */
+  const readFunder = (): string => (JSON.parse(readFileSync(argument('funder') ?? '', 'utf8')) as { address: string }).address;
+  const work = mainnet ? `${(folder ?? '').replace(/\/+$/, '')}/` : chipnet ? `${root}.chipnet/${directory}-chipnet/` : `${root}.local-runs/${directory}/`;
   const started = Date.now();
-  const within = Number(argument('within') ?? (chipnet ? '30' : '6'));
+  const within = Number(argument('within') ?? (publicChain ? '30' : '6'));
   if (!(within > 0)) throw new Error(`--within takes the run's bound in minutes, such as 6, not ${argument('within')}`);
   const deadline = started + within * MINUTE;
 
@@ -252,9 +282,11 @@ export const course = (options: { directory: string; continuing: boolean; until:
   const run = (file: string, args: string[]): string => execFileSync(file, args, { cwd: root, encoding: 'utf8' }).trim();
   /** The run's own key, which pays everything the run pays (scripts/run-key.ts). */
   const keyFile = `${work}run-key.json`;
-  const network = chipnet ? 'chipnet' : 'regtest';
+  const network = networkName;
   /** At the start: the run's key is made and given what the run needs, in one payment from the funding address. Not again for a key that holds enough. */
   const fundRunKey = (satoshis = options.need ?? 500_000): void => {
+    // On mainnet a stopped run's key is not replaced by itself: what it holds is looked at by a person first.
+    if (mainnet && !options.continuing && existsSync(keyFile)) throw new Error(`${keyFile} is there already: a run on mainnet does not replace a key by itself`);
     // A run from its first step gets a fresh key: one an earlier run left sends what it holds back first, and is kept aside.
     if (!options.continuing && existsSync(keyFile)) {
       log(`an earlier run's key: ${run('npx', ['tsx', 'scripts/run-key.ts', 'return', keyFile])}`);
@@ -263,33 +295,43 @@ export const course = (options: { directory: string; continuing: boolean; until:
     if (existsSync(keyFile)) {
       const holds = BigInt(/^(\d+) satoshis/.exec(run('npx', ['tsx', 'scripts/run-key.ts', 'balance', keyFile]))?.[1] ?? '0');
       if (holds >= BigInt(satoshis)) {
-        log(`the run's key ${runKey(keyFile, network).address} holds ${holds} satoshis already (${work.slice(root.length)}run-key.json)`);
+        log(`the run's key ${runKey(keyFile, network).address} holds ${holds} satoshis already (${shown(keyFile)})`);
         return;
       }
     }
-    log(`${run('npx', ['tsx', 'scripts/run-key.ts', 'fund', keyFile, String(satoshis), network])}; the key is kept in ${work.slice(root.length)}run-key.json`);
+    log(`about to make the run's key in ${shown(keyFile)} and pay it ${satoshis} satoshis from the funding address`);
+    log(`${run('npx', ['tsx', 'scripts/run-key.ts', 'fund', keyFile, String(satoshis), network, ...(mainnet ? [argument('funder') ?? ''] : [])])}; the key is kept in ${shown(keyFile)}`);
   };
   const pay = (address: string, satoshis: number): string => {
     if (!existsSync(keyFile)) fundRunKey();
+    log(`   about to pay ${satoshis} satoshis from the run's key to ${address}`);
     return run('npx', ['tsx', 'scripts/run-key.ts', 'pay', keyFile, address, String(satoshis)]);
   };
   /** What the run's key holds, in satoshis. */
   const keyBalance = (): bigint => BigInt(/^(\d+) satoshis/.exec(run('npx', ['tsx', 'scripts/run-key.ts', 'balance', keyFile]))?.[1] ?? '0');
   /** At the end of a whole run: what the run's key holds goes back to the funding address. */
   const returnCoins = (): void => {
-    if (existsSync(keyFile)) log(run('npx', ['tsx', 'scripts/run-key.ts', 'return', keyFile]));
+    if (!existsSync(keyFile)) return;
+    log(`about to send everything the run's key holds back to the funding address ${runKey(keyFile, network).funding}`);
+    log(run('npx', ['tsx', 'scripts/run-key.ts', 'return', keyFile]));
   };
-  /** On the local node the run makes the blocks; on chipnet they come by themselves. */
+  /** What the funding address holds, as its server says. */
+  const fundingHolds = (): string => {
+    const address = existsSync(keyFile) ? runKey(keyFile, network).funding : mainnet ? readFunder() : undefined;
+    return address === undefined ? '(not read: no run key yet)' : run('npx', ['tsx', 'scripts/run-key.ts', 'holds', address, network]);
+  };
+  /** On the local node the run makes the blocks; on chipnet and mainnet they come by themselves. */
   const mine = (blocks = 1): void => {
-    if (!chipnet) run('npx', ['tsx', 'scripts/local-pay.ts', 'mine', String(blocks)]);
+    if (!publicChain) run('npx', ['tsx', 'scripts/local-pay.ts', 'mine', String(blocks)]);
   };
-  /** On the local node the run moves the chain's clock; on chipnet the waiting period takes its time. */
-  const passTime = (seconds: number): string => (chipnet ? 'the waiting period takes its real time' : run('npx', ['tsx', 'scripts/local-pay.ts', 'time', String(seconds)]));
+  /** On the local node the run moves the chain's clock; on chipnet and mainnet the waiting period takes its time. */
+  const passTime = (seconds: number): string => (publicChain ? 'the waiting period takes its real time' : run('npx', ['tsx', 'scripts/local-pay.ts', 'time', String(seconds)]));
   /** An address outside every wallet of the run, to pay to: the funding address the coins came from (on the local node, the local payer's). */
   let outside: string | undefined;
   const elsewhere = (): string => {
     if (outside !== undefined) return outside;
     if (existsSync(keyFile)) outside = runKey(keyFile, network).funding;
+    else if (mainnet) throw new Error('on mainnet the coins go back only to the funding address, which the run\'s key names: there is no run key yet');
     else if (chipnet) outside = run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'address']);
     else {
       const made = lockingBytecodeToCashAddress({ prefix: 'bchtest', bytecode: hexToBin(`76a914${'11'.repeat(20)}88ac`) });
@@ -351,7 +393,7 @@ export const course = (options: { directory: string; continuing: boolean; until:
     }
   };
   const standing = async (page: Page): Promise<{ height: number; open: string[]; settled: number; text: string }> => {
-    const stored = await page.evaluate(() => ({ state: localStorage.getItem('gw2-wallet:state'), activity: localStorage.getItem('gw2-wallet:activity') }));
+    const stored = await page.evaluate(([state, activity]) => ({ state: localStorage.getItem(state as string), activity: localStorage.getItem(activity as string) }), [walletKey('state'), walletKey('activity')]);
     const state = stored.state === null ? undefined : (JSON.parse(stored.state) as { identity?: string; creation?: { prepareTransactionId?: string; createTransactionId?: string; byRecoverer?: boolean } });
     const activity = stored.activity === null ? [] : (JSON.parse(stored.activity) as { what: string; transactionId: string }[]);
     const named = new Map<string, string>();
@@ -403,7 +445,7 @@ export const course = (options: { directory: string; continuing: boolean; until:
     }
   };
   /** Whether the wallet page has noted a sweep of coins from earlier addresses among what it sent: it does as soon as it sends one. */
-  const sweepSent = (page: Page): Promise<boolean> => page.evaluate(() => /from earlier addresses/.test(localStorage.getItem('gw2-wallet:activity') ?? '')).catch(() => false);
+  const sweepSent = (page: Page): Promise<boolean> => page.evaluate((key) => /from earlier addresses/.test(localStorage.getItem(key) ?? ''), walletKey('activity')).catch(() => false);
   /** The same, said in the log and in the head of the record, with what was just done. */
   const standingNow = async (page: Page, what: string): Promise<{ height: number; open: string[] }> => {
     const seen = await standing(page).catch((error: unknown) => ({ height: 0, open: [], settled: 0, text: `the chain could not be read: ${(error as Error).message.slice(0, 120)}` }));
@@ -440,6 +482,7 @@ export const course = (options: { directory: string; continuing: boolean; until:
       return;
     }
     if (chipnet) log(`funding address: ${run('npx', ['tsx', 'scripts/chipnet-pay.ts', 'balance'])}`);
+    else if (mainnet) log(`mainnet; funding address: ${run('npx', ['tsx', 'scripts/run-key.ts', 'holds', readFunder(), 'mainnet'])}`);
     else log(`local node: ${run(`${root}deploy/regtest/regtest.sh`, ['status']).split('\n')[0]}`);
     for (const app of apps) if (!existsSync(`${root}apps/${app}/dist/index.html`)) throw new Error(`apps/${app} is not built`);
     // On the local node the sessions between the pages go through a relay on this machine, named in a copy of
@@ -657,7 +700,7 @@ export const course = (options: { directory: string; continuing: boolean; until:
     await relay?.close();
   };
 
-  return { work, started, lines, note, log, run, pay, fundRunKey, keyBalance, returnCoins, keyFile, keyLocking: () => runKeyLocking(keyFile), lookAround, capture, mine, passTime, elsewhere, prepare, device, watchPage, close, keepStorage, freshEngine, devices, shot, state, begin, failed, end, mark, since, blockFacts, blockFact, standing, standingNow, height, sweepSent, nameNewest };
+  return { work, started, lines, note, log, run, pay, fundRunKey, keyBalance, returnCoins, fundingHolds, shown, keyFile, keyLocking: () => runKeyLocking(keyFile), lookAround, capture, mine, passTime, elsewhere, prepare, device, watchPage, close, keepStorage, freshEngine, devices, shot, state, begin, failed, end, mark, since, blockFacts, blockFact, standing, standingNow, height, sweepSent, nameNewest };
 };
 
 export type Course = ReturnType<typeof course>;
@@ -840,6 +883,30 @@ export const balanceOf = async (page: Page): Promise<bigint> => {
   return BigInt(whole) * 100_000_000n + BigInt(fraction.padEnd(8, '0').slice(0, 8) || '0');
 };
 
+// ------------------------------------------------------------------ mainnet's statement
+
+/**
+ * On mainnet, a page opened for the first time in a browser shows its full statement before it starts: it is read
+ * and confirmed as a person would ("I understand that coins can be lost"), and the band that stays in view is
+ * looked for. Elsewhere nothing is done.
+ * @returns what the statement and the band said, for the log; empty where there is none
+ */
+export const confirmStatement = async (page: Page, log: (line: string) => void, who: string): Promise<void> => {
+  if (!mainnet) return;
+  const statement = page.locator('.mainnet-gate').first();
+  const band = page.locator('button.mainnet-band').first();
+  await pageShows(statement.or(band), `${who}: mainnet's statement, "This page uses real Bitcoin Cash", or its band`);
+  if (!(await statement.isVisible())) {
+    log(`   ${who}: the statement was confirmed in this browser before; the band in view says "${flatText(await band.innerText())}"`);
+    return;
+  }
+  log(`   ${who} shows mainnet's statement before it starts: "${flatText(await statement.innerText()).slice(0, 700)}"`);
+  await click(page, 'I understand that coins can be lost');
+  await pageShows(statement, `${who}: the statement gone once confirmed`, 'hidden');
+  await pageShows(band, `${who}: the band "Mainnet: not audited, coins can be lost" in view`);
+  log(`   confirmed; the band in view says "${flatText(await band.innerText())}"`);
+};
+
 // ------------------------------------------------------------------ the first steps of every course
 
 /**
@@ -874,29 +941,37 @@ export const firstSteps = async (
   shoot: (page: Page, name: string) => Promise<void>,
   /** Called once the owner's phone has its words and before anything is created for it: to keep them on disk. */
   beforeFunding: (old: Device) => Promise<void> = async () => undefined,
+  /** What Anna's balance and the owner are paid, in satoshis. */
+  amounts: { balance: number; receive: number } = { balance: 400_000, receive: 50_000 },
 ): Promise<{ recoverer: Device; old: Device; recovererLink: string; overSession: boolean } | undefined> => {
   // 1 ------------------------------------------------------------------
   if (!begin('Anna opens the recoverer\'s page to help someone she knows, and funds her balance')) return;
   const recoverer = await device('recoverer');
   await recoverer.page.goto(RECOVERER);
+  await confirmStatement(recoverer.page, log, 'the recoverer\'s page');
   await see(recoverer.page, 'How will you use this page?');
   await recoverer.page.getByTestId('mode-friend').click();
   await recoverer.page.getByLabel('Your name, as their wallet shows it').fill('Anna');
   await shoot(recoverer.page, 'recoverer-start');
   await click(recoverer.page, 'Continue');
   await see(recoverer.page, 'No wallets yet.');
-  // The shortest waiting period, so that the course's recovery can complete: the run moves the chain's clock.
-  await recoverer.page.getByRole('link', { name: 'Settings' }).first().click();
-  await recoverer.page.getByLabel(/about 9 minutes/).check();
-  await recoverer.page.getByLabel('Starting balance, in satoshis').fill('100000');
-  await shoot(recoverer.page, 'recoverer-settings');
-  await click(recoverer.page, 'Save');
-  log('   friend mode; new wallets get 100,000 satoshis and a waiting period of about 9 minutes');
-  await recoverer.page.getByRole('link', { name: 'People' }).first().click();
+  if (firstUse) {
+    // A first use keeps what the page proposes: on mainnet a waiting period of about a day.
+    log('   friend mode; the waiting period and the starting balance are left as the page proposes them');
+  } else {
+    // The shortest waiting period, so that the course's recovery can complete: the run moves the chain's clock.
+    await recoverer.page.getByRole('link', { name: 'Settings' }).first().click();
+    await recoverer.page.getByLabel(/about 9 minutes/).check();
+    await recoverer.page.getByLabel('Starting balance, in satoshis').fill('100000');
+    await shoot(recoverer.page, 'recoverer-settings');
+    await click(recoverer.page, 'Save');
+    log('   friend mode; new wallets get 100,000 satoshis and a waiting period of about 9 minutes');
+    await recoverer.page.getByRole('link', { name: 'People' }).first().click();
+  }
   const fundsAddress = await valueOf(recoverer.page, 'funds-address');
   await keepStorage(recoverer);
-  log(`   Anna's balance is funded at ${fundsAddress}; what her page keeps, her words among it, is copied to ${work.slice(root.length)}storage-recoverer.json first`);
-  log(`   ${pay(fundsAddress, 400_000)}`);
+  log(`   Anna's balance is funded at ${fundsAddress}; what her page keeps, her words among it, is copied to ${work.startsWith(root) ? work.slice(root.length) : work}storage-recoverer.json first`);
+  log(`   ${pay(fundsAddress, amounts.balance)}`);
   const balance = recoverer.page.locator('[data-testid="funds-balance"]:not([data-value="0"])');
   await chainShows(balance, 'the payment to reach Anna\'s balance on her page', LIMIT.coin);
   log(`   Anna's page shows her balance: ${(await balance.first().getAttribute('data-value')) ?? ''} satoshis`);
@@ -906,11 +981,14 @@ export const firstSteps = async (
   if (!begin('Anna sets up Grandma\'s wallet: the phone scans her code, she says yes')) return;
   await recoverer.page.getByTestId('new-wallet').click();
   await recoverer.page.getByLabel('Who are you helping?').fill('Grandma');
+  const offer = recoverer.page.getByText(/^New wallets get /).first();
+  if (await offer.isVisible()) log(`   Anna's page says: "${flatText(await offer.innerText())}"`);
   await click(recoverer.page, 'Show the code');
   const code = await codeOn(recoverer.page, 'recoverer-code');
   log(`   Anna's code carries her name, her key and a session, ${code.length} characters`);
   const old = await device('old-phone');
   await old.page.goto(WALLET);
+  await confirmStatement(old.page, log, 'the wallet');
   await see(old.page, 'Someone I trust is setting it up');
   await shoot(old.page, 'wallet-welcome');
   await click(old.page, 'Someone I trust is setting it up');
@@ -922,6 +1000,7 @@ export const firstSteps = async (
   await keepStorage(old);
   await shoot(old.page, 'wallet-setting-up');
   await shoot(recoverer.page, 'recoverer-friend-confirm');
+  log(`   about to say yes on Anna's page ("${flatText(await recoverer.page.locator('main').first().innerText()).slice(0, 300)}"): her page creates the wallet from her balance and sends it`);
   await click(recoverer.page, 'Set it up');
   mark('paid');
   // Anna's page says the wallet is set up for some seconds and then offers a new code for the next phone: it is
@@ -949,7 +1028,7 @@ export const firstSteps = async (
   await old.page.getByRole('link', { name: 'Receive' }).first().click();
   const receiving = await valueOf(old.page, 'receive-address');
   log(`   address ${receiving}`);
-  log(`   ${pay(receiving, 50_000)}`);
+  log(`   ${pay(receiving, amounts.receive)}`);
   await shoot(old.page, 'wallet-receive');
   // The vault address is given as soon as the wallet is created, as every other address.
   await old.page.getByRole('button', { name: 'For regular payments' }).click();
@@ -959,7 +1038,10 @@ export const firstSteps = async (
   await standingNow(old.page, `From "Set it up" to the vault address shown: ${since('paid')}`);
   await shoot(old.page, 'wallet-receive-vault');
   await old.page.getByRole('link', { name: 'Home' }).first().click();
-  await untilChain('the payment of 50,000 satoshis to reach the wallet\'s balance (more than 0.0014 BCH)', LIMIT.coin, async () => Number(((await old.page.getByTestId('balance').textContent()) ?? '').replace(/[^0-9.]/g, '')) > 0.0014);
+  // The payment with the starting balance, less a margin: 0.0014 BCH for the course's 100,000 and 50,000 satoshis; in a
+  // first use the page's proposed starting balance of 10,000.
+  const expected = (firstUse ? 10_000 : 100_000) + amounts.receive - 10_000;
+  await untilChain(`the payment of ${amounts.receive.toLocaleString('en-US')} satoshis to reach the wallet's balance (more than ${(expected / 1e8).toFixed(8).replace(/0+$/, '')} BCH)`, LIMIT.coin, async () => Number(await balanceOf(old.page)) > expected);
   log(`   the wallet holds ${(await old.page.getByTestId('balance').textContent())?.replace('BCH', ' BCH')}`);
   await shoot(old.page, 'wallet-home');
   return { recoverer, old, recovererLink: code, overSession: true };
@@ -982,6 +1064,7 @@ export const newPhoneAsks = async (theCourse: Course, recoverer: Device, _link: 
   const code = await codeOn(recoverer.page, 'lost-phone-code');
   await shoot(recoverer.page, 'recoverer-lost-phone');
   await next.page.goto(WALLET);
+  await confirmStatement(next.page, log, 'the new phone\'s wallet');
   await click(next.page, 'I lost my phone');
   await pasteCode(next.page, code);
   await see(next.page, /Waiting for Anna/);
