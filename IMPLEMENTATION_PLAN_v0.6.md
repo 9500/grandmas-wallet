@@ -152,6 +152,10 @@ Asked for by the owner on 20 November 2026, to meet the requirements of BCH Blaz
 
 **Done when** a page built with the parameter on shows the warning and works against mainnet servers in a test that sends nothing, and a page built without it cannot be brought to mainnet.
 
+**Built on 21 November 2026.** A page runs on mainnet only when its served configuration has `"network": "mainnet"` and `"mainnetEnabled": true`; without the second it refuses to start and says why, and the serving and installing scripts refuse such a configuration too. `deploy/config/mainnet.example.json` is an example, not a deployment. On a mainnet page a band stays in view ("Mainnet: not audited, coins can be lost") and a full statement is confirmed once per browser before the page connects to anything or makes a key: enabled only to meet the requirements of BCH Blaze, nothing audited, coins can be lost, not recommended. One defect was found and corrected: the pages created the XO engine for chipnet whatever the network, so on mainnet its keys would have been made under the test networks' path while the wallet's own were made under mainnet's. The recoverer's waiting period on mainnet is 169 units of 512 seconds, about a day, and the short one for trying out is not offered there. The loan page stays off on mainnet: no deployment of Paryon's contracts on mainnet is named in the code. In a read-only look at mainnet servers the recoverer's page passed its header check in about eight seconds and showed a zero balance at a `bitcoincash:` address, and the wallet's page reached it over the relays; nothing was sent.
+
+Still open, and the owner's to decide: anything that spends on mainnet, the wallet's own header check there (a wallet opens its account only once it is created), whether a mainnet deployment is served and where (the installer uses the same service names and ports as the chipnet one), and whether the loan page gets a mainnet deployment of ParyonUSD.
+
 ## Stage 21 — More actions recognised as coming back
 
 Agreed by the owner on 21 November 2026, for after stages 19 and 20. The wallet refuses an action when it finds that what the action leaves would not come back after a recovery, or when it cannot tell (proposal sections 12.3 and 12.5). Two cases are refused today although nothing of the wallet's would be tied to the phone:
@@ -202,4 +206,4 @@ The numbers are those of the proposal's section 22. Work follows the default unl
 | 36 | Where the pages of this version are served for the chipnet runs | Decided, 20 November 2026 | At the public addresses, in place of the second design's pages |
 | 37 | The wait for the engine to list the coins of an action just sent | Decided, 20 November 2026 | Accepted |
 | 38 | Token names and units from a registry (BCMR) | Stage 19 | Evaluated in `docs/token-registries.md`; its eight decisions are open |
-| 39 | Mainnet | Stage 20 | By a configuration parameter, off by default, with a warning |
+| 39 | Mainnet | Built, 21 November 2026 | `"mainnetEnabled": true` beside `"network": "mainnet"` in the served configuration; off without it; a warning on every page. Nothing has been spent on mainnet |
