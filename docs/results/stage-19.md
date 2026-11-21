@@ -1,6 +1,6 @@
 # Stage 19: record of the acceptance tests
 
-Made by `node scripts/test-record.mjs 19 TR01-TR14` at revision `1b4ba25` with changes not yet committed.
+Made by `node scripts/test-record.mjs 19 TR01-TR14` at revision `9103f3b` with changes not yet committed.
 All tests of the repository: 718 passed, 0 failed, of 718.
 
 | No. | Test, as the proposal states it | Expected | Tests that carry the number | Result |
@@ -14,10 +14,10 @@ All tests of the repository: 718 passed, 0 failed, of 718.
 | TR07 | Snapshots in the past and the future | The latest one reached; the oldest when none is reached | the latest snapshot reached; the oldest when none is reached (`test/token-registries.test.ts`) | passed |
 | TR08 | A typed amount with the token's decimals; with too many decimal places | The exact raw amount is sent; refused | an amount typed with the token's decimals is sent exactly; one with too many places is refused (`test/token-registries.test.ts`) | passed |
 | TR09 | Two held categories with the same symbol; a reserved symbol | Shown apart with their categories; not shown | two held categories with the same symbol are marked; a reserved symbol is not shown (`test/token-registries.test.ts`) | passed |
-| TR10 | An NFT of a position whose category also has a registry | The template's name | none | **open** |
+| TR10 | An NFT of a position whose category also has a registry | The template's name | a position's NFT keeps the template's name; another NFT takes the registry's name for its sequential type (`test/token-registries.test.ts`) | passed |
 | TR11 | A registry resolves while a review is open | The review does not change | a registry that resolves while a review is open does not change the review (`test/token-registries.test.ts`) | passed |
 | TR12 | After a recovery | The new device resolves again and shows the same; nothing of it was in the backup | after a recovery the new device resolves again and shows the same; nothing of it was in the backup (`test/token-registries.test.ts`) | passed |
 | TR13 | Wallet code searched for a token's category or symbol | None | their code names no token: no category of a token the tests or the demonstrations use, and no symbol (`test/wallet-knows-no-application.test.ts`) | passed |
 | TR14 | `mode` off or absent | No request beyond today's; raw units | with the mode off or absent, nothing is asked and the token stays in raw units (`test/token-registries.test.ts`) | passed |
 
-1 of 14 numbers are open or failing.
+Every number has at least one test, and all of them pass.

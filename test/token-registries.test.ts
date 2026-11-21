@@ -342,7 +342,7 @@ describe('resolving a token on the simulated chain', () => {
     expect(of(reserved.category)).toBe(undefined);
   });
 
-  it('TR10 and sequential NFT types: a position\'s NFT keeps the template\'s name; another NFT takes the registry\'s name for its type', async () => {
+  it('TR10: a position\'s NFT keeps the template\'s name; another NFT takes the registry\'s name for its sequential type', async () => {
     const device = await deviceWith([]);
     const files = new Files();
     const token = published(device.chain, files, (category) => registryFile(category, { symbol: 'TICKET', name: 'Tickets', types: { '01': 'Front row' } }), [
