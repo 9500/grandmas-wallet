@@ -8,11 +8,17 @@ import { actionShape } from './action-shape.js';
  * at a script of the template it would follow in its role, and reaches one of three findings:
  *
  * - **It comes back**: no such output sits at a script that takes a key of the device. An action that only empties
- *   or closes a position, or leaves nothing outside the wallet's own addresses, comes back.
+ *   or closes a position, or leaves nothing outside the wallet's own addresses, comes back. So does one that leaves
+ *   something at a script that takes no key of the device, even where the template gives the rule for following it as
+ *   an expression: followed or not, nothing there depends on a key.
  * - **It does not come back**: such an output sits at a script that takes a key of the device, a key the engine makes
  *   for the wallet under the application's template. A new seed has no such key.
- * - **The wallet cannot tell**: whether it would follow such an output's script is given by an expression, which the
- *   engine does not evaluate yet.
+ * - **The wallet cannot tell**: such an output sits at a script that takes a key of the device, and whether the wallet
+ *   would follow it is given by an expression, which the engine does not evaluate yet.
+ *
+ * A key of the device is a key the script uses that the wallet would keep in its role. Where the template says whose a
+ * key is, a key that only another role keeps at the script, and that the wallet's role keeps nowhere in the template,
+ * is not one; a key the template does not say is another's counts.
  *
  * What a program cannot see stays outside all three: a key hash that reaches a script as plain bytes, what an
  * application keeps on its servers, a position that someone else's transaction changes later.
@@ -104,17 +110,53 @@ const keysIn = (definition: Definition, script: string | undefined, keys: Set<st
   return found;
 };
 
+/** The names of the secrets in a list the template gives: names, or entries that name a secret as their key. */
+const secretNames = (list: unknown): string[] =>
+  Array.isArray(list) ? list.flatMap((item: unknown) => (typeof item === 'string' ? [item] : item !== null && typeof item === 'object' ? Object.keys(item) : [])) : [];
+
+/**
+ * The keys a role keeps anywhere in the template: the secrets its actions require or make, those it keeps at a
+ * locking script, and those an action offered to it at a locking script spends.
+ */
+const keptByRole = (definition: Definition, role: string): Set<string> => {
+  const kept = new Set<string>();
+  const offered = (actions: unknown): void => {
+    if (!Array.isArray(actions)) return;
+    for (const offer of actions as { role?: string; secrets?: unknown; generate?: unknown }[]) if (offer?.role === role) for (const name of [...secretNames(offer.secrets), ...secretNames(offer.generate)]) kept.add(name);
+  };
+  for (const action of Object.values(definition.actions ?? {})) {
+    const own = (action as { roles?: Record<string, { generate?: unknown; requirements?: { secrets?: unknown } }> }).roles?.[role];
+    for (const name of [...secretNames(own?.generate), ...secretNames(own?.requirements?.secrets)]) kept.add(name);
+  }
+  offered((definition as { start?: unknown }).start);
+  for (const script of Object.values(definition.lockingScripts ?? {})) {
+    const entry = script as LockingScriptEntry & { actions?: unknown };
+    offered(entry.actions);
+    for (const [name, described] of Object.entries(entry.roles ?? {})) {
+      if (name === role) for (const secret of secretNames(described.state?.secrets)) kept.add(secret);
+      offered((described as { actions?: unknown }).actions);
+    }
+  }
+  return kept;
+};
+
 /**
  * The keys of the device a locking script of the template takes for a role: those its locking or its own unlocking
- * script uses, and the secrets the role keeps there.
+ * script uses, and the secrets the script and the role keep there, less the keys the template gives to another role
+ * alone. A key counts unless another role keeps it at the script, the script itself does not, and the wallet's role
+ * keeps it nowhere in the template: where the template does not say whose a key is, it is the device's.
  */
 export const scriptKeys = (definition: Definition, lockingScript: string, role: string): string[] => {
   const entry = lockingScriptOf(definition, lockingScript);
   if (entry === undefined) return [];
   const keys = keysOf(definition);
-  const found = new Set([...keysIn(definition, entry.lockingBytecode, keys), ...keysIn(definition, entry.unlockingBytecode, keys)]);
-  for (const secret of [...(entry.state?.secrets ?? []), ...(entry.roles?.[role]?.state?.secrets ?? [])]) found.add(secret);
-  return [...found];
+  const atScript = secretNames(entry.state?.secrets);
+  const ownRole = secretNames(entry.roles?.[role]?.state?.secrets);
+  const found = new Set([...keysIn(definition, entry.lockingBytecode, keys), ...keysIn(definition, entry.unlockingBytecode, keys), ...atScript, ...ownRole]);
+  const otherRoles = new Set(Object.entries(entry.roles ?? {}).flatMap(([name, described]) => (name === role ? [] : secretNames(described.state?.secrets))));
+  if (otherRoles.size === 0) return [...found];
+  const kept = keptByRole(definition, role);
+  return [...found].filter((key) => !otherRoles.has(key) || atScript.includes(key) || ownRole.includes(key) || kept.has(key));
 };
 
 /**
@@ -157,7 +199,8 @@ export const actionFinding = (definition: Definition, action: string, role: stri
       ...(follows === 'expression' ? { expression: true as const } : {}),
     });
   }
-  const finding: Finding = outputs.some(({ keys, expression }) => keys.length > 0 && expression !== true) ? 'does not come back' : outputs.some(({ expression }) => expression === true) ? 'cannot tell' : 'comes back';
+  // A script that takes no key of the device comes back whether the wallet follows it or not.
+  const finding: Finding = outputs.some(({ keys, expression }) => keys.length > 0 && expression !== true) ? 'does not come back' : outputs.some(({ keys, expression }) => keys.length > 0 && expression === true) ? 'cannot tell' : 'comes back';
   return { action, role, name: definition.actions?.[action]?.name ?? action, finding, outputs };
 };
 
@@ -178,8 +221,8 @@ export const findingReason = (finding: ActionFinding): string => {
     return `This would tie money to this phone alone: ${where}. A new phone has no such key. If the phone is lost, nobody can get it back. This wallet does not carry it out.`;
   }
   if (finding.finding === 'cannot tell') {
-    const unclear = finding.outputs.filter(({ expression }) => expression === true);
-    const where = unclear.map(({ name, scriptName }) => `"${name}" at "${scriptName}"`).join(', ');
+    const unclear = finding.outputs.filter(({ keys, expression }) => keys.length > 0 && expression === true);
+    const where = unclear.map(({ name, scriptName, keys }) => `"${name}" at "${scriptName}", a script that takes a key of this device (${keys.map((key) => `"${key}"`).join(', ')})`).join('; ');
     return `This wallet cannot tell whether this would come back if the phone is lost: the template decides by an expression whether the wallet follows ${where}, and the wallet cannot work that out. This wallet does not carry it out.`;
   }
   return 'It comes back.';
