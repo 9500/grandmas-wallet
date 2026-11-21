@@ -238,6 +238,8 @@ section.first { border-top: 0; margin-top: 18px; padding-top: 18px; }
 .cmp-col.now { border-color: color-mix(in srgb, var(--app) 45%, var(--line)); background: color-mix(in srgb, var(--app) 5%, var(--surface)); }
 .cmp-col ul { font-size: 14.5px; margin-top: 6px; padding-left: 18px; }
 .cmp-col.now .tag { color: var(--app); }
+.designs { margin-bottom: 14px; width: auto; }
+.designs th, .designs td { padding-right: 28px; }
 pre.code.rec { font-size: 12.5px; }
 .carriers { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 16px 0; }
 .carrier { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--c); border-radius: 10px; padding: 12px 14px; }
@@ -302,7 +304,7 @@ pre.code.rec { font-size: 12.5px; }
 <nav class="rail" aria-label="Contents">
   <div class="brand">Grandma's Wallet</div>
   <ol>
-    <li><a href="#changed">What changed</a></li>
+    <li><a href="#changed">Three designs</a></li>
     <li><a href="#idea">The design</a></li>
     <li><a href="#controller">Identity and controller</a></li>
     <li><a href="#keys">Keys and addresses</a></li>
@@ -346,37 +348,55 @@ pre.code.rec { font-size: 12.5px; }
     <span style="--c: var(--recoverer)">Recoverer</span>
     <span style="--c: var(--app)">Application</span>
   </div>
-  <p class="small" style="margin-top:14px">This page is the illustrated overview of the third design of the wallet. The specification is <code>Grandmas_Wallet_Architecture_Proposal_v0.6.md</code> in the repository, the order of work is in <code>IMPLEMENTATION_PLAN_v0.6.md</code>, and the code, the test records and the runs of this design are on the branch <code>design-3</code>. Where design 3 stands, part by part, is under <a href="#status">Costs and open points</a>.</p>
+  <p class="small" style="margin-top:14px">This page is the illustrated overview of the third design of the wallet. The specification is <code>Grandmas_Wallet_Architecture_Proposal_v0.6.md</code> in the repository, the order of work is in <code>IMPLEMENTATION_PLAN_v0.6.md</code>, and the code, the test records and the runs of this design are on the branch <code>main</code>. Where design 3 stands, part by part, is under <a href="#status">Costs and open points</a>.</p>
 </header>
 
 <!-- ============================== CHANGED -->
 <section id="changed" class="first">
-  <h2>What changed from design 2</h2>
+  <h2>Three designs in one week</h2>
   <div class="changed">
-    <p>Design 2 is described on its own page, <a href="design_v0.5.html">the overview v0.5</a>. Design 3 keeps its keys, its addresses, its controller and its recovery flow unchanged. What changes is how an application's position comes back after a recovery.</p>
+    <p>This is the third design of the wallet. All three were made for BCH Blaze 2026, one after another between 15 and 21 November 2026, and the repository holds no earlier work: its first commit is the first design's proposal, of 15 November. Each design was built and run on chipnet, and what it showed led to the next.</p>
+    <div class="scroll"><table class="designs">
+      <tr><th></th><th>Proposed</th><th>Worked on until</th></tr>
+      <tr><td>Design 1</td><td>15 November 2026</td><td>17 November 2026</td></tr>
+      <tr><td>Design 2</td><td>17 November 2026</td><td>20 November 2026</td></tr>
+      <tr><td><strong>Design 3</strong></td><td>20 November 2026</td><td>in progress</td></tr>
+    </table></div>
     <div class="cmp">
       <div class="cmp-col">
-        <span class="tag">Design 2</span>
+        <span class="tag">Design 1 · 15 to 17 November</span>
         <ul>
-          <li>An application brought two documents: its XO template and a <strong>recovery declaration</strong> written for this wallet.</li>
-          <li>The declaration told the wallet how to fill each action and how to find a position again on chain.</li>
+          <li>The recovery idea all three share: a <strong>controller</strong> on chain, whose owner key a trusted recoverer can replace after a request that stayed unchallenged for a waiting period.</li>
+          <li>Every coin was spent <strong>together with the controller</strong>, so nothing had to move after a recovery.</li>
+          <li>That linked all of a wallet's activity on chain, and it got in the way of applications.</li>
+          <li>Ran through its whole course on chipnet, with its own web pages. It is at the tag <a href="https://github.com/9500/grandmas-wallet/tree/design-1" target="_blank" rel="noopener"><code>design-1</code></a>.</li>
+        </ul>
+      </div>
+      <div class="cmp-col">
+        <span class="tag">Design 2 · 17 to 20 November</span>
+        <ul>
+          <li><strong>Every address has its own key</strong>, as in an ordinary HD wallet. The controller is used only for recovery, after which the new phone moves the coins to addresses of its own.</li>
+          <li>An application brought two documents: its XO template and a <strong>recovery declaration</strong> written for this wallet, which told the wallet how to fill each action and how to find a position again on chain.</li>
           <li>A contract had to keep its values on chain, and someone had to write down where.</li>
           <li>A template was judged as a whole.</li>
           <li>A recovered ParyonUSD loan could be closed from the wallet with the loan page not opened.</li>
+          <li>It is at the tag <a href="https://github.com/9500/grandmas-wallet/tree/design-2" target="_blank" rel="noopener"><code>design-2</code></a>, and described in <a href="design_v0.5.html">the overview v0.5</a>.</li>
         </ul>
       </div>
       <div class="cmp-col now">
-        <span class="tag">Design 3</span>
+        <span class="tag">Design 3 · since 20 November</span>
         <ul>
+          <li>Keeps design 2's keys, addresses, controller and recovery flow unchanged. What changes is how an application's position comes back after a recovery.</li>
           <li>An application needs <strong>nothing but its XO template</strong>, written as for any XO wallet. The declaration is retired.</li>
           <li>Three things carry every action: the <strong>template</strong>, the application's <strong>request</strong>, and the wallet's own <strong>position record</strong>, stored in its sealed backup before anything is signed.</li>
           <li>After a recovery the new phone reads the records. A record counts only when <strong>the chain ties it to a token the wallet holds</strong>.</li>
           <li>Each action is judged by <strong>what it leaves behind</strong>: it comes back, it does not, or the wallet cannot tell.</li>
           <li>The wallet acts by itself only where nothing is missing. A loan is closed through its page: "Open the application to do this".</li>
+          <li>It is on <code>main</code>, and the public pages serve it since 21 November 2026.</li>
         </ul>
       </div>
     </div>
-    <p class="small" style="margin:12px 0 0; max-width:none">The sections that are new or rewritten: <a href="#rules">Rules for applications</a>, <a href="#records">Position records</a>, <a href="#check">The chain as the check</a>, <a href="#values">Where each value comes from</a>, <a href="#findings">What an action leaves behind</a>, <a href="#alone">Acting without the application</a>, <a href="#connect">Talking to applications</a>, <a href="#xo">XO</a>, <a href="#jar">Savings Jar</a>, <a href="#paryon">ParyonUSD</a>, <a href="#backup">Backup</a> and <a href="#limits">Costs and open points</a>. The "Template extension" section of design 2 is gone with the declaration.</p>
+    <p class="small" style="margin:12px 0 0; max-width:none">Compared with design 2, the sections that are new or rewritten: <a href="#rules">Rules for applications</a>, <a href="#records">Position records</a>, <a href="#check">The chain as the check</a>, <a href="#values">Where each value comes from</a>, <a href="#findings">What an action leaves behind</a>, <a href="#alone">Acting without the application</a>, <a href="#connect">Talking to applications</a>, <a href="#xo">XO</a>, <a href="#jar">Savings Jar</a>, <a href="#paryon">ParyonUSD</a>, <a href="#backup">Backup</a> and <a href="#limits">Costs and open points</a>. The "Template extension" section of design 2 is gone with the declaration.</p>
   </div>
 </section>
 
