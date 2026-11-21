@@ -102,7 +102,7 @@ export const Receive = ({ owner }: { owner: Owner }) => {
                     </Button>
                   )}
                 </div>
-                <PlayCoins environment={owner.session.environment} address={address} satoshis={100_000_000n} label="Get 1 BCH of play coins" />
+                <PlayCoins environment={owner.session.environment} address={address} satoshis={200_000_000n} label="Get 2 BCH of play coins" />
                 {shown?.again === true && (
                   <Notice tone="warn">
                     <span class="again">

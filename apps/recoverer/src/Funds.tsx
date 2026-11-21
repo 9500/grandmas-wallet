@@ -123,7 +123,7 @@ export const FundsCard = ({ session, funds, problem, note, short }: { session: S
               <p class="small muted">{onMockup(session.environment) ? 'On the mockup, the button below sends play coins here.' : test ? 'Send test coins to this address.' : 'Send Bitcoin Cash to this address, from any wallet.'}</p>
             </HandOff>
           )}
-          <PlayCoins environment={session.environment} address={address} satoshis={5_000_000n} onPaid={() => setSent(sent + 1)} />
+          <PlayCoins environment={session.environment} address={address} satoshis={200_000_000n} label="Get 2 BCH of play coins" onPaid={() => setSent(sent + 1)} />
           <SendAll session={session} funds={funds} balance={balance} onSent={() => setSent(sent + 1)} />
         </div>
       )}

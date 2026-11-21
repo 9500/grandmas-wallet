@@ -53,7 +53,7 @@ const TREASURY_BLOCKS = 110;
 const TICK_MS = 2_000;
 /** A block at least this often by the chain's clock, so that its median time follows the clock. */
 const HEARTBEAT_SECONDS = 600;
-const MOST_SATOSHIS = 100_000_000;
+const MOST_SATOSHIS = 200_000_000;
 const LEAST_SATOSHIS = 1_000;
 const MOST_SKIP_SECONDS = 8 * 24 * 3600;
 const PER_HOUR = { coins: 30, skip: 60 };

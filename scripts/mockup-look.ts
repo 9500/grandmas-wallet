@@ -109,7 +109,7 @@ try {
   await recoverer.getByRole('button', { name: 'Continue' }).click();
   const fundsAddress = (await recoverer.getByTestId('funds-address').first().getAttribute('data-value')) ?? '';
   if (!fundsAddress.startsWith('bchreg:')) throw new Error(`the recoverer's balance address is not written for the mockup: ${fundsAddress}`);
-  await recoverer.getByRole('button', { name: 'Get play coins' }).click();
+  await recoverer.getByRole('button', { name: 'Get 2 BCH of play coins' }).click();
   await recoverer.locator('[data-testid="funds-balance"]:not([data-value="0"])').first().waitFor();
   await shot(recoverer, 'mockup-recoverer-fund');
   log(`play coins reached the recoverer's balance at ${fundsAddress}: ${(await recoverer.getByTestId('funds-balance').first().getAttribute('data-value')) ?? ''} satoshis`);
@@ -135,11 +135,11 @@ try {
   await old.page.getByRole('link', { name: 'Receive' }).first().click();
   const receive = (await old.page.getByTestId('receive-address').getAttribute('data-value')) ?? '';
   if (!receive.startsWith('bchreg:')) throw new Error(`the wallet's address is not written for the mockup: ${receive}`);
-  await old.page.getByRole('button', { name: 'Get 1 BCH of play coins' }).click();
+  await old.page.getByRole('button', { name: 'Get 2 BCH of play coins' }).click();
   await see(old.page, 'Sent. They show here in a few seconds.');
   await shot(old.page, 'mockup-wallet-receive');
   await old.page.getByRole('link', { name: 'Home' }).first().click();
-  await old.page.getByTestId('balance').filter({ hasText: /^\s*1\.\d/ }).first().waitFor();
+  await old.page.getByTestId('balance').filter({ hasText: /^\s*2\.\d/ }).first().waitFor();
   log(`play coins reached the wallet at ${receive}: it holds ${await balanceOf(old.page)}`);
 
   // The Savings Jar: opened from its page, time let pass until its date, emptied.
@@ -220,7 +220,7 @@ try {
   await complete.click();
   log(`"Let the waiting period pass" opened the completion after ${((Date.now() - waitedFrom) / 1000).toFixed(0)} s`);
   await next.page.getByRole('button', { name: 'Open the wallet' }).click({ timeout: 240_000 });
-  await next.page.getByTestId('balance').filter({ hasText: /^\s*(0\.[1-9]|1\.)/ }).first().waitFor({ timeout: 120_000 });
+  await next.page.getByTestId('balance').filter({ hasText: /^\s*(0\.[1-9]|[12]\.)/ }).first().waitFor({ timeout: 120_000 });
   await shot(next.page, 'mockup-wallet-recovered');
   log(`the new phone has the wallet, with ${await balanceOf(next.page)}`);
 

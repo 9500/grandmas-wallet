@@ -23,8 +23,8 @@ export const MODES: { mode: Mode; title: string; detail: string; name: string; p
   },
 ];
 
-/** What the mockup's service is asked for at a press: enough for many wallets, and for the fees of what follows. */
-export const PLAY_COINS = 5_000_000n;
+/** What the mockup's service is asked for at a press: 2 BCH, enough for many wallets with any starting balance. */
+export const PLAY_COINS = 200_000_000n;
 
 /**
  * Whether the first run is behind this page: it has said how it works and its balance has once covered a new
@@ -127,7 +127,7 @@ const Fund = ({ session, onBack, onDone }: { session: Session; onBack: () => voi
             <p class="small muted">{onMockup(session.environment) ? 'On the mockup, the button below sends play coins here.' : test ? 'Send test coins to this address, from a faucet or any wallet of this test network.' : 'Send Bitcoin Cash to this address, from any wallet.'}</p>
           </HandOff>
         )}
-        <PlayCoins environment={session.environment} address={address} satoshis={PLAY_COINS} />
+        <PlayCoins environment={session.environment} address={address} satoshis={PLAY_COINS} label="Get 2 BCH of play coins" />
         {balance === undefined ? (
           unread !== undefined && <Notice tone="bad">Your balance could not be read: {unread}</Notice>
         ) : covered ? (

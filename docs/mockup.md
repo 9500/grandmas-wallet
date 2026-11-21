@@ -64,7 +64,7 @@ Browsers may call the service from `https://wallet.9500.cash`, `https://recovere
 
 | | |
 | --- | --- |
-| Play coins | From 1,000 to 100,000,000 satoshis (1 BCH) a request; 30 requests an hour from one address |
+| Play coins | From 1,000 to 200,000,000 satoshis (2 BCH) a request; 30 requests an hour from one address |
 | Skips | From 1 second to 8 days a request; 60 requests an hour from one address |
 | Client's address | The last entry of `X-Forwarded-For` (the one the reverse proxy adds), or the connection's |
 
