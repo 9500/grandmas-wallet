@@ -138,7 +138,7 @@ button.netchip.choosable:hover:not(:disabled) { background: var(--sunken); }
 }
 .rail-foot .netmenu { right: auto; left: 0; top: auto; bottom: calc(100% + 6px); }
 button.netmenu-item {
-  display: flex; align-items: center; justify-content: flex-start; width: 100%; min-height: 44px; padding: 8px 12px 8px 30px;
+  display: flex; align-items: center; justify-content: flex-start; gap: 0; width: 100%; min-height: 44px; padding: 8px 14px 8px 32px;
   position: relative; background: transparent; border: 0; border-radius: var(--r-s); color: var(--ink);
   font-size: 14px; font-weight: 600; text-align: left;
 }
