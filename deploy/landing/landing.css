@@ -308,6 +308,13 @@ h3 { font-size: 19px; }
 .steps p { color: var(--muted); max-width: 78ch; }
 .steps h3 { margin-bottom: 2px; }
 .tip { padding: 10px 14px; border-radius: 8px; background: var(--sunken); font-size: 15px; }
+/* A step with a picture of the screen it is about, beside its text. */
+.steps > li.has-shot { grid-template-columns: minmax(0, 1fr) 320px; gap: 8px 28px; align-items: start; }
+.step-text { display: grid; gap: 8px; }
+.shot { margin: 0; }
+.shot img { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+.shot figcaption { margin-top: 8px; font-size: 13px; color: var(--muted); }
+
 /* What differs by network within a step. */
 .by-network { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 15px; }
 .by-network li { padding-left: 12px; border-left: 2px solid var(--line); }
@@ -369,6 +376,8 @@ h3 { font-size: 19px; }
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-grid { grid-template-columns: 1fr 260px; gap: 24px 28px; }
   .promise { grid-template-columns: 1fr; gap: 12px; }
+  .steps > li.has-shot { grid-template-columns: 1fr; }
+  .shot { max-width: 360px; }
   .where { grid-template-columns: 1fr; gap: 12px; max-width: 640px; }
 }
 

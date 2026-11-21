@@ -176,7 +176,7 @@
     <section id="try" class="section">
       <div class="wrap">
         <h2>What to try</h2>
-        <p class="section-lead">On the mockup the whole course takes a few minutes: nothing has to be brought and nothing has to be waited for. On chipnet it takes about half an hour, half of it the waiting period, so start the recovery (step 4) early and try the applications while it runs. On mainnet the waiting period is a day.</p>
+        <p class="section-lead">On the mockup the whole course takes a few minutes: nothing has to be brought and nothing has to be waited for. On chipnet it takes about half an hour, half of it the waiting period, so start the recovery (step 5) early and try the applications while it runs. On mainnet the waiting period is a day.</p>
         <ol class="steps">
           <li>
             <h3>Choose where to try it, and give the recoverer coins</h3>
@@ -200,6 +200,22 @@
               <li><strong>Chipnet:</strong> send about 0.6 test BCH to the wallet's <q>Receive</q> address for the loan. The jar opens a few minutes after its date.</li>
             </ul>
           </li>
+          <li class="has-shot">
+            <div class="step-text">
+              <h3>Empty the jar from the wallet, with its page closed</h3>
+              <p>Close the Savings Jar's tab. In the wallet, <q>Apps</q> lists the jar's key under <q>Tokens</q>, with what the jar holds and a button: <q>Empty a savings jar</q>. Press it once the jar's date has passed. The wallet shows what the transaction does and carries it out by itself.</p>
+              <p>Nothing in the wallet was written for the jar. The jar's XO template describes the action, and this action needs nothing that only the application has: it spends no coin of the application's, and every value it takes is in the record the wallet stored when the jar was opened. Every action of every template that meets this shows up as a button, automatically.</p>
+              <p>An action that does need the application is listed too, with <q>Open the application to do this</q> and the reason behind a <q>?</q>. Closing a ParyonUSD loan is one: it spends Paryon's price coin, which only the loan page can name.</p>
+              <ul class="by-network">
+                <li><strong>Mockup:</strong> press <q>Let time pass until the jar opens</q> on the jar's page before you close it.</li>
+                <li><strong>Chipnet:</strong> the network takes the transaction a few minutes after the jar's date; the wallet says from when.</li>
+              </ul>
+            </div>
+            <figure class="shot">
+              <img src="wallet-jar.png" alt="The wallet's Tokens card: Jar key, Savings Jar, open, holds 0.01 BCH, with the button Empty a savings jar." width="716" height="542">
+              <figcaption>The wallet's <q>Apps</q> screen with a jar open. The button comes from the jar's template.</figcaption>
+            </figure>
+          </li>
           <li>
             <h3>Lose your phone</h3>
             <p>Close the wallet on your phone. Then open the wallet in a private window, or another browser, on the desktop: this is the new phone. Tap <q>I lost my phone</q>.</p>
@@ -208,7 +224,7 @@
               <li><strong>Mockup:</strong> press <q>Let the waiting period pass</q> on the recoverer when you have seen enough of the wait. It moves the chain's clock on, for everyone on the mockup.</li>
               <li><strong>Chipnet:</strong> the move can complete about 15 minutes after the request. <strong>Mainnet:</strong> about a day.</li>
             </ul>
-            <p class="tip warn">Close the old wallet first. While it is open, it refuses any request by itself. That is the protection working, and it is step 5.</p>
+            <p class="tip warn">Close the old wallet first. While it is open, it refuses any request by itself. That is the protection working, and it is step 6.</p>
           </li>
           <li>
             <h3>Or say no from the old phone</h3>
