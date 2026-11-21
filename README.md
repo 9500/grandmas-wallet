@@ -6,7 +6,7 @@ Built for BCH Blaze 2026 on the XO stack.
 
 **Status:** a working demonstration on chipnet, the Bitcoin Cash test network. The wallet, the recoverer's page, two applications and the backup stores are built and have run through their whole course on chipnet, in scripts and in browsers. Nothing has been audited, the pages keep their keys unencrypted in the browser, and a phone watches for recovery requests only while the page is open. Use it with test coins only.
 
-`main` holds the code of the second design of the wallet (design 2) as it was built and run, and the documents of the third (design 3). The third design is built on the branch [`design-3`](https://github.com/9500/grandmas-wallet/tree/design-3), has run on chipnet, and is what the pages under "Try it" serve since 20 November 2026; `main` has not yet moved to it. [Designs](#designs) says what each design is and why the third was started.
+`main` holds the third design of the wallet (design 3), which is what the pages under "Try it" serve. [Designs](#designs) says what each design is and why the third was made.
 
 ## Try it
 
@@ -25,15 +25,15 @@ Built for BCH Blaze 2026 on the XO stack.
 Every transaction the wallet sends is an invitation of an XO template, built and signed by the XO engine.
 
 - **The wallet's own templates** define its controller, its addresses and its payments: [docs/templates/](docs/templates/).
-- **Applications arrive as templates.** The wallet's code names no application. It carries out a template's actions, shows its own figures before anything is signed, stores the template in the backup, and after a recovery finds what the owner holds in an application from the template and the chain alone.
+- **Applications arrive as templates.** The wallet's code names no application, and an application needs nothing but its XO template. The wallet carries out a template's actions, shows its own figures before anything is signed, and stores the template and a record of each position in the backup before it signs. After a recovery it reads those records, lets the chain confirm them, and lists what the owner holds again.
 - **ParyonUSD as an XO template.** [A template](packages/paryon/frozen/paryon-loan-v1-chipnet-fast-periods-6.json) for Paryon's public loan contracts, used unchanged: making a loan key, borrowing, managing and closing are actions of it.
-- **Invitations.** [docs/xo-invitations.md](docs/xo-invitations.md) lists the invitations of three complete runs on chipnet, shows how to open one in XO's debug tool, and says how to produce them again. In the wallet and on the recoverer's page, developer mode saves the invitation of any transaction that browser sent.
+- **Invitations.** [docs/xo-invitations.md](docs/xo-invitations.md) lists the invitations of complete runs of the second design on chipnet, shows how to open one in XO's debug tool, and says how to produce them with the third. In the wallet and on the recoverer's page, developer mode saves the invitation of any transaction that browser sent.
 
 ## Designs
 
 - **Design 1** is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1), with its web demonstration and chipnet runs. It spent every coin together with the wallet's controller, which linked all of a wallet's activity and got in the way of applications.
-- **Design 2** is at the tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2), and was what the pages under "Try it" ran until 20 November 2026. It gives each address its own key and uses the controller only for recovery. After a recovery, the new phone finds what the owner holds in an application from the application's token, its template and the chain alone.
-- **Design 3** starts from design 2 and keeps its keys, addresses and controller. It is built on the branch `design-3`. It changes how an application's position comes back after a recovery. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6. It is built, has run on a local test node and on chipnet, and is what the pages under "Try it" serve since 20 November 2026.
+- **Design 2** is at the tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2), and was what the pages under "Try it" ran until 20 November 2026. It gives each address its own key and uses the controller only for recovery. After a recovery, the new phone finds what the owner holds in an application from the application's token, its template, a second document written for this wallet, and the chain.
+- **Design 3** is what `main` holds. It keeps design 2's keys, addresses and controller, and changes how an application's position comes back after a recovery: from the application's XO template, the application's request and the wallet's own record in its sealed backup, checked against the chain. It has run on a local test node and on chipnet, in scripts and in browsers. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6.
 
 ### Why a third design
 
@@ -59,8 +59,8 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 
 ## Documents
 
-- Design 3, proposed: [architecture proposal v0.6](Grandmas_Wallet_Architecture_Proposal_v0.6.md), [implementation plan v0.6](IMPLEMENTATION_PLAN_v0.6.md), and the [illustrated overview v0.6](https://blaze2026.9500.cash/design.html) ([source](docs/design_v0.6.html))
-- Design 2, as built: [architecture proposal v0.4](Grandmas_Wallet_Architecture_Proposal_v0.4.md), [implementation plan v0.4](IMPLEMENTATION_PLAN_v0.4.md), and the [illustrated overview v0.5](https://blaze2026.9500.cash/design_v0.5.html) ([source](docs/design_v0.5.html))
+- Design 3, as built: [architecture proposal v0.6](Grandmas_Wallet_Architecture_Proposal_v0.6.md), [implementation plan v0.6](IMPLEMENTATION_PLAN_v0.6.md), and the [illustrated overview v0.6](https://blaze2026.9500.cash/design.html) ([source](docs/design_v0.6.html))
+- Design 2, at the tag `design-2`: [architecture proposal v0.4](Grandmas_Wallet_Architecture_Proposal_v0.4.md), [implementation plan v0.4](IMPLEMENTATION_PLAN_v0.4.md), and the [illustrated overview v0.5](https://blaze2026.9500.cash/design_v0.5.html) ([source](docs/design_v0.5.html))
 - [Decisions log](docs/decisions.md)
 - Proposed, not built: [token names and units from registries (BCMR)](docs/token-registries.md)
 - [XO templates and invitations](docs/xo-invitations.md)

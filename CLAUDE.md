@@ -2,10 +2,9 @@
 
 Bitcoin Cash wallet with on-chain, challenge-period key recovery, built on the XO stack.
 
-- Design 3, the reference for new work: [Grandmas_Wallet_Architecture_Proposal_v0.6.md](Grandmas_Wallet_Architecture_Proposal_v0.6.md). Work order and exit criteria: [IMPLEMENTATION_PLAN_v0.6.md](IMPLEMENTATION_PLAN_v0.6.md). Nothing of design 3 is built until its stages say so.
-- Design 2, which is what the code holds: [Grandmas_Wallet_Architecture_Proposal_v0.4.md](Grandmas_Wallet_Architecture_Proposal_v0.4.md), [IMPLEMENTATION_PLAN_v0.4.md](IMPLEMENTATION_PLAN_v0.4.md), and the illustrated overview [docs/design_v0.5.html](docs/design_v0.5.html).
-- Code for design 3 goes on the branch `design-3`, which starts after the tag `design-2`. `main` stays at design 2, with the design-3 documents, until design 3 has run.
-- The earlier designs are at the tags `design-1` and `design-2`. Parts that are rewritten start from the files there (`git show <tag>:<path>`).
+- Design 3 is what `main` holds and what the public pages serve (since 21 November 2026). Its reference: [Grandmas_Wallet_Architecture_Proposal_v0.6.md](Grandmas_Wallet_Architecture_Proposal_v0.6.md). Work order and exit criteria: [IMPLEMENTATION_PLAN_v0.6.md](IMPLEMENTATION_PLAN_v0.6.md), whose stages 19 and 20 are still to be built. The illustrated overview is [docs/design_v0.6.html](docs/design_v0.6.html).
+- The earlier designs are at the tags `design-1` and `design-2`, with their own documents (design 2: proposal and plan v0.4, overview v0.5). Parts that are rewritten start from the files there (`git show <tag>:<path>`).
+- The public backup stores run from this checkout's source. Work that changes code is done on a branch in a separate worktree and merged when its check passes.
 
 # Workflow
 

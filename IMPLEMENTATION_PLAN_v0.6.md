@@ -116,14 +116,13 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 
 A release is checked with `node deploy/check-public.mjs <configuration> --expect <commit>` and then `npx tsx scripts/page-smoke.ts <configuration>`, which goes through the start screens of the public pages and needs no coins. `docs/walkthrough.md` is the hand course of this version; the second design's is at the tag `design-2`. The invitations kept in `docs/xo-invitations.md` are the second design's.
 
-The owner decided on 20 November 2026 that the pages of this version are served at the public addresses, in place of the second design's, whose release is kept so that it can be put back. Whether `main` moves to this version is decided separately.
+The owner decided on 20 November 2026 that the pages of this version are served at the public addresses, in place of the second design's, whose release is kept so that it can be put back. On 21 November 2026 the owner decided that this version is the one to be judged: `main` holds it since then, and the branch `design-3` ends there.
 
 **State on 20 November 2026:** the template, the two pages and their packages are changed, and both courses ran on the local node through the engine without a browser (`docs/runs/stage-17-jar-local-node.md`, `docs/runs/stage-17-loan-local-node.md` on the branch `design-3`), and again after the declaration was removed from the wallet. Both courses then ran in browsers on the local node, with the new phone's requests recorded (`docs/runs/stage-17-jar-browser-local-node.md`, `docs/runs/stage-17-loan-browser-local-node.md`; pictures in `docs/screens/live-*.png`): PR19 and PR20 pass there. Six defects the courses showed were corrected, among them what the wallet's review said about an application's own NFTs. **Done on chipnet, 20 and 21 November 2026:** the second design's wallets and what the first design left that was worth its fee were drained to the funding address, and `.xo-demo/leftovers.md` says what stays; the pages of this version were released to the public addresses; run G (`docs/runs/stage-17-jar-browser-chipnet.md`), run H (`docs/runs/stage-17-loan-browser-chipnet.md`) and the Savings Jar page with the unmodified Cashonize wallet (`docs/runs/stage-17-jar-cashonize-chipnet.md`) ran against them. PR19 and PR20 are closed. Run H did not run straight through: its recovery request waited about 25 minutes for a block, the first closing was refused because someone else had spent a coin of Paryon's that it named, and the loan was closed by driving the same pages directly. What follows from it is in the next stage's list.
 
 ## Stage 18 — For XO, and the documents
 
 - From run H: a page tries again at once when the network refuses a transaction because someone else spent a coin it named; the wallet tells the page so in a form it can act on. The run scripts stop within seconds where a page does not show what it should, and keep a picture and the page's text; only waits on the chain are long. Each chipnet run gets its own funded key, so that runs go side by side.
-- A fee rate of exactly 1 satoshi per byte was seen to confirm slowly on chipnet in these runs; whether the wallet pays slightly more there is to be decided once that is measured.
 
 - The notes for developer feedback are kept up to date in [docs/xo-feedback-notes.md](docs/xo-feedback-notes.md). The feedback itself is written by the owner.
 - What XO's authors answer about a call to follow a script, about synchronisation and about how invitations travel (proposal section 13.6) is noted in the proposal's section 22.
@@ -131,6 +130,8 @@ The owner decided on 20 November 2026 that the pages of this version are served 
 - **Push.**
 
 ## Stage 19 — Token names and units from a registry
+
+Decided by the owner on 21 November 2026: built now, with stage 20, before anything else.
 
 Asked for by the owner on 20 November 2026, for after the chipnet runs. Until then the wallet shows a fungible token by its category and in raw units (proposal section 13.3, decision 25).
 
@@ -150,6 +151,16 @@ Asked for by the owner on 20 November 2026, to meet the requirements of BCH Blaz
 - A run on mainnet with small amounts is the owner's decision and is not part of this stage.
 
 **Done when** a page built with the parameter on shows the warning and works against mainnet servers in a test that sends nothing, and a page built without it cannot be brought to mainnet.
+
+## Stage 21 — More actions recognised as coming back
+
+Agreed by the owner on 21 November 2026, for after stages 19 and 20. The wallet refuses an action when it finds that what the action leaves would not come back after a recovery, or when it cannot tell (proposal sections 12.3 and 12.5). Two cases are refused today although nothing of the wallet's would be tied to the phone:
+
+- **A script that takes no key, with a rule for following it that is given as an expression.** Whether the wallet follows it or not, nothing depends on a key of the device: the finding is "comes back".
+- **A script that takes a key of another party only.** Where the template says which role keeps which key of a script, a key that only another role keeps is not counted as the device's. A template that does not say whose key it is stays refused.
+- A rule given as an expression is evaluated by the wallet only once XO says how such a rule is evaluated; the question is in the notes for XO.
+
+**Done when** tests on the simulated chain show both cases carried out and the neighbouring cases still refused: the same script with a key of the wallet's role, and a template that names no role for its key.
 
 ## Which stage closes which test
 
