@@ -8,5 +8,6 @@
   "chain": ["wss://chipnet.9500.cash:443", "wss://chipnet.imaginary.cash:50004"],
   "relays": ["wss://relay.riften.net:443", "wss://relay.cauldron.quest:443"],
   "explorer": "https://chipnet.imaginary.cash/tx/",
-  "secondsPerBlock": 60
+  "secondsPerBlock": 60,
+  "registries": { "mode": "chain" }
 }

@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Apps } from './Apps.js';
 import { Arrival } from './Arrival.js';
 import { type ApplicationsPart, useApplications } from './connections.js';
+import { TokenNames } from './token-words.js';
 import { Details, Erase } from './Details.js';
 import { Home } from './Home.js';
 import { BRAND } from './brand.js';
@@ -364,11 +365,13 @@ const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: O
     ) : null;
   const plain = moved !== undefined || elsewhere || (arrival !== undefined && arrival.swept !== true);
   return (
-    <Frame brand={BRAND} role="Your wallet" environment={session.environment} {...(plain ? {} : { nav, current: route, onNavigate: navigate })}>
-      {offer}
-      {screen}
-      {toastElement}
-    </Frame>
+    <TokenNames.Provider value={apps.names}>
+      <Frame brand={BRAND} role="Your wallet" environment={session.environment} {...(plain ? {} : { nav, current: route, onNavigate: navigate })}>
+        {offer}
+        {screen}
+        {toastElement}
+      </Frame>
+    </TokenNames.Provider>
   );
 };
 

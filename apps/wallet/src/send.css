@@ -38,8 +38,8 @@
 .amount-row { display: flex; gap: 8px; align-items: center; }
 .amount-row .input-unit { flex: 1 1 auto; min-width: 0; }
 .amount-row > button { flex: none; align-self: stretch; min-width: 72px; }
-.token-unit input { padding-right: 76px; }
-.token-unit span { max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.token-unit input { padding-right: 116px; }
+.token-unit span { max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .plain-refusal strong, .controls strong { font-weight: 650; }
 .token-review .kv dd strong { font-weight: 650; }

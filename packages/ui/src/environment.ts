@@ -1,4 +1,4 @@
-import type { AppChain } from '@grandmas-wallet/app';
+import type { AppChain, RegistriesConfig } from '@grandmas-wallet/app';
 import { linkKind } from '@grandmas-wallet/app/links';
 import { Electrum } from '@grandmas-wallet/chipnet/electrum';
 import { ChainPool } from '@grandmas-wallet/chipnet/pool';
@@ -23,6 +23,8 @@ export interface Environment {
   explorer: string;
   /** Seconds between blocks on this network, for working out when a waiting period counted in blocks ends. */
   secondsPerBlock: number;
+  /** Token names from registries checked against the chain (`chain`), or none (`off`, or no entry). */
+  registries?: RegistriesConfig;
 }
 
 export const loadEnvironment = async (): Promise<Environment> => {

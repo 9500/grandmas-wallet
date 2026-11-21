@@ -395,3 +395,17 @@ describe('resolving a token on the simulated chain', () => {
     }
   });
 });
+
+describe('what the screens write', () => {
+  it('TR11: a registry that resolves while a review is open does not change the review', async () => {
+    const { frozenNames, tokenUnits } = await import('../apps/wallet/src/token-words.js');
+    const category = 'ab'.repeat(32);
+    const kept: { token?: { name: string; symbol: string; decimals: number } } = {};
+    const live = (asked: string) => (asked === category ? kept.token : undefined);
+    const review = frozenNames(live, [category]);
+    kept.token = { name: 'Example Dollar', symbol: 'XDOL', decimals: 2 };
+    expect(tokenUnits(12_345n, review(category))).toBe('12,345 units');
+    // A review opened after it resolved shows the token's units.
+    expect(tokenUnits(12_345n, frozenNames(live, [category])(category))).toBe('123.45 XDOL');
+  });
+});

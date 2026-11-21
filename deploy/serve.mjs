@@ -42,6 +42,8 @@ const version = (() => {
 
 /** Servers named for this page alone. */
 const extra = process.argv.flatMap((word, index) => (word === '--connect' && process.argv[index + 1] !== undefined ? [process.argv[index + 1]] : []));
+// The wallet's page reads token registries from whatever host a token's issuer published on chain, when the configuration says `chain`.
+if (config.registries?.mode === 'chain' && /(^|[\\/])wallet([\\/]dist)?$/.test(root)) extra.push('https:');
 
 // The Electrum servers the XO engine connects to by itself on this network.
 const ENGINE_SERVERS = { chipnet: ['wss://chipnet.imaginary.cash:50004', 'wss://chipnet.bch.ninja:50004'] };
