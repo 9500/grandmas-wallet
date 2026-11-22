@@ -391,8 +391,8 @@ pre.code.rec { font-size: 12.5px; }
           <li>Three things carry every action: the <strong>template</strong>, the application's <strong>request</strong>, and the wallet's own <strong>position record</strong>, stored in its sealed backup before anything is signed.</li>
           <li>After a recovery the new phone reads the records. A record counts only when <strong>the chain ties it to a token the wallet holds</strong>.</li>
           <li>Each action is judged by <strong>what it leaves behind</strong>: it comes back, it does not, or the wallet cannot tell.</li>
-          <li>The wallet acts by itself only where nothing is missing. A loan is closed through its page: "Open the application to do this".</li>
-          <li>It is on <code>main</code>, and the public pages serve it since 21 November 2026.</li>
+          <li>The wallet acts by itself where nothing is missing, or where the template names a <strong>service</strong> that brings what is missing. Since 22 November 2026 a loan is managed and closed from the wallet, with the loan page closed.</li>
+          <li>It is on <code>main</code>, and the public pages serve it since 21 November 2026, on three networks: a mockup chain with play coins, chipnet, and mainnet with a warning. A first use and a recovery ran on mainnet.</li>
         </ul>
       </div>
     </div>
@@ -1011,7 +1011,7 @@ contract VaultAddress(bytes32 tag) {
     <tr><td>The record counts, and its script holds nothing</td><td><span class="pill unk">closed</span></td><td>Reports the position as closed</td></tr>
     <tr><td>Several records count for one token, and one of their scripts holds coins</td><td><span class="pill ok">open</span></td><td>Ordinary: each action that moved the position wrote one. That record is the current one.</td></tr>
     <tr><td>Several count, and more than one of their scripts holds coins</td><td><span class="pill ok">open</span></td><td>Shows each as an open position. Ordinary too: a position moved, and someone who kept its earlier address paid there again. A request that names only the token means the one recorded last.</td></tr>
-    <tr><td>The record names no script</td><td><span class="pill part">held</span></td><td>Shows the token under the template's name, with no word on whether the position is open. Where it would offer actions it shows "Open the application to do this", with the page's address from the record.</td></tr>
+    <tr><td>The record names no script</td><td><span class="pill part">held</span></td><td>Shows the token under the template's name, with no word on whether the position is open. Where the template names a service, it offers the actions the service says are possible; otherwise it shows "Open the application to do this", with the page's address from the record.</td></tr>
     <tr><td>The record does not count, and the wallet holds an NFT of its category</td><td><span class="pill no">not confirmed</span></td><td>Shown apart. An action there is carried out only when the wallet gives nothing but the fee: money can be taken out, and none is paid in.</td></tr>
     <tr><td>The record does not count, and the wallet holds no NFT of its category</td><td></td><td>Shows nothing for it</td></tr>
     <tr><td>A token and no record</td><td></td><td>Shows the token, which can be sent. It does not look for a position.</td></tr>
@@ -1137,19 +1137,19 @@ contract VaultAddress(bytes32 tag) {
         </div>
       </div>
     </div>
-    <figcaption>Sketches of the wallet's screens for these cases, drawn after the screens that are built and pictured from the wallet's fixtures page on a phone and a desktop. The refusal, "Not confirmed" and a backup that cannot be reached are never hidden behind a "?". The screens have not yet been run through the engine with the two applications.</figcaption>
+    <figcaption>Sketches of the wallet's screens for these cases, drawn after the screens that are built and pictured from the wallet's fixtures page on a phone and a desktop. The refusal, "Not confirmed" and a backup that cannot be reached are never hidden behind a "?". The screens have since run through the engine with the two applications, in browsers on the local node, on chipnet and on mainnet.</figcaption>
   </figure>
 </section>
 
 <!-- ============================== ALONE -->
 <section id="alone">
   <h2>Acting without the application</h2>
-  <p>A template says which actions a script offers to whoever holds it. From its list of positions the wallet offers those actions, and carries one out by itself when every value it needs is in the record, is the wallet's own to give, or can be typed by the user, and the action spends no coin of the application's. Otherwise it says "Open the application to do this" and shows the address of the application's page from the record.</p>
+  <p>A template says which actions a script offers to whoever holds it. From its list of positions the wallet offers those actions, and carries one out by itself when every value it needs is in the record, is the wallet's own to give, or can be typed by the user, and the action spends no coin of the application's. Where the template names a service, the wallet asks the service for what is missing and carries the action out itself (<a href="#service">below</a>). Otherwise it says "Open the application to do this" and shows the address of the application's page from the record.</p>
   <div class="grid2">
     <div class="card by" style="--c: var(--good)"><span class="tag">Savings Jar</span><h4 style="margin:6px 0 6px; font: 700 16px var(--font-display)">Emptied by the wallet alone</h4><p class="small" style="margin:0">The jar's two values come from the record, the date on the key from the record's other values, the key's input is the template's own, and the addresses are the wallet's. Nothing is missing. In the run of stage 17 the new device emptied the jar from its own list, with no page, no session and no request.</p></div>
-    <div class="card by" style="--c: var(--recoverer)"><span class="tag">ParyonUSD loan</span><h4 style="margin:6px 0 6px; font: 700 16px var(--font-display)">"Open the application to do this"</h4><p class="small" style="margin:0">Closing a loan spends Paryon's price coin, the loan and its sidecar, and needs their state: the price, the loan's record, the interest manager. Only the application gives those. In the run the wallet answered with the page's address, and the page on the new phone closed the loan.</p></div>
+    <div class="card by" style="--c: var(--recoverer)"><span class="tag">ParyonUSD loan</span><h4 style="margin:6px 0 6px; font: 700 16px var(--font-display)">With its service, or through its page</h4><p class="small" style="margin:0">Closing a loan spends Paryon's price coin, the loan and its sidecar, and needs their state: the price, the loan's record, the interest manager. Only the application gives those. With the first templates the wallet answered "Open the application to do this" with the page's address, and the page on the new phone closed the loan. Version 3 of the template names the loan service, which brings them: the new phone closed the loan from its own list, the page never opened.</p></div>
   </div>
-  <div class="note"><p><strong>Design 2 could do more here.</strong> Its declaration told the wallet how to find a loan through its sidecar coin, which of Paryon's coins an action spends and how to read their values. A recovered loan was closed on chipnet from the wallet's own list, with the loan page not opened. Without a declaration the wallet does not know how to find or read an application's coins, and design 3 does not ask an application for a document written for this wallet. Keeping the declaration as an optional extra was considered and decided against: the loan page carries that knowledge.</p></div>
+  <div class="note"><p><strong>Design 2 could do more here.</strong> Its declaration told the wallet how to find a loan through its sidecar coin, which of Paryon's coins an action spends and how to read their values. A recovered loan was closed on chipnet from the wallet's own list, with the loan page not opened. Without a declaration the wallet does not know how to find or read an application's coins, and design 3 does not ask an application for a document written for this wallet. Keeping the declaration as an optional extra was considered and decided against: the loan page carries that knowledge, and since 22 November 2026 the loan service the template names.</p></div>
   <p><strong>A page is replaceable.</strong> Both demonstration pages are static files whose only dependency is the chain's servers. Anyone can serve them, from any address, and the template they send is identified by its hash. The wallet keeps the address a request came from in the position's record and shows it when an action needs the application; the user can open another copy. This is the answer to an application's site going away, in place of the wallet doing the application's work.</p>
 </section>
 
@@ -1197,6 +1197,16 @@ contract VaultAddress(bytes32 tag) {
     <li><strong>A token that carries authority is spent only in transactions the wallet built itself</strong> from a template the user trusts, or sent on by the wallet's own Send after the tick.</li>
     <li><strong>A standard signing request is refused.</strong> The wallet builds every transaction itself.</li>
   </ul>
+  <h3 id="service">An application's service: <code>xo_service_v1</code></h3>
+  <p>Some actions need what only the application has: a price, a contract coin that many users share and its unlocking. A template can name a server that brings them, in its <code>resources</code>, under the name <code>xo_service_v1</code>. The service takes part in the action as a second participant, in a role of its own, and the wallet carries the action out from its own Apps screen, with the application's page closed. The protocol is this project's own and carries XO's invitations unchanged; it is specified in <a href="https://github.com/9500/grandmas-wallet/blob/main/docs/xo-service.md" target="_blank" rel="noopener"><code>docs/xo-service.md</code></a>.</p>
+  <ol class="steps">
+    <li><div><strong>The wallet starts the invitation</strong> with the user's values and its token, and sends it to the service.</div></li>
+    <li><div><strong>The service joins</strong> with one commit: its own values, the application's coins with their unlocking, and the outputs that put them back.</div></li>
+    <li><div><strong>The wallet checks everything the service added</strong> against the template and the chain: no value of the wallet's touched, every coin read from the chain at the template's script, every output the one the template compiles. It adds its own coins and outputs and runs every input in the virtual machine.</div></li>
+    <li><div><strong>The user sees the wallet's own figures,</strong> with what the service stated apart, under "From the service", and approves or not. The store's confirmation of the record and the findings apply as for any action.</div></li>
+  </ol>
+  <p>The wallet speaks to a service only when the user trusts the template, presses Connect, or carries out an action, never in the background. It tells the service the template, its role, and the tokens it holds or made under that template, and nothing else. What the service offers is checked against the template, so a service cannot add an action. Version 3 of the ParyonUSD loan template, which the loan page sends, names the loan service that runs beside the page.</p>
+  <p><strong>The Apps screen.</strong> Every action of a trusted template is visible: on the template's screen, its service with Connect, its starting actions, each under its role where there are several, and tokens it made that wait elsewhere; under each token, the actions that follow, shown right after the action that brought it. A review writes a template's values in its units. A template can also be added from a file, or deleted.</p>
   <h3>Between the wallet and a recoverer's page</h3>
   <p>The same kind of session carries a phone's set-up request to the recoverer's page and the new wallet back, a lost phone's request and the hand-over, and a kit for a new recoverer, under a second extension of this project's own, separate from <code>xo_v1</code>. The recoverer's page shows the session's address inside its QR code; the wallet announces only this extension and offers nothing else. It is unchanged from design 2.</p>
 <pre class="code">{ "gw_recoverer_v1": { "version": 1 } }</pre>
@@ -1293,6 +1303,7 @@ contract VaultAddress(bytes32 tag) {
     <div><h4>Design 2, and what is still to run</h4><ul>
       <li>With design 2's template and declaration, the same course ran on chipnet, in browsers with the public pages, and an unmodified Cashonize opened and emptied a jar with the same page and contract.</li>
       <li>Design 3 ran the course in browsers on the local node, and on chipnet with the public pages on 20 November 2026 (run G of the plan): after the recovery the new phone trusted the stored template, listed the jar from its record as open, and emptied it from its own list. Of the 183 requests its browser had made by then, none went to the jar's page. The same page opened and emptied a jar with the unmodified Cashonize wallet.</li>
+      <li>On mainnet, with small amounts, on 21 and 22 November 2026: a jar opened with its record in both stores first, the phone lost, the move completed after a day's waiting period, and the jar emptied by the new phone from its own list, with the jar's page never opened on it.</li>
     </ul></div>
   </div>
 </section>
@@ -1300,7 +1311,7 @@ contract VaultAddress(bytes32 tag) {
 <!-- ============================== PARYON -->
 <section id="paryon">
   <h2>ParyonUSD</h2>
-  <p>ParyonUSD lends its dollar token, PUSD, against BCH collateral. Each loan is managed by whoever holds its loan key NFT. That is rule 1 already, on chain, in contracts that need no change. Paryon's public contracts are used unchanged; its team was not asked, and this project's loan page says on every screen that it is an independent demonstration. In design 3 the template's scripts are unchanged, and the template is sent alone. What the declaration held moves to the loan page.</p>
+  <p>ParyonUSD lends its dollar token, PUSD, against BCH collateral. Each loan is managed by whoever holds its loan key NFT. That is rule 1 already, on chain, in contracts that need no change. Paryon's public contracts are used unchanged; its team was not asked, and this project's loan page says on every screen that it is an independent demonstration. In design 3 the template's scripts are unchanged, and the template is sent alone. What the declaration held moves to the loan page, and from version 3 of the template, which the page sends since 22 November 2026, to the loan service the template names (<a href="#service">above</a>).</p>
   <div class="scroll">
   <table>
     <tr><th>Design 2's declaration said</th><th>Now</th></tr>
@@ -1333,11 +1344,13 @@ contract VaultAddress(bytes32 tag) {
       <li><strong>Stage 17:</strong> a key was made with the user's tick, 100.00 PUSD borrowed, collateral added, the phone lost, the wallet recovered. Asked to close the loan by itself, the wallet answered "Open the application to do this" with the page's address, and the page on the new phone closed it. The collateral came back to addresses of the new seed.</li>
       <li>The record was written when the key reached the wallet, at the borrowing. The step that makes the key leaves it in Paryon's contract and records nothing.</li>
       <li>The run calls the page's code without a browser, and cost 16,179 satoshis in network fees.</li>
+      <li><strong>With the loan service</strong> (22 November 2026), in browsers: the page only offered the template; with its tab closed, the loan was carried out from the wallet's screens, the service joining each action. After the recovery the new phone pressed Connect and closed the loan from the key's actions, without opening the page.</li>
     </ul></div>
     <div><h4>Not run, and what to know</h4><ul>
       <li>Design 3 ran the course in browsers on the local node, and on Paryon's chipnet deployment with the public pages on 20 and 21 November 2026 (run H of the plan): a key made with the tick, 100.00 PUSD borrowed, collateral added; after the recovery the wallet showed "Open the application to do this" with the page's address, and the page on the new phone found and closed the loan. The first closing was refused by the network because someone else had spent a coin of Paryon's that it named; the page now asks again at once in that case.</li>
       <li>Design 2 ran a loan on Paryon's chipnet deployment <code>chipnet-fast-periods-6</code> on 18 November 2026, by plain script, through the wallet from the template with its declaration, and from the loan page in browsers; the new phone closed the recovered loan with the page not opened.</li>
-      <li>A repayment that leaves the loan open has not been sent. It takes a loan of 200 PUSD; it passes in the virtual machine against the live outputs.</li>
+      <li>A repayment that leaves the loan open has not been sent on chipnet. It takes a loan of 200 PUSD; it passes in the virtual machine against the live outputs, and was sent on the local node with the loan service.</li>
+      <li>On mainnet the page works with Paryon's deployment <code>mainnet-v1</code>, proposing 150% collateral. No loan has been opened there.</li>
       <li>The deployment's keepers have stopped: its stored price was near $275 while the oracle signed $208. The page reckons at the lower price and takes nothing under 115%.</li>
       <li>The sweep and an action of the loan are separate transactions: the sweep needs the controller as its first input, Paryon's actions their price contract.</li>
       <li>The other 21 contracts (interest, redemption, liquidation, staking) were read only as far as they bear on a loan. Paryon's repository states no licence, so the npm package is used as a dependency and not copied.</li>
@@ -1360,6 +1373,7 @@ contract VaultAddress(bytes32 tag) {
   </table>
   </div>
   <p style="margin-top:14px">With actions judged one by one, the last two rows read differently from design 2. Trading on Cauldron leaves nothing behind and comes back; opening a pool does not. Entering a BCH Bull contract puts a key of the device into its script, for the early exit, so the finding is that it does not come back, although the payout at maturity would survive a recovery: a program cannot tell the two apart. The pattern: applications that already use an ownership NFT need an XO template and a front end that sends requests; applications that wrote a key into a contract need a contract variant.</p>
+  <p><strong>Templates others published.</strong> Templates written by others for XO and published at XO Grid were taken to the wallet too. Which of them work, and why the others do not, is in section 12.4 of the <a href="https://github.com/9500/grandmas-wallet/blob/main/Grandmas_Wallet_Architecture_Proposal_v0.6.md#124-where-existing-applications-stand" target="_blank" rel="noopener">proposal</a>.</p>
 </section>
 
 <!-- ============================== BACKUP -->
@@ -1426,13 +1440,13 @@ contract VaultAddress(bytes32 tag) {
   <div class="scroll">
   <table>
     <tr><th>Page</th><th>What the user meets</th></tr>
-    <tr><td>Wallet</td><td>The first screen has two groups. "New wallet": "I have a code from my bank" and "Someone I trust is setting it up". "I had a wallet before": "I lost my phone", "I still have my old phone" and "I have my own backup". Then the balance, Receive, Send, the applications with their positions and templates, and Recovery. The screens carry little text; explanations sit behind a "?".</td></tr>
+    <tr><td>Wallet</td><td>The first screen has two groups. "New wallet": "I have a code from my bank" and "Someone I trust is setting it up". "I had a wallet before": "I lost my phone", "I still have my old phone" and "I have my own backup". Then the balance, Receive, Send, Apps with the connected applications, tokens and positions, and every action of each trusted template, and Recovery. The screens carry little text; explanations sit behind a "?". The first visit asks for the network: the mockup, chipnet or mainnet.</td></tr>
     <tr><td>Recoverer</td><td>"I'm a bank" or "I'm helping someone I know", chosen once. Its balance with an address to fund it, its wallets or customers, the chain's clock for the waiting period, settings, and "Start afresh". Unchanged from design 2.</td></tr>
     <tr><td>Savings Jar</td><td>Serves a wallet that carries out actions itself and an ordinary wallet, such as Cashonize. It sends the template of version 4 and requests of <code>xo_v1</code> version 2, and lists the jars a wallet holds.</td></tr>
-    <tr><td>Loan page</td><td>"Borrow PUSD against BCH" on Paryon's contracts. It finds a loan from its key, names Paryon's coins and reads their values. Not affiliated with Paryon, and it says so.</td></tr>
+    <tr><td>Loan page</td><td>"Borrow PUSD against BCH" on Paryon's contracts, on chipnet, mainnet and the mockup. It sends version 3 of the template, which names the loan service beside the page, and asks only for what the borrower decides. Not affiliated with Paryon, and it says so.</td></tr>
   </table>
   </div>
-  <p class="small" style="margin-top:10px">The public pages show design 2. Both demonstration pages are static files that anyone can serve.</p>
+  <p class="small" style="margin-top:10px">The public pages show design 3. Both demonstration pages are static files that anyone can serve.</p>
 </section>
 
 <!-- ============================== LIMITS -->
@@ -1450,9 +1464,12 @@ contract VaultAddress(bytes32 tag) {
     <tr><td>Findings for each action</td><td><span class="pill ok">Built</span> Tested on the simulated chain (stage 15).</td></tr>
     <tr><td>The wallet's screens for these</td><td><span class="pill ok">Run on chipnet</span> Built (stage 16), and pictured from the runs in browsers on the local node and on chipnet.</td></tr>
     <tr><td>Savings Jar and ParyonUSD without declarations</td><td><span class="pill ok">Run on chipnet</span> Through the engine and the real recovery flow, on the local node and on chipnet (stage 17).</td></tr>
-    <tr><td>Both courses in browsers</td><td><span class="pill ok">Run</span> On the local node, with the wallet's, the recoverer's and the two applications' pages. The new phone emptied the jar from its own list with the jar's page never opened; the loan was closed from its page on the new phone.</td></tr>
+    <tr><td>Both courses in browsers</td><td><span class="pill ok">Run</span> On the local node, with the wallet's, the recoverer's and the two applications' pages. The new phone emptied the jar from its own list with the jar's page never opened; the loan was closed from its page on the new phone, and in a later course with the loan service from the wallet, the page never opened.</td></tr>
     <tr><td>Both courses on chipnet (runs G and H)</td><td><span class="pill ok">Run on chipnet</span> On 20 and 21 November 2026, with the public pages. The loan's run did not go straight through: its first closing was refused because someone else had spent a coin of Paryon's that it named, and it was closed on a second request. The Savings Jar page was also used with the unmodified Cashonize wallet.</td></tr>
-    <tr><td>Public demonstration</td><td><span class="pill ok">Design 3</span> The public sites show design 3 since 20 November 2026.</td></tr>
+    <tr><td>Public demonstration</td><td><span class="pill ok">Design 3</span> The public sites show design 3 since 20 November 2026, on chipnet, on mainnet beside it since 21 November, and on the mockup.</td></tr>
+    <tr><td>Token names and units from registries</td><td><span class="pill ok">Run on chipnet</span> Built on 21 November 2026; the loan course on chipnet showed "100.00 PUSDTEST" in the wallet's reviews.</td></tr>
+    <tr><td>Mainnet</td><td><span class="pill ok">Run on mainnet</span> By configuration only, with a warning on every page. A first use with small amounts and a recovery through to the jar emptied by the new phone, on 21 and 22 November 2026.</td></tr>
+    <tr><td>An application's service; the Apps screen</td><td><span class="pill ok">Run</span> Built on 22 November 2026, with the loan service and version 3 of the loan template. The loan course ran in browsers on the local node with the page closed.</td></tr>
     <tr><td>A recoverer other than this project's page</td><td><span class="pill unk">Not built</span> The role is stated.</td></tr>
   </table>
   </div>
@@ -1472,9 +1489,9 @@ contract VaultAddress(bytes32 tag) {
     <li><strong>The first coins are traceable</strong> to the creation of the identity, and to the recoverer's coins.</li>
     <li><strong>Applications have to be reached through a template.</strong> Front ends that build transactions from the wallet's public keys cannot serve it.</li>
     <li><strong>This wallet refuses to open a position that a key of the device opens,</strong> even where part of that position would survive a recovery.</li>
-    <li><strong>The wallet does not act for an application where an action needs something only the application knows.</strong> A ParyonUSD loan is managed through its page.</li>
+    <li><strong>The wallet does not act for an application where an action needs something only the application knows,</strong> unless the template names a service that brings it. A ParyonUSD loan of the first templates is managed through its page; one of version 3 from the wallet too, through the loan service.</li>
     <li><strong>A token that came from someone else</strong> is held and can be sent, and the wallet does not find what it controls: there is no record for it.</li>
-    <li><strong>Fungible tokens are shown by category and in raw units,</strong> until the wallet reads a token registry. Sending a token such as PUSD is harder to read than in design 2, whose declaration named it.</li>
+    <li><strong>Fungible tokens are shown by category and in raw units</strong> unless the token's own registry, checked against the chain, names them, as PUSD's does.</li>
     <li><strong>A complete search is a long one.</strong> It looks up every address of fixed ranges, for every seed the wallet has had.</li>
     <li><strong>Templates that hold keys can never change,</strong> and an old identity can outlive its rules. Closing makes every controller transaction 45 bytes larger and turns the identity's vault addresses into addresses nobody can spend from.</li>
   </ul>
@@ -1484,7 +1501,7 @@ contract VaultAddress(bytes32 tag) {
     <li><strong>Positions at a script many users share.</strong> Their record names no script, so the chain check has nothing to test beyond the token: the record says only "this token belongs to that template". Whether the position is open, the application says.</li>
     <li><strong>Positions that change without the wallet.</strong> A liquidated or redeemed loan leaves the wallet holding a key to nothing, and a record that names a coin which is gone. "Closed" and "not found" are ordinary answers.</li>
     <li><strong>A record planted before the sweep</strong> by whoever holds the earlier seed can be listed as a position beside the genuine one. That holder can take every coin in the same time, so the wallet does not try to keep it out.</li>
-    <li><strong>Token names.</strong> Names and decimals are to come from a token registry (BCMR) once the wallet reads one; what such a lookup tells a server about the wallet has to be settled then.</li>
+    <li><strong>Token names.</strong> Names and decimals come from a token's registry (BCMR) where the chain vouches for the file. The wallet's page fetches the file from the host the issuer chose, which learns the browser's network address once per publication.</li>
     <li><strong>XO's synchronisation in place of this project's stores,</strong> once it exists and offers the three things listed under <a href="#xo">XO</a>.</li>
     <li><strong>Confidence in the chain.</strong> What the wallet reads about its transactions and their confirmations it takes from the servers it is set up with, the user's own node among them. It does not call chain state verified.</li>
     <li><strong>Watching on a phone.</strong> A phone that is switched on is not thereby watching the chain. The wallet watches while its page is open, and says so.</li>
@@ -1506,7 +1523,7 @@ contract VaultAddress(bytes32 tag) {
     <li>Moria, Cauldron and AnyHedge: their published contract sources and, for Moria, its live front end.</li>
     <li>WizardConnect and WalletConnect for Bitcoin Cash: their published protocol descriptions.</li>
     <li>XO: its guide, template format, and the state package <code>@xo-cash/state</code> 0.0.5.</li>
-    <li>This project's records: on the branch <code>design-3</code>, <code>docs/stage-11-trial.md</code>, <code>docs/results</code> and <code>docs/runs</code>; <code>docs/decisions.md</code>; and the record of the declaration approach, <code>docs/xo-position-recovery.md</code>.</li>
+    <li>This project's records: on the branch <code>main</code>, <code>docs/stage-11-trial.md</code>, <code>docs/results</code> and <code>docs/runs</code>; <code>docs/decisions.md</code>; <code>docs/xo-service.md</code>; <code>docs/token-registries.md</code>; and the record of the declaration approach, <code>docs/xo-position-recovery.md</code>.</li>
   </ul>
 </section>
 </main>
@@ -1957,7 +1974,7 @@ contract VaultAddress(bytes32 tag) {
     { name: "4 · After recovery", kind: "ok",
       inputs: [{ i: "0", k: "ctrl", t: "Controller", s: "new owner signs: ownerAuthorize" }, { i: "1", k: "app", t: "Loan key, earlier address", s: SWEEP }, { i: "2", k: "wallet", t: "PUSD at an earlier address", s: SWEEP }],
       outputs: [{ i: "0", k: "ctrl", t: "Controller", s: C_SAME }, { i: "1", k: "app", t: "Loan key NFT", s: "at a new address", neu: true }, { i: "2", k: "wallet", t: "PUSD", s: "at a new address", neu: true }],
-      checks: [[1, "No Paryon contract is in this transaction. The loan, its collateral and its sidecar stay where they are."], [1, "The new device reads the key's record; it names no script, so the key is listed as held, under the template's name."], [0, "Asked to close the loan from its own list, the wallet has no price, loan record or interest manager: \"Open the application to do this\", with the page's address."]],
+      checks: [[1, "No Paryon contract is in this transaction. The loan, its collateral and its sidecar stay where they are."], [1, "The new device reads the key's record; it names no script, so the key is listed as held, under the template's name."], [0, "Asked to close the loan from its own list, a wallet with a template that names no service has no price, loan record or interest manager: \"Open the application to do this\", with the page's address. With version 3 the loan service brings them."]],
       verdict: "A token transfer like any other. Paryon cannot tell that a recovery happened." },
     { name: "5 · Close, from the page", kind: "ok",
       inputs: [{ i: "0", k: "app", t: "Price contract", s: "named by the page" }, { i: "1", k: "app", t: "Loan", s: "named by the page" }, { i: "2", k: "app", t: "Loan sidecar", s: "named by the page" }, { i: "3", k: "app", t: "Manage function", s: "named by the page" }, { i: "4", k: "wallet", t: "Loan key NFT", s: "at an address of the new seed" }, { i: "5", k: "wallet", t: "Wallet coin", s: "the fee" }, { i: "6", k: "wallet", t: "PUSD to repay", s: "the whole debt" }],
@@ -2044,7 +2061,7 @@ contract VaultAddress(bytes32 tag) {
         ],
         verdict: "The key reaches the wallet, so a record is written that ties the key to the template and names no script." },
       { name: "Close a loan, from the wallet's list", kind: "no",
-        intro: "Tapped in the wallet's own list on the new phone, after a recovery. The loan sits at a script every borrower shares.",
+        intro: "Tapped in the wallet's own list on the new phone, after a recovery, with a template that names no service. The loan sits at a script every borrower shares.",
         rows: [
           ["keyCategory", "token category", "wal", "The category of the token the action is about: the record's key."],
           ["keyHolder", "locking script", "wal", "A fresh address of the new seed."],
