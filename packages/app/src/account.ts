@@ -62,17 +62,21 @@ const intentFor = (template: XOTemplate, action: string, role: string): IntentLi
 };
 
 /**
- * An output of the template as the engine is given it, tagged with the account's role where the output's locking script
- * names that role. The engine reads a template's `relevant: false` for the role an output is added in, and with no role
- * it follows every script an output pays to. A script that names no such role, such as a contract the role only pays
- * into, is left untagged: the engine refuses a role a locking script does not name.
+ * An output of the template as the engine is given it. Where the output's locking script names the account's role, it
+ * is tagged with that role: the engine reads a template's `relevant: false` for the role an output is added in, and
+ * follows the script. A script that names no such role, such as a contract the role only pays into and that may hold
+ * the coins of every user of an application, is given with the locking bytecode the wallet worked out: the engine then
+ * neither follows it nor asks for a role the script does not name, which it refuses. The coins there are spent as
+ * coins given with their unlocking.
  */
-export const outputForEngine = <T extends object>(template: XOTemplate, output: T, role: string): T & { roleIdentifier?: string } => {
+export const outputForEngine = <T extends object>(template: XOTemplate, output: T, role: string): Omit<T, 'lockingBytecode'> & { roleIdentifier?: string; lockingBytecode?: Uint8Array } => {
   if (!('outputIdentifier' in output) || typeof output.outputIdentifier !== 'string') return output;
   const definition = template as unknown as { outputs?: Record<string, { lockingScript?: string }>; lockingScripts?: Record<string, { roles?: Record<string, unknown> }> };
   const lockingScript = definition.outputs?.[output.outputIdentifier]?.lockingScript;
   const named = lockingScript !== undefined && Object.hasOwn(definition.lockingScripts ?? {}, lockingScript) && Object.hasOwn(definition.lockingScripts?.[lockingScript]?.roles ?? {}, role);
-  return named ? { ...output, roleIdentifier: role } : output;
+  if (!named) return output;
+  const { lockingBytecode: _worked, ...rest } = output as T & { lockingBytecode?: Uint8Array };
+  return { ...rest, roleIdentifier: role };
 };
 
 /**

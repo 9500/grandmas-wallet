@@ -2274,7 +2274,7 @@ export class Applications {
           ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
           ...(given === true ? { unlocking: { bytecode: unlocking as Uint8Array, sequenceNumber: sequence ?? 0 } } : {}),
         })),
-        outputs: plan.outputs.map(({ output, identifier: outputIdentifier, wallet }) => (outputIdentifier === undefined || wallet === 'left over' ? output : { outputIdentifier })),
+        outputs: plan.outputs.map(({ output, identifier: outputIdentifier, wallet }) => (outputIdentifier === undefined || wallet === 'left over' ? output : { outputIdentifier, lockingBytecode: output.lockingBytecode })),
       });
       try {
         this.check(plan, prepared);

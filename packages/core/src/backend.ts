@@ -47,8 +47,11 @@ export interface TransactionRequest {
    * input it stands for; a coin of another template is unlocked the way its own script says.
    */
   inputs: { coin: AccountCoin; inputIdentifier?: string; unlocking?: GivenUnlocking }[];
-  /** The outputs, in order: an output of the template by name, or any output given whole. */
-  outputs: ({ outputIdentifier: string } | Output)[];
+  /**
+   * The outputs, in order: an output of the template by name, or any output given whole. An output of the template
+   * may carry the locking bytecode the wallet worked out, for a key holder that need not follow its script.
+   */
+  outputs: ({ outputIdentifier: string; lockingBytecode?: Uint8Array } | Output)[];
 }
 
 /**
