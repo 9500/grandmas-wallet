@@ -102,6 +102,8 @@ interface Facts {
   coins: Record<string, string>;
   steps: Record<string, { transactionIds: string[]; data?: Record<string, number | string> }>;
   pending?: Record<string, { transactionId: string; hex: string }>;
+  /** The action being carried out, until its transaction is written down. */
+  carrying?: string;
   finished: string[];
   funderAtStart?: string;
   funderAfter?: string;
@@ -488,9 +490,25 @@ try {
     const applications = new Applications(wallet.parts, { archive: applicationArchive({ arrangement: () => facts.arrangement, storeAt, seed: ownerSeed, identity: hexToBin(facts.identity as string), chain }) });
     const category = facts.category as string;
     const carryOut = async (step: string, asked: ApplicationAction, about: string, satoshis?: number): Promise<{ transactionIds: string[]; data?: Record<string, string> }> => {
+      // A part that ended while carrying an action out may have sent it: the run does not carry it out a second time.
+      if (facts.carrying === step) throw new Error(`a part ended while carrying out "${step}", which may have been sent; look at the wallet's transactions and write the step down before continuing`);
       const preview = await applications.preview(asked);
       note(`${step}: the wallet's review ${figuresOf(preview)}.`);
-      const outcome = await applications.carryOut(asked, undefined, { tokensLeave: true });
+      facts.carrying = step;
+      keep();
+      let outcome: Awaited<ReturnType<Applications['carryOut']>>;
+      try {
+        outcome = await applications.carryOut(asked, undefined, { tokensLeave: true });
+      } catch (error) {
+        // Refused by the network: nothing was sent.
+        if (/non-?BIP68-final|rejected by network rules/i.test(String((error as Error).message))) {
+          delete facts.carrying;
+          keep();
+        }
+        throw error;
+      }
+      delete facts.carrying;
+      keep();
       record(step, await sentAs(outcome.transactionId), `${about}; ${await shapeOf(outcome.transactionId)}`);
       if (satoshis !== undefined) {
         facts.coins[step] = await coinOf(outcome.transactionId, satoshis);
