@@ -4,7 +4,7 @@ This document specifies `xo_service_v1`, version 1. It is written for an enginee
 
 `xo_service_v1` is this project's own protocol, as `xo_v1` is. It carries XO's own serialized invitations unchanged. An application's page may still start actions over `xo_v1`; this protocol is a second way in, beside it.
 
-The reference implementation is `packages/connect/src/service.ts`, with its tests in `packages/connect/test/service.test.ts`.
+The reference implementation is `packages/connect/src/service.ts`, with its tests in `packages/connect/test/service.test.ts`. A service built on it is Paryon's, `apps/paryon-service`.
 
 ## What it is for
 
@@ -244,6 +244,8 @@ A refusal:
 ### How a service joins
 
 Before it joins, a service checks the invitation it received with the engine's `validateInvitation`, against the template as its own engine stored it. The engine's `acceptInvitation` does not check signatures or history, so a party that joins an invitation started by the other side must call `validateInvitation` itself. The service then checks the action, the token and the values as the template and its own rules require, and only then appends its commit.
+
+A service answers with exactly one new commit, in the role its hello answer named. In the engine that is one call, `acceptInvitation(invitation, { roleIdentifier, variables, inputs, outputs })`, with everything the service adds; `acceptInvitation` followed by `appendInvitation` makes two commits, and a wallet refuses the answer. The commit leaves the places of its inputs and outputs to the template, and uses no `mergesWith` and no resolutions.
 
 A service can keep no state at all: a fresh engine for each message works. It reserves no coins, so two wallets may be handed the same shared coin; the later transaction is then refused by the network.
 

@@ -72,6 +72,11 @@ export interface ParyonAddresses {
 }
 /** The addresses for Paryon's own deployments, chipnet's and mainnet's alike: one address serves several networks. */
 export const PARYON_ADDRESSES: ParyonAddresses = { service: 'https://paryon.9500.cash/service/v1', page: 'https://paryon.9500.cash/' };
+/**
+ * The addresses for a deployment whose loan page is at `page`: the service at `service/v1` on the same host, as for
+ * Paryon's own (`PARYON_ADDRESSES`). For a deployment on a chain of one's own, whose template is made at run time.
+ */
+export const paryonAddressesAt = (page: string): ParyonAddresses => ({ service: new URL('service/v1', page).href, page });
 /** The resource by which a wallet finds an application's service. */
 export const SERVICE_RESOURCE = 'xo_service_v1';
 

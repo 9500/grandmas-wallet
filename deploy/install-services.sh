@@ -5,12 +5,15 @@
 #   deploy/install-services.sh 192.168.88.112 deploy/config/production.json 2
 #
 # Each service listens on plain HTTP; a reverse proxy in front provides HTTPS. Ports:
-#   8101 wallet, 8102 recoverer, 8103 savings jar application, 8104 loan page, 8105 landing page, 8111 and up
-#   backup stores. The landing page (deploy/landing) introduces the demonstration and links to the others; the
+#   8101 wallet, 8102 recoverer, 8103 savings jar application, 8104 loan page, 8105 landing page, 8106 Paryon's
+#   service (on 127.0.0.1 only), 8111 and up backup stores. The landing page (deploy/landing) introduces the demonstration and links to the others; the
 #   design overview (docs/design_v0.6.html) is served beside it as design.html, and the second design's overview, which it
 #   links to, as design_v0.5.html.
 # The loan page is an independent demonstration with Paryon's public contracts on chipnet; it is served when
 # the configuration names an address for it (loanUrl) and it is built. On mainnet it says that it is off.
+# With it runs Paryon's service (apps/paryon-service), which wallets reach at service/v1 on the loan page's host: the
+# loan page's server forwards that path to it. It serves the networks the configuration offers that have a deployment
+# of Paryon's, mainnet only with "mainnetEnabled": true, runs from the checkout like the stores and keeps nothing.
 # A configuration for mainnet (deploy/config/mainnet.example.json) is installed only if it carries
 # "mainnetEnabled": true; the services have the same names and ports as a chipnet installation and replace it.
 # The pages must have been built first: deploy/preview.sh build
@@ -112,8 +115,13 @@ page jar "savings jar application" 8103
 # The design overviews carry their styles and scripts in the page; the server is told that they are such documents.
 page landing "landing page" 8105 --document design.html --document design_v0.5.html
 NAMES=(wallet recoverer jar landing)
-# The loan page reads the price General Protocols' oracle signs; that server is named for it alone.
-if [ "$LOAN" = yes ]; then page loan "loan page" 8104 --connect https://oracles.generalprotocols.com; NAMES+=(loan); fi
+# The loan page reads the price General Protocols' oracle signs; that server is named for it alone. Its server passes
+# /service/ to Paryon's service, which listens on this machine only.
+if [ "$LOAN" = yes ]; then
+  page loan "loan page" 8104 --connect https://oracles.generalprotocols.com --forward /service/=http://127.0.0.1:8106
+  unit paryon-service "Paryon's service" "$ROOT" --import tsx apps/paryon-service/src/cli.ts --config "$RELEASE/config.json" --host 127.0.0.1 --port 8106
+  NAMES+=(loan paryon-service)
+fi
 for number in $(seq 1 "$STORES"); do
   unit "store$number" "backup store $number" "$ROOT" --import tsx apps/archive-store/src/cli.ts \
     --port "$((8110 + number))" --host "$HOST" --directory "$DATA/store$number" --origin "$WALLET_ORIGIN" --origin "$RECOVERER_ORIGIN"
@@ -123,5 +131,5 @@ done
 systemctl --user daemon-reload
 for name in "${NAMES[@]}"; do systemctl --user enable --quiet "grandmas-wallet-$name.service"; systemctl --user restart "grandmas-wallet-$name.service"; done
 sleep 2
-for name in "${NAMES[@]}"; do printf '%-10s %s\n' "$name" "$(systemctl --user is-active "grandmas-wallet-$name.service")"; done
+for name in "${NAMES[@]}"; do printf '%-15s %s\n' "$name" "$(systemctl --user is-active "grandmas-wallet-$name.service")"; done
 echo "To keep the services running when nobody is logged in: sudo loginctl enable-linger $USER"

@@ -1,6 +1,4 @@
-import { readFileSync } from 'node:fs';
-
-import { type Output, type TransactionCommon, binToHex, createCompilerBch, createVirtualMachineBch2025, decodeTransactionBch, encodeTransactionBch, hexToBin } from '@bitauth/libauth';
+import { type Output, binToHex, createCompilerBch, createVirtualMachineBch2025, hexToBin } from '@bitauth/libauth';
 import {
   type BuiltTransaction,
   type InputSpec,
@@ -22,10 +20,8 @@ import { buildCompilerBytecodeDataFromCompilationVariables, mergeTemplateConstan
 import { describe, expect, it } from 'vitest';
 
 import {
-  type ListedOutput,
   type ParyonAction,
   type ParyonDeployment,
-  type ParyonServiceChain,
   type ServiceRefusal,
   type ServiceShare,
   CHIPNET_FAST_PERIODS_6,
@@ -48,6 +44,7 @@ import {
   manageLoan,
   minimumCollateral,
   outputsOfRole,
+  paryonAddressesAt,
   paryonChipnetTemplateTextV2,
   paryonChipnetTemplateTextV3,
   paryonContracts,
@@ -61,6 +58,7 @@ import {
   serviceShare,
   updateBorrowingPeriod,
 } from '../src/index.js';
+import { FixtureChain, recordedDeployment, recordedOutputs } from './fixture-chain.js';
 
 /**
  * Version 3 of the loan template, in which Paryon's service takes part in every action as a second participant, and the
@@ -118,6 +116,8 @@ describe('version 3 of the template', () => {
         { name: 'Loan page', url: 'https://paryon.9500.cash/' },
       ]);
       expect(serviceAddress(readTemplate(text).definition)).toBe('https://paryon.9500.cash/service/v1');
+      expect(paryonAddressesAt(PARYON_ADDRESSES.page)).toEqual(PARYON_ADDRESSES);
+      expect(paryonAddressesAt('http://localhost:8104/')).toEqual({ service: 'http://localhost:8104/service/v1', page: 'http://localhost:8104/' });
       // Another deployment, on a chain of one's own, names the addresses it is given.
       const local = parts(paryonTemplateAlone(paryonContracts(deployment), 3, { service: 'http://127.0.0.1:9/service/v1', page: 'http://127.0.0.1:9/' }).texts.template);
       expect(local.resources?.map(({ url }) => url)).toEqual(['http://127.0.0.1:9/service/v1', 'http://127.0.0.1:9/']);
@@ -207,79 +207,6 @@ describe('version 3 of the template', () => {
 
 // ------------------------------------------------------------------------------------- the shares, on each deployment
 
-interface RecordedOutput {
-  transactionId: string;
-  index: number;
-  height: number;
-  valueSatoshis: string;
-  lockingBytecode: string;
-  token?: { category: string; amount: string; nft?: { capability: 'none' | 'mutable' | 'minting'; commitment: string } };
-}
-const outputOf = (entry: RecordedOutput): Output => ({
-  lockingBytecode: hexToBin(entry.lockingBytecode),
-  valueSatoshis: BigInt(entry.valueSatoshis),
-  ...(entry.token === undefined
-    ? {}
-    : { token: { category: hexToBin(entry.token.category), amount: BigInt(entry.token.amount), ...(entry.token.nft === undefined ? {} : { nft: { capability: entry.token.nft.capability, commitment: hexToBin(entry.token.nft.commitment) } }) } }),
-});
-
-/**
- * A chain of the recorded outputs and the transactions a test adds. A recorded output's transaction is not recorded: the
- * chain makes one up that has the output at its index, which is all a reader takes from it.
- */
-class FixtureChain implements ParyonServiceChain {
-  private readonly transactions = new Map<string, string>();
-  private readonly unspent = new Map<string, { utxo: Utxo; height: number }>();
-
-  constructor(
-    outputs: RecordedOutput[],
-    readonly height: number,
-  ) {
-    for (const entry of outputs) this.adopt({ transactionHash: hexToBin(entry.transactionId), index: entry.index, output: outputOf(entry) }, entry.height);
-  }
-
-  /** A coin, with a made-up transaction that holds it. */
-  adopt(utxo: Utxo, height = 1): void {
-    const transactionId = binToHex(utxo.transactionHash);
-    const known = this.transactions.get(transactionId);
-    const outputs: Output[] = [];
-    if (known !== undefined) {
-      const decoded = this.decoded(known);
-      outputs.push(...decoded.outputs);
-    }
-    while (outputs.length <= utxo.index) outputs.push({ lockingBytecode: Uint8Array.of(0x6a), valueSatoshis: 0n });
-    outputs[utxo.index] = utxo.output;
-    const transaction: TransactionCommon = { version: 2, inputs: [{ outpointTransactionHash: new Uint8Array(32), outpointIndex: 0, sequenceNumber: 0, unlockingBytecode: new Uint8Array() }], outputs, locktime: 0 };
-    this.transactions.set(transactionId, binToHex(encodeTransactionBch(transaction)));
-    this.unspent.set(`${transactionId}:${utxo.index}`, { utxo, height });
-  }
-
-  private decoded(text: string): TransactionCommon {
-    const transaction = decodeTransactionBch(hexToBin(text));
-    if (typeof transaction === 'string') throw new Error(transaction);
-    return transaction;
-  }
-
-  add(built: BuiltTransaction): void {
-    for (const input of built.transaction.inputs) this.unspent.delete(`${binToHex(input.outpointTransactionHash)}:${input.outpointIndex}`);
-    built.transaction.outputs.forEach((output, index) => this.unspent.set(`${built.transactionId}:${index}`, { utxo: { transactionHash: built.transactionHash, index, output }, height: 0 }));
-    this.transactions.set(built.transactionId, binToHex(encodeTransactionBch(built.transaction)));
-  }
-
-  async tip(): Promise<{ height: number }> {
-    return { height: this.height };
-  }
-
-  async getTransaction(transactionId: string): Promise<string | undefined> {
-    return this.transactions.get(transactionId);
-  }
-
-  async listUnspent(lockingBytecode: Uint8Array): Promise<ListedOutput[]> {
-    return [...this.unspent.values()]
-      .filter(({ utxo }) => binToHex(utxo.output.lockingBytecode) === binToHex(lockingBytecode))
-      .map(({ utxo, height }) => ({ transactionId: binToHex(utxo.transactionHash), index: utxo.index, valueSatoshis: utxo.output.valueSatoshis, height }));
-  }
-}
 const hex = binToHex;
 const outpoint = (utxo: Utxo): string => `${hex(utxo.transactionHash)}:${utxo.index}`;
 const vm2025 = createVirtualMachineBch2025(true);
@@ -340,8 +267,8 @@ const runOn = (deployment: ParyonDeployment, text: string): void => {
   const contracts = paryonContracts(deployment);
   const service = paryonService(contracts, text);
   const template = service.template;
-  const recorded = JSON.parse(readFileSync(new URL(`fixtures/${deployment.network}-live.json`, import.meta.url), 'utf8')) as Record<'borrowing' | 'price' | 'loanKeyFactory' | 'manage' | 'changeInterest', RecordedOutput[]> & { tip: { height: number } };
-  const all = [...recorded.borrowing, ...recorded.price, ...recorded.loanKeyFactory, ...recorded.manage, ...recorded.changeInterest];
+  const recorded = recordedDeployment(deployment.network);
+  const all = recordedOutputs(recorded);
   const STORED_PRICE = recorded.price.map((entry) => decodePriceState(hexToBin(entry.token?.nft?.commitment ?? '')).price).reduce((a, b) => (a > b ? a : b));
   // The tip as recorded; where every Borrowing thread is in the tip's period already (as on mainnet), a height in the
   // next period, so that there is something to bring up to date.
