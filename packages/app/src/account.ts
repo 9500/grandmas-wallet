@@ -62,21 +62,20 @@ const intentFor = (template: XOTemplate, action: string, role: string): IntentLi
 };
 
 /**
- * An output of the template as the engine is given it. Where the output's locking script names the account's role, it
- * is tagged with that role: the engine reads a template's `relevant: false` for the role an output is added in, and
- * follows the script. A script that names no such role, such as a contract the role only pays into and that may hold
- * the coins of every user of an application, is given with the locking bytecode the wallet worked out: the engine then
- * neither follows it nor asks for a role the script does not name, which it refuses. The coins there are spent as
- * coins given with their unlocking.
+ * An output of the template as the engine is given it. An output the wallet gives with its locking bytecode, to a
+ * script the engine is not to follow (a contract the role only pays into, or one that many users' coins share), is
+ * given so: the engine then neither follows the script nor asks for a role on it. Otherwise, where the output's
+ * locking script names the account's role, it is tagged with that role: the engine reads a template's
+ * `relevant: false` for the role an output is added in, and follows the script. A script that names no such role is
+ * left untagged, as the engine refuses a role a locking script does not name.
  */
-export const outputForEngine = <T extends object>(template: XOTemplate, output: T, role: string): Omit<T, 'lockingBytecode'> & { roleIdentifier?: string; lockingBytecode?: Uint8Array } => {
+export const outputForEngine = <T extends object>(template: XOTemplate, output: T, role: string): T & { roleIdentifier?: string } => {
   if (!('outputIdentifier' in output) || typeof output.outputIdentifier !== 'string') return output;
+  if ('lockingBytecode' in output && output.lockingBytecode instanceof Uint8Array) return output;
   const definition = template as unknown as { outputs?: Record<string, { lockingScript?: string }>; lockingScripts?: Record<string, { roles?: Record<string, unknown> }> };
   const lockingScript = definition.outputs?.[output.outputIdentifier]?.lockingScript;
   const named = lockingScript !== undefined && Object.hasOwn(definition.lockingScripts ?? {}, lockingScript) && Object.hasOwn(definition.lockingScripts?.[lockingScript]?.roles ?? {}, role);
-  if (!named) return output;
-  const { lockingBytecode: _worked, ...rest } = output as T & { lockingBytecode?: Uint8Array };
-  return { ...rest, roleIdentifier: role };
+  return named ? { ...output, roleIdentifier: role } : output;
 };
 
 /**

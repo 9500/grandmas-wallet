@@ -643,3 +643,45 @@ describe('values of a script\'s state that the request gives', () => {
     await refused(device, () => device.applications.preview(request(presented, 'solve', 'solver', { answer: ANSWER, answerHash: HASH }, { inputs: { boxInput: box } })), /is at no script of the template/);
   });
 });
+
+describe('what the key holder is told to follow when an action pays into a contract', () => {
+  const ANSWER = hex(utf8ToBin('a riddle\'s answer'));
+  const HASH = hex(sha256.hash(utf8ToBin('a riddle\'s answer')));
+  /** The requests the key holder is given to build, as they reach it. */
+  const watched = (device: Device): Parameters<Device['backend']['prepare']>[0][] => {
+    const seen: Parameters<Device['backend']['prepare']>[0][] = [];
+    const prepare = device.backend.prepare.bind(device.backend);
+    device.backend.prepare = async (asked) => (seen.push(asked), prepare(asked));
+    return seen;
+  };
+
+  it('a payment into a script that names only another role gives the key holder the script as worked out, and a coin there is spent with its unlocking', async () => {
+    const presented = presentation(riddleTemplate);
+    const device = await deviceWith([100_000n, 100_000n]);
+    const seen = watched(device);
+    const sent = await device.applications.carryOut(request(presented, 'hide', 'setter', { answerHash: HASH, prize: 20_000 }));
+    const at = templateLockingBytecode(definitionOf(presented), 'boxLockingScript', { answerHash: HASH });
+    const [hiding] = seen;
+    expect(hiding?.outputs.filter((output) => 'outputIdentifier' in output)).toEqual([{ outputIdentifier: 'boxOutput', lockingBytecode: at }]);
+    const box = `${sent.transactionId}:${(await transactionOf(device, sent.transactionId)).outputs.findIndex((output) => hex(output.lockingBytecode) === hex(at))}`;
+    await device.applications.carryOut(request(presented, 'solve', 'solver', { answer: ANSWER, answerHash: HASH }, { inputs: { boxInput: box } }));
+    const solving = seen.at(-1);
+    expect(solving?.inputs.map(({ inputIdentifier, unlocking }) => ({ inputIdentifier, given: unlocking !== undefined }))).toEqual([{ inputIdentifier: 'boxInput', given: true }]);
+  });
+
+  it('a payment into a script the role names is left to the key holder to follow, unless many coins share the script', async () => {
+    const box = riddleTemplate.lockingScripts.boxLockingScript;
+    const presented = presentation({ ...riddleTemplate, lockingScripts: { boxLockingScript: { ...box, roles: { ...box.roles, setter: { selectable: false } } } } });
+    const at = templateLockingBytecode(definitionOf(presented), 'boxLockingScript', { answerHash: HASH });
+    const alone = await deviceWith([100_000n, 100_000n]);
+    const seenAlone = watched(alone);
+    await alone.applications.carryOut(request(presented, 'hide', 'setter', { answerHash: HASH, prize: 20_000 }));
+    expect(seenAlone[0]?.outputs.filter((output) => 'outputIdentifier' in output)).toEqual([{ outputIdentifier: 'boxOutput' }]);
+    const shared = await deviceWith([100_000n, 100_000n]);
+    shared.chain.adopt(Array.from({ length: 51 }, (_, index) => ({ transactionId: index.toString(16).padStart(64, 'c'), index: 0, output: { lockingBytecode: at, valueSatoshis: 1_000n } })));
+    shared.chain.mine();
+    const seenShared = watched(shared);
+    await shared.applications.carryOut(request(presented, 'hide', 'setter', { answerHash: HASH, prize: 20_000 }));
+    expect(seenShared[0]?.outputs.filter((output) => 'outputIdentifier' in output)).toEqual([{ outputIdentifier: 'boxOutput', lockingBytecode: at }]);
+  });
+});

@@ -28,7 +28,12 @@ describe('the role an output of a template is given to the engine with', () => {
 
   it('tags an output with the acting role where its locking script names that role, and leaves its script to the engine', () => {
     expect(outputForEngine(template, { outputIdentifier: 'ownOutput' }, 'payer')).toEqual({ outputIdentifier: 'ownOutput', roleIdentifier: 'payer' });
-    expect(outputForEngine(template, { outputIdentifier: 'contractOutput', lockingBytecode: Uint8Array.of(0xaa) }, 'spender')).toEqual({ outputIdentifier: 'contractOutput', roleIdentifier: 'spender' });
+    expect(outputForEngine(template, { outputIdentifier: 'contractOutput' }, 'spender')).toEqual({ outputIdentifier: 'contractOutput', roleIdentifier: 'spender' });
+  });
+
+  it('gives an output to a script the role names with its locking bytecode where the wallet gives one, as for a contract many share', () => {
+    const lockingBytecode = Uint8Array.of(0xaa, 0x20);
+    expect(outputForEngine(template, { outputIdentifier: 'contractOutput', lockingBytecode }, 'spender')).toEqual({ outputIdentifier: 'contractOutput', lockingBytecode });
   });
 
   it('leaves untagged an output whose locking script is a value, and an output given whole', () => {

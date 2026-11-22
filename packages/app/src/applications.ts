@@ -784,6 +784,12 @@ interface PlannedOutput {
   output: Output;
   identifier?: string;
   wallet?: WalletOutputKind;
+  /**
+   * An output of the template to a script the key holder is not to follow: one the template says it need not track,
+   * one its script does not name the action's role on, or one many coins share. It is given to the key holder with
+   * its locking bytecode as worked out.
+   */
+  unfollowed?: true;
 }
 
 interface Plan {
@@ -1563,6 +1569,24 @@ export class Applications {
       }
     }
     for (const input of applicationInputs) if (crowded.has(hex(input.coin.utxo.output.lockingBytecode))) input.given = true;
+    // The same for the template's outputs to scripts that are not the wallet's: a contract many share is not followed
+    // because the action pays to it.
+    for (const planned of templateOutputs) {
+      if (planned.wallet !== undefined || planned.identifier === undefined) continue;
+      const lockingScript = definition.outputs?.[planned.identifier]?.lockingScript;
+      const script = lockingScript === undefined ? undefined : (definition.lockingScripts?.[lockingScript] as { relevant?: unknown; roles?: Record<string, { relevant?: unknown }> } | undefined);
+      if (script === undefined) continue;
+      const bytecode = planned.output.lockingBytecode;
+      const most = this.options.followUpTo ?? 50;
+      const unfollowed =
+        script.relevant === false ||
+        script.roles?.[request.role] === undefined ||
+        script.roles[request.role]?.relevant === false ||
+        crowded.has(hex(bytecode)) ||
+        (await this.wallet.chain.listUnspent(bytecode)).length > most ||
+        (await this.wallet.chain.getHistory(bytecode)).length > most;
+      if (unfollowed) planned.unfollowed = true;
+    }
     // The token the action spends: at the template's input for it, where the template gives it one (section 13.3).
     const spentToken: (PlannedInput & { index?: number }) | undefined =
       token !== undefined && frame.spends
@@ -2274,7 +2298,7 @@ export class Applications {
           ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
           ...(given === true ? { unlocking: { bytecode: unlocking as Uint8Array, sequenceNumber: sequence ?? 0 } } : {}),
         })),
-        outputs: plan.outputs.map(({ output, identifier: outputIdentifier, wallet }) => (outputIdentifier === undefined || wallet === 'left over' ? output : { outputIdentifier, lockingBytecode: output.lockingBytecode })),
+        outputs: plan.outputs.map(({ output, identifier: outputIdentifier, wallet, unfollowed }) => (outputIdentifier === undefined || wallet === 'left over' ? output : { outputIdentifier, ...(unfollowed === true ? { lockingBytecode: output.lockingBytecode } : {}) })),
       });
       try {
         this.check(plan, prepared);
