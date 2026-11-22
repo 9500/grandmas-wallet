@@ -26,13 +26,16 @@ import type { Owner } from './OwnerApp.js';
  * follow-ups its service offers), `unreached` (its last exchange failed) or `unusable` (its address cannot be used).
  * Beside it, a token of a template without a service. With `&fail=unreachable`, `declined` or `refused`, working out an
  * action fails as it would with such a service; with `&fail=spent`, carrying it out fails because a coin was spent first,
- * and asking again goes through. The template, its words and the service are invented examples; nothing is sent.
+ * and asking again goes through. With `&roles`, its starting actions are under two roles, each named beside its action, as
+ * for a template whose role the wallet does not settle. The template, its words and the service are invented examples;
+ * nothing is sent.
  */
 
 const params = new URLSearchParams(window.location.search);
 type Mode = 'never' | 'reached' | 'unreached' | 'unusable';
 let mode: Mode = (['never', 'reached', 'unreached', 'unusable'] as const).find((candidate) => candidate === params.get('service')) ?? 'reached';
 const fail = params.get('fail');
+const twoRoles = params.has('roles');
 
 const AT = 1_795_000_000;
 const URL_ = 'https://lending.example.org/xo';
@@ -79,7 +82,8 @@ const status = (): ServiceStatus => {
 };
 
 const debt = { variable: 'debt', name: 'Amount to borrow', description: 'Tokens to borrow, in cents.', type: 'integer' };
-const startingOf = (): TemplateAction[] => {
+const lend: TemplateAction = { action: 'lend', role: 'lender', name: 'Lend', description: 'Put coins up for borrowers to take.', asks: [{ variable: 'amount', name: 'Amount', description: 'Satoshis to put up.', type: 'satoshis' }] };
+const borrowerStarting = (): TemplateAction[] => {
   if (mode === 'unusable') {
     const needs = 'It needs the template\'s service, which this wallet cannot use here: The address is not https.';
     return [actionOf('prepare', { asks: [debt], service: {}, needsApplication: needs }), actionOf('fixed', { service: {}, needsApplication: needs })];
@@ -87,6 +91,7 @@ const startingOf = (): TemplateAction[] => {
   if (mode !== 'reached') return [actionOf('prepare', { asks: [debt], service: {} }), actionOf('fixed', { service: {} })];
   return [actionOf('prepare', { asks: [debt], service: { available: true, checkedAt: AT } }), actionOf('fixed', { service: { available: false, reason: 'Fixed rates are not offered now.', checkedAt: AT } })];
 };
+const startingOf = (): TemplateAction[] => (twoRoles ? [...borrowerStarting(), lend] : borrowerStarting());
 const waitingOf = (): TemplateAction[] => (mode === 'reached' ? [actionOf('borrow', { service: { checkedAt: AT }, waiting: { category: NEW_KEY, at: 'Lending contract' } })] : []);
 
 const nft = (category: string, at: number) => ({ category, commitment: '', capability: 'none' as const, outpoint: `${'7c'.repeat(32)}:${at}`, satoshis: 1_000n, place: 'address' as const });
@@ -228,8 +233,10 @@ const fixtureApplications = {
     return contacting;
   },
   templateActions: async (identifier: string): Promise<TemplateActions | undefined> =>
-    identifier === LENDING ? { template: { identifier, name: lending.name }, role: 'borrower', service: status(), starting: startingOf(), waiting: waitingOf() } : undefined,
-  startAction: (identifier: string, action: string, typed: Record<string, string | number> = {}): ApplicationAction => ({ template: { identifier, contentHash: lending.contentHash }, action, role: 'borrower', variables: {}, fromWallet: { typed } }),
+    identifier === LENDING
+      ? { template: { identifier, name: lending.name }, ...(twoRoles ? { roleNames: { borrower: 'Borrower', lender: 'Lender' } } : { role: 'borrower' }), service: status(), starting: startingOf(), waiting: waitingOf() }
+      : undefined,
+  startAction: (identifier: string, action: string, typed: Record<string, string | number> = {}, role = 'borrower'): ApplicationAction => ({ template: { identifier, contentHash: lending.contentHash }, action, role, variables: {}, fromWallet: { typed } }),
   waitingAction: (identifier: string, category: string, action: string, typed: Record<string, string | number> = {}): ApplicationAction => ({ template: { identifier, contentHash: lending.contentHash }, action, role: 'borrower', variables: {}, about: { category, spent: true }, fromWallet: { typed } }),
   actionOn: (position: RecordedPosition, action: string, typed: Record<string, string | number> = {}): ApplicationAction => ({ template: { identifier: position.template.identifier, contentHash: lending.contentHash }, action, role: 'borrower', variables: {}, about: { category: position.token.category, spent: true }, fromWallet: { typed } }),
   preview: async (request: ApplicationAction): Promise<ActionPreview> => {

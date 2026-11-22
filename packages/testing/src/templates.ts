@@ -533,5 +533,48 @@ export const jointEnvelopeTemplate = {
   variables: { ...envelopeTemplate.variables, giverKey: { ...view('Giver\'s key', 'The giver\'s half of the envelope\'s lock.'), type: 'private_key' } },
 } as const;
 
+/**
+ * A guest book whose starting actions are under two roles: a host opens a book, a guest signs one or opens one too. Each
+ * action makes a token of the wallet's from its own coin, at an address of the wallet's; nothing is shared.
+ */
+export const guestBookTemplate = {
+  $schema: SCHEMA,
+  ...view('Guest book', 'A host opens a book and guests sign it. Each gets a token of their own.'),
+  version: '1',
+  supported: ['BCH_2026_05'],
+  roles: { host: view('Host', 'Opens a book.'), guest: view('Guest', 'Signs a book.') },
+  start: [
+    { action: 'openBook', role: 'host' },
+    { action: 'sign', role: 'guest' },
+    { action: 'openBook', role: 'guest' },
+  ],
+  actions: {
+    openBook: {
+      ...view('Open a book', 'Make a book token with coins on it.'),
+      roles: { host: { requirements: { variables: ['bookKey', 'amount', 'holder'] } }, guest: { requirements: { variables: ['bookKey', 'amount', 'holder'] } } },
+      requirements: { participants: [{ role: 'host', slots: { min: 0, max: 1 } }, { role: 'guest', slots: { min: 0, max: 1 } }] },
+      transaction: 'openTransaction',
+    },
+    sign: action('Sign', 'Make a page token of your own.', 'guest', ['pageKey', 'holder'], 'signTransaction'),
+  },
+  transactions: {
+    openTransaction: { ...view('Book opened', 'A book of $(<amount>) satoshis was opened.'), inputs: [], outputs: [{ output: 'bookOutput' }], version: 2, locktime: 0 },
+    signTransaction: { ...view('Signed', 'A page was signed.'), inputs: [], outputs: [{ output: 'pageOutput' }], version: 2, locktime: 0 },
+  },
+  inputs: {},
+  outputs: {
+    bookOutput: { ...view('Book', 'The book token, with $(<amount>) satoshis.'), lockingScript: '$(<holder>)', valueSatoshis: '$(<amount>)', token: { category: '$(<bookKey>)', amount: null, nft: { capability: 'none', commitment: '' } } },
+    pageOutput: { ...view('Page', 'The page token.'), lockingScript: '$(<holder>)', valueSatoshis: '1000', token: { category: '$(<pageKey>)', amount: null, nft: { capability: 'none', commitment: '' } } },
+  },
+  lockingScripts: {},
+  scripts: {},
+  variables: {
+    bookKey: { ...view('Book', 'The token category of the book.'), type: 'token_category' },
+    pageKey: { ...view('Page', 'The token category of the page.'), type: 'token_category' },
+    amount: { ...view('Amount', 'Satoshis on the book.'), type: 'satoshis' },
+    holder: { ...view('Holder', 'Where the token goes: an address of the wallet.'), type: 'locking_script' },
+  },
+} as const;
+
 /** A template as an application would send it: its text. */
 export const templateText = (template: unknown): string => JSON.stringify(template);
