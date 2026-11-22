@@ -19,8 +19,8 @@
 # 8111 and 8112. The loan page uses Paryon's deployment on chipnet, whose template names Paryon's public loan service;
 # on the local node it says it has none, since the preview deploys none. A configuration file that names a deployment
 # of Paryon's contracts on a chain of one's own ("paryon" for regtest or the mockup) gets Paryon's loan service as
-# well, on 8106 with the same file: its template names the service at <loanUrl>service/v1, and the loan page
-# forwards /service/ to it. From another computer, forward those ports (and 60403, the local node's server, for
+# well, on 8106 with the same file: its template names the service at <loanUrl>service/v1, the loan page
+# forwards /service/ to it, and the wallet page may connect to the loan page's origin. From another computer, forward those ports (and 60403, the local node's server, for
 # `local`) and open http://localhost:8101 and the others. A page at localhost counts as
 # secure for the browser, which the pages' cryptography needs; a page at this machine's network address
 # over plain HTTP does not.
@@ -70,16 +70,19 @@ case "${1:-}" in
       launch "store$number" "$NODE" --import tsx apps/archive-store/src/cli.ts --port "$((8110 + number))" --host 127.0.0.1 \
         --directory "$STATE/store$number" --origin http://localhost:8101 --origin http://localhost:8102
     done
-    launch wallet "$NODE" deploy/serve.mjs --root apps/wallet/dist --config "$CONFIG" --host 127.0.0.1 --port 8101
-    launch recoverer "$NODE" deploy/serve.mjs --root apps/recoverer/dist --config "$CONFIG" --host 127.0.0.1 --port 8102
-    launch jar "$NODE" deploy/serve.mjs --root apps/jar/dist --config "$CONFIG" --host 127.0.0.1 --port 8103
-    # Paryon's loan service, for a deployment on a chain of one's own, which no public service serves.
-    OWN_PARYON="$("$NODE" -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const parts = c.networks === undefined ? [c] : Object.entries(c.networks).map(([network, part]) => ({ ...c, ...part, network })); console.log(parts.some((part) => ["regtest", "mockup"].includes(part.network) && typeof part.paryon === "object" && part.paryon !== null) ? "yes" : "no")' "$CONFIG")"
+    # Paryon's loan service, for a deployment on a chain of one's own, which no public service serves. The wallet page
+    # reaches it beside the loan page, so it may connect to the loan page's origin (its template names the service there).
+    SERVICE_ORIGINS="$("$NODE" -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const parts = c.networks === undefined ? [c] : Object.entries(c.networks).map(([network, part]) => ({ ...c, ...part, network })); const own = parts.filter((part) => ["regtest", "mockup"].includes(part.network) && typeof part.paryon === "object" && part.paryon !== null); console.log(own.length === 0 ? "none" : [...new Set(own.flatMap((part) => (typeof part.loanUrl === "string" ? [new URL(part.loanUrl).origin] : [])))].join(" "))' "$CONFIG")"
     FORWARD=()
-    if [ "$OWN_PARYON" = yes ]; then
+    WALLET_CONNECT=()
+    if [ "$SERVICE_ORIGINS" != none ]; then
       launch paryon-service "$NODE" --import tsx apps/paryon-service/src/cli.ts --config "$CONFIG" --host 127.0.0.1 --port 8106
       FORWARD=(--forward /service/=http://127.0.0.1:8106)
+      for origin in $SERVICE_ORIGINS; do WALLET_CONNECT+=(--connect "$origin"); done
     fi
+    launch wallet "$NODE" deploy/serve.mjs --root apps/wallet/dist --config "$CONFIG" --host 127.0.0.1 --port 8101 "${WALLET_CONNECT[@]}"
+    launch recoverer "$NODE" deploy/serve.mjs --root apps/recoverer/dist --config "$CONFIG" --host 127.0.0.1 --port 8102
+    launch jar "$NODE" deploy/serve.mjs --root apps/jar/dist --config "$CONFIG" --host 127.0.0.1 --port 8103
     # The loan page reads the price General Protocols' oracle signs; that server is named for it alone.
     launch loan "$NODE" deploy/serve.mjs --root apps/loan/dist --config "$CONFIG" --host 127.0.0.1 --port 8104 --connect https://oracles.generalprotocols.com "${FORWARD[@]}"
     if [ "$2" = local ]; then
