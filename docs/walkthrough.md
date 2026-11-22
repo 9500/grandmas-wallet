@@ -13,7 +13,7 @@ It walks through the wallet in a browser: a helper sets up a wallet for Grandma 
 
 The public pages are released from this repository; `version.json` at each address names the commit and the branch, `main` for this design. The same pages run on your own machine (at the end).
 
-The same course runs unattended in scripts on the local node: setting up and recovering in `scripts/browser-run.ts` ([runs/wallet-set-up-local-node.md](runs/wallet-set-up-local-node.md)), the jar in `scripts/stage-17-jar-browser.ts` ([runs/stage-17-jar-browser-local-node.md](runs/stage-17-jar-browser-local-node.md)) and the loan in `scripts/stage-17-loan-browser.ts` ([runs/stage-17-loan-browser-local-node.md](runs/stage-17-loan-browser-local-node.md)). Pictures of their screens are in [screens/](screens/), those of the applications as `live-jar-*` and `live-loan-*`.
+The same course runs unattended in scripts on the local node: setting up and recovering in `scripts/browser-run.ts` ([runs/wallet-set-up-local-node.md](runs/wallet-set-up-local-node.md)), the jar in `scripts/stage-17-jar-browser.ts` ([runs/stage-17-jar-browser-local-node.md](runs/stage-17-jar-browser-local-node.md)) and the loan in `scripts/stage-17-loan-browser.ts` ([runs/stage-17-loan-browser-local-node.md](runs/stage-17-loan-browser-local-node.md)), and carried out from the wallet with the loan service in `scripts/stage-17-loan-service-browser.ts` ([runs/stage-17-loan-service-browser-local-node.md](runs/stage-17-loan-service-browser-local-node.md)). Pictures of their screens are in [screens/](screens/), those of the applications as `live-jar-*`, `live-loan-*` and `live-loan-service-*`.
 
 ## What you need
 
@@ -144,8 +144,8 @@ deploy/preview.sh stop
 
 The wallet is then at <http://localhost:8101/>, the recoverer at <http://localhost:8102/>, the Savings Jar at <http://localhost:8103/> and the loan page at <http://localhost:8104/>. The connection between the pages goes through the relays named in `deploy/config/local-regtest.json`, which are public ones; the scripted courses use a relay on this machine instead. A jar opened here can be emptied once the chain's clock passes its date: `local-pay.ts time` moves the clock on.
 
-The loan page needs Paryon's contracts deployed on the local chain, and the preview deploys none: the page says "No deployment of Paryon's contracts". `scripts/stage-17-loan-browser.ts` deploys them for its run and serves the loan page with that deployment in its configuration.
+The loan page needs Paryon's contracts deployed on the local chain, and the preview deploys none: the page says "No deployment of Paryon's contracts". `scripts/stage-17-loan-browser.ts` deploys them for its run and serves the loan page with that deployment in its configuration. A configuration file that names such a deployment (`"paryon"`) gets the loan service as well, on port 8106, at `service/v1` beside the loan page, as `scripts/stage-17-loan-service-browser.ts` does.
 
-`deploy/preview.sh start chipnet` serves the same pages for chipnet on the same local addresses, the loan page with Paryon's deployment there.
+`deploy/preview.sh start chipnet` serves the same pages for chipnet on the same local addresses, the loan page with Paryon's deployment there, whose template names the public loan service.
 
 To check a set of pages without coins before trying them by hand: `npx tsx scripts/page-smoke.ts deploy/config/local-regtest.json` (or `local.json` for the chipnet preview, `production.json` for the public pages).
