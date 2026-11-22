@@ -1,9 +1,9 @@
-import { type TransactionCommon, binToHex, decodeTransactionBch, hexToBin } from '@bitauth/libauth';
+import { type TransactionCommon, binToHex, decodeTransactionBch, hexToBin, sha256, utf8ToBin } from '@bitauth/libauth';
 import { type MemoryStore, type PositionRecordEntry, positionEntry } from '@grandmas-wallet/archive';
 import { type RecordedPosition, ActionRefusedError, NeedsApplicationError, TickNeededError, applicationArchive, applicationConnector, walletAnnouncement } from '@grandmas-wallet/app';
 import { type ActionDetails, type Channel, type Proposal, DappRequests, XO_EXTENSION, readAdvertisement } from '@grandmas-wallet/connect';
 import { ADDRESS_KIND, p2pkhLockingBytecode, readTemplate, takeNumber, templateLockingBytecode, walletAddress } from '@grandmas-wallet/core';
-import { cloakroomTemplate, furnaceTemplate, keyedStrongboxTemplate, lockerClubTemplate, strongboxTemplate, testKey } from '@grandmas-wallet/testing';
+import { cloakroomTemplate, furnaceTemplate, keyedStrongboxTemplate, lockerClubTemplate, riddleTemplate, solverRiddleTemplate, strongboxTemplate, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
 import { type Device, deviceWith, finishCopying, presentation, request, seedOf } from './support/applications.js';
@@ -604,5 +604,42 @@ describe('a template input that leaves its coin\'s satoshis and tokens out of th
     expect(shapeOf(await transactionOf(device, burned.transactionId))).toEqual({ inputs: 1, outputs: [0n] });
     const kept = (await device.wallet.parts.tokenCoins()).filter(({ coin }) => hex(coin.utxo.output.token?.category ?? new Uint8Array()) === FUEL);
     expect(kept.map(({ coin }) => coin.utxo.output.token?.amount)).toEqual([4800n]);
+  });
+});
+
+describe('values of a script\'s state that the request gives', () => {
+  const ANSWER = hex(utf8ToBin('a riddle\'s answer'));
+  const HASH = hex(sha256.hash(utf8ToBin('a riddle\'s answer')));
+  const balanceOf = async (device: Device): Promise<bigint> => (await device.wallet.balance()).recoverable;
+  /** A box hidden by the wallet, and its outpoint. */
+  const hidden = async (device: Device, presented: Presented): Promise<string> => {
+    const sent = await device.applications.carryOut(request(presented, 'hide', 'setter', { answerHash: HASH, prize: 20_000 }));
+    const at = templateLockingBytecode(definitionOf(presented), 'boxLockingScript', { answerHash: HASH });
+    return `${sent.transactionId}:${(await transactionOf(device, sent.transactionId)).outputs.findIndex((output) => hex(output.lockingBytecode) === hex(at))}`;
+  };
+
+  for (const [what, template] of [['the script', riddleTemplate], ['the solver\'s role', solverRiddleTemplate]] as const) {
+    it(`a coin the request names is recognised and unlocked with a value of the state that ${what} lists and the role does not provide, as the request gives it`, async () => {
+      const presented = presentation(template);
+      const device = await deviceWith([100_000n, 100_000n]);
+      const box = await hidden(device, presented);
+      const solve = (variables: Record<string, string>) => request(presented, 'solve', 'solver', variables, { inputs: { boxInput: box } });
+      // Without the hash, and with another hash, the coin is at no script of the template made with the action's values.
+      await refused(device, () => device.applications.preview(solve({ answer: ANSWER })), /is at no script of the template/);
+      await refused(device, () => device.applications.preview(solve({ answer: ANSWER, answerHash: hex(sha256.hash(utf8ToBin('another answer'))) })), /is at no script of the template/);
+      const before = await balanceOf(device);
+      const solved = await device.applications.carryOut(solve({ answer: ANSWER, answerHash: HASH }));
+      const transaction = await transactionOf(device, solved.transactionId);
+      expect(transaction.inputs).toHaveLength(1);
+      expect(transaction.outputs.map((output) => output.valueSatoshis)).toEqual([20_000n - solved.sent.feeSatoshis]);
+      expect(await balanceOf(device)).toBe(before + 20_000n - solved.sent.feeSatoshis);
+    });
+  }
+
+  it('a value the request gives for a variable that is not in the script\'s state does not make the script', async () => {
+    const presented = presentation({ ...riddleTemplate, lockingScripts: { boxLockingScript: { ...riddleTemplate.lockingScripts.boxLockingScript, state: { variables: [] } } } });
+    const device = await deviceWith([100_000n, 100_000n]);
+    const box = await hidden(device, presented);
+    await refused(device, () => device.applications.preview(request(presented, 'solve', 'solver', { answer: ANSWER, answerHash: HASH }, { inputs: { boxInput: box } })), /is at no script of the template/);
   });
 });

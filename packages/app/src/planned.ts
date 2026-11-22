@@ -22,10 +22,10 @@ export const inputBytes = (unlocking: Uint8Array): number => 32 + 4 + (unlocking
 /**
  * Which of a template's locking scripts a coin sits at, for one of the template's inputs: the coin's locking bytecode
  * is compared with each script the template gives, made with the action's values; the script whose unlocking is the
- * input's is tried first.
+ * input's is tried first. `values` may differ by script, as the values a request gives for a script's state do.
  * @returns `undefined` when the coin is at no script of the template
  */
-export const coinScriptOf = (definition: ReadTemplate['definition'], input: string, lockingBytecode: Uint8Array, values: TemplateValues): string | undefined => {
+export const coinScriptOf = (definition: ReadTemplate['definition'], input: string, lockingBytecode: Uint8Array, values: TemplateValues | ((lockingScript: string) => TemplateValues)): string | undefined => {
   const unlocking = (definition.inputs?.[input] as { unlockingScript?: string } | undefined)?.unlockingScript;
   const scripts = Object.entries(definition.lockingScripts ?? {})
     .map(([identifier, script]) => ({ identifier, first: (script as { unlockingBytecode?: string }).unlockingBytecode === unlocking }))
@@ -33,7 +33,7 @@ export const coinScriptOf = (definition: ReadTemplate['definition'], input: stri
     .map(({ identifier }) => identifier);
   return scripts.find((candidate) => {
     try {
-      return hex(templateLockingBytecode(definition, candidate, values)) === hex(lockingBytecode);
+      return hex(templateLockingBytecode(definition, candidate, typeof values === 'function' ? values(candidate) : values)) === hex(lockingBytecode);
     } catch (error) {
       if (!(error instanceof TemplateError)) throw error;
       return false;

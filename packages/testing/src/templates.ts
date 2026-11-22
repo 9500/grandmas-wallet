@@ -541,6 +541,8 @@ export const jointEnvelopeTemplate = {
  *   input leaves the coin's satoshis and tokens out of the change, so that they go to the fee or are destroyed;
  *   relighting puts the satoshis of a furnace coin back in, with the same mark; sweeping spends a furnace coin through
  *   an input without the mark.
+ * - **Riddle box**: coins that whoever knows the answer to a riddle can take. The box's script keeps the hash of the
+ *   answer as its state, which the solver's role does not provide: a request that names a box gives it.
  */
 
 const furnaceInput = (name: string, description: string, marked: boolean) => ({
@@ -600,6 +602,55 @@ export const furnaceTemplate = {
     fuelAmount: { ...view('Fuel amount', 'How many tokens to feed.'), type: 'token_amount' },
     feedSatoshis: { ...view('Satoshis', 'Satoshis that go into the furnace.'), type: 'satoshis' },
     note: { ...view('Note', 'Words written into the data output.'), type: 'string' },
+  },
+} as const;
+
+/** Coins that whoever knows the answer to a riddle can take: the box keeps the hash of the answer. */
+export const riddleTemplate = {
+  $schema: SCHEMA,
+  ...view('Riddle box', 'Coins that whoever knows the answer to a riddle can take.'),
+  version: '1',
+  supported: ['BCH_2026_05'],
+  roles: { setter: view('Setter', 'Hides coins behind a riddle.'), solver: view('Solver', 'Knows the answer.') },
+  start: [{ action: 'hide', role: 'setter' }],
+  actions: {
+    hide: action('Hide coins', 'Put coins in a box that the answer to a riddle opens.', 'setter', ['answerHash', 'prize'], 'hideTransaction'),
+    solve: action('Solve', 'Take the coins with the answer.', 'solver', ['answer'], 'solveTransaction'),
+  },
+  transactions: {
+    hideTransaction: { ...view('Hidden', '$(<prize>) satoshis were hidden behind a riddle.'), inputs: [], outputs: [{ output: 'boxOutput' }], version: 2, locktime: 0 },
+    solveTransaction: { ...view('Solved', 'A riddle was solved.'), inputs: [{ input: 'boxInput' }], outputs: [], version: 2, locktime: 0 },
+  },
+  inputs: { boxInput: { ...view('Riddle box', 'Opened by the answer.'), unlockingScript: 'unlockBox' } },
+  outputs: { boxOutput: { ...view('Riddle box', '$(<prize>) satoshis behind a riddle.'), lockingScript: 'boxLockingScript', valueSatoshis: '$(<prize>)' } },
+  lockingScripts: {
+    boxLockingScript: {
+      ...view('Riddle box', 'Opens for the answer whose hash it keeps.'),
+      lockingType: 'p2sh',
+      lockingBytecode: 'boxBytecode',
+      unlockingBytecode: 'unlockBox',
+      state: { variables: ['answerHash'] },
+      roles: { solver: { selectable: false, actions: [{ action: 'solve', role: 'solver' }] } },
+    },
+  },
+  scripts: { boxBytecode: 'OP_SHA256 <answerHash> OP_EQUAL', unlockBox: '<answer>' },
+  variables: {
+    answerHash: { ...view('Answer hash', 'The SHA-256 hash of the answer.'), type: 'bytes' },
+    answer: { ...view('Answer', 'The answer to the riddle.'), type: 'bytes' },
+    prize: { ...view('Prize', 'Satoshis to hide.'), type: 'satoshis' },
+  },
+} as const;
+
+/** The riddle box, whose state only the solver's role names. */
+export const solverRiddleTemplate = {
+  ...riddleTemplate,
+  ...view('Riddle box for solvers', 'Coins that whoever knows the answer to a riddle can take. The solver keeps the hash of the answer.'),
+  lockingScripts: {
+    boxLockingScript: {
+      ...riddleTemplate.lockingScripts.boxLockingScript,
+      state: { variables: [] },
+      roles: { solver: { ...riddleTemplate.lockingScripts.boxLockingScript.roles.solver, state: { variables: ['answerHash'] } } },
+    },
   },
 } as const;
 

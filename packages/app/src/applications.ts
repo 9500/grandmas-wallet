@@ -824,7 +824,8 @@ interface Frame {
   creates?: string;
   /** Existing token categories the request gives for variables that an output names as its token's category and no input does. */
   givenCategories: string[];
-  applicationCoins: { input: string; index?: number; utxo: Utxo; lockingScript: string }[];
+  /** `state`: the values of the coin's script's state that the request gave, where the role does not provide them. */
+  applicationCoins: { input: string; index?: number; utxo: Utxo; lockingScript: string; state?: TemplateValues }[];
   follow: Map<string, FollowedScript>;
   following: Map<string, string>;
   /** The token of the wallet's the action is about. */
@@ -941,6 +942,11 @@ const isDataOutput = (output: Output): boolean => output.lockingBytecode[0] === 
 const scriptVariables = (definition: ReadTemplate['definition'], lockingScript: string): string[] => {
   const text = definition.scripts?.[definition.lockingScripts?.[lockingScript]?.lockingBytecode ?? ''] ?? '';
   return [...new Set([...text.matchAll(/<\$?\(?<?([A-Za-z_][A-Za-z0-9_]*)>?/g)].map((match) => match[1] as string))].filter((name) => definition.variables?.[name] !== undefined);
+};
+/** The variables a template lists in the state of one of its locking scripts, for the script itself and for a role. */
+const stateVariables = (definition: ReadTemplate['definition'], lockingScript: string, role: string): string[] => {
+  const script = definition.lockingScripts?.[lockingScript] as { state?: { variables?: string[] }; roles?: Record<string, { state?: { variables?: string[] } }> } | undefined;
+  return [...new Set([...(script?.state?.variables ?? []), ...(script?.roles?.[role]?.state?.variables ?? [])])].filter((name) => definition.variables?.[name] !== undefined);
 };
 const vm = createVirtualMachineBch2026(true);
 /** The bytes that stand for a signature of the wallet's while a transaction is worked out: a coin of the wallet's is unlocked only by the key holder. */
@@ -1503,15 +1509,17 @@ export class Applications {
     try {
       const transaction = templateTransaction(definition, request.action, values);
       locktime = transaction.locktime;
-      applicationInputs = applicationCoins.map(({ input, index, utxo, lockingScript }) => {
-        const unlocking = templateUnlockingBytecode(definition, lockingScript, input, values);
+      applicationInputs = applicationCoins.map(({ input, index, utxo, lockingScript, state }) => {
+        // A coin is unlocked with the action's values and the values of its script's state the request gave.
+        const coinValues = state === undefined ? values : { ...state, ...values };
+        const unlocking = templateUnlockingBytecode(definition, lockingScript, input, coinValues);
         return {
           coin: { utxo, template: template.identifier, height: 0 },
           inputIdentifier: input,
           bytes: inputBytes(unlocking),
           kind: 'application' as const,
           unlocking,
-          sequence: templateSequenceNumber(definition, input, values) ?? 0,
+          sequence: templateSequenceNumber(definition, input, coinValues) ?? 0,
           ...(index === undefined ? {} : { index }),
         };
       });
@@ -1777,7 +1785,8 @@ export class Applications {
    *   other values, in an action that spends the position; (5) the user, for a value a person can type, when the
    *   wallet acts by itself. A variable nothing fills stops the action, named.
    * - **The application's coins:** each that the request names by outpoint, read from the chain and matched to a
-   *   script of the template by its bytecode; and the position's coins at the record's script, for the input whose
+   *   script of the template by its bytecode, made with the action's values and the values the request gives for the
+   *   script's state that the role does not provide; and the position's coins at the record's script, for the input whose
    *   unlocking that script names. The wallet looks for no other coin of the application's.
    *
    * With `shared`, another participant joins the action and brings the application's coins: only the wallet's own
@@ -1955,10 +1964,10 @@ export class Applications {
         const at = inputIndex === undefined ? {} : { index: inputIndex };
         const outpoint = named[input];
         if (outpoint !== undefined) {
-          const { utxo, lockingScript } = await this.namedCoin(definition, input, outpoint, values);
+          const { utxo, lockingScript, state } = await this.namedCoin(definition, input, outpoint, values, request);
           if (applicationCoins.some((coin) => outpointOf(coin.utxo) === outpointOf(utxo))) return refuse(`The coin for ${inputName(input)} is already spent as another input of the action.`);
-          applicationCoins.push({ input, ...at, utxo, lockingScript });
-          followed(lockingScript, values, utxo.output.lockingBytecode);
+          applicationCoins.push({ input, ...at, utxo, lockingScript, ...(state === undefined ? {} : { state }) });
+          followed(lockingScript, state === undefined ? values : { ...state, ...values }, utxo.output.lockingBytecode);
           continue;
         }
         if (positionScript !== undefined && positionInputs.includes(input)) {
@@ -2015,18 +2024,34 @@ export class Applications {
    * template's scripts it sits at, the wallet finds by comparing its locking bytecode with each script the
    * template gives, made with the action's values; the script whose unlocking is the input's is tried first. A
    * coin at no script of the template is refused, and so is one that is spent.
+   *
+   * A script's state can hold values that the role does not provide, which the XO engine takes from the coin it
+   * follows. For those, and only those, the values the request gives are used too (`state`): the variables the template
+   * lists in the script's state, for the script and for the role. Nothing is taken on trust: the coin's bytecode has
+   * to be the script made with them.
    */
-  private async namedCoin(definition: ReadTemplate['definition'], input: string, outpoint: string, values: TemplateValues): Promise<{ utxo: Utxo; lockingScript: string }> {
+  private async namedCoin(definition: ReadTemplate['definition'], input: string, outpoint: string, values: TemplateValues, request: Pick<ApplicationAction, 'role' | 'variables'>): Promise<{ utxo: Utxo; lockingScript: string; state?: TemplateValues }> {
     const name = definition.inputs?.[input]?.name ?? input;
     const [transactionId = '', index = ''] = outpoint.split(':');
     if (!/^[0-9a-f]{64}$/.test(transactionId) || !/^\d{1,5}$/.test(index)) return refuse(`The request names the coin for "${name}" in a form this wallet does not read.`);
     const output = await this.namedOutput(outpoint);
     if (output === undefined) return refuse(`The coin the request names for "${name}" is not on chain.`);
-    const lockingScript = coinScriptOf(definition, input, output.lockingBytecode, values);
+    const stateOf = (candidate: string): TemplateValues | undefined => {
+      const given = Object.fromEntries(stateVariables(definition, candidate, request.role).flatMap((name) => (values[name] === undefined && request.variables[name] !== undefined ? [[name, request.variables[name]]] : [])));
+      if (Object.keys(given).length === 0) return undefined;
+      try {
+        return typedValues(definition, given);
+      } catch (error) {
+        if (!(error instanceof TemplateError)) throw error;
+        return undefined;
+      }
+    };
+    const lockingScript = coinScriptOf(definition, input, output.lockingBytecode, (candidate) => ({ ...stateOf(candidate), ...values }));
     if (lockingScript === undefined) return refuse(`The coin the request names for "${name}" is at no script of the template "${definition.name ?? ''}", made with the values of this action. It is refused.`);
     const unspent = (await this.wallet.chain.listUnspent(output.lockingBytecode)).some((listed) => listed.transactionId === transactionId && listed.index === Number(index));
     if (!unspent) return refuse(`The coin the request names for "${name}" is spent.`);
-    return { utxo: { transactionHash: hexToBin(transactionId), index: Number(index), output }, lockingScript };
+    const state = stateOf(lockingScript);
+    return { utxo: { transactionHash: hexToBin(transactionId), index: Number(index), output }, lockingScript, ...(state === undefined ? {} : { state }) };
   }
 
   /**
