@@ -1,8 +1,8 @@
 import { binToHex } from '@bitauth/libauth';
-import { type ActionOutcome, type ActionPreview, type ApplicationAction, type Applications, type HeldToken, type RecordedPosition, type ServiceStatus, type TemplateActions, type TemplateSummary, type TokenAction, NotStoredError, SERVICE_WORDS, WALLET_TEMPLATES, actionOf } from '@grandmas-wallet/app';
+import { type ActionOutcome, type ActionPreview, type ApplicationAction, type Applications, type DeletionHolds, type HeldToken, type RecordedPosition, type ServiceStatus, type TemplateActions, type TemplateSummary, type TokenAction, type TemplateFile, LARGEST_TEMPLATE_FILE, NotStoredError, SERVICE_WORDS, TEMPLATE_FILE_TOO_LARGE, TemplateFileError, WALLET_TEMPLATES, actionOf, deletionNeedsConfirming } from '@grandmas-wallet/app';
 import { readLink } from '@grandmas-wallet/app/links';
 import type { LedgerEntry, Offer, Proposal } from '@grandmas-wallet/connect';
-import { type Task, Amount, Button, Card, Field, Info, KeyValues, Loading, Notice, PageHead, Pill, Spinner, TaskStatus, TextInput, Value, formatTime, lockingBytecodeOfAddress, useTask } from '@grandmas-wallet/ui';
+import { type Task, Amount, Button, Card, Choice, Field, Info, KeyValues, Loading, Notice, PageHead, Pill, Spinner, TaskStatus, TextArea, TextInput, Value, formatTime, lockingBytecodeOfAddress, useTask } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
@@ -25,7 +25,12 @@ import './apps.css';
  * shows about one comes from the application's template, and its name for itself is marked as unverified.
  */
 
-type View = { at: 'main' } | { at: 'act'; target: ActTarget; action: TokenAction; back: View } | { at: 'trust'; identifier: string } | { at: 'template'; identifier: string };
+type View =
+  | { at: 'main' }
+  | { at: 'act'; target: ActTarget; action: TokenAction; back: View }
+  | { at: 'trust'; identifier: string }
+  | { at: 'template'; identifier: string }
+  | { at: 'file'; file: Extract<TemplateFile, { kind: 'new' | 'suggested' }>; pasted: boolean };
 
 /** Requests the user decided while the page has been open: their outcome stays on the screen until dismissed. */
 const followed = new Set<string>();
@@ -55,6 +60,7 @@ export const Apps = ({ owner }: { owner: Owner }) => {
   if (view.at === 'act') return <ActOn owner={owner} target={view.target} action={view.action} onBack={() => go(view.back)} />;
   if (view.at === 'trust') return <TrustSuggested owner={owner} identifier={view.identifier} onBack={back} />;
   if (view.at === 'template') return <TemplatePage owner={owner} identifier={view.identifier} onBack={back} onView={go} />;
+  if (view.at === 'file') return <TemplateFromFile owner={owner} file={view.file} pasted={view.pasted} onBack={back} onView={go} />;
   return <Main owner={owner} onView={go} />;
 };
 
@@ -604,7 +610,12 @@ const Templates = ({ owner, onView }: { owner: Owner; onView: (view: View) => vo
       <TitleInfo
         title="Templates"
         label="About templates"
-        info="A template tells this wallet what an app's tokens control and how to carry out its actions. You trust one when you approve an app's first action, or when an app offers it to you."
+        info={
+          <>
+            <span>A template tells this wallet what an app's tokens control and how to carry out its actions. You trust one when you approve an app's first action, or when an app offers it to you.</span>
+            <span>You can also add one from a file. The wallet reads it on this phone, sends it nowhere, and shows it to you before you trust it.</span>
+          </>
+        }
       />
       {trusted.length === 0 && others.length === 0 ? (
         <p class="templates-none">None yet.</p>
@@ -646,9 +657,204 @@ const Templates = ({ owner, onView }: { owner: Owner; onView: (view: View) => vo
         </ul>
         <p class="small muted">The wallet's own templates. They cannot be removed.</p>
       </details>
+      <AddFromFile owner={owner} onView={onView} />
     </Card>
   );
 };
+
+/** A template file larger than this is refused unread: four bytes a character at most, over the limit an offer has. */
+const LARGEST_FILE_BYTES = LARGEST_TEMPLATE_FILE * 4;
+
+/**
+ * Adding a template from a file the user picks, or its text pasted: read on this phone, checked as an app's offer is, and
+ * shown for review. A template trusted already opens its screen.
+ */
+const AddFromFile = ({ owner, onView }: { owner: Owner; onView: (view: View) => void }) => {
+  const { applications } = owner.apps;
+  const input = useRef<HTMLInputElement>(null);
+  const [problem, setProblem] = useState<string | undefined>();
+  const [pasting, setPasting] = useState(false);
+  const [text, setText] = useState('');
+  const take = (read: string, pasted: boolean): void => {
+    setProblem(undefined);
+    let file: TemplateFile;
+    try {
+      file = applications.readTemplateFile(read);
+    } catch (error) {
+      const words = error instanceof TemplateFileError ? error.message : refusalOf(error);
+      setProblem(pasted ? words.replace(/^This file\b/, 'This text').replace(/^The file\b/, 'The text') : words);
+      return;
+    }
+    if (file.kind === 'trusted') {
+      owner.toast(`"${file.name}" is trusted already.`);
+      onView({ at: 'template', identifier: file.names.identifier });
+      return;
+    }
+    onView({ at: 'file', file, pasted });
+  };
+  const chosen = async (event: Event): Promise<void> => {
+    const element = event.currentTarget as HTMLInputElement;
+    const picked = element.files?.[0];
+    // The same file can be chosen again after a refusal.
+    element.value = '';
+    if (picked === undefined) return;
+    if (picked.size > LARGEST_FILE_BYTES) {
+      setProblem(TEMPLATE_FILE_TOO_LARGE);
+      return;
+    }
+    try {
+      take(await picked.text(), false);
+    } catch {
+      setProblem('The file could not be read.');
+    }
+  };
+  return (
+    <div class="template-add" data-testid="template-add">
+      <input ref={input} type="file" accept=".json,application/json" class="visually-hidden" tabIndex={-1} aria-hidden="true" onChange={(event) => void chosen(event)} />
+      {pasting ? (
+        <>
+          <Field label="The template's text" id="template-text" error={problem}>
+            <TextArea id="template-text" rows={5} value={text} onInput={setText} placeholder="{ … }" invalid={problem !== undefined} />
+          </Field>
+          <div class="actions">
+            <Button small disabled={text.trim() === ''} onClick={() => take(text, true)}>
+              Check it
+            </Button>
+            <Button
+              small
+              kind="quiet"
+              onClick={() => {
+                setPasting(false);
+                setProblem(undefined);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          {problem !== undefined && (
+            <Notice tone="bad">
+              <span data-testid="template-file-problem">{problem}</span>
+            </Notice>
+          )}
+          <div class="template-add-ways">
+            <Button small kind="secondary" onClick={() => input.current?.click()}>
+              Add from a file
+            </Button>
+            <Button
+              small
+              kind="link"
+              onClick={() => {
+                setPasting(true);
+                setProblem(undefined);
+              }}
+            >
+              Paste it instead
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+/**
+ * A template the user added from a file, or pasted, for review: the same review an app's offer gets, marked as coming
+ * from this phone and from no app. Trusted, it is stored in the backup, its service is asked if it names one, and its
+ * screen opens.
+ */
+const TemplateFromFile = ({ owner, file, pasted, onBack, onView }: { owner: Owner; file: Extract<TemplateFile, { kind: 'new' | 'suggested' }>; pasted: boolean; onBack: () => void; onView: (view: View) => void }) => {
+  const { apps } = owner;
+  const task = useTask();
+  const trust = () =>
+    task.run('trust', async () => {
+      const kept = await apps.applications.trustFile(file);
+      apps.changed();
+      owner.toast('The template is trusted on this phone.');
+      onView({ at: 'template', identifier: kept.identifier });
+    });
+  return (
+    <div class="stack">
+      <PageHead title={pasted ? 'A template you pasted' : 'A template from a file'} onBack={onBack} />
+      <div class="grid two">
+        <Card cls="request-card offer-card file-card">
+          <div class="stack">
+            <div class="asker">
+              <Pill>{pasted ? 'Pasted on this phone' : 'From a file on this phone'}</Pill>
+              <Info label="Where this template comes from">
+                {pasted ? 'You pasted this text.' : 'You chose this file.'} The wallet read it on this phone and sent it nowhere. No app offered it, and no app is connected to it.
+                {file.kind === 'suggested' && ' Your backup holds the same template; you stopped trusting it, or an earlier owner stored it.'}
+              </Info>
+            </div>
+            <Part title="Template" info="If you trust it, this wallet shows what your tokens of this template control and can carry out the template's actions. Each action still waits for your approval.">
+              <TemplateView summary={file.summary} showActions />
+            </Part>
+            <TaskStatus task={task} name="trust" />
+            <div class="actions decide">
+              <Button task={task} name="trust" onClick={() => void trust()}>
+                Trust this template
+              </Button>
+              <Button kind="quiet" disabled={task.busy !== undefined} onClick={onBack}>
+                Decline
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// ------------------------------------------------------------------ deleting a template
+
+/** Behind the "?" of a deletion: exactly what is removed, what is marked, and what stays. */
+const DELETE_INFO =
+  'Deleting removes the template from this phone: its text, what its service said, which apps may see its tokens, and the tokens made with it that this phone was keeping track of. Your backup can only be added to, so the template stays there, sealed: it is marked as deleted, and no phone offers it again. Your tokens stay in the wallet and still move in a recovery, and the records of what they control stay too. Add the same template again, from its app or from a file, and this wallet can operate them again.';
+
+const tokenNameOf = (token: HeldToken): string => token.tokenName ?? token.registry?.name ?? `Token ${token.category.slice(0, 8)}…`;
+
+/**
+ * What a deletion would leave without its template, read when the user turns to deleting: while the wallet holds any,
+ * a warning and the tick, as for a token that leaves the wallet. Nothing is deleted without the tick then.
+ * @returns the warning to show, and whether the deletion may go ahead
+ */
+const useDeletion = (applications: Pick<Applications, 'deletionHolds'>, identifier: string, wanted: boolean): { warning: ComponentChildren; ready: boolean; confirmed: boolean } => {
+  const [holds, setHolds] = useState<DeletionHolds | undefined>();
+  const [ticked, setTicked] = useState(false);
+  useEffect(() => {
+    if (!wanted || holds !== undefined) return;
+    applications.deletionHolds(identifier).then(setHolds, () => setHolds({ tokens: [], open: [], waiting: [], unknown: true }));
+  }, [wanted]);
+  if (!wanted) return { warning: null, ready: false, confirmed: false };
+  if (holds === undefined) return { warning: <Loading>Checking for tokens of this template…</Loading>, ready: false, confirmed: false };
+  if (!deletionNeedsConfirming(holds)) return { warning: null, ready: true, confirmed: false };
+  const names = [...new Set(holds.tokens.map(tokenNameOf))];
+  const warning = (
+    <div class="stack-s" data-testid="delete-warning">
+      <Notice tone="warn">
+        {holds.unknown === true
+          ? 'This wallet couldn\'t check whether it holds tokens of this template.'
+          : [
+              names.length > 0 ? `You hold ${holds.tokens.length === 1 ? 'a token' : `${holds.tokens.length} tokens`} of this template: ${names.join(', ')}.` : '',
+              holds.waiting.length > 0 ? `${holds.waiting.length === 1 ? 'A token' : `${holds.waiting.length} tokens`} made with it ${holds.waiting.length === 1 ? 'waits' : 'wait'} elsewhere.` : '',
+              `This wallet can't operate ${holds.tokens.length + holds.waiting.length === 1 ? 'it' : 'them'} until you add the template again.`,
+            ]
+              .filter((line) => line !== '')
+              .join(' ')}
+      </Notice>
+      <Choice type="checkbox" checked={ticked} onChange={setTicked} title="I understand, delete it anyway">
+        The tokens stay in the wallet.
+      </Choice>
+    </div>
+  );
+  return { warning, ready: ticked, confirmed: ticked };
+};
+
+/** After a deletion: what it did, in a few words. */
+const deletedWords = ({ name, backupTold }: { name: string; backupTold: boolean }): string =>
+  backupTold ? `"${name}" is deleted from this wallet.` : `"${name}" is deleted from this wallet. Your backup will be marked when a store can be reached.`;
 
 /**
  * One trusted template: what it is, its actions (the starting ones carried out from here), the tokens it made that wait
@@ -660,6 +866,8 @@ const TemplatePage = ({ owner, identifier, onBack, onView }: { owner: Owner; ide
   const kept = applications.templates.find((template) => template.identifier === identifier);
   const task = useTask();
   const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const deletion = useDeletion(applications, identifier, confirming && deleting);
   const [tokens, setTokens] = useState<HeldToken[] | undefined>();
   const [open, setOpen] = useState<HeldToken[]>([]);
   useEffect(() => {
@@ -706,6 +914,11 @@ const TemplatePage = ({ owner, identifier, onBack, onView }: { owner: Owner; ide
   const tokenName = (token: HeldToken): string => token.tokenName ?? `Token ${token.category.slice(0, 8)}…`;
   const stop = () =>
     task.run('stop', async () => {
+      if (deleting) {
+        owner.toast(deletedWords(await apps.deleteTemplate(identifier, deletion.confirmed)));
+        onBack();
+        return;
+      }
       const { name, backupTold } = await apps.stopTrusting(identifier);
       owner.toast(backupTold ? `"${name}" is no longer trusted.` : `"${name}" is no longer trusted. Your backup will be told when a store can be reached.`);
       onBack();
@@ -721,6 +934,7 @@ const TemplatePage = ({ owner, identifier, onBack, onView }: { owner: Owner; ide
               <KeyValues
                 entries={[
                   ['Trusted since', formatTime(kept.trustedAt)],
+                  ...(kept.from === 'file' ? [['Added', 'By you, not by an app'] as [string, string]] : []),
                   ['Backup', kept.stored ? 'Stored' : <span>Not stored yet<Info label="About the backup">A template is stored in your backup before its first action, so that a new phone can operate what was made with it.</Info></span>],
                   ['Your tokens of it', tokens === undefined ? <Spinner /> : tokens.length === 0 ? 'None' : tokens.map(tokenName).join(', ')],
                 ]}
@@ -737,6 +951,7 @@ const TemplatePage = ({ owner, identifier, onBack, onView }: { owner: Owner; ide
         </div>
         <div class="stack">
           {service !== undefined && <ServiceCard owner={owner} identifier={identifier} status={service} />}
+          {(kept.from !== 'file' || kept.applications.length > 0) && (
           <Card cls="seen-by-card">
             <TitleInfo title="Apps that see its tokens" label="About apps that see its tokens" info="These apps are told which tokens of this template you hold and where their positions stand, whenever they ask. They learn nothing else, and every action still waits for your approval." />
             {kept.applications.length === 0 ? (
@@ -769,6 +984,7 @@ const TemplatePage = ({ owner, identifier, onBack, onView }: { owner: Owner; ide
               </ul>
             )}
           </Card>
+          )}
           <Card title="Stop trusting" cls="stop-card">
             <div class="stack">
               {!confirming ? (
@@ -779,18 +995,34 @@ const TemplatePage = ({ owner, identifier, onBack, onView }: { owner: Owner; ide
                 </div>
               ) : (
                 <>
-                  {open.length > 0 && (
+                  {open.length > 0 && !deleting && (
                     <Notice tone="warn">
                       You hold {open.length === 1 ? 'a token' : `${open.length} tokens`} of this template with an open position: {open.map(tokenName).join(', ')}. This wallet will no longer show or operate {open.length === 1 ? 'it' : 'them'} until you trust the template again.
                     </Notice>
                   )}
-                  <p class="small muted">Your tokens stay in the wallet and still move in a recovery. Your backup keeps the template, so you can trust it again later.</p>
+                  <p class="small muted">
+                    {deleting
+                      ? 'Your tokens stay in the wallet and still move in a recovery. The template is no longer listed or offered to you again.'
+                      : 'Your tokens stay in the wallet and still move in a recovery. Your backup keeps the template, so you can trust it again later.'}
+                  </p>
+                  <div class="choice-info" data-testid="template-delete-choice">
+                    <Choice type="checkbox" checked={deleting} onChange={setDeleting} title="Also delete it from this wallet" />
+                    <Info label="About deleting a template">{DELETE_INFO}</Info>
+                  </div>
+                  {deletion.warning}
                   <TaskStatus task={task} name="stop" />
                   <div class="actions" data-testid="template-stop-confirm">
-                    <Button kind="danger" task={task} name="stop" onClick={() => void stop()}>
-                      Stop trusting
+                    <Button kind="danger" task={task} name="stop" disabled={deleting && !deletion.ready} onClick={() => void stop()}>
+                      {deleting ? 'Stop and delete' : 'Stop trusting'}
                     </Button>
-                    <Button kind="quiet" disabled={task.busy !== undefined} onClick={() => setConfirming(false)}>
+                    <Button
+                      kind="quiet"
+                      disabled={task.busy !== undefined}
+                      onClick={() => {
+                        setConfirming(false);
+                        setDeleting(false);
+                      }}
+                    >
                       Keep it
                     </Button>
                   </div>
@@ -1587,6 +1819,13 @@ const TrustSuggested = ({ owner, identifier, onBack }: { owner: Owner; identifie
   const { applications } = owner.apps;
   const [suggestion] = useState(() => applications.suggestions.find((candidate) => candidate.identifier === identifier));
   const task = useTask();
+  const [deleting, setDeleting] = useState(false);
+  const deletion = useDeletion(applications, identifier, deleting);
+  const remove = () =>
+    task.run('delete', async () => {
+      owner.toast(deletedWords(await owner.apps.deleteTemplate(identifier, deletion.confirmed)));
+      onBack();
+    });
   const [summary, problem] = useMemo((): [TemplateSummary | undefined, string | undefined] => {
     if (suggestion === undefined) return [undefined, 'The template is no longer among those found in the backup.'];
     try {
@@ -1622,7 +1861,7 @@ const TrustSuggested = ({ owner, identifier, onBack }: { owner: Owner; identifie
                 <TemplateView summary={summary} showActions />
               </Part>
             )}
-            <TaskStatus task={task} />
+            <TaskStatus task={task} name="trust" />
             <div class="actions decide">
               {summary !== undefined && (
                 <Button task={task} name="trust" onClick={() => void trust()}>
@@ -1632,6 +1871,36 @@ const TrustSuggested = ({ owner, identifier, onBack }: { owner: Owner; identifie
             </div>
           </div>
         </Card>
+        {suggestion?.withdrawn !== undefined && (
+          <div class="stack">
+            <Card cls="stop-card delete-card">
+              <TitleInfo title="Delete" label="About deleting a template" info={DELETE_INFO} />
+              <div class="stack">
+                {!deleting ? (
+                  <div data-testid="template-delete">
+                    <Button kind="secondary" disabled={task.busy !== undefined} onClick={() => setDeleting(true)}>
+                      Delete it from this wallet
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <p class="small muted">Your tokens stay in the wallet and still move in a recovery. The template is no longer listed or offered to you again.</p>
+                    {deletion.warning}
+                    <TaskStatus task={task} name="delete" />
+                    <div class="actions" data-testid="template-delete-confirm">
+                      <Button kind="danger" task={task} name="delete" disabled={!deletion.ready} onClick={() => void remove()}>
+                        Delete
+                      </Button>
+                      <Button kind="quiet" disabled={task.busy !== undefined} onClick={() => setDeleting(false)}>
+                        Keep it
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </Card>
+          </div>
+        )}
       </div>
     </div>
   );

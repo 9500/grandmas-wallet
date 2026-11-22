@@ -67,6 +67,13 @@ export interface TemplateWithdrawalEntry {
   contentHash: string;
   /** Template records of the same signer with this number or a lower one are withdrawn. */
   renewal: number;
+  /**
+   * The user also deleted the template from the wallet: the records this withdrawal reaches are no longer suggested
+   * to trust again, on any device. Nothing is removed from the archive, which is only ever added to; the template's
+   * record stays there, sealed, and trusting the same template again stores it under the next number. A reader of an
+   * earlier version takes this for a plain withdrawal.
+   */
+  deleted?: true;
 }
 
 /**
@@ -263,6 +270,7 @@ const parseEntry = (value: unknown): RecordEntry => {
         identifier: isHash(value['identifier']) ? value['identifier'] : fail('The withdrawal names no template.'),
         contentHash: isHash(value['contentHash']) ? value['contentHash'] : fail('The withdrawal names no template text.'),
         renewal: count(value['renewal'], 'renewal'),
+        ...(value['deleted'] === undefined ? {} : { deleted: value['deleted'] === true ? (true as const) : fail('The withdrawal says in a form this version does not know whether the template was deleted.') }),
       };
     case 'token-note':
       return {

@@ -213,6 +213,25 @@ describe('who can make a record that counts', () => {
     expect(assessed.tokenNotes[0]).toMatchObject({ entry: { kind: 'token-note', category: 'c7'.repeat(32), templateIdentifier: TEMPLATE_ID }, standing: 'current owner' });
     expect(assessed.notices).toEqual([]);
   });
+
+  it('a template marked deleted: the record stays, withdrawn and marked, up to the mark\'s number; a later record is not reached', async () => {
+    const { archive, owning, seedA, read } = await start();
+    const hash = contentHashOf(TEMPLATE_TEXT);
+    const sign = (entry: RecordEntry) => archive.write({ type: 'record', signed: signRecord(entry, owning, seedA.controllerKey) });
+    await sign({ kind: 'template-withdrawal', identifier: TEMPLATE_ID, contentHash: hash, renewal: 0, deleted: true });
+    const marked = await read();
+    expect(marked.templates).toMatchObject([{ entry: { text: TEMPLATE_TEXT }, withdrawn: 0, deleted: true }]);
+    expect(templateStanding(marked, TEMPLATE_ID, hash)).toMatchObject({ stored: true, trusted: false });
+    expect(marked.refused).toEqual([]);
+    // Trusted again, under the next number: that record is neither withdrawn nor marked.
+    await sign(templateEntry(TEMPLATE_ID, TEMPLATE_TEXT, 1));
+    const again = await read();
+    expect(again.templates.find((template) => template.entry.renewal === 1)).not.toHaveProperty('deleted');
+    expect(templateStanding(again, TEMPLATE_ID, hash).trusted).toBe(true);
+    // A mark in a form this version does not know is refused, not taken for a plain withdrawal.
+    await sign({ kind: 'template-withdrawal', identifier: TEMPLATE_ID, contentHash: hash, renewal: 1, deleted: 'yes' } as unknown as RecordEntry);
+    expect((await read()).refused).toHaveLength(1);
+  });
 });
 
 describe('records of an earlier seed', () => {

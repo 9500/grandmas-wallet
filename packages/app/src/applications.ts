@@ -43,7 +43,7 @@ import {
   variableType,
 } from '@grandmas-wallet/core';
 
-import { type ServiceItem, type ServiceResource, SERVICE_LIMITS, findServiceResource } from '@grandmas-wallet/connect';
+import { type ServiceItem, type ServiceResource, LARGEST_TEMPLATE_TEXT, SERVICE_LIMITS, findServiceResource } from '@grandmas-wallet/connect';
 
 import { TYPEABLE, actionShape, applicationInputs, expressionVariable, offeredAt, paysTo, spendingInputs } from './action-shape.js';
 import {
@@ -71,8 +71,12 @@ import { coinsAt } from './positions.js';
 import { type RecoveryArrangement, type StoreAt, writeRecord } from './recovery-flow.js';
 import { type PositionRecordCheck, type PositionRecordVerdict, checkPositionRecord, recordsDue, samePosition, sameRecord, sameNft } from './position-records.js';
 import { builtDifference, coinScriptOf, inputBytes, sameToken } from './planned.js';
-import { type PresentedTexts, type TemplateNames, readPresented } from './template-check.js';
+import { type PresentedTexts, type TemplateNames, PresentationError, readPresented } from './template-check.js';
+import { WALLET_TEMPLATES, templateIdentifier } from './templates.js';
 import { type ShownRegistry, shownRegistry } from './token-registry.js';
+
+/** Whether two things name the same template text. */
+const sameNames = (a: Pick<TemplateNames, 'identifier' | 'contentHash'>, b: Pick<TemplateNames, 'identifier' | 'contentHash'>): boolean => a.identifier === b.identifier && a.contentHash === b.contentHash;
 
 /** Two held categories shown with the same symbol are each marked, so that the screens write the category beside it. */
 const markSameSymbols = (held: HeldToken[]): HeldToken[] => {
@@ -98,6 +102,10 @@ const markSameSymbols = (held: HeldToken[]): HeldToken[] => {
  */
 
 const hex = binToHex;
+
+/** The identifiers of the wallet's own templates, worked out once: they are built in, never trusted, stopped or deleted. */
+let builtIn: Set<string> | undefined;
+const builtInIdentifiers = (): Set<string> => (builtIn ??= new Set(Object.values(WALLET_TEMPLATES).map(templateIdentifier)));
 
 /** The kinds of output an application leaves to the wallet, named by a request where it is not a plain receipt (section 13.3). */
 export const BINDING_KINDS = ['receive', 'change', 'return', 'lasting'] as const;
@@ -126,6 +134,21 @@ export interface KeptTemplate {
   cameBack?: boolean;
   /** How many times the user had stopped trusting it before this trust. The backup's record of it carries the same number. */
   renewal?: number;
+  /** The user added it on this device, from a file or as text they pasted; no application offered it. */
+  from?: 'file';
+}
+
+/**
+ * A template the user deleted from the wallet: all the device keeps of it, its names and the number of the withdrawal
+ * that marks it deleted in the backup, so that reading the backup does not offer it again and trusting it again
+ * stores it under a number that mark does not reach. Its text is gone from the device.
+ */
+export interface DeletedTemplate extends TemplateNames {
+  renewal: number;
+  /** A backup store has confirmed the mark. Until then it is written again whenever the backup is read. */
+  stored: boolean;
+  /** A store had confirmed a withdrawal under the same number before the deletion: the backup's record of it is withdrawn either way. */
+  withdrawnBefore?: true;
 }
 
 /**
@@ -170,6 +193,8 @@ export interface ApplicationsState {
   services?: KeptService[];
   /** Token categories the wallet created with templates' actions, for their services; kept on this device only. */
   made?: MadeCategory[];
+  /** Templates the user deleted from the wallet. */
+  deleted?: DeletedTemplate[];
 }
 
 /** What an application, or the user, asks for: an action of a template. */
@@ -214,7 +239,7 @@ export interface ApplicationArchive {
   write(entry: RecordEntry): Promise<WriteResult>;
   /** The templates, notes and position records in the archive, each with whose it is: the current owner's, or an earlier one's. */
   read(): Promise<{
-    templates: { entry: TemplateEntry; standing: Standing; withdrawn?: number }[];
+    templates: { entry: TemplateEntry; standing: Standing; withdrawn?: number; deleted?: true }[];
     tokenNotes: { entry: TokenNoteEntry; standing: Standing }[];
     positions?: { entry: PositionRecordEntry; standing: Standing }[];
   }>;
@@ -329,7 +354,82 @@ export interface TemplateSummary extends TemplateNames {
    * This wallet refuses the actions whose finding is not that they come back, and only those.
    */
   findings: ActionFinding[];
+  /**
+   * The service the template names for this wallet's network (docs/xo-service.md), as the template describes it: its
+   * address, or why the address cannot be used. Nothing is asked of it to say this.
+   */
+  service?: { description: string; url?: string; problem?: string };
 }
+
+/**
+ * What the wallet keeps that a template's deletion would leave without its template (`Applications.deletionHolds`): the
+ * tokens it holds that a record or note ties to the template, the positions recorded with it that are not closed, and the
+ * tokens it made with the template that wait elsewhere. Where any is there, the deletion needs the user's confirmation.
+ */
+export interface DeletionHolds {
+  tokens: HeldToken[];
+  open: RecordedPosition[];
+  /** Token categories the wallet made with the template, not in the wallet. */
+  waiting: string[];
+  /** The tokens or records could not be read: nothing can be said, and the deletion is confirmed as if something were held. */
+  unknown?: true;
+}
+
+/** Whether a deletion leaves something without its template, or cannot tell: then the user confirms it. */
+export const deletionNeedsConfirming = (holds: DeletionHolds): boolean => holds.unknown === true || holds.tokens.length + holds.open.length + holds.waiting.length > 0;
+
+/** A deletion that leaves tokens or open positions without their template, asked without the user's confirmation. Nothing was deleted. */
+export class DeletionNotConfirmedError extends ActionRefusedError {
+  constructor(readonly holds: DeletionHolds) {
+    super('This wallet holds tokens of this template, or positions made with it. Confirm the deletion: the wallet will not operate them until the template is added again. Nothing was deleted.');
+    this.name = 'DeletionNotConfirmedError';
+  }
+}
+
+/** Why a file the user chose is not taken in as a template. */
+export type TemplateFileProblem = 'empty' | 'too large' | 'not json' | 'not a template';
+
+/** A file the user chose is not a template this wallet takes in, in plain words. Nothing was trusted or stored. */
+export class TemplateFileError extends Error {
+  constructor(
+    readonly problem: TemplateFileProblem,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'TemplateFileError';
+  }
+}
+
+/** The largest template a file may hold, in characters: what an application's offer may carry. */
+export const LARGEST_TEMPLATE_FILE = LARGEST_TEMPLATE_TEXT;
+
+/** What the user is told of a file too large to be a template. */
+export const TEMPLATE_FILE_TOO_LARGE = `The file is too large for a template. A template can have at most ${LARGEST_TEMPLATE_FILE.toLocaleString('en-US')} characters.`;
+
+/**
+ * A template read from a file the user chose (`Applications.readTemplateFile`), checked as an application's offer is:
+ * - `new`: to be reviewed, and trusted or declined;
+ * - `suggested`: the same text as one the backup holds and this device does not trust; trusting it trusts that one;
+ * - `trusted`: this device trusts it already.
+ */
+export type TemplateFile =
+  | { kind: 'new' | 'suggested'; names: TemplateNames; texts: PresentedTexts; summary: TemplateSummary }
+  | { kind: 'trusted'; names: TemplateNames; name: string };
+
+/** The first reason a reader gives, kept short for a screen. */
+const shortReason = (message: string): string => {
+  // The XO validator lists what it found, one item a line, each a field and what it expected there: the first is said.
+  const item = /Template invalid:\s*-\s*([^\n]+)/.exec(message)?.[1]?.trim();
+  if (item !== undefined) {
+    const [, field, found] = /^([^:]+):\s*(.+)$/.exec(item) ?? [];
+    const said = field === undefined || found === undefined ? item : `${field === '(root)' ? 'the file' : `"${field}"`} ${found}`;
+    return said.length > 140 ? `${said.slice(0, 139)}…` : said.replace(/[.;:]$/, '');
+  }
+  const plain = message.replace(/^This is not a template the XO engine accepts:\s*/, '').replace(/\s+/g, ' ').trim();
+  const [first] = plain.split(/(?<=[.;:])\s/);
+  const reason = (first ?? plain).replace(/[.;:]$/, '');
+  return reason.length > 140 ? `${reason.slice(0, 139)}…` : reason;
+};
 
 export interface MovedOutput {
   satoshis: bigint;
@@ -977,6 +1077,7 @@ export class Applications {
 
   private summary(template: ReadTemplate, kept: KeptTemplate | undefined): TemplateSummary {
     const { definition } = template;
+    const resource = this.resourceOf(definition);
     return {
       identifier: template.identifier,
       contentHash: template.contentHash,
@@ -986,6 +1087,7 @@ export class Applications {
       trusted: kept !== undefined,
       ...(kept?.cameBack === true ? { cameBack: true } : {}),
       findings: templateFindings(definition),
+      ...(resource === undefined ? {} : { service: resource.usable ? { description: resource.description, url: resource.url } : { description: resource.description, problem: resource.reason } }),
     };
   }
 
@@ -1002,27 +1104,29 @@ export class Applications {
    * Trust a template on the user's word, and store it in the backup. Storing may fail; the template is then
    * trusted on this device and not yet stored, and no signature for one of its actions leaves the wallet.
    */
-  async trust(names: TemplateNames, presented: PresentedTexts | undefined, application?: string, options: { contact?: boolean } = {}): Promise<KeptTemplate> {
-    const kept = await this.trustOnly(names, presented, application);
+  async trust(names: TemplateNames, presented: PresentedTexts | undefined, application?: string, options: { contact?: boolean; from?: 'file' } = {}): Promise<KeptTemplate> {
+    const kept = await this.trustOnly(names, presented, application, options.from);
     // The user trusts it now, in this session: its service, if it names one, is asked who it is and what is possible.
     // A trust restored from the backup does not ask (docs/xo-service.md, "When a wallet speaks to a service").
     if (options.contact === true) void this.connect(kept.identifier);
     return kept;
   }
 
-  private async trustOnly(names: TemplateNames, presented: PresentedTexts | undefined, application?: string): Promise<KeptTemplate> {
+  private async trustOnly(names: TemplateNames, presented: PresentedTexts | undefined, application?: string, from?: 'file'): Promise<KeptTemplate> {
     let kept = this.keptTemplate(names);
     if (kept === undefined) {
       const suggestion = this.suggestions.find((suggested) => suggested.identifier === names.identifier && suggested.contentHash === names.contentHash);
       const texts = presented ?? suggestion?.texts;
       if (texts === undefined) return refuse('This wallet does not have that template.');
-      // Trust given again after it was withdrawn. Where the backup has the withdrawal, the template is stored
-      // again under the next number, which the withdrawal does not reach; where it has not, nothing there changed.
-      const withdrawn = suggestion?.withdrawn;
+      // Trust given again after it was withdrawn, or deleted. Where the backup has the withdrawal, the template is
+      // stored again under the next number, which the withdrawal does not reach; where it has not, nothing there changed.
+      const deleted = suggestion === undefined ? this.deletedOf(names) : undefined;
+      const withdrawn = suggestion?.withdrawn ?? (deleted === undefined ? undefined : { renewal: deleted.renewal, stored: deleted.stored || deleted.withdrawnBefore === true });
       const renewal = withdrawn === undefined ? 0 : withdrawn.stored ? withdrawn.renewal + 1 : withdrawn.renewal;
       const read = readPresented(names, texts);
-      // The backup's record of the withdrawn trust serves again where the backup was never told of the withdrawal.
-      const asStored = withdrawn !== undefined && !withdrawn.stored;
+      // The backup's record of the withdrawn trust serves again where the backup was never told of the withdrawal. A
+      // deletion the backup was not told of may concern a template it never held: the template is written again.
+      const asStored = suggestion?.withdrawn !== undefined && !suggestion.withdrawn.stored;
       kept = {
         identifier: read.identifier,
         contentHash: read.contentHash,
@@ -1032,10 +1136,12 @@ export class Applications {
         applications: [],
         stored: asStored,
         ...(renewal === 0 ? {} : { renewal }),
+        ...(from === undefined ? {} : { from }),
       };
       this.change({
         templates: [...this.state.templates, kept],
-        ...(withdrawn === undefined ? {} : { suggested: (this.state.suggested ?? []).filter((suggested) => !(suggested.identifier === names.identifier && suggested.contentHash === names.contentHash)) }),
+        ...(suggestion?.withdrawn === undefined ? {} : { suggested: (this.state.suggested ?? []).filter((suggested) => !(suggested.identifier === names.identifier && suggested.contentHash === names.contentHash)) }),
+        ...(deleted === undefined ? {} : { deleted: (this.state.deleted ?? []).filter((known) => known !== deleted) }),
       });
     }
     if (application !== undefined && !kept.applications.includes(application)) kept = this.updateTemplate(kept.identifier, { applications: [...kept.applications, application] });
@@ -1172,11 +1278,16 @@ export class Applications {
     return { name: kept.name, backupTold: (await this.tellWithdrawals()) === 0 };
   }
 
-  /** Write the withdrawals the backup does not have yet. @returns how many it still lacks */
+  /** Write the withdrawals and deletions the backup does not have yet. @returns how many it still lacks */
   private async tellWithdrawals(): Promise<number> {
     const { archive } = this.options;
     const waiting = (): SuggestedTemplate[] => (this.state.suggested ?? []).filter((suggested) => suggested.withdrawn?.stored === false);
-    if (archive === undefined) return waiting().length;
+    const deletions = (): DeletedTemplate[] => (this.state.deleted ?? []).filter((deleted) => !deleted.stored);
+    if (archive === undefined) return waiting().length + deletions().length;
+    for (const deleted of deletions()) {
+      const confirmed = await archive.write({ kind: 'template-withdrawal', identifier: deleted.identifier, contentHash: deleted.contentHash, renewal: deleted.renewal, deleted: true }).then(safelyStored, () => false);
+      if (confirmed) this.change({ deleted: (this.state.deleted ?? []).map((known) => (known === deleted || (sameNames(known, deleted) && !known.stored) ? { ...known, stored: true } : known)) });
+    }
     for (const suggestion of waiting()) {
       const { renewal } = suggestion.withdrawn as { renewal: number };
       const confirmed = await archive.write({ kind: 'template-withdrawal', identifier: suggestion.identifier, contentHash: suggestion.contentHash, renewal }).then(safelyStored, () => false);
@@ -1187,7 +1298,138 @@ export class Applications {
         ),
       });
     }
-    return waiting().length;
+    return waiting().length + deletions().length;
+  }
+
+  /** The device's mark of a template the user deleted, where there is one. */
+  private deletedOf(names: Pick<TemplateNames, 'identifier' | 'contentHash'>): DeletedTemplate | undefined {
+    return (this.state.deleted ?? []).find((deleted) => sameNames(deleted, names));
+  }
+
+  /**
+   * What a template's deletion would leave without its template (`DeletionHolds`): the tokens a record or note ties to
+   * it, its positions that are not closed, as the records and the chain say, and the tokens made with it that wait
+   * elsewhere. A template the backup holds and this device does not trust is checked with its text, as if it were
+   * trusted; nothing is trusted by it.
+   */
+  async deletionHolds(identifier: string): Promise<DeletionHolds> {
+    const kept = this.keptById(identifier);
+    const suggested = kept === undefined ? this.suggestions.find((template) => template.identifier === identifier) : undefined;
+    const made = (this.state.made ?? []).filter((entry) => entry.templateIdentifier === identifier).map((entry) => entry.category);
+    try {
+      const held = await this.tokens();
+      const tokens = held.filter((token) => token.template?.identifier === identifier);
+      const trusting = suggested === undefined ? undefined : readPresented(suggested, suggested.texts);
+      const positions = await this.recordedPositions({ template: identifier, ...(trusting === undefined ? {} : { trusting }) });
+      return { tokens, open: positions.filter((position) => position.status !== 'closed'), waiting: made.filter((category) => !held.some((token) => token.category === category)) };
+    } catch {
+      return { tokens: [], open: [], waiting: made, unknown: true };
+    }
+  }
+
+  /**
+   * Delete a template from the wallet, on the user's word: one the user trusts, which is no longer trusted then, or one
+   * the user stopped trusting that the backup still holds. What the device kept about it goes: its text, what its
+   * service said, the applications allowed to see its tokens, and the token categories made with it. Its tokens stay in
+   * the wallet and move in a recovery like any other coin; they are listed as tokens the wallet does not understand.
+   * The records of its positions stay, here and in the backup, so that adding the same template again restores what
+   * the wallet can do with them.
+   *
+   * The backup is only ever added to: the template's record stays there. It is marked deleted, by a withdrawal that
+   * says so, and no device that reads the backup offers it again. Where no store confirms the mark now, it is written
+   * the next time the backup is read; until then, this device alone knows.
+   *
+   * @param options.confirmed - the user confirmed a deletion that leaves tokens or open positions without their template
+   * @throws DeletionNotConfirmedError when something would be left without its template and the user did not confirm
+   * @returns whether the backup knows: `true` also when it never held the template
+   */
+  async deleteTemplate(identifier: string, options: { confirmed?: boolean } = {}): Promise<{ name: string; backupTold: boolean }> {
+    if (builtInIdentifiers().has(identifier)) return refuse('This is one of the wallet\'s own templates. It is built in and cannot be deleted.');
+    const kept = this.keptById(identifier);
+    const suggested = kept === undefined ? this.suggestions.find((template) => template.identifier === identifier) : undefined;
+    if (kept === undefined && suggested?.withdrawn === undefined) return refuse('This wallet can delete a template you trust, or one you stopped trusting. It has no such template.');
+    if (options.confirmed !== true) {
+      const holds = await this.deletionHolds(identifier);
+      if (deletionNeedsConfirming(holds)) throw new DeletionNotConfirmedError(holds);
+    }
+    const names: TemplateNames = kept ?? (suggested as SuggestedTemplate);
+    const name = kept?.name ?? (suggested as SuggestedTemplate).name;
+    // The number a mark has to reach: the trust's own, or the withdrawal's. A withdrawal that a store confirmed already
+    // reaches the backup's record whatever happens to the mark.
+    const renewal = kept?.renewal ?? suggested?.withdrawn?.renewal ?? 0;
+    const known = this.deletedOf(names);
+    const mark: DeletedTemplate = {
+      identifier: names.identifier,
+      contentHash: names.contentHash,
+      renewal: Math.max(renewal, known?.renewal ?? 0),
+      stored: false,
+      ...(suggested?.withdrawn?.stored === true || known?.stored === true || known?.withdrawnBefore === true ? { withdrawnBefore: true as const } : {}),
+    };
+    // A trust the backup never held, of a template never withdrawn: nothing there depends on it, and nothing is marked.
+    const unknownThere = kept !== undefined && !kept.stored && (kept.renewal ?? 0) === 0 && known === undefined;
+    const ours = (entry: { identifier?: string; templateIdentifier?: string }): boolean => (entry.identifier ?? entry.templateIdentifier) === names.identifier;
+    this.change({
+      templates: this.state.templates.filter((template) => !ours(template)),
+      suggested: (this.state.suggested ?? []).filter((template) => !sameNames(template, names)),
+      services: (this.state.services ?? []).filter((service) => !ours(service)),
+      made: (this.state.made ?? []).filter((entry) => !ours(entry)),
+      deleted: [...(this.state.deleted ?? []).filter((deleted) => !sameNames(deleted, names)), ...(unknownThere ? [] : [mark])],
+    });
+    // Actions worked out with its service and not carried out are put aside.
+    for (const [key, pending] of [...this.pendingShared]) {
+      if (pending.request.template.identifier !== identifier) continue;
+      this.pendingShared.delete(key);
+      await this.putAside(pending).catch(() => undefined);
+    }
+    if (unknownThere) return { name, backupTold: true };
+    return { name, backupTold: (await this.tellWithdrawals()) === 0 };
+  }
+
+  /**
+   * Read a template from a file the user chose, on this device, and check it as an offer of an application's is
+   * checked: no larger than an offer may be, a template the XO engine accepts and this wallet can run, with the
+   * identifier and the hash of its text worked out here. Nothing is trusted or stored.
+   * @throws TemplateFileError with the reason, in plain words
+   */
+  readTemplateFile(text: string): TemplateFile {
+    if (text.trim() === '') throw new TemplateFileError('empty', 'The file is empty.');
+    if (text.length > LARGEST_TEMPLATE_FILE) throw new TemplateFileError('too large', TEMPLATE_FILE_TOO_LARGE);
+    try {
+      JSON.parse(text);
+    } catch {
+      throw new TemplateFileError('not json', 'This file is not JSON.');
+    }
+    let read: ReadTemplate;
+    try {
+      read = readTemplate(text);
+    } catch (error) {
+      throw new TemplateFileError('not a template', `This is not an XO template: ${shortReason((error as Error).message)}.`);
+    }
+    const names: TemplateNames = { identifier: read.identifier, contentHash: read.contentHash };
+    if (builtInIdentifiers().has(names.identifier)) throw new TemplateFileError('not a template', 'This is one of the wallet\'s own templates. It is built in already.');
+    const kept = this.keptById(names.identifier);
+    if (kept !== undefined) return { kind: 'trusted', names: { identifier: kept.identifier, contentHash: kept.contentHash }, name: kept.name };
+    const texts: PresentedTexts = { template: text };
+    let summary: TemplateSummary;
+    try {
+      summary = this.describe(names, texts);
+    } catch (error) {
+      throw new TemplateFileError('not a template', error instanceof PresentationError ? `This wallet cannot use this template: ${shortReason(error.message)}.` : `This is not an XO template: ${shortReason((error as Error).message)}.`);
+    }
+    const suggested = this.suggestions.some((template) => sameNames(template, names) && template.texts.template === text);
+    return { kind: suggested ? 'suggested' : 'new', names, texts, summary };
+  }
+
+  /**
+   * Trust a template the user added from a file, on their word, as a page's offer is trusted: stored in the backup now
+   * where a store answers, its service asked who it is and what is possible if it names one, and the position records an
+   * earlier owner left for it checked against the chain. No application is told of it.
+   */
+  async trustFile(file: Extract<TemplateFile, { kind: 'new' | 'suggested' }>): Promise<KeptTemplate> {
+    const kept = await this.trust(file.names, file.texts, undefined, { contact: true, from: 'file' });
+    await this.storeNow(kept.identifier);
+    await this.confirmRecords().catch(() => undefined);
+    return this.keptById(kept.identifier) ?? kept;
   }
 
   /** No longer let an application see the tokens of a template. The template stays trusted. */
@@ -2550,14 +2792,24 @@ export class Applications {
     const { templates, tokenNotes, positions = [] } = await archive.read();
     const same = (a: Pick<TemplateNames, 'identifier' | 'contentHash'>, b: Pick<TemplateNames, 'identifier' | 'contentHash'>): boolean => a.identifier === b.identifier && a.contentHash === b.contentHash;
     let suggested = [...(this.state.suggested ?? [])];
-    for (const { entry, standing, withdrawn } of templates) {
+    let deletedList = [...(this.state.deleted ?? [])];
+    for (const { entry, standing, withdrawn, deleted } of templates) {
       const names: TemplateNames = { identifier: entry.identifier, contentHash: entry.contentHash };
       const texts: PresentedTexts = { template: entry.text };
       if (this.keptTemplate(names) !== undefined) continue;
       try {
         const renewal = entry.renewal ?? 0;
         const local = suggested.find((known) => same(known, names))?.withdrawn;
-        if (standing === 'current owner' && withdrawn !== undefined) {
+        const gone = deletedList.find((known) => same(known, names));
+        if (standing === 'current owner' && withdrawn !== undefined && deleted === true) {
+          // This seed deleted it: not offered again. The device keeps the mark's number, and only that.
+          if (gone === undefined || gone.renewal < withdrawn || !gone.stored) {
+            deletedList = [...deletedList.filter((known) => !same(known, names)), { ...names, renewal: Math.max(withdrawn, gone?.renewal ?? 0), stored: true, ...(gone?.withdrawnBefore === true ? { withdrawnBefore: true as const } : {}) }];
+          }
+          suggested = suggested.filter((candidate) => !(same(candidate, names) && (candidate.withdrawn === undefined || candidate.withdrawn.renewal <= withdrawn)));
+        } else if (gone !== undefined && (standing === 'earlier owner' || gone.renewal >= renewal)) {
+          // Deleted on this device, whether or not the backup has been told yet: neither trusted nor offered again.
+        } else if (standing === 'current owner' && withdrawn !== undefined) {
           // This seed stopped trusting it: a suggestion, which remembers the withdrawal's number.
           const known = suggested.find((candidate) => same(candidate, names));
           if (known?.withdrawn === undefined || known.withdrawn.renewal < withdrawn || !known.withdrawn.stored) {
@@ -2568,9 +2820,11 @@ export class Applications {
         } else if (standing === 'current owner') {
           // A record the withdrawals do not reach: trusted, as it was when it was stored.
           suggested = suggested.filter((candidate) => !(same(candidate, names) && candidate.withdrawn !== undefined));
-          this.change({ suggested });
+          this.change({ suggested, deleted: deletedList });
           await this.trust(names, texts);
           this.updateTemplate(names.identifier, { stored: true, ...(renewal === 0 ? {} : { renewal }) });
+          // Trusted again after a deletion: the device's mark of it has gone with the trust.
+          deletedList = [...(this.state.deleted ?? [])];
         } else if (!suggested.some((known) => known.identifier === names.identifier && known.contentHash === names.contentHash)) {
           suggested.push({ ...names, name: readPresented(names, texts).definition.name ?? 'Unnamed template', texts });
         }
@@ -2582,7 +2836,7 @@ export class Applications {
     for (const { entry } of tokenNotes) {
       if (!notes.some((note) => note.category === entry.category)) notes.push({ category: entry.category, templateIdentifier: entry.templateIdentifier });
     }
-    this.change({ suggested, notes });
+    this.change({ suggested, notes, deleted: deletedList });
     await this.tellWithdrawals();
     await this.takeRecords(archive, positions);
     return { suggested: this.suggestions.length, notes: notes.length };

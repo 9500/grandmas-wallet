@@ -218,6 +218,8 @@ export interface Assessment {
   templates: (AssessedRecord<TemplateEntry> & {
     /** The same owner stopped trusting the template after this record: the number of that withdrawal. */
     withdrawn?: number;
+    /** A withdrawal that reaches this record also says that the owner deleted the template from the wallet. */
+    deleted?: true;
   })[];
   tokenNotes: AssessedRecord<TokenNoteEntry>[];
   /**
@@ -357,10 +359,11 @@ export const assessArchive = (contents: ArchiveContents, authority: Authority): 
   }
   // A withdrawal reaches the template records of the key that signed it, up to its own number.
   for (const template of assessment.templates) {
-    const reaching = withdrawals
-      .filter(({ entry, signerKeyHash }) => signerKeyHash === template.signerKeyHash && entry.identifier === template.entry.identifier && entry.contentHash === template.entry.contentHash && entry.renewal >= (template.entry.renewal ?? 0))
-      .map(({ entry }) => entry.renewal);
-    if (reaching.length > 0) template.withdrawn = Math.max(...reaching);
+    const reaching = withdrawals.filter(
+      ({ entry, signerKeyHash }) => signerKeyHash === template.signerKeyHash && entry.identifier === template.entry.identifier && entry.contentHash === template.entry.contentHash && entry.renewal >= (template.entry.renewal ?? 0),
+    );
+    if (reaching.length > 0) template.withdrawn = Math.max(...reaching.map(({ entry }) => entry.renewal));
+    if (reaching.some(({ entry }) => entry.deleted === true)) template.deleted = true;
   }
   for (const template of assessment.templates) {
     if (template.standing === 'earlier owner') {

@@ -31,6 +31,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { ActionReview, NOT_YET_MADE } from './ActionReview.js';
 import { TokenNames } from './token-words.js';
 import { Apps, TokenListView } from './Apps.js';
+import { FileApps } from './fixtures-file.js';
 import { ServiceApps } from './fixtures-service.js';
 import { Receive } from './Receive.js';
 import { Backup, Recovery } from './Recovery.js';
@@ -838,7 +839,7 @@ const Fixtures = () => {
       ) : show === 'receive' ? (
         <Receive owner={tokenOwner} />
       ) : show === 'apps' ? (
-        params.has('service') ? <ServiceApps base={appsOwner} /> : <Apps owner={appsOwner} />
+        params.has('service') ? <ServiceApps base={appsOwner} /> : params.has('file') ? <FileApps base={appsOwner} /> : <Apps owner={appsOwner} />
       ) : show === 'recovery' ? (
         <Recovery owner={recoveryOwner} />
       ) : show === 'backup' ? (

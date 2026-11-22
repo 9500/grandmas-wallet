@@ -238,6 +238,10 @@ button.template-row > :first-child { display: flex; flex-direction: column; min-
 .template-row-name { font-weight: 600; overflow-wrap: anywhere; }
 .template-row-go { color: var(--muted); font-size: 20px; }
 .templates-own .list { margin-bottom: 8px; }
+/* Adding a template from a file, at the foot of the card: the way in, and below it what was refused. */
+.template-add { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.template-add-ways { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.template-add textarea { font-family: var(--mono); font-size: 13px; }
 
 /* ------------------------------------------------------------------ what an action leaves behind, and its tick */
 

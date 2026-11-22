@@ -263,6 +263,28 @@ describe('an application\'s service: when the wallet speaks to it', () => {
     expect(service.calls).toHaveLength(before);
   });
 
+  it('a template added from a file names its service in the review, and asks it once when the user trusts it; reading the file asks nothing', async () => {
+    const { service, applications } = await withService();
+    const file = applications.readTemplateFile(TEMPLATE.texts.template);
+    expect(file).toMatchObject({ kind: 'new', summary: { service: { description: 'The test service', url: URL_ } } });
+    expect(service.calls).toEqual([]);
+    if (file.kind === 'trusted') throw new Error('not new');
+    await applications.trustFile(file);
+    await contacted(applications);
+    expect(service.calls).toEqual(['xo_service_hello', 'xo_service_possible_request']);
+    expect(applications.readTemplateFile(TEMPLATE.texts.template)).toMatchObject({ kind: 'trusted' });
+    await applications.templateActions(NAMES.identifier);
+    expect(service.calls).toHaveLength(2);
+    // Deleted, what the service said is gone with it; added again, it is asked once more.
+    await applications.deleteTemplate(NAMES.identifier);
+    expect(applications.serviceOf(NAMES.identifier)).toBeUndefined();
+    const again = applications.readTemplateFile(TEMPLATE.texts.template);
+    if (again.kind === 'trusted') throw new Error('not new');
+    expect(applications.serviceOf((await applications.trustFile(again)).identifier)).toMatchObject({ url: URL_ });
+    await contacted(applications);
+    expect(service.calls).toHaveLength(4);
+  });
+
   it('a service that cannot be reached leaves the template trusted, and says so in plain words', async () => {
     const { service, applications } = await withService({ unreachable: new Set(['xo_service_hello']) });
     const status = await trusted(applications);

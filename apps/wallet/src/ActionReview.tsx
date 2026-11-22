@@ -5,6 +5,7 @@ import type { ComponentChildren } from 'preact';
 import { useContext, useState } from 'preact/hooks';
 
 import { type Refusal, leavingLine, leavingWords } from './review-gate.js';
+import { serviceHost } from './template-actions.js';
 import { TokenNames, frozenNames, rawUnits, tokenUnits } from './token-words.js';
 
 /**
@@ -82,6 +83,19 @@ export const Findings = ({ summary }: { summary: TemplateSummary }) => {
   );
 };
 
+/** The service a template names, as it names it: its host, or why its address can't be used. Nothing is asked of it. */
+const ServiceNamed = ({ service }: { service: NonNullable<TemplateSummary['service']> }) => (
+  <span>
+    {serviceHost(service.url) ?? (service.description === '' ? 'Named by the template' : service.description)}
+    {service.problem !== undefined && (
+      <span class="muted">
+        {' · Address not usable '}
+        <Info label="Why the address can't be used">{service.problem}</Info>
+      </span>
+    )}
+  </span>
+);
+
 /** A template: its own name and description, what the wallet can say about it, and what it can ask for. */
 export const TemplateView = ({ summary, showActions }: { summary: TemplateSummary; showActions?: boolean }) => (
   <div class="stack-s">
@@ -115,6 +129,7 @@ export const TemplateView = ({ summary, showActions }: { summary: TemplateSummar
         entries={[
           ['Identifier', <span class="mono">{summary.identifier}</span>],
           ['Content hash', <span class="mono">{summary.contentHash}</span>],
+          ...(summary.service === undefined ? [] : [[SERVICE_WORDS.service, <ServiceNamed service={summary.service} />] as [ComponentChildren, ComponentChildren]]),
         ]}
       />
     </More>

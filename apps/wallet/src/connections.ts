@@ -1,5 +1,5 @@
 import { hexToBin } from '@bitauth/libauth';
-import { type ActionConsent, type ActionOutcome, type ApplicationAction, type OwnerWallet, type ShownRegistry, Applications, TokenRegistries, applicationArchive, applicationConnector, httpRegistryFetch, shownRegistry, walletAnnouncement } from '@grandmas-wallet/app';
+import { type ActionConsent, type ActionOutcome, type ApplicationAction, type OwnerWallet, type ShownRegistry, Applications, DeletionNotConfirmedError, TokenRegistries, deletionNeedsConfirming, applicationArchive, applicationConnector, httpRegistryFetch, shownRegistry, walletAnnouncement } from '@grandmas-wallet/app';
 import type { Offer, Proposal, WalletConnector } from '@grandmas-wallet/connect';
 import { type LinkStatus, type WalletLink, newLinkKey, openWalletLink, pairingOf } from '@grandmas-wallet/connect/wizard';
 import type { SeedKeys } from '@grandmas-wallet/core';
@@ -108,6 +108,13 @@ export interface ApplicationsPart {
    * @returns whether the backup has been told
    */
   stopTrusting(identifier: string): Promise<{ name: string; backupTold: boolean }>;
+  /**
+   * Delete a template from the wallet: one the user trusts, which stops being trusted, or one the user stopped trusting.
+   * Requests of it that wait for a decision are declined. `confirmed`: the user confirmed a deletion that leaves tokens
+   * or open positions without their template.
+   * @returns whether the backup has been told
+   */
+  deleteTemplate(identifier: string, confirmed: boolean): Promise<{ name: string; backupTold: boolean }>;
   /** Connect to the application whose address this is. @throws if the address cannot be used */
   connect(uri: string, name?: string): Connection;
   /** Close a connection and forget it. Requests it made, and their outcomes, are kept. */
@@ -269,6 +276,20 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
       setAsks((known) => known.filter((ask) => ask.template.identifier !== identifier));
       try {
         return await applications.forget(identifier);
+      } finally {
+        changed();
+      }
+    },
+    deleteTemplate: async (identifier, confirmed) => {
+      // Nothing is declined for a deletion that is not confirmed and needs to be.
+      if (!confirmed) {
+        const holds = await applications.deletionHolds(identifier);
+        if (deletionNeedsConfirming(holds)) throw new DeletionNotConfirmedError(holds);
+      }
+      for (const proposal of open_.current.filter((candidate) => candidate.entry.template.identifier === identifier)) await proposal.decline();
+      setAsks((known) => known.filter((ask) => ask.template.identifier !== identifier));
+      try {
+        return await applications.deleteTemplate(identifier, { confirmed });
       } finally {
         changed();
       }

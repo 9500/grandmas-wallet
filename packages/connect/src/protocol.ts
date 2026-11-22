@@ -286,8 +286,9 @@ export const readBindings = (value: unknown): OutputBindings | undefined => {
   return read;
 };
 
-/** The largest text a request may carry: a template with its compiled contracts. */
-const LARGEST_TEXT = 400_000;
+/** The largest text a request or an offer may carry: a template with its compiled contracts. */
+export const LARGEST_TEMPLATE_TEXT = 400_000;
+const LARGEST_TEXT = LARGEST_TEMPLATE_TEXT;
 const isLongText = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= LARGEST_TEXT;
 
 /** The template a request or an offer sends. Anything else beside it is not taken. */
