@@ -32,6 +32,7 @@ import {
   requiredFee,
   smallestOutputValue,
   templateLockingBytecode,
+  templateOmittedSatoshis,
   templateOutput,
   templateSequenceNumber,
   templateTransaction,
@@ -463,6 +464,11 @@ export interface ActionPreview {
     feeSatoshis: bigint;
     /** The part of the fee that is too small to return as change. */
     remainderSatoshis: bigint;
+    /**
+     * The part of the fee that coins of the application's give up to it, where its template leaves their satoshis out
+     * of the change (`omitChangeAmounts`): it goes to the network, and never came from the wallet.
+     */
+    feeFromApplicationSatoshis?: bigint;
     bytes: number;
     /**
      * What goes into the application, in satoshis: what the wallet gives less what it gets and the fee. Below
@@ -788,6 +794,8 @@ interface Plan {
   follow: FollowedScript[];
   feeSatoshis: bigint;
   remainderSatoshis: bigint;
+  /** The part of the fee that the application's coins give up to it as their template says (`omitChangeAmounts`). */
+  feeFromApplicationSatoshis?: bigint;
   bytes: number;
   token?: TokenCoin;
   /** The wallet has no coin that can define a new token: it pays itself this much first. */
@@ -1607,7 +1615,32 @@ export class Applications {
       changeLockingBytecode: leftOver.address.lockingBytecode,
       feeRate: this.wallet.feeRate,
     };
-    let choice = chooseCoins({ ...choosing, outputs: paying });
+    // Satoshis of the application's coins that the template leaves out of the change (`omitChangeAmounts`) pay toward
+    // the outputs and the fee first, and what is left of them goes to the fee: it is never change for the wallet.
+    // Where they pay for everything by themselves, no coin of the wallet's is added, and only what the wallet's own
+    // inputs bring comes back to it; where they do not, the wallet's coins pay the rest and get their change, as always.
+    let omitted: bigint;
+    try {
+      omitted = sum(applicationInputs.map(({ inputIdentifier, coin }) => templateOmittedSatoshis(definition, inputIdentifier as string, coin.utxo.output.valueSatoshis, values)));
+    } catch (error) {
+      if (!(error instanceof TemplateError)) throw error;
+      return refuse(error.message);
+    }
+    const fixedValue = sum(choosing.fixedInputs.map((input) => input.utxo.output.valueSatoshis));
+    const paid = sum(paying.map((output) => output.valueSatoshis));
+    const plainBytes = transactionBytes(choosing.fixedInputs.map((input) => input.inputBytes), paying);
+    let choice: ReturnType<typeof chooseCoins>;
+    if (omitted > 0n && omitted >= paid + requiredFee(plainBytes, this.wallet.feeRate)) {
+      const walletsOwn = fixedValue - omitted;
+      const withBytes = transactionBytes(choosing.fixedInputs.map((input) => input.inputBytes), [...paying, leastLeftOver]);
+      const short = paid + requiredFee(withBytes, this.wallet.feeRate) - omitted;
+      const back = walletsOwn - (short > 0n ? short : 0n);
+      if (back >= smallest) choice = { coins: [], changeSatoshis: back, feeSatoshis: fixedValue - paid - back, remainderSatoshis: 0n, bytes: withBytes };
+      else if (mustLeave) return refuse('The template leaves an output to the wallet, and the coins whose satoshis go to the fee leave nothing that the wallet may put there.');
+      else choice = { coins: [], feeSatoshis: fixedValue - paid, remainderSatoshis: walletsOwn, bytes: plainBytes };
+    } else {
+      choice = chooseCoins({ ...choosing, outputs: paying });
+    }
     if (mustLeave && choice.changeSatoshis === undefined) {
       // The coins come out without anything left over: they are chosen again so that the least an output may
       // hold is left, and whatever more there is goes to that one output, at the exact fee.
@@ -1618,6 +1651,8 @@ export class Applications {
       const changeSatoshis = sum(spending.map((coin) => coin.utxo.output.valueSatoshis)) - sum(paying.map((output) => output.valueSatoshis)) - feeSatoshis;
       choice = { coins: again.coins, changeSatoshis, feeSatoshis, remainderSatoshis: 0n, bytes };
     }
+    const beyondOutputs = omitted - paid;
+    const fromApplication = beyondOutputs <= 0n ? 0n : beyondOutputs < choice.feeSatoshis ? beyondOutputs : choice.feeSatoshis;
     const chosen: PlannedInput[] = choice.coins.map(({ utxo }) => ({ coin: available.find((coin) => coin.utxo === utxo) as AccountCoin, bytes: INPUT_BYTES.byKey, kind: 'own' }));
     const leftOverOutput: PlannedOutput[] = choice.changeSatoshis === undefined ? [] : [{ output: { lockingBytecode: leftOver.address.lockingBytecode, valueSatoshis: choice.changeSatoshis }, wallet: 'left over' }];
 
@@ -1686,6 +1721,7 @@ export class Applications {
       feeSatoshis: choice.feeSatoshis,
       remainderSatoshis: choice.remainderSatoshis,
       bytes: choice.bytes,
+      ...(fromApplication > 0n ? { feeFromApplicationSatoshis: fromApplication } : {}),
       ...(token === undefined ? {} : { token }),
       ...(payItself === undefined ? {} : { payItself }),
       ...(tokensLeaving.length === 0 ? {} : { tokensLeaving }),
@@ -2113,6 +2149,7 @@ export class Applications {
         getsSatoshis: gets,
         feeSatoshis: plan.feeSatoshis,
         remainderSatoshis: plan.remainderSatoshis,
+        ...(plan.feeFromApplicationSatoshis === undefined ? {} : { feeFromApplicationSatoshis: plan.feeFromApplicationSatoshis }),
         bytes: plan.bytes,
         intoApplicationSatoshis: gives - gets - plan.feeSatoshis,
         fromApplication: { satoshis: sum(theirs.map((input) => input.coin.utxo.output.valueSatoshis)), coins: theirs.length },

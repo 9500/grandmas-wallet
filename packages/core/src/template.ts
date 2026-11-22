@@ -259,6 +259,40 @@ export const templateSequenceNumber = (template: XOTemplate, inputIdentifier: st
   return input.sequenceNumber === undefined ? undefined : wholeNumber(template, input.sequenceNumber, values, `sequence number of "${inputIdentifier}"`, 0xffffffff);
 };
 
+/**
+ * The satoshis of a coin at one of a template's inputs that the template leaves out of the change: its
+ * `omitChangeAmounts.satoshis`, `true` for the coin's whole value, or an amount, as a number or an expression, never
+ * more than the coin holds. What is left out pays toward the outputs and the fee, and what is left of it goes to the
+ * fee: it is nobody's change. The XO engine itself does not read the field; this is the meaning its schema gives it.
+ * @returns 0 for an input that leaves nothing out
+ * @throws TemplateError if the amount is an expression that cannot be worked out
+ */
+export const templateOmittedSatoshis = (template: XOTemplate, inputIdentifier: string, valueSatoshis: bigint, values: TemplateValues): bigint => {
+  const marked = (template.inputs?.[inputIdentifier] as { omitChangeAmounts?: { satoshis?: unknown } } | undefined)?.omitChangeAmounts?.satoshis;
+  if (marked === undefined || marked === null || marked === false) return 0n;
+  if (marked === true) return valueSatoshis;
+  const text = typeof marked === 'bigint' || typeof marked === 'number' ? String(marked) : isExpression(marked) ? evaluate(template, marked, values, 'bigint') : String(marked);
+  if (!/^\d+$/.test(text)) return fail(`The satoshis the template's input "${inputIdentifier}" leaves out of the change are not a whole number.`);
+  const amount = BigInt(text);
+  return amount < valueSatoshis ? amount : valueSatoshis;
+};
+
+/**
+ * What the coins of a transaction leave out of the change by their template inputs, together: the most the fee may
+ * exceed the required one by on their account, for the check before sending. An amount that cannot be worked out
+ * counts as nothing.
+ */
+export const templateGivenToFee = (template: XOTemplate, inputs: { inputIdentifier?: string | undefined; valueSatoshis: bigint }[], values: TemplateValues): bigint =>
+  inputs.reduce((total, { inputIdentifier, valueSatoshis }) => {
+    if (inputIdentifier === undefined) return total;
+    try {
+      return total + templateOmittedSatoshis(template, inputIdentifier, valueSatoshis, values);
+    } catch (error) {
+      if (!(error instanceof TemplateError)) throw error;
+      return total;
+    }
+  }, 0n);
+
 /** A template's text with the values put in where it refers to them as `$(<name>)`: its own words about an action. */
 export const templateWords = (template: XOTemplate, text: string | undefined, values: TemplateValues): string => {
   if (text === undefined) return '';

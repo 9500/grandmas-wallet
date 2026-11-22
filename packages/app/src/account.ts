@@ -19,6 +19,7 @@ import {
   InvitationNotTakenError,
   checkBeforeSending,
   invitationParts,
+  templateGivenToFee,
   typedValues,
 } from '@grandmas-wallet/core';
 import type { Engine } from '@xo-cash/engine';
@@ -373,7 +374,9 @@ export class Account implements WalletBackend {
         (input, index) => hex(input.outpointTransactionHash) === hex(request.inputs[index]?.coin.utxo.transactionHash ?? new Uint8Array()) && input.outpointIndex === request.inputs[index]?.coin.utxo.index,
       );
       if (transaction.inputs.length !== request.inputs.length || !spendsWhatWasAsked) throw new Error('The engine built a transaction with other inputs than the ones asked for.');
-      const check = checkBeforeSending({ transaction, sourceOutputs });
+      // Coins whose template input leaves satoshis out of the change give them to the fee, as the template says.
+      const givenToFee = templateGivenToFee(templateDefinition, request.inputs.map(({ coin, inputIdentifier }) => ({ inputIdentifier, valueSatoshis: coin.utxo.output.valueSatoshis })), typedValues(templateDefinition, request.variables ?? {}));
+      const check = checkBeforeSending({ transaction, sourceOutputs }, undefined, givenToFee);
       if (check !== true) {
         throw new Error(`The transaction fails the check before sending: ${check}`, { cause: { transactionHex: builtTransaction.serializedTransaction, sourceOutputs } });
       }

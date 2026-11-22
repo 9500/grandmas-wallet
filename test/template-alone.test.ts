@@ -527,3 +527,82 @@ describe('a token category an action carries on, and one it makes', () => {
     await refused(device, () => device.applications.preview(request(furnace, 'feed', 'stoker', { fuel: FUEL, fuelAmount: 200, feedSatoshis: 1000 }, { creates: 'fuel' })), 'A new category cannot be given');
   });
 });
+
+describe('a template input that leaves its coin\'s satoshis and tokens out of the change', () => {
+  const definition = definitionOf(furnace);
+  const furnaceAt = templateLockingBytecode(definition, 'furnaceLockingScript', {});
+  const balanceOf = async (device: Device): Promise<bigint> => (await device.wallet.balance()).recoverable;
+  /** A furnace coin of the given value, put there by the wallet, and its outpoint. */
+  const stoked = async (device: Device, satoshis: number): Promise<string> => {
+    const sent = await device.applications.carryOut(request(furnace, 'stoke', 'stoker', { feedSatoshis: satoshis }));
+    const transaction = await transactionOf(device, sent.transactionId);
+    const index = transaction.outputs.findIndex((output) => hex(output.lockingBytecode) === hex(furnaceAt));
+    return `${sent.transactionId}:${index}`;
+  };
+  const shapeOf = (transaction: TransactionCommon) => ({ inputs: transaction.inputs.length, outputs: transaction.outputs.map((output) => output.valueSatoshis) });
+
+  it('a marked coin pays the outputs and the fee by itself: no coin of the wallet\'s is added, nothing is left over, and the rest of the coin goes to the fee, shown as the application\'s', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    for (const satoshis of [5000, 600]) {
+      const coin = await stoked(device, satoshis);
+      const burn = request(furnace, 'burn', 'stoker', { note: 'goodbye' }, { inputs: { furnaceInput: coin } });
+      const preview = await device.applications.preview(burn);
+      expect(preview.figures).toMatchObject({ givesSatoshis: 0n, getsSatoshis: 0n, feeSatoshis: BigInt(satoshis), feeFromApplicationSatoshis: BigInt(satoshis), toWallet: [] });
+      const before = await balanceOf(device);
+      const burned = await device.applications.carryOut(burn);
+      expect(shapeOf(await transactionOf(device, burned.transactionId))).toEqual({ inputs: 1, outputs: [0n] });
+      expect(burned.sent.feeSatoshis).toBe(BigInt(satoshis));
+      expect(await balanceOf(device)).toBe(before);
+    }
+  });
+
+  it('where marked coins do not cover the outputs and the fee, the wallet\'s coins pay the difference and get their own change; where they do, the surplus goes to the fee', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    const small = await stoked(device, 1000);
+    const more = request(furnace, 'relight', 'stoker', { feedSatoshis: 3000 }, { inputs: { furnaceInput: small } });
+    const preview = await device.applications.preview(more);
+    expect(preview.figures.feeFromApplicationSatoshis).toBeUndefined();
+    expect(preview.figures.feeSatoshis).toBeLessThan(1000n);
+    const before = await balanceOf(device);
+    const relit = await device.applications.carryOut(more);
+    const transaction = await transactionOf(device, relit.transactionId);
+    expect(transaction.inputs).toHaveLength(2);
+    expect(transaction.outputs[0]?.valueSatoshis).toBe(3000n);
+    expect(transaction.outputs).toHaveLength(2);
+    expect(await balanceOf(device)).toBe(before - 2000n - relit.sent.feeSatoshis);
+    // A coin larger than the output: no coin of the wallet's, and the surplus goes to the fee.
+    const large = await stoked(device, 5000);
+    const less = await device.applications.carryOut(request(furnace, 'relight', 'stoker', { feedSatoshis: 1000 }, { inputs: { furnaceInput: large } }));
+    expect(shapeOf(await transactionOf(device, less.transactionId))).toEqual({ inputs: 1, outputs: [1000n] });
+    expect(less.sent.feeSatoshis).toBe(4000n);
+  });
+
+  it('a coin spent through an input without the mark is as before: what the outputs and the fee leave of it comes back to the wallet', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    const coin = await stoked(device, 5000);
+    const sweep = request(furnace, 'sweep', 'stoker', { note: 'swept' }, { inputs: { sweptInput: coin } });
+    const preview = await device.applications.preview(sweep);
+    expect(preview.figures.feeFromApplicationSatoshis).toBeUndefined();
+    expect(preview.figures.toWallet).toEqual([expect.objectContaining({ kind: 'left over', satoshis: 5000n - preview.figures.feeSatoshis })]);
+    const before = await balanceOf(device);
+    const swept = await device.applications.carryOut(sweep);
+    expect(shapeOf(await transactionOf(device, swept.transactionId))).toEqual({ inputs: 1, outputs: [0n, 5000n - swept.sent.feeSatoshis] });
+    expect(await balanceOf(device)).toBe(before + 5000n - swept.sent.feeSatoshis);
+  });
+
+  it('fungible tokens on a marked coin that no output carries on are destroyed, not returned to the wallet', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    const FUEL = 'f5'.repeat(32);
+    device.chain.adopt([{ transactionId: 'f6'.repeat(32), index: 1, output: { lockingBytecode: hexToBin(addressOf(device, change, 0)), valueSatoshis: 1000n, token: { category: hexToBin(FUEL), amount: 5000n } } }]);
+    await device.wallet.search({ passes: ['quick'] });
+    const fed = await device.applications.carryOut(request(furnace, 'feed', 'stoker', { fuel: FUEL, fuelAmount: 200, feedSatoshis: 1000 }), undefined, { tokensLeave: true });
+    const burn = request(furnace, 'burn', 'stoker', { note: 'fuel' }, { inputs: { furnaceInput: `${fed.transactionId}:0` } });
+    const preview = await device.applications.preview(burn);
+    expect(preview.figures.toWallet).toEqual([]);
+    expect(preview.figures.tokensDestroyed).toEqual([expect.objectContaining({ token: { category: FUEL, amount: 200n }, how: 'not carried on', wallet: false })]);
+    const burned = await device.applications.carryOut(burn);
+    expect(shapeOf(await transactionOf(device, burned.transactionId))).toEqual({ inputs: 1, outputs: [0n] });
+    const kept = (await device.wallet.parts.tokenCoins()).filter(({ coin }) => hex(coin.utxo.output.token?.category ?? new Uint8Array()) === FUEL);
+    expect(kept.map(({ coin }) => coin.utxo.output.token?.amount)).toEqual([4800n]);
+  });
+});

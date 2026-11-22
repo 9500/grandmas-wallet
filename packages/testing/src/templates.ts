@@ -537,7 +537,10 @@ export const jointEnvelopeTemplate = {
  * Templates for how the wallet reads a template's inputs and scripts:
  *
  * - **Furnace**: fuel fed to a furnace every stoker shares. Feeding names the fuel's category as a value of the
- *   request, or leaves it to the wallet to make a new one.
+ *   request, or leaves it to the wallet to make a new one. Burning spends a furnace coin into one data output, and its
+ *   input leaves the coin's satoshis and tokens out of the change, so that they go to the fee or are destroyed;
+ *   relighting puts the satoshis of a furnace coin back in, with the same mark; sweeping spends a furnace coin through
+ *   an input without the mark.
  */
 
 const furnaceInput = (name: string, description: string, marked: boolean) => ({

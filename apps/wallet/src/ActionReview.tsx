@@ -530,6 +530,7 @@ export const OwnFigures = ({ figures }: { figures: ActionPreview['figures'] }) =
       <p class="small muted moved-note">Worked out by this wallet from the transaction it built. The application cannot change them.</p>
       <KeyValues entries={rows} />
       {figures.remainderSatoshis > 0n && <Notice>The fee includes {formatSatoshis(figures.remainderSatoshis)} satoshis that are too few to come back as change.</Notice>}
+      {figures.feeFromApplicationSatoshis !== undefined && <Notice>The fee includes {formatSatoshis(figures.feeFromApplicationSatoshis)} satoshis of the application's coins, which its template gives to the network. They do not come from your wallet.</Notice>}
       {figures.tokensNet.length > 0 && (
         <div class="moved-group">
           <div class="moved-title">Tokens</div>

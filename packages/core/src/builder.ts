@@ -196,6 +196,8 @@ export interface BuildParameters {
   locktime?: number;
   /** Permit input tokens that do not reappear in the outputs. */
   allowTokenBurn?: boolean;
+  /** Satoshis that coins of an application's give up to the fee as their template says: the fee may exceed the required one by that much more. */
+  givenToFee?: bigint;
 }
 
 export interface BuiltTransaction {
@@ -342,7 +344,7 @@ export const buildTransaction = (parameters: BuildParameters): BuiltTransaction 
       }
     });
     const remainderSatoshis = feeSatoshis - requiredFeeSatoshis;
-    if (remainderSatoshis >= SMALLEST_CHANGE && changeIndex === undefined) {
+    if (remainderSatoshis - (parameters.givenToFee ?? 0n) >= SMALLEST_CHANGE && changeIndex === undefined) {
       throw new Error(
         `The fee of ${feeSatoshis} satoshis is ${remainderSatoshis} above the required ${requiredFeeSatoshis}; an amount that size is returned as change, not left to the fee.`,
       );
@@ -412,11 +414,14 @@ export const verifyTransaction = ({ transaction, sourceOutputs }: Pick<BuiltTran
 /**
  * The check before sending. `true` when the transaction passes the network's rules, pays the required fee
  * and no more than a remainder too small to return, and has no output below its smallest value; otherwise
- * the reason. It works from the signed transaction alone, whoever built it.
+ * the reason. It works from the signed transaction alone, whoever built it. `givenToFee` is what coins of an
+ * application's give up to the fee as their template says (`templateOmittedSatoshis`): the fee may exceed the
+ * required one by that much more.
  */
 export const checkBeforeSending = (
   { transaction, sourceOutputs }: Pick<BuiltTransaction, 'transaction' | 'sourceOutputs'>,
   feeRate = DEFAULT_FEE_RATE,
+  givenToFee = 0n,
 ): string | true => {
   if (sourceOutputs.length !== transaction.inputs.length) return 'The spent outputs do not match the inputs.';
   const inputTotal = sourceOutputs.reduce((sum, { valueSatoshis }) => sum + valueSatoshis, 0n);
@@ -424,7 +429,7 @@ export const checkBeforeSending = (
   const fee = inputTotal - outputTotal;
   const required = requiredFee(encodeTransactionBch(transaction).length, feeRate);
   if (fee < required) return `The fee of ${fee} satoshis is below the ${required} that nodes require.`;
-  if (fee - required >= SMALLEST_CHANGE) {
+  if (fee - required - givenToFee >= SMALLEST_CHANGE) {
     return `The fee of ${fee} satoshis is ${fee - required} above the required ${required}: more than a remainder too small to return.`;
   }
   for (const [index, output] of transaction.outputs.entries()) {

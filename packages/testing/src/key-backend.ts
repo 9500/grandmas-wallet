@@ -35,6 +35,7 @@ import {
   recoverableAddressScript,
   recoverableInput,
   sweptInput,
+  templateGivenToFee,
   templateLockingBytecode,
   templateOutput,
   templateSequenceNumber,
@@ -225,7 +226,10 @@ export class KeyBackend implements WalletBackend {
 
   async prepare(request: TransactionRequest): Promise<PreparedTransaction> {
     const imported = this.imported.get(request.template);
+    // As the account does: coins whose template input leaves satoshis out of the change give them to the fee.
+    const givenToFee = imported === undefined ? 0n : templateGivenToFee(imported.definition, request.inputs.map(({ coin, inputIdentifier }) => ({ inputIdentifier, valueSatoshis: coin.utxo.output.valueSatoshis })), typedValues(imported.definition, request.variables ?? {}));
     const built = buildTransaction({
+      givenToFee,
       inputs: request.inputs.map(({ coin, inputIdentifier, unlocking }) => this.inputFor(coin, request, inputIdentifier, unlocking)),
       outputs: request.outputs.map((output) => this.outputFor(output, request)),
       // An action of an application's template has the lock time its template gives it.
@@ -236,7 +240,7 @@ export class KeyBackend implements WalletBackend {
       // dropped, and the network's rules decide the rest.
       allowTokenBurn: (request.template === 'controller' && request.action === 'close') || imported !== undefined,
     });
-    const check = checkBeforeSending(built);
+    const check = checkBeforeSending(built, undefined, givenToFee);
     if (check !== true) throw new Error(`The transaction fails the check before sending: ${check}`);
     this.nextHandle += 1;
     const invitationIdentifier = `prepared-${this.nextHandle}`;

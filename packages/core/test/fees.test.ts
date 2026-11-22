@@ -12,7 +12,10 @@ import {
   InsufficientFundsError,
   p2pkhLockingBytecode,
   requiredFee,
+  readTemplate,
   smallestOutputValue,
+  templateGivenToFee,
+  templateOmittedSatoshis,
   verifyTransaction,
 } from '../src/index.js';
 import { activeState, identity, newOwner, owner, pendingState, recoverer, stranger } from './harness.js';
@@ -192,5 +195,44 @@ describe('the check before sending', () => {
     expect(built.feeSatoshis).toBeGreaterThan(40_000n);
     expect(built.transaction.outputs[0]?.valueSatoshis).toBe(300_000n - built.feeSatoshis);
     expect(checkBeforeSending(built)).toBe(true);
+  });
+});
+
+describe('satoshis a template input leaves out of the change', () => {
+  const marked = (satoshis: unknown) =>
+    readTemplate(
+      JSON.stringify({
+        $schema: 'https://libauth.org/schemas/wallet-template-v0.schema.json',
+        name: 'Marked',
+        description: 'An input that leaves satoshis out of the change.',
+        version: '1',
+        supported: ['BCH_2026_05'],
+        roles: { anyone: { name: 'Anyone', description: 'Anyone.' } },
+        start: [],
+        actions: {},
+        transactions: {},
+        outputs: {},
+        lockingScripts: {},
+        inputs: { markedInput: { name: 'Marked', description: 'Marked.', unlockingScript: 'unlock', omitChangeAmounts: { satoshis } }, plainInput: { name: 'Plain', description: 'Plain.', unlockingScript: 'unlock' } },
+        scripts: { unlock: '' },
+        variables: { burned: { name: 'Burned', description: 'Satoshis burned.', type: 'satoshis' } },
+      }),
+    ).definition;
+
+  it('FE04: all of the coin, an amount no larger than the coin, or an amount worked out from the values; nothing for an input without the mark', () => {
+    expect(templateOmittedSatoshis(marked(true), 'markedInput', 5000n, {})).toBe(5000n);
+    expect(templateOmittedSatoshis(marked('1200'), 'markedInput', 5000n, {})).toBe(1200n);
+    expect(templateOmittedSatoshis(marked('9000'), 'markedInput', 5000n, {})).toBe(5000n);
+    expect(templateOmittedSatoshis(marked('$(<burned>)'), 'markedInput', 5000n, { burned: 700n })).toBe(700n);
+    expect(templateOmittedSatoshis(marked(true), 'plainInput', 5000n, {})).toBe(0n);
+    expect(templateGivenToFee(marked(true), [{ inputIdentifier: 'markedInput', valueSatoshis: 5000n }, { inputIdentifier: 'plainInput', valueSatoshis: 3000n }, { valueSatoshis: 1000n }], {})).toBe(5000n);
+  });
+
+  it('FE04: the check before sending and the builder take a fee above the required one by what such coins give up to it, and no more', () => {
+    const built = buildTransaction({ inputs: [coinAt(1).byKey()], outputs: [payment(5_000n)], givenToFee: 5_000n });
+    expect(checkBeforeSending(built)).toContain('above the required');
+    expect(checkBeforeSending(built, undefined, 5_000n)).toBe(true);
+    expect(checkBeforeSending(built, undefined, 3_000n)).toContain('above the required');
+    expect(() => buildTransaction({ inputs: [coinAt(1).byKey()], outputs: [payment(5_000n)] })).toThrow(/returned as change, not left to the fee/);
   });
 });
