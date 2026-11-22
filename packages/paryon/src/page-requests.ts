@@ -1,7 +1,7 @@
 import { binToHex } from '@bitauth/libauth';
 import type { Utxo } from '@grandmas-wallet/core';
 
-import { borrowingFee, repaymentAllowed } from './amounts.js';
+import { borrowingFee, interestRateProblem, repaymentAllowed } from './amounts.js';
 import { type ParyonContracts, periodAt } from './deployment.js';
 import {
   type InterestManagerConfiguration,
@@ -19,8 +19,14 @@ import {
 } from './state.js';
 
 /**
- * What the loan's page asks of a wallet of this project in `xo_v1` (proposal sections 14.2 and 15.3): an action of
- * the Paryon template, which is all the wallet is sent. What the wallet cannot know of Paryon, the page says itself:
+ * What the loan's page asks of a wallet of this project in `xo_v1` (proposal sections 14.2 and 15.3).
+ *
+ * Version 3 (the names without a version): the page sends only what the borrower decides and where its key goes, the
+ * loan it is about and its own address. Paryon's service, which the template names, supplies the rest when the wallet
+ * asks it to join the invitation: Paryon's coins and every value read from them. The page names no coin.
+ *
+ * Versions 1 and 2 (the names ending in `V2`): an action of the Paryon template, which is all the wallet is sent. What
+ * the wallet cannot know of Paryon, the page says itself:
  *
  * - **Paryon's coins.** Every coin of Paryon's an action spends is named by outpoint, for the template input it is
  *   spent as: the shared contracts (factory, Borrowing thread, price, manage function), the key waiting in the
@@ -111,8 +117,8 @@ export type LoanActionParts = ActionParts & { about: { category: string; spent: 
 /** Making a loan key: Paryon's factory. */
 export const createKeyParts = (factory: Utxo): ActionParts => ({ variables: {}, inputs: { factoryInput: outpoint(factory) } });
 
-/** Make a loan key: the wallet's coin defines its category; Paryon's factory, which the page names, makes it. */
-export const createKeyRequestAlone = (template: TemplateNamesAlone, chosen: { factory: Utxo; page?: string }): LoanRequestAlone => {
+/** Version 2. Make a loan key: the wallet's coin defines its category; Paryon's factory, which the page names, makes it. */
+export const createKeyRequestAloneV2 = (template: TemplateNamesAlone, chosen: { factory: Utxo; page?: string }): LoanRequestAlone => {
   const { variables, inputs } = createKeyParts(chosen.factory);
   return { ...base(template, 'createKey', chosen.page), variables, creates: 'keyCategory', inputs };
 };
@@ -132,7 +138,7 @@ export const movePeriodParts = (contracts: ParyonContracts, borrowing: Utxo, loc
  * Move a Borrowing thread on to the period of a height, so that a loan opened from it is charged no interest for
  * periods before. The lock time is that height; the thread's supply is put back as it is.
  */
-export const movePeriodRequestAlone = (template: TemplateNamesAlone, contracts: ParyonContracts, chosen: { borrowing: Utxo; lockHeight: number; page?: string }): LoanRequestAlone => {
+export const movePeriodRequestAloneV2 = (template: TemplateNamesAlone, contracts: ParyonContracts, chosen: { borrowing: Utxo; lockHeight: number; page?: string }): LoanRequestAlone => {
   const { variables, inputs } = movePeriodParts(contracts, chosen.borrowing, chosen.lockHeight);
   return { ...base(template, 'movePeriod', chosen.page), variables, inputs };
 };
@@ -161,7 +167,7 @@ export const borrowParts = (choice: BorrowChoice): ActionParts => {
 };
 
 /** Borrow: the key waiting in Paryon's contract and the PUSD go to fresh addresses of the wallet's. */
-export const borrowRequestAlone = (template: TemplateNamesAlone, choice: BorrowChoice & { page?: string }): LoanRequestAlone => {
+export const borrowRequestAloneV2 = (template: TemplateNamesAlone, choice: BorrowChoice & { page?: string }): LoanRequestAlone => {
   const { variables, inputs } = borrowParts(choice);
   return { ...base(template, 'borrow', choice.page), variables, bindings: { keyHolder: 'receive', tokensHolder: 'receive' }, inputs };
 };
@@ -205,7 +211,7 @@ export const manageParts = (coins: LoanCoins, collateral: bigint): LoanActionPar
 };
 
 /** Add or take out collateral: the loan then holds `collateral`. The key goes back to the script it left. */
-export const manageRequestAlone = (template: TemplateNamesAlone, coins: LoanCoins & { collateral: bigint; page?: string }): LoanRequestAlone => {
+export const manageRequestAloneV2 = (template: TemplateNamesAlone, coins: LoanCoins & { collateral: bigint; page?: string }): LoanRequestAlone => {
   const { variables, about, inputs } = manageParts(coins, coins.collateral);
   return { ...base(template, 'manage', coins.page), variables, bindings: { keyHolder: 'return' }, about, inputs };
 };
@@ -228,7 +234,7 @@ export const repayParts = (coins: LoanCoins, repay: bigint, collateral: bigint):
 };
 
 /** Repay part of the debt; the loan stays open and holds `collateral`. Paryon takes at least 100.00 PUSD and leaves at least 100.00. */
-export const repayRequestAlone = (template: TemplateNamesAlone, coins: LoanCoins & { repay: bigint; collateral: bigint; page?: string }): LoanRequestAlone => {
+export const repayRequestAloneV2 = (template: TemplateNamesAlone, coins: LoanCoins & { repay: bigint; collateral: bigint; page?: string }): LoanRequestAlone => {
   const { variables, about, inputs } = repayParts(coins, coins.repay, coins.collateral);
   return { ...base(template, 'repay', coins.page), variables, bindings: { keyHolder: 'return' }, about, inputs };
 };
@@ -243,7 +249,7 @@ export const closeParts = (coins: LoanCoins): LoanActionParts => {
  * Repay the whole debt and close the loan. The loan's record goes to a data output as it is; the key comes back to
  * a fresh address of the wallet's, since the contracts do not require it to continue at all.
  */
-export const closeRequestAlone = (template: TemplateNamesAlone, coins: LoanCoins & { page?: string }): LoanRequestAlone => {
+export const closeRequestAloneV2 = (template: TemplateNamesAlone, coins: LoanCoins & { page?: string }): LoanRequestAlone => {
   const { variables, about, inputs } = closeParts(coins);
   return { ...base(template, 'close', coins.page), variables, bindings: { keyHolder: 'receive' }, about, inputs };
 };
@@ -288,7 +294,78 @@ export const changeInterestParts = (coins: InterestCoins, rate: number): LoanAct
  * record as the contract does (only the next rate changes); the collateral stays as it is; the key goes back to the
  * script it left. The rate charged now stays until the next interest payment makes the new one current.
  */
-export const changeInterestRequestAlone = (template: TemplateNamesAlone, coins: InterestCoins & { rate: number; page?: string }): LoanRequestAlone => {
+export const changeInterestRequestAloneV2 = (template: TemplateNamesAlone, coins: InterestCoins & { rate: number; page?: string }): LoanRequestAlone => {
   const { variables, about, inputs } = changeInterestParts(coins, coins.rate);
   return { ...base(template, 'changeInterest', coins.page), variables, bindings: { keyHolder: 'return' }, about, inputs };
 };
+
+// ------------------------------------------------------------------ version 3: the borrower's values alone
+
+/** A loan an action of version 3 is about: its key's category, explorer order, hex. */
+export interface LoanKeyChoice {
+  keyCategory: string;
+  page?: string;
+}
+
+const key = (keyCategory: string, spent: boolean): { category: string; spent: boolean } => {
+  if (!/^[0-9a-f]{64}$/.test(keyCategory)) throw new Error('A loan key\'s category is 64 hexadecimal digits.');
+  return { category: keyCategory, spent };
+};
+const positive = (amount: bigint, what: string): string => {
+  if (amount <= 0n) throw new Error(`${what} must be more than nothing.`);
+  return String(amount);
+};
+const rateOf = (rate: number): number => {
+  const problem = interestRateProblem(rate);
+  if (problem !== undefined) throw new Error(problem);
+  return rate;
+};
+
+/** Make a loan key: the wallet's coin defines its category, which the wallet fills in; Paryon's service brings its factory. */
+export const createKeyRequestAlone = (template: TemplateNamesAlone, chosen: { page?: string } = {}): LoanRequestAlone => ({ ...base(template, 'createKey', chosen.page), variables: {}, creates: 'keyCategory' });
+
+/** Bring Paryon up to date: Paryon's service chooses the Borrowing thread and the lock time. Nothing is the borrower's to give. */
+export const movePeriodRequestAlone = (template: TemplateNamesAlone, chosen: { page?: string } = {}): LoanRequestAlone => ({ ...base(template, 'movePeriod', chosen.page), variables: {} });
+
+/**
+ * Borrow with the key the wallet made, which waits in Paryon's contract: the debt in PUSD cents, the collateral in
+ * satoshis and the starting rate per 10,000,000 per period. The key and the PUSD go to fresh addresses of the wallet's.
+ */
+export const borrowRequestAlone = (template: TemplateNamesAlone, choice: LoanKeyChoice & { debt: bigint; collateral: bigint; startingRate: number }): LoanRequestAlone => ({
+  ...base(template, 'borrow', choice.page),
+  variables: { debt: positive(choice.debt, 'The debt'), collateral: positive(choice.collateral, 'The collateral'), startingRate: rateOf(choice.startingRate) },
+  bindings: { keyHolder: 'receive', tokensHolder: 'receive' },
+  about: key(choice.keyCategory, false),
+});
+
+/** Add or take out collateral: the loan then holds `collateral` satoshis. The key goes back to the script it left. */
+export const manageRequestAlone = (template: TemplateNamesAlone, choice: LoanKeyChoice & { collateral: bigint }): LoanRequestAlone => ({
+  ...base(template, 'manage', choice.page),
+  variables: { collateral: positive(choice.collateral, 'The collateral') },
+  bindings: { keyHolder: 'return' },
+  about: key(choice.keyCategory, true),
+});
+
+/** Repay part of the debt, in PUSD cents; the loan stays open. The key goes back to the script it left. */
+export const repayRequestAlone = (template: TemplateNamesAlone, choice: LoanKeyChoice & { repay: bigint }): LoanRequestAlone => ({
+  ...base(template, 'repay', choice.page),
+  variables: { repayAmount: positive(choice.repay, 'The repayment') },
+  bindings: { keyHolder: 'return' },
+  about: key(choice.keyCategory, true),
+});
+
+/** Repay the whole debt and close the loan; the key comes back to a fresh address of the wallet's. */
+export const closeRequestAlone = (template: TemplateNamesAlone, choice: LoanKeyChoice): LoanRequestAlone => ({
+  ...base(template, 'close', choice.page),
+  variables: {},
+  bindings: { keyHolder: 'receive' },
+  about: key(choice.keyCategory, true),
+});
+
+/** Change the loan's interest rate for the periods to come: a whole number per 10,000,000 per period. The key goes back to the script it left. */
+export const changeInterestRequestAlone = (template: TemplateNamesAlone, choice: LoanKeyChoice & { rate: number }): LoanRequestAlone => ({
+  ...base(template, 'changeInterest', choice.page),
+  variables: { interestRate: rateOf(choice.rate) },
+  bindings: { keyHolder: 'return' },
+  about: key(choice.keyCategory, true),
+});

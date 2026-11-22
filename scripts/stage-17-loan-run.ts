@@ -83,30 +83,30 @@ import {
   type ParyonDeployment,
   type ParyonState,
   CHIPNET_FAST_PERIODS_6,
-  borrowRequestAlone,
+  borrowRequestAloneV2,
   borrowingFee,
-  closeRequestAlone,
+  closeRequestAloneV2,
   collateralAtRatio,
   collateralRatio,
-  createKeyRequestAlone,
+  createKeyRequestAloneV2,
   decodeLoanState,
   findLoan,
   loanCoins,
   localDeployment,
-  manageRequestAlone,
-  changeInterestRequestAlone,
+  manageRequestAloneV2,
+  changeInterestRequestAloneV2,
   interestCoins,
   interestPerPeriod,
   minimumCollateral,
-  movePeriodRequestAlone,
-  paryonChipnetTemplateText,
+  movePeriodRequestAloneV2,
+  paryonChipnetTemplateTextV2,
   paryonContracts,
   paryonTemplateAlone,
   periodAt,
   periodStart,
   readInterestFunctions,
   readParyonState,
-  repayRequestAlone,
+  repayRequestAloneV2,
 } from '../packages/paryon/src/index.js';
 import { detailsOf } from '../apps/loan/src/xo.js';
 import { CHIPNET_FASTER_BLOCKS_FROM, finalLockHeight } from '../apps/loan/src/loan.js';
@@ -190,11 +190,11 @@ const sat = (value: bigint): string => `${value.toLocaleString('en-US')} sat`;
  * deployment, unchanged, checked against its known identifier; on the local chain made for the run's own deployment.
  */
 const templateOf = (deployment: ParyonDeployment): { names: { identifier: string; contentHash: string }; texts: { template: string } } => {
-  if (local) return paryonTemplateAlone(paryonContracts(deployment));
+  if (local) return paryonTemplateAlone(paryonContracts(deployment), 2);
   if (deployment.name !== CHIPNET_FAST_PERIODS_6.name) throw new Error(`on chipnet the run uses Paryon's deployment ${CHIPNET_FAST_PERIODS_6.name}, not ${deployment.name}`);
-  const read = readTemplate(paryonChipnetTemplateText);
+  const read = readTemplate(paryonChipnetTemplateTextV2);
   if (read.identifier !== CHIPNET_TEMPLATE_IDENTIFIER) throw new Error(`the frozen template's identifier is ${read.identifier}, not ${CHIPNET_TEMPLATE_IDENTIFIER}`);
-  return { names: { identifier: read.identifier, contentHash: read.contentHash }, texts: { template: paryonChipnetTemplateText } };
+  return { names: { identifier: read.identifier, contentHash: read.contentHash }, texts: { template: paryonChipnetTemplateTextV2 } };
 };
 /** The price threads as the run reckons with them: the highest, which the page names and the contracts take, and the lowest, at which the collateral is reckoned. */
 const pricesOf = (state: ParyonState): { thread: ParyonState['price'][number]; used: bigint; lowest: bigint } => {
@@ -258,7 +258,7 @@ if (phase === undefined && dry) {
   try {
     const contracts = paryonContracts(CHIPNET_FAST_PERIODS_6);
     const template = templateOf(CHIPNET_FAST_PERIODS_6);
-    const made = paryonTemplateAlone(contracts);
+    const made = paryonTemplateAlone(contracts, 2);
     console.log(`The frozen template "${readTemplate(template.texts.template).definition.name ?? ''}" ${template.names.identifier}, content ${template.names.contentHash}; the template made from the deployment's parameters today ${made.names.identifier === template.names.identifier && made.names.contentHash === template.names.contentHash ? 'is the same' : `DIFFERS (${made.names.identifier}, ${made.names.contentHash}); the run sends the frozen one`}.`);
     const tip = await server.tip();
     const lockHeight = earliestLockHeight(tip.height);
@@ -622,7 +622,7 @@ const reportedKeySatoshis = async (link: PageLink, keyCategory: string): Promise
   });
   return BigInt(reported.satoshis);
 };
-const readLoanForPage = async (link: PageLink, keyCategory: string): Promise<FoundLoan & { coins: Parameters<typeof closeRequestAlone>[1] }> => {
+const readLoanForPage = async (link: PageLink, keyCategory: string): Promise<FoundLoan & { coins: Parameters<typeof closeRequestAloneV2>[1] }> => {
   const found = await loanCoins(server, contracts(), hexToBin(keyCategory), await reportedKeySatoshis(link, keyCategory));
   if (found === undefined) throw new Error('the page finds no loan for the key');
   return { ...found, coins: { keyCategory, keySatoshis: found.keySatoshis, loan: found.loan, sidecar: found.sidecar, price: found.price, manageFunction: found.manageFunction, page: PAGE } };
@@ -742,7 +742,7 @@ try {
       const state = await readParyonState(server, contracts());
       const [factory] = state.loanKeyFactory;
       if (factory === undefined) throw new Error('no factory');
-      const outcome = await ask(createKeyRequestAlone(template().names, { factory, page: PAGE }), 'Making a loan key', true);
+      const outcome = await ask(createKeyRequestAloneV2(template().names, { factory, page: PAGE }), 'Making a loan key', true);
       record('make a loan key', await sentAs(outcome.transactionId), 'from the page\'s request, with the user\'s tick: the wallet\'s coin that is output 0 defines the key\'s category (input 0); Paryon\'s factory, named by the page; the key waits in Paryon\'s contract; output 0 is what the wallet keeps of its coin');
       return { transactionIds: [outcome.transactionId], data: { transactionId: outcome.transactionId } };
     });
@@ -756,7 +756,7 @@ try {
 
     // 2. Bring the Borrowing thread up to date, so that the loan is charged no interest for the periods before.
     const move = async (thread: ParyonState['borrowing'][number], height: number, how: string): Promise<{ transactionIds: string[] }> => {
-      const outcome = await ask(movePeriodRequestAlone(template().names, contracts(), { borrowing: thread, lockHeight: height, page: PAGE }), 'Bringing Paryon up to date');
+      const outcome = await ask(movePeriodRequestAloneV2(template().names, contracts(), { borrowing: thread, lockHeight: height, page: PAGE }), 'Bringing Paryon up to date');
       record('bring the Borrowing thread up to date', await sentAs(outcome.transactionId), `from the page's request: the thread named by the page, moved from period ${thread.period} to ${periodAt(contracts().deployment, height)} (lock time ${height}); its supply as the page read it${how}`);
       amount(`period ${thread.period} moved to ${periodAt(contracts().deployment, height)} (lock time ${height})${how}`, 'Borrowing thread');
       return { transactionIds: [outcome.transactionId] };
@@ -857,7 +857,7 @@ try {
           if (fees > fee + 40_000n) throw new Error(`STOP before borrowing: Paryon's fee is ${sat(fees)} at ${dollars(price.state.price)} now, more than the wallet was paid for. Nothing was borrowed.`);
         }
         const at = (index: number): Utxo => ({ transactionHash: hexToBin(madeId), index, output: madeTransaction.outputs[index] as Output });
-        return borrowRequestAlone(template().names, { borrowing: thread, price, enforcer: at(2), proof: at(3), debt: DEBT, collateral, startingInterest: 0, page: PAGE });
+        return borrowRequestAloneV2(template().names, { borrowing: thread, price, enforcer: at(2), proof: at(3), debt: DEBT, collateral, startingInterest: 0, page: PAGE });
       }, 'Borrowing');
       if (price === undefined) throw new Error('no price');
       record('borrow', await sentAs(outcome.transactionId), `from the page's request: ${pusd(DEBT)} PUSD against ${sat(collateral)} of collateral, Paryon's fee ${sat(fees)}, starting interest 0; the page named the Borrowing thread, the price, the key waiting in Paryon's contract and its proof, and gave the values it read from them; the key and the PUSD to fresh addresses of the wallet; the record of the key on both stores before the engine signed`);
@@ -884,7 +884,7 @@ try {
     await once('collateral is added', async () => {
       const outcome = await askOnLoan(ask, async () => {
         const { coins } = await readLoanForPage(link, keyCategory);
-        return manageRequestAlone(template().names, { ...coins, collateral: coins.loan.output.valueSatoshis + MANAGE_ADD });
+        return manageRequestAloneV2(template().names, { ...coins, collateral: coins.loan.output.valueSatoshis + MANAGE_ADD });
       }, 'Adding collateral');
       record('add collateral', await sentAs(outcome.transactionId), `from the page's request: ${sat(MANAGE_ADD)} more collateral; the page named the price, the loan, its sidecar and a manage function, and gave the key's coin value as the wallet reported it; the key back to the address it was spent from (\`return\`)`);
       return { transactionIds: [outcome.transactionId] };
@@ -910,7 +910,7 @@ try {
       const outcome = await askOnLoan(ask, async () => {
         const found = await interestCoins(server, contracts(), hexToBin(keyCategory), await reportedKeySatoshis(link, keyCategory));
         if (found === undefined) throw new Error('the page finds no loan for the key');
-        return changeInterestRequestAlone(template().names, { keyCategory, keySatoshis: found.keySatoshis, loan: found.loan, sidecar: found.sidecar, interestFunction: found.interestFunction, rate: NEW_RATE, page: PAGE });
+        return changeInterestRequestAloneV2(template().names, { keyCategory, keySatoshis: found.keySatoshis, loan: found.loan, sidecar: found.sidecar, interestFunction: found.interestFunction, rate: NEW_RATE, page: PAGE });
       }, 'Changing the interest rate');
       record('change the interest rate', await sentAs(outcome.transactionId), `from the page's request: the loan's rate for the periods to come set from ${added.state.nextInterestRate} to ${NEW_RATE} per 10,000,000 per period; the page named the loan, its sidecar and a coin of Paryon's interest function, and gave the loan's new record and the key's coin value as the wallet reported it; no price; the key back to the address it was spent from (\`return\`)`);
       amount(`${added.state.currentInterestRate} per 10,000,000 per period when the loan was opened, ${NEW_RATE} from its next interest payment on (${sat(interestPerPeriod(NEW_RATE, DEBT, lowestPrice))} a period on ${pusd(DEBT)} PUSD at ${dollars(lowestPrice)}, ${sat(interestPerPeriod(NEW_RATE, DEBT - REPAY, lowestPrice))} on ${pusd(DEBT - REPAY)})`, 'Interest rate');
@@ -928,7 +928,7 @@ try {
       }
       const outcome = await askOnLoan(ask, async () => {
         const { coins } = await readLoanForPage(link, keyCategory);
-        return repayRequestAlone(template().names, { ...coins, repay: REPAY, collateral: coins.loan.output.valueSatoshis });
+        return repayRequestAloneV2(template().names, { ...coins, repay: REPAY, collateral: coins.loan.output.valueSatoshis });
       }, 'Repaying part of the loan');
       record('repay part of the loan', await sentAs(outcome.transactionId), `from the page's request: ${pusd(REPAY)} PUSD repaid and destroyed, ${pusd(DEBT - REPAY)} PUSD still owed; the page named the price, the loan, its sidecar and a manage function, and gave the loan's new record and the key's coin value as the wallet reported it; the PUSD left over and the key back to the wallet`);
       amount(`${pusd(REPAY)} PUSD repaid before the device was lost, leaving ${pusd(DEBT - REPAY)} PUSD owed`, 'Repayment');
@@ -1092,7 +1092,7 @@ try {
         let closing = coins;
         const outcome = await askOnLoan(ask, async () => {
           closing = (await readLoanForPage(link, keyCategory)).coins;
-          return closeRequestAlone(template().names, closing);
+          return closeRequestAloneV2(template().names, closing);
         }, 'Closing the loan on the new phone');
         record('close the loan', await sentAs(outcome.transactionId), 'from the page\'s request on the new phone: the page named the price, the loan, its sidecar and a manage function, and gave the loan\'s record, the debt and the key\'s coin value as the wallet reported it; the whole debt repaid, the PUSD and the loan\'s record sent to data outputs, the sidecar not carried on; the collateral and the key to fresh addresses of the new seed');
         const record_ = decodeLoanState(closing.loan.output.token?.nft?.commitment as Uint8Array);

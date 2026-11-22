@@ -1,9 +1,9 @@
 // Writes the text a wallet is sent for each of Paryon's own deployments, chipnet's and mainnet's, in each version of
 // the template: the template, as it is served and named by hash. Run after a deliberate change to the source:
-// `npm run freeze -w @grandmas-wallet/paryon`. Versions 1 and 2 are made as they were frozen and must come out unchanged.
+// `npm run freeze -w @grandmas-wallet/paryon`. Versions 1, 2 and 3 are made as they were frozen and must come out unchanged.
 //
-// Each version has constants that name it. The constants without a version mean version 2, which the pages and runs
-// send until the wallet works with a service.
+// Each version has constants that name it. The constants without a version mean version 3, which the pages send; versions
+// 1 and 2 stay for what was recorded under them and for the scripted run that still sends version 2.
 import { writeFileSync } from 'node:fs';
 
 import { CHIPNET_FAST_PERIODS_6, MAINNET_V1, type ParyonDeployment, paryonContracts } from './deployment.js';
@@ -26,7 +26,7 @@ for (const [constant, deployment, version] of frozen) {
   lines.push(`export const ${constant}: string =\n  ${JSON.stringify(texts.template)};`);
   console.log(`${deployment.name}, version ${version}: template ${names.identifier}, content ${names.contentHash}`);
 }
-lines.push('/** Version 2, which the pages and runs send. */');
-lines.push('export const paryonChipnetTemplateText: string = paryonChipnetTemplateTextV2;');
-lines.push('export const paryonMainnetTemplateText: string = paryonMainnetTemplateTextV2;');
+lines.push('/** Version 3, which the pages send. */');
+lines.push('export const paryonChipnetTemplateText: string = paryonChipnetTemplateTextV3;');
+lines.push('export const paryonMainnetTemplateText: string = paryonMainnetTemplateTextV3;');
 writeFileSync(new URL('./frozen.ts', import.meta.url), [...lines, ''].join('\n'));

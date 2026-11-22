@@ -1,5 +1,5 @@
 import { hexToBin } from '@bitauth/libauth';
-import { type BorrowingThread, type PriceThread, CHIPNET_FAST_PERIODS_6, MAINNET_V1, borrowingFee, collateralRatio, decodePriceState, minimumCollateral, paryonChipnetTemplateText, paryonMainnetTemplateText } from '@grandmas-wallet/paryon';
+import { type BorrowingThread, type PriceThread, CHIPNET_FAST_PERIODS_6, MAINNET_V1, borrowingFee, collateralRatio, decodePriceState, minimumCollateral, paryonChipnetTemplateText, paryonChipnetTemplateTextV3, paryonMainnetTemplateText, paryonMainnetTemplateTextV3 } from '@grandmas-wallet/paryon';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -225,14 +225,16 @@ describe('the interest rate as a person types and reads it', () => {
 });
 
 describe('on mainnet', () => {
-  it('uses Paryon\'s deployment mainnet-v1 and its own template, version 2 as on chipnet, whose oracle is the one read on chipnet', () => {
+  it('uses Paryon\'s deployment mainnet-v1 and its own template, version 3 as on chipnet, whose oracle is the one read on chipnet', () => {
     expect(deskFor({ network: 'mainnet' })).toBe(MAINNET_DESK);
     expect(MAINNET_DESK.deployment.name).toBe('mainnet-v1');
     expect(MAINNET_DESK.paryons).toBe(true);
-    expect(MAINNET_DESK.template.names.identifier).toBe('30647ea4b817c4e58b32fb4fc104643af9c1e92295729b33d5551dc875569364');
-    expect(CHIPNET_DESK.template.names.identifier).toBe('3fa4baf9f313ee2a5046ae30fdf1f7affc6aca21a29e3f6b38227b4a826e9235');
+    expect(MAINNET_DESK.template.names.identifier).toBe('89b1af236ace2e5544f28f286a830186dc742597ddb9a7e7e3a205ad1b48092a');
+    expect(CHIPNET_DESK.template.names.identifier).toBe('160a451f5398db649de7d660855db24113b774559534361f8334cbfe9a583e20');
     expect(MAINNET_DESK.template.texts.template).toBe(paryonMainnetTemplateText);
     expect(CHIPNET_DESK.template.texts.template).toBe(paryonChipnetTemplateText);
+    expect(paryonChipnetTemplateText).toBe(paryonChipnetTemplateTextV3);
+    expect(paryonMainnetTemplateText).toBe(paryonMainnetTemplateTextV3);
     // The page reads General Protocols' oracle with chipnet's deployment; the key is the same on mainnet.
     expect(MAINNET_DESK.deployment.oraclePublicKey).toBe(CHIPNET_DESK.deployment.oraclePublicKey);
   });

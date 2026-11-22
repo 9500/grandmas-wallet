@@ -29,7 +29,7 @@ import { p2pkhTemplate } from '@xo-cash/templates';
 import type { XOInvitation, XOTemplate } from '@xo-cash/types';
 import { deserializeInvitation, serializeInvitation } from '@xo-cash/utils';
 import { Electrum } from '../../packages/chipnet/src/electrum.ts';
-import { type ParyonDeployment, borrow, createLoanKey, findLoan, loanCoins, manageLoan, manageRequestAlone, minimumCollateral, paryonContracts } from '../../packages/paryon/src/index.ts';
+import { type ParyonDeployment, borrow, createLoanKey, findLoan, loanCoins, manageLoan, manageRequestAloneV2, minimumCollateral, paryonContracts } from '../../packages/paryon/src/index.ts';
 import { localDeployment } from '../../packages/paryon/src/local-deployment.ts';
 import { paryonTemplateSource } from '../../packages/paryon/src/template-source.ts';
 // @ts-expect-error plain script
@@ -88,7 +88,7 @@ const runService = async (job: ServiceJob) => {
     // Paryon's own code finds the loan from its key and picks the shared coins, as the loan's page does today.
     const coins = await loanCoins(server, contracts, hexToBin(keyCategory), BigInt(String(said.keySatoshis)));
     if (coins === undefined) throw new Error('the key opens no loan');
-    const request = manageRequestAlone({ identifier: templateIdentifier, contentHash: '' }, { ...coins, keyCategory, collateral: BigInt(String(said.collateral)) });
+    const request = manageRequestAloneV2({ identifier: templateIdentifier, contentHash: '' }, { ...coins, keyCategory, collateral: BigInt(String(said.collateral)) });
     const values = { ...said, ...request.variables } as Record<string, unknown>;
     const typed = (name: string) => (definition.variables?.[name]?.type === 'satoshis' || definition.variables?.[name]?.type === 'token_amount' ? BigInt(String(values[name])) : values[name]);
     const byOutpoint = new Map([coins.price, coins.loan, coins.sidecar, coins.manageFunction].map((utxo) => [`${hex(utxo.transactionHash)}:${utxo.index}`, utxo]));

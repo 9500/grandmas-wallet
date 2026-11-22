@@ -7,7 +7,7 @@ import { generateBip39Mnemonic } from '@bitauth/libauth';
 import { Engine, XO_SUPPORTED_NETWORKS, resolveElectrumServersForNetwork } from '@xo-cash/engine';
 
 import { Account } from '../../packages/app/src/account.ts';
-import { paryonChipnetTemplateText } from '../../packages/paryon/src/index.ts';
+import { paryonChipnetTemplateTextV2 } from '../../packages/paryon/src/index.ts';
 
 console.error = () => {};
 const scripts = process.argv.slice(2);
@@ -16,7 +16,7 @@ if (first === undefined) throw new Error('no server');
 const started = Date.now();
 const account = await Account.open(await Engine.create(generateBip39Mnemonic(), { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers: [{ host: 'chipnet.9500.cash', version: first.version, transports: { wss: 443 }, blockchain: first.blockchain }] }));
 console.log('open after', Date.now() - started, 'ms');
-const identifier = await account.importTemplate(paryonChipnetTemplateText);
+const identifier = await account.importTemplate(paryonChipnetTemplateTextV2);
 for (const lockingScript of scripts) {
   const t0 = Date.now();
   await account.followScript({ template: identifier, lockingScript, role: 'borrower', variables: {} });

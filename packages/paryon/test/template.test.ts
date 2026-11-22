@@ -2,7 +2,7 @@ import { binToHex } from '@bitauth/libauth';
 import { paryonArtifacts } from '@paryonusd/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { CHIPNET_FAST_PERIODS_6, MAINNET_V1, paryonChipnetTemplateText, paryonChipnetTemplateTextV1, paryonContracts, paryonMainnetTemplateText, paryonTemplateSource } from '../src/index.js';
+import { CHIPNET_FAST_PERIODS_6, MAINNET_V1, paryonChipnetTemplateTextV1, paryonChipnetTemplateTextV2, paryonContracts, paryonMainnetTemplateTextV2, paryonTemplateSource } from '../src/index.js';
 
 /**
  * What the template offers, and where: the actions a borrower may start with, and those a script of the template offers
@@ -27,7 +27,7 @@ const offered = (template: TemplateParts): Record<string, string[]> =>
   Object.fromEntries(Object.entries(template.lockingScripts).flatMap(([name, script]) => (script.roles['borrower']?.actions === undefined ? [] : [[name, script.roles['borrower'].actions.map(({ action }) => action)]])));
 
 describe('version 2: where each action is offered', () => {
-  for (const [deployment, text] of [[CHIPNET_FAST_PERIODS_6, paryonChipnetTemplateText], [MAINNET_V1, paryonMainnetTemplateText]] as const) {
+  for (const [deployment, text] of [[CHIPNET_FAST_PERIODS_6, paryonChipnetTemplateTextV2], [MAINNET_V1, paryonMainnetTemplateTextV2]] as const) {
     it(`${deployment.name}: starts with making a key and bringing Paryon up to date, and nothing else`, () => {
       expect(parts(text).start).toEqual([
         { action: 'createKey', role: 'borrower' },
@@ -66,7 +66,7 @@ describe('version 2: where each action is offered', () => {
 });
 
 describe('version 2: changing the interest rate, as Paryon\'s contract requires it', () => {
-  const source = (deployment = CHIPNET_FAST_PERIODS_6) => paryonTemplateSource(paryonContracts(deployment)) as unknown as TemplateParts;
+  const source = (deployment = CHIPNET_FAST_PERIODS_6) => paryonTemplateSource(paryonContracts(deployment), 2) as unknown as TemplateParts;
 
   it('is the borrower\'s function of `changeInterest.cash` as published, at the same script for chipnet and mainnet', () => {
     const artifact = paryonArtifacts.loanContractFunctions.artifactFunctionChangeInterest;
@@ -105,6 +105,6 @@ describe('version 2: changing the interest rate, as Paryon\'s contract requires 
     expect(offered(v1)).toEqual({});
     expect(Object.keys(v1.actions)).not.toContain('changeInterest');
     expect(Object.keys(v1.scripts)).not.toContain('changeInterestBytecode');
-    expect(Object.keys(parts(paryonChipnetTemplateText).actions)).toEqual([...Object.keys(v1.actions), 'changeInterest']);
+    expect(Object.keys(parts(paryonChipnetTemplateTextV2).actions)).toEqual([...Object.keys(v1.actions), 'changeInterest']);
   });
 });

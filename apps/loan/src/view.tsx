@@ -42,8 +42,6 @@ import type { MadeKey } from './market.js';
 export interface Progress {
   text: string;
   stage?: RequestStage;
-  /** Why the page asks the wallet again, while it does. */
-  again?: string;
 }
 
 /** What the page is doing, what it did last, and what went wrong, each under the name of what started it. */
@@ -145,6 +143,7 @@ export const HowItWorks = () => (
         <span>Add collateral or take some out, repay part, or repay all of it and get the collateral back. If your wallet is recovered to a new phone, open this page there and connect: the loan is found from its key.</span>
       </li>
     </ol>
+    <p class="small muted form-foot">Your wallet keeps this page's template, so it can also carry out each step by itself, with this page closed. It does so through the loan service the template names, which brings Paryon's shared coins.</p>
   </Card>
 );
 
@@ -218,7 +217,6 @@ export const OnItsWay = ({ title, progress, onStopWaiting }: { title: string; pr
   return (
     <Card cls="on-way" title="On its way" aside={<Spinner />}>
       <p>{title}</p>
-      {progress?.again !== undefined && <Notice tone="wait">{progress.again}</Notice>}
       {steps !== undefined ? <Steps steps={steps} /> : progress !== undefined && <Notice tone="wait">{progress.text}</Notice>}
       {onStopWaiting !== undefined && (
         <div class="actions">
@@ -857,6 +855,7 @@ export const NewLoanCard = ({
       </div>
       <More summary="What your wallet shows you">
         <p class="small muted">For each step your wallet shows the action in the words of this page's template and in its own figures: what leaves the wallet, what goes into Paryon's contracts, the fee, and the tokens it receives. Nothing is signed until you approve it there.</p>
+        <p class="small muted">Paryon's coins, and the values read from them, come from the loan service the template names. Your wallet shows them apart from its own figures and runs Paryon's contracts on the whole transaction before you are asked.</p>
       </More>
     </Card>
   );

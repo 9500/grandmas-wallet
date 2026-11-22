@@ -40,10 +40,10 @@ import type { ParyonContracts } from './deployment.js';
  */
 
 const view = (name: string, description: string) => ({ name, description });
-/** A version of this template. Versions 1 and 2 are kept as frozen; the pages and runs send version 2. */
+/** A version of this template. Versions 1, 2 and 3 are kept as frozen; the pages send version 3. */
 export type ParyonTemplateVersion = 1 | 2 | 3;
-/** What the pages and runs send; the names without a version mean it. Version 3 is named by its number only. */
-export const PARYON_TEMPLATE_VERSION = 2 as const;
+/** What the pages send; the names without a version mean it. Versions 1 and 2 are named by their numbers. */
+export const PARYON_TEMPLATE_VERSION = 3 as const;
 
 /** The actions of the template; `changeInterest` from version 2 on. */
 export type ParyonAction = 'createKey' | 'movePeriod' | 'borrow' | 'manage' | 'repay' | 'close' | 'changeInterest';
@@ -458,9 +458,9 @@ const source = (contracts: ParyonContracts, version: ParyonTemplateVersion, addr
 
 /** The template's source for a deployment: versions 1 and 2 as frozen; version 3 with the service's and the page's addresses. */
 export type ParyonTemplateSource = ReturnType<typeof source>;
-export function paryonTemplateSource(contracts: ParyonContracts, version?: 1 | 2): ParyonTemplateSource;
+export function paryonTemplateSource(contracts: ParyonContracts, version: 1 | 2): ParyonTemplateSource;
 export function paryonTemplateSource(contracts: ParyonContracts, version: 3, addresses: ParyonAddresses): ParyonTemplateSource;
 export function paryonTemplateSource(contracts: ParyonContracts, version: ParyonTemplateVersion, addresses?: ParyonAddresses): ParyonTemplateSource;
-export function paryonTemplateSource(contracts: ParyonContracts, version: ParyonTemplateVersion = PARYON_TEMPLATE_VERSION, addresses?: ParyonAddresses): ParyonTemplateSource {
+export function paryonTemplateSource(contracts: ParyonContracts, version: ParyonTemplateVersion, addresses?: ParyonAddresses): ParyonTemplateSource {
   return source(contracts, version, version === 3 ? addresses : undefined);
 }

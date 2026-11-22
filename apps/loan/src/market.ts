@@ -1,6 +1,5 @@
 import { hexToBin } from '@bitauth/libauth';
-import type { Utxo } from '@grandmas-wallet/core';
-import { type InterestCoins, type LoanCoins, type ParyonChain, findLoan, firstFactory, interestCoins, latestOraclePrice, loanCoins, readParyonState } from '@grandmas-wallet/paryon';
+import { type ParyonChain, findLoan, latestOraclePrice, readParyonState } from '@grandmas-wallet/paryon';
 
 import { type Desk, type LoanView, type Market, CHIPNET_DESK, DEPLOYMENT, finalLockHeight, lowerPrice, periodOf } from './loan.js';
 
@@ -10,6 +9,9 @@ export { type MadeKey, keyWaiting, readMadeKey } from '@grandmas-wallet/paryon';
 /**
  * What the page reads from the chain and, for Paryon's own deployment, from the oracle: Paryon's contracts and
  * prices, a loan from its key, and a loan key it made. Every output is read from its own transaction; a server's listing only finds candidates.
+ *
+ * All of it is for what the page shows and for its own checks of what the user typed. None of it goes into a request:
+ * Paryon's service, which the template names, finds and reads Paryon's coins for each action itself.
  */
 
 /** What the page needs of a server. */
@@ -77,33 +79,4 @@ export const readLoan = async (chain: PageChain, category: string, keySatoshis: 
   }
   if (found === undefined) return { category, status: 'closed', satoshis: 0n, ...key };
   return { category, status: 'open', satoshis: found.loan.output.valueSatoshis, ...key, debt: found.state.borrowed, beingRedeemed: found.state.beingRedeemed, interestRate: found.state.currentInterestRate, nextInterestRate: found.state.nextInterestRate, found };
-};
-
-/**
- * What a request on an open loan names: the loan and its sidecar, found from the key, and the price and manage
- * coins of Paryon's the page chose, with what the key's coin holds as the wallet reported it.
- * @throws when the key opens no open loan
- */
-export const readLoanCoins = async (chain: PageChain, category: string, keySatoshis: bigint, desk: Desk = CHIPNET_DESK): Promise<LoanCoins> => {
-  const coins = await loanCoins(chain, desk.contracts, hexToBin(category), keySatoshis);
-  if (coins === undefined) throw new Error('This key opens no loan on the chain just now. It may have been closed.');
-  return { keyCategory: category, keySatoshis, loan: coins.loan, sidecar: coins.sidecar, price: coins.price, manageFunction: coins.manageFunction };
-};
-
-/**
- * What a request to change a loan's interest rate names: the loan and its sidecar, found from the key, and a coin of
- * Paryon's interest function the page chose, with what the key's coin holds as the wallet reported it.
- * @throws when the key opens no open loan
- */
-export const readInterestCoins = async (chain: PageChain, category: string, keySatoshis: bigint, desk: Desk = CHIPNET_DESK): Promise<InterestCoins> => {
-  const coins = await interestCoins(chain, desk.contracts, hexToBin(category), keySatoshis);
-  if (coins === undefined) throw new Error('This key opens no loan on the chain just now. It may have been closed.');
-  return { keyCategory: category, keySatoshis, loan: coins.loan, sidecar: coins.sidecar, interestFunction: coins.interestFunction };
-};
-
-/** A coin of Paryon's key factories, for making a key; the first by outpoint. */
-export const readFactory = async (chain: PageChain, desk: Desk = CHIPNET_DESK): Promise<Utxo> => {
-  const factory = firstFactory(await readParyonState(chain, desk.contracts));
-  if (factory === undefined) throw new MarketProblem('Paryon\'s key factory could not be found on the chain just now. Try again in a minute.');
-  return factory;
 };

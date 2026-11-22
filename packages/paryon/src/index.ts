@@ -8,7 +8,7 @@
 export * from './amounts.js';
 export * from './contract.js';
 export * from './deployment.js';
-// The names without a version mean version 2, which the pages and runs send until the wallet works with a service.
+// The names without a version mean version 3, which the pages send; versions 1 and 2 are named by their numbers.
 export {
   paryonChipnetTemplateText,
   paryonChipnetTemplateTextV1,

@@ -1,10 +1,6 @@
-import { binToHex } from '@bitauth/libauth';
 import type { ActionDetails, DappRequests, RequestStage, XoAdvertisement } from '@grandmas-wallet/connect';
 import { RequestRefusedError, XO_EXTENSION_VERSION } from '@grandmas-wallet/connect';
 import {
-  type BorrowingThread,
-  type InterestCoins,
-  type LoanCoins,
   type LoanRequestAlone,
   borrowRequestAlone,
   changeInterestRequestAlone,
@@ -14,20 +10,20 @@ import {
   movePeriodRequestAlone,
   repayRequestAlone,
 } from '@grandmas-wallet/paryon';
-import type { Utxo } from '@grandmas-wallet/core';
 
-import { type BorrowPlan, type Desk, type LoanView, type Market, CHIPNET_DESK, interestRateProblem } from './loan.js';
-import { type MadeKey, type PageChain, keyWaiting, readFactory, readInterestCoins, readLoan, readLoanCoins, readMadeKey } from './market.js';
+import { type BorrowPlan, type Desk, type LoanView, CHIPNET_DESK, interestRateProblem, repaymentProblem } from './loan.js';
+import { type MadeKey, type PageChain, keyWaiting, readLoan, readMadeKey } from './market.js';
 
 /**
- * Loans through a wallet that speaks `xo_v1`, version 2 (proposal sections 14.2 and 15.3). The page builds no
- * transaction and sees no key: it names its template and asks for one of the template's actions. It sends no
- * recovery declaration; what the declaration told the wallet, the page's requests now say (`packages/paryon`,
- * `page-requests.ts`): every coin of Paryon's the action spends, by outpoint, found and read by the page itself
- * (the loan and its sidecar from the key, the shared contracts it chose); the values read from them; which loan
- * the action is about, by its key, and that the key is spent; that the key goes back to the script it left; and
- * what the key's coin holds, as the wallet reported it. The wallet fills in its own coins and addresses, runs
- * Paryon's contracts on the transaction before the user is asked, and shows the user its own figures.
+ * Loans through a wallet that speaks `xo_v1` (proposal sections 14.2 and 15.3). The page builds no transaction and sees
+ * no key: it names its template, version 3, and asks for one of the template's actions with what the borrower decides
+ * (`packages/paryon`, `page-requests.ts`): the amounts and the rate typed here, which loan the action is about, by its
+ * key, and where the key goes. It names no coin. The template names Paryon's loan service (`xo_service_v1`), which the
+ * wallet asks to join each action: the service brings Paryon's coins and every value read from them, and the wallet
+ * runs Paryon's contracts on the transaction before the user is asked. The wallet can carry out the same actions from
+ * the template alone, with this page closed.
+ *
+ * The page reads the chain only for what it shows and for its own checks of what the user typed.
  *
  * Every request carries the page's address, which the wallet keeps in the record it writes when the key arrives.
  *
@@ -105,44 +101,26 @@ export const detailsOf = (request: LoanRequestAlone): ActionDetails => ({
 export type PageAddress = string | undefined;
 const from = (page: PageAddress): { page?: string } => (page === undefined ? {} : { page });
 
-export const createKeyDetails = (factory: Utxo, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(createKeyRequestAlone(desk.template.names, { factory, ...from(page) }));
-export const movePeriodDetails = (thread: BorrowingThread, lockHeight: number, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(movePeriodRequestAlone(desk.template.names, desk.contracts, { borrowing: thread, lockHeight, ...from(page) }));
-export const borrowDetails = (key: MadeKey, thread: BorrowingThread, market: Pick<Market, 'priceThread'>, plan: Pick<BorrowPlan, 'debt' | 'collateral'>, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails =>
-  detailsOf(borrowRequestAlone(desk.template.names, { borrowing: thread, price: market.priceThread, enforcer: key.enforcer, proof: key.proof, debt: plan.debt, collateral: plan.collateral, startingInterest: 0, ...from(page) }));
-export const manageDetails = (coins: LoanCoins, collateral: bigint, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(manageRequestAlone(desk.template.names, { ...coins, collateral, ...from(page) }));
-export const repayDetails = (coins: LoanCoins, repay: bigint, collateral: bigint, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(repayRequestAlone(desk.template.names, { ...coins, repay, collateral, ...from(page) }));
-export const closeDetails = (coins: LoanCoins, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(closeRequestAlone(desk.template.names, { ...coins, ...from(page) }));
-export const changeInterestDetails = (coins: InterestCoins, rate: number, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(changeInterestRequestAlone(desk.template.names, { ...coins, rate, ...from(page) }));
+export const createKeyDetails = (page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(createKeyRequestAlone(desk.template.names, from(page)));
+export const movePeriodDetails = (page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(movePeriodRequestAlone(desk.template.names, from(page)));
+/** A loan opened with no interest: the lowest rate there is, which the user may change later. */
+export const borrowDetails = (key: Pick<MadeKey, 'category'>, plan: Pick<BorrowPlan, 'debt' | 'collateral'>, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails =>
+  detailsOf(borrowRequestAlone(desk.template.names, { keyCategory: key.category, debt: plan.debt, collateral: plan.collateral, startingRate: 0, ...from(page) }));
+export const manageDetails = (category: string, collateral: bigint, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(manageRequestAlone(desk.template.names, { keyCategory: category, collateral, ...from(page) }));
+export const repayDetails = (category: string, repay: bigint, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(repayRequestAlone(desk.template.names, { keyCategory: category, repay, ...from(page) }));
+export const closeDetails = (category: string, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(closeRequestAlone(desk.template.names, { keyCategory: category, ...from(page) }));
+export const changeInterestDetails = (category: string, rate: number, page?: PageAddress, desk: Desk = CHIPNET_DESK): ActionDetails => detailsOf(changeInterestRequestAlone(desk.template.names, { keyCategory: category, rate, ...from(page) }));
 
-/**
- * How many times in a row an action that names Paryon's shared coins is asked for, when each time another transaction
- * spent one of those coins first. Each try is a new transaction, which the user approves anew in the wallet.
- */
-export const TRIES = 3;
+/** The wallet says that another transaction spent one of the coins of the action first (`ActionResult.code`). */
+export const spentFirst = (error: unknown): boolean => error instanceof RequestRefusedError && error.code === 'inputs-spent';
 
-/** What the page says while it asks again. */
-export const ASKING_AGAIN = 'Someone else used one of Paryon\'s coins first. Asking your wallet again with the current ones.';
-
-/** Each try in a row found one of Paryon's coins spent by someone else first. */
+/** Another transaction spent one of Paryon's coins first: what the page says instead of the wallet's words. */
 export class SpentFirstError extends Error {
   constructor() {
-    super(`Someone else used one of Paryon's coins first, ${TRIES} times in a row. Nothing was sent. Try again in a moment.`);
+    super('Someone else used one of Paryon\'s coins first. Nothing was sent. Try again in a moment.');
     this.name = 'SpentFirstError';
   }
 }
-
-/** The wallet says that another transaction spent one of the coins the request named first (`ActionResult.code`). */
-export const spentFirst = (error: unknown): boolean => error instanceof RequestRefusedError && error.code === 'inputs-spent';
-
-/** The loan, as read for a try after the first, differs from what the first try was about. */
-export class LoanChangedError extends Error {
-  constructor() {
-    super('The loan has changed since you asked: another transaction spent it. Nothing was sent. Look at the loan again before you ask.');
-    this.name = 'LoanChangedError';
-  }
-}
-
-const outpointOf = (utxo: Utxo): string => `${binToHex(utxo.transactionHash)}:${utxo.index}`;
 
 const newId = (): string => `loan-${Array.from(crypto.getRandomValues(new Uint8Array(10)), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 
@@ -165,9 +143,15 @@ export class XoLoans {
     private readonly desk: Desk = CHIPNET_DESK,
   ) {}
 
-  /** Requests made before that have no outcome yet. */
+  /**
+   * Requests made before that have no outcome yet. One made with another template than the page's now, such as an
+   * earlier version of it, is forgotten: the wallet may still have carried it out, and the lists show what it did.
+   */
   pending(): PendingRequest[] {
-    return this.store.get();
+    const kept = this.store.get();
+    const current = kept.filter((request) => request.details.template.identifier === this.desk.template.names.identifier);
+    if (current.length !== kept.length) this.store.set(current);
+    return current;
   }
 
   private forget(id: string): void {
@@ -185,6 +169,7 @@ export class XoLoans {
     } catch (error) {
       // A refusal is the wallet's last word on the request. Anything else, such as no connection, leaves it open.
       if ((error as Error).name === 'RequestRefusedError') this.forget(request.id);
+      if (spentFirst(error)) throw new SpentFirstError();
       throw error;
     }
   }
@@ -194,9 +179,12 @@ export class XoLoans {
     if (request.action === 'createKey' && outcome.transactionId !== undefined && !this.keys.get().some((key) => key.transactionId === outcome.transactionId)) {
       this.keys.set([...this.keys.get(), { transactionId: outcome.transactionId, madeAt: this.now() }]);
     }
-    if (request.action === 'borrow') {
-      const used = request.details.inputs?.['enforcerInput']?.split(':')[0];
-      this.keys.set(this.keys.get().filter((key) => key.transactionId !== used));
+    const used = request.details.about?.category;
+    if (request.action === 'borrow' && used !== undefined) {
+      // The key borrowed with is forgotten: the page knows each kept key by the transaction that made it, and reads its category from there.
+      const kept = await Promise.all(this.keys.get().map(async (key) => ({ key, category: (await readMadeKey(this.chain, key.transactionId).catch(() => undefined))?.category })));
+      const usedKeys = new Set(kept.filter(({ category }) => category === used).map(({ key }) => key.transactionId));
+      this.keys.set(this.keys.get().filter((key) => !usedKeys.has(key.transactionId)));
     }
   }
 
@@ -208,103 +196,47 @@ export class XoLoans {
     return this.send({ id: newId(), action, details, startedAt: this.now() }, onStage);
   }
 
-  /** Make a loan key, from a factory of Paryon's the page reads from the chain. The wallet asks for the user's tick: the key waits in Paryon's contract. */
-  async createKey(onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {
-    return this.tries('createKey', async () => createKeyDetails(await readFactory(this.chain, this.desk), this.page, this.desk), onStage, onAgain);
+  /** Make a loan key. Paryon's service brings the factory; the wallet asks for the user's tick, since the key waits in Paryon's contract. */
+  createKey(onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
+    return this.start('createKey', createKeyDetails(this.page, this.desk), onStage);
   }
 
-  movePeriod(thread: BorrowingThread, lockHeight: number, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
-    return this.start('movePeriod', movePeriodDetails(thread, lockHeight, this.page, this.desk), onStage);
+  /** Bring Paryon's contracts up to date: Paryon's service chooses which Borrowing contract and the lock time. */
+  movePeriod(onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
+    return this.start('movePeriod', movePeriodDetails(this.page, this.desk), onStage);
   }
 
-  borrow(key: MadeKey, thread: BorrowingThread, market: Pick<Market, 'priceThread'>, plan: BorrowPlan, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
+  /** Borrow with a key made from this page, which waits in Paryon's contract, as planned here. */
+  borrow(key: Pick<MadeKey, 'category'>, plan: BorrowPlan, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
     if (plan.problem !== undefined) return Promise.reject(new Error(plan.problem));
-    return this.start('borrow', borrowDetails(key, thread, market, plan, this.page, this.desk), onStage);
+    return this.start('borrow', borrowDetails(key, plan, this.page, this.desk), onStage);
   }
 
-  /**
-   * What a request on the loan of a key names, read now: what the key's coin holds, as the wallet reports it, and
-   * the loan, its sidecar and Paryon's coins, as the chain shows them.
-   */
-  private async coinsOf(category: string): Promise<LoanCoins> {
-    return readLoanCoins(this.chain, category, await this.keySatoshis(category), this.desk);
+  /** Add collateral or take some out: the loan then holds `collateral` satoshis. */
+  manage(category: string, collateral: bigint, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
+    return this.start('manage', manageDetails(category, collateral, this.page, this.desk), onStage);
   }
 
-  /** What the coin that holds a loan key holds, as the wallet reports it. */
-  private async keySatoshis(category: string): Promise<bigint> {
-    const { positions } = await this.requests.recordedPositions(this.desk.template.names.identifier);
-    const reported = positions.find((position) => position.category === category && position.capability === 'minting');
-    if (reported === undefined || !/^\d+$/.test(reported.satoshis)) throw new Error('Your wallet does not report this loan key as one of this page\'s. Connect the wallet that holds it.');
-    return BigInt(reported.satoshis);
-  }
-
-  /**
-   * Ask for an action, and ask again at once, up to {@link TRIES} times in a row, while the wallet says that another
-   * transaction spent one of the coins the request named first: the request is built anew each time from the coins
-   * read now. The wallet shows each try to the user, who approves it anew. Any other outcome ends the tries.
-   * @param build - reads the coins and builds the request; `first` for the first try
-   * @param onAgain - told, before each try after the first, what the page says while it asks again
-   * @throws SpentFirstError when every try found a coin spent first
-   */
-  private async tries(action: LoanAction, build: (first: boolean) => Promise<ActionDetails>, onStage: (stage: RequestStage) => void, onAgain: (words: string) => void): Promise<Outcome> {
-    for (let attempt = 1; ; attempt++) {
-      const details = await build(attempt === 1);
-      try {
-        return await this.start(action, details, onStage);
-      } catch (error) {
-        if (!spentFirst(error)) throw error;
-        if (attempt >= TRIES) throw new SpentFirstError();
-        onAgain(ASKING_AGAIN);
-      }
-    }
-  }
-
-  /**
-   * The coins of a loan's request, read anew for each try. A try after the first is about the loan the first was
-   * about: if the loan is gone, or another transaction has changed it, the page says so and asks nothing.
-   */
-  private loanTries<T extends { loan: Utxo } = LoanCoins>(category: string, read: (category: string) => Promise<T> = (key) => this.coinsOf(key) as unknown as Promise<T>): (first: boolean) => Promise<T> {
-    let loan: string | undefined;
-    return async (first) => {
-      const coins = await read(category);
-      if (first) loan = outpointOf(coins.loan);
-      else if (outpointOf(coins.loan) !== loan) throw new LoanChangedError();
-      return coins;
-    };
-  }
-
-  async manage(category: string, collateral: bigint, onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {
-    const read = this.loanTries(category);
-    return this.tries('manage', async (first) => manageDetails(await read(first), collateral, this.page, this.desk), onStage, onAgain);
-  }
-
-  async repay(loan: LoanView, repay: bigint, onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {
-    const read = this.loanTries(loan.category);
-    return this.tries(
-      'repay',
-      async (first) => {
-        const coins = await read(first);
-        return repayDetails(coins, repay, coins.loan.output.valueSatoshis, this.page, this.desk);
-      },
-      onStage,
-      onAgain,
-    );
+  /** Repay part of the loan, in PUSD cents, as far as Paryon takes it (`repaymentProblem`). */
+  repay(loan: LoanView, repay: bigint, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
+    const problem = repaymentProblem(loan, repay);
+    if (problem !== undefined) return Promise.reject(new Error(problem));
+    return this.start('repay', repayDetails(loan.category, repay, this.page, this.desk), onStage);
   }
 
   /**
    * Change the loan's interest rate for the periods to come: `rate` per 10,000,000 of the debt's value per period, 0 to
-   * 32,767 (`interestRateProblem`). The page names the loan, its sidecar and a coin of Paryon's interest function.
+   * 32,767 (`interestRateProblem`), the template's variable `interestRate`.
    */
-  async changeInterest(category: string, rate: number, onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {
+  changeInterest(category: string, rate: number, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
     const problem = interestRateProblem(rate);
-    if (problem !== undefined) throw new Error(problem);
-    const read = this.loanTries(category, async (key) => readInterestCoins(this.chain, key, await this.keySatoshis(key), this.desk));
-    return this.tries('changeInterest', async (first) => changeInterestDetails(await read(first), rate, this.page, this.desk), onStage, onAgain);
+    if (problem !== undefined) return Promise.reject(new Error(problem));
+    return this.start('changeInterest', changeInterestDetails(category, rate, this.page, this.desk), onStage);
   }
 
-  async close(category: string, onStage: (stage: RequestStage) => void = () => undefined, onAgain: (words: string) => void = () => undefined): Promise<Outcome> {
-    const read = this.loanTries(category);
-    return this.tries('close', async (first) => closeDetails(await read(first), this.page, this.desk), onStage, onAgain);
+  /** Repay the whole debt and close the loan. */
+  close(category: string, onStage: (stage: RequestStage) => void = () => undefined): Promise<Outcome> {
+    return this.start('close', closeDetails(category, this.page, this.desk), onStage);
   }
 
   /**

@@ -69,27 +69,21 @@ const RESUMED_DONE: Record<PendingRequest['action'], string> = {
 const follow = (progress: (step: Progress) => void) => (stage: RequestStage) => progress({ text: STAGE_WORDS[stage], stage });
 
 /**
- * The steps of an action that the page may ask for again, when someone else used one of Paryon's coins first: the
- * line that says so stays above the steps of the new try.
- */
-const followTries = (progress: (step: Progress) => void): [(stage: RequestStage) => void, (words: string) => void] => {
-  let again: string | undefined;
-  return [
-    (stage) => progress({ text: STAGE_WORDS[stage], stage, ...(again === undefined ? {} : { again }) }),
-    (words) => {
-      again = words;
-      progress({ text: STAGE_WORDS.sent, stage: 'sent', again });
-    },
-  ];
-};
-
-/**
  * The address this page is served from, for the wallet's record of each loan key: where the user can open the
  * page again. A page is replaceable; whoever serves a copy has its own address here.
  */
 const pageAddress = (): string | undefined => {
   const { protocol, origin, pathname } = window.location;
   return protocol === 'https:' || protocol === 'http:' ? `${origin}${pathname}` : undefined;
+};
+
+/**
+ * The folder this page is served from, such as `http://localhost:8104/`: where the template names the loan page, and
+ * the loan service beside it, for a deployment whose configuration gives no address of the page (`loanUrl`).
+ */
+const pageFolder = (): string | undefined => {
+  const { protocol, href } = window.location;
+  return protocol === 'https:' || protocol === 'http:' ? new URL('./', href).href : undefined;
 };
 
 /** The page once a wallet is connected. */
@@ -197,18 +191,18 @@ const Loans = ({ environment, desk, loans, chain, peerName, onDisconnect }: { en
             onManage={(loan, collateral) => {
               const now = loan.found?.loan.output.valueSatoshis ?? 0n;
               const change = collateral > now ? `Adding ${formatBch(collateral - now)} BCH of collateral` : `Taking ${formatBch(now - collateral)} BCH of collateral out`;
-              void act(manageName(loan), `${change}; the loan then holds ${formatBch(collateral)} BCH.`, (progress) => loans.manage(loan.category, collateral, ...followTries(progress)), 'The collateral is changed. The key is back where it was in your wallet.');
+              void act(manageName(loan), `${change}; the loan then holds ${formatBch(collateral)} BCH.`, (progress) => loans.manage(loan.category, collateral, follow(progress)), 'The collateral is changed. The key is back where it was in your wallet.');
             }}
-            onRepay={(loan, repay) => void act(repayName(loan), `Repaying ${formatPusd(repay)} PUSD of the loan.`, (progress) => loans.repay(loan, repay, ...followTries(progress)), 'Repaid. The PUSD repaid are destroyed; the loan stays open.')}
+            onRepay={(loan, repay) => void act(repayName(loan), `Repaying ${formatPusd(repay)} PUSD of the loan.`, (progress) => loans.repay(loan, repay, follow(progress)), 'Repaid. The PUSD repaid are destroyed; the loan stays open.')}
             onChangeInterest={(loan, rate) =>
               void act(
                 interestName(loan),
                 rate === 0 ? 'Changing the loan\'s interest rate to none, from its next interest payment.' : `Changing the loan's interest rate to ${formatYearlyPercent(rate, desk.deployment)} a year, from its next interest payment.`,
-                (progress) => loans.changeInterest(loan.category, rate, ...followTries(progress)),
+                (progress) => loans.changeInterest(loan.category, rate, follow(progress)),
                 'The interest rate is changed. It applies from the loan\'s next interest payment; the key is back where it was in your wallet.',
               )
             }
-            onClose={(loan) => void act(closeName(loan), `Repaying ${formatPusd(loan.debt ?? 0n)} PUSD and closing the loan.`, (progress) => loans.close(loan.category, ...followTries(progress)), 'The loan is closed. The collateral is back in your wallet, and so is the key.')}
+            onClose={(loan) => void act(closeName(loan), `Repaying ${formatPusd(loan.debt ?? 0n)} PUSD and closing the loan.`, (progress) => loans.close(loan.category, follow(progress)), 'The loan is closed. The collateral is back in your wallet, and so is the key.')}
           />
         </div>
         <div class="stack">
@@ -218,11 +212,9 @@ const Loans = ({ environment, desk, loans, chain, peerName, onDisconnect }: { en
           keys={keys}
           facts={facts}
           state={state}
-          onMakeKey={() => void act(keyName, 'Making a loan key.', (progress) => loans.createKey(...followTries(progress)), 'The loan key is made. It waits in Paryon\'s contracts until you borrow.')}
-          onMove={(need) => void act(moveName, 'Bringing Paryon\'s contracts up to date.', (progress) => loans.movePeriod(need.thread, market?.lockHeight ?? 0, follow(progress)), 'Paryon\'s contracts are up to date.')}
-          onBorrow={(key, plan, need) =>
-            void act(borrowName, `Borrowing ${formatPusd(plan.debt)} PUSD against ${formatBch(plan.collateral)} BCH.`, (progress) => (market === undefined ? Promise.reject(new Error('The prices are not read yet.')) : loans.borrow(key, need.thread, market, plan, follow(progress))), 'The loan is open. The PUSD and the loan key are in your wallet.')
-          }
+          onMakeKey={() => void act(keyName, 'Making a loan key.', (progress) => loans.createKey(follow(progress)), 'The loan key is made. It waits in Paryon\'s contracts until you borrow.')}
+          onMove={() => void act(moveName, 'Bringing Paryon\'s contracts up to date.', (progress) => loans.movePeriod(follow(progress)), 'Paryon\'s contracts are up to date.')}
+          onBorrow={(key, plan) => void act(borrowName, `Borrowing ${formatPusd(plan.debt)} PUSD against ${formatBch(plan.collateral)} BCH.`, (progress) => loans.borrow(key, plan, follow(progress)), 'The loan is open. The PUSD and the loan key are in your wallet.')}
         />
         <PricesCard market={market} problem={marketProblem} desk={desk} />
         </div>
@@ -232,7 +224,7 @@ const Loans = ({ environment, desk, loans, chain, peerName, onDisconnect }: { en
 };
 
 const App = ({ environment }: { environment: Environment }) => {
-  const desk = useMemo(() => deskFor(environment), [environment]);
+  const desk = useMemo(() => deskFor(environment, pageFolder()), [environment]);
   const link = useRef<DappLink | undefined>(undefined);
   const [status, setStatus] = useState<LinkStatus>({ state: 'connecting' });
   const [problem, setProblem] = useState<string | undefined>();

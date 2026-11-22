@@ -16,8 +16,11 @@
 #   status          what is running
 #
 # The pages listen on 127.0.0.1: wallet 8101, recoverer 8102, Savings Jar 8103, loan page 8104, backup stores
-# 8111 and 8112. The loan page uses Paryon's deployment on chipnet; on the local node it says it has none, since
-# the preview deploys none. From another computer, forward those ports (and 60403, the local node's server, for
+# 8111 and 8112. The loan page uses Paryon's deployment on chipnet, whose template names Paryon's public loan service;
+# on the local node it says it has none, since the preview deploys none. A configuration file that names a deployment
+# of Paryon's contracts on a chain of one's own ("paryon" for regtest or the mockup) gets Paryon's loan service as
+# well, on 8106 with the same file: its template names the service at <loanUrl>service/v1, and the loan page
+# forwards /service/ to it. From another computer, forward those ports (and 60403, the local node's server, for
 # `local`) and open http://localhost:8101 and the others. A page at localhost counts as
 # secure for the browser, which the pages' cryptography needs; a page at this machine's network address
 # over plain HTTP does not.
@@ -70,8 +73,15 @@ case "${1:-}" in
     launch wallet "$NODE" deploy/serve.mjs --root apps/wallet/dist --config "$CONFIG" --host 127.0.0.1 --port 8101
     launch recoverer "$NODE" deploy/serve.mjs --root apps/recoverer/dist --config "$CONFIG" --host 127.0.0.1 --port 8102
     launch jar "$NODE" deploy/serve.mjs --root apps/jar/dist --config "$CONFIG" --host 127.0.0.1 --port 8103
+    # Paryon's loan service, for a deployment on a chain of one's own, which no public service serves.
+    OWN_PARYON="$("$NODE" -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const parts = c.networks === undefined ? [c] : Object.entries(c.networks).map(([network, part]) => ({ ...c, ...part, network })); console.log(parts.some((part) => ["regtest", "mockup"].includes(part.network) && typeof part.paryon === "object" && part.paryon !== null) ? "yes" : "no")' "$CONFIG")"
+    FORWARD=()
+    if [ "$OWN_PARYON" = yes ]; then
+      launch paryon-service "$NODE" --import tsx apps/paryon-service/src/cli.ts --config "$CONFIG" --host 127.0.0.1 --port 8106
+      FORWARD=(--forward /service/=http://127.0.0.1:8106)
+    fi
     # The loan page reads the price General Protocols' oracle signs; that server is named for it alone.
-    launch loan "$NODE" deploy/serve.mjs --root apps/loan/dist --config "$CONFIG" --host 127.0.0.1 --port 8104 --connect https://oracles.generalprotocols.com
+    launch loan "$NODE" deploy/serve.mjs --root apps/loan/dist --config "$CONFIG" --host 127.0.0.1 --port 8104 --connect https://oracles.generalprotocols.com "${FORWARD[@]}"
     if [ "$2" = local ]; then
       # Blocks come by themselves, as on a public network, only sooner.
       launch blocks bash -c "cd '$ROOT' && while true; do npx tsx scripts/local-pay.ts mine 1 > /dev/null; sleep 15; done"
@@ -80,7 +90,7 @@ case "${1:-}" in
     echo "wallet: http://localhost:8101   recoverer: http://localhost:8102   jar: http://localhost:8103   loan: http://localhost:8104   (chain: $2)"
     ;;
   stop)
-    for name in wallet recoverer jar loan store1 store2 blocks; do
+    for name in wallet recoverer jar loan paryon-service store1 store2 blocks; do
       if running "$name"; then
         # The whole group: a loop and what it started.
         kill -- "-$(cat "$STATE/$name.pid")" 2>/dev/null || kill "$(cat "$STATE/$name.pid")" 2>/dev/null || true
@@ -90,13 +100,13 @@ case "${1:-}" in
     done
     ;;
   status)
-    for name in wallet recoverer jar loan store1 store2 blocks; do
+    for name in wallet recoverer jar loan paryon-service store1 store2 blocks; do
       if running "$name"; then echo "$name: running"; else echo "$name: not running"; fi
     done
     [ -f "$STATE/chain" ] && echo "chain: $(cat "$STATE/chain")"
     ;;
   *)
-    sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

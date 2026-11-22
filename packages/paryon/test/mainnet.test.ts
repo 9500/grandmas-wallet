@@ -68,19 +68,30 @@ describe('the frozen templates', () => {
     3: { chipnet: paryonChipnetTemplateTextV3, mainnet: paryonMainnetTemplateTextV3 },
   } as const;
 
-  it('the names without a version still mean version 2', () => {
-    expect(paryonChipnetTemplateText).toBe(paryonChipnetTemplateTextV2);
-    expect(paryonMainnetTemplateText).toBe(paryonMainnetTemplateTextV2);
+  it('the names without a version mean version 3', () => {
+    expect(PARYON_TEMPLATE_VERSION).toBe(3);
+    expect(paryonChipnetTemplateText).toBe(paryonChipnetTemplateTextV3);
+    expect(paryonMainnetTemplateText).toBe(paryonMainnetTemplateTextV3);
   });
 
-  it('makes version 3 only when it is named, with the service\'s and the page\'s addresses, and fixes its texts and identifiers', () => {
+  it('makes version 3 unless another is named, with Paryon\'s own addresses for its own deployments, and fixes its texts and identifiers', () => {
     for (const deployment of [CHIPNET_FAST_PERIODS_6, MAINNET_V1]) {
       const which = deployment === MAINNET_V1 ? 'mainnet' : 'chipnet';
-      const made = paryonTemplateAlone(paryonContracts(deployment), 3, PARYON_ADDRESSES);
-      expect(made.texts.template).toBe(TEXTS[3][which]);
-      expect([made.names.identifier, made.names.contentHash]).toEqual(IDENTIFIERS[3][which]);
-      expect((JSON.parse(made.texts.template) as { version: string }).version).toBe('3');
+      for (const made of [paryonTemplateAlone(paryonContracts(deployment)), paryonTemplateAlone(paryonContracts(deployment), 3, PARYON_ADDRESSES), paryonTemplateAlone(paryonContracts(deployment), PARYON_ADDRESSES)]) {
+        expect(made.texts.template).toBe(TEXTS[3][which]);
+        expect([made.names.identifier, made.names.contentHash]).toEqual(IDENTIFIERS[3][which]);
+        expect((JSON.parse(made.texts.template) as { version: string }).version).toBe('3');
+      }
     }
+  });
+
+  it('asks for the addresses of the service and the page of a deployment that is not Paryon\'s own', () => {
+    const own = { ...CHIPNET_FAST_PERIODS_6, name: 'local' };
+    expect(() => paryonTemplateAlone(paryonContracts(own))).toThrow(/give their addresses/);
+    const addresses = { service: 'http://127.0.0.1:18610/service/v1', page: 'http://127.0.0.1:18610/' };
+    const made = paryonTemplateAlone(paryonContracts(own), addresses);
+    expect(made).toEqual(paryonTemplateAlone(paryonContracts(own), 3, addresses));
+    expect(made.texts.template).toContain(addresses.service);
   });
 
   it('leaves version 1 of chipnet and mainnet as frozen, text and identifier, reachable only by a name that says so', () => {
@@ -94,11 +105,10 @@ describe('the frozen templates', () => {
     expect(mainnet.names.contentHash).toBe('d30ac987f2b7c8862d763ffdba9175290051cabb68ec9a6ff78cbd6ed601a052');
   });
 
-  it('makes version 2 unless version 1 is named, from the same source, and fixes its texts and identifiers', () => {
-    expect(PARYON_TEMPLATE_VERSION).toBe(2);
+  it('makes version 2 when it is named, from the same source, and fixes its texts and identifiers', () => {
     for (const deployment of [CHIPNET_FAST_PERIODS_6, MAINNET_V1]) {
       const which = deployment === MAINNET_V1 ? 'mainnet' : 'chipnet';
-      const made = paryonTemplateAlone(paryonContracts(deployment));
+      const made = paryonTemplateAlone(paryonContracts(deployment), 2);
       expect(made.texts.template).toBe(TEXTS[2][which]);
       expect([made.names.identifier, made.names.contentHash]).toEqual(IDENTIFIERS[2][which]);
       expect((JSON.parse(made.texts.template) as { version: string }).version).toBe('2');

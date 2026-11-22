@@ -70,7 +70,7 @@ try {
   console.log('deployed: categories', hex(contracts.paryonCategory).slice(0, 12), hex(contracts.loanKeyFactoryCategory).slice(0, 12), 'at height', height);
 
   // The template, for this deployment.
-  const text = JSON.stringify(paryonTemplateSource(contracts));
+  const text = JSON.stringify(paryonTemplateSource(contracts, 2));
   const template = readTemplate(text);
   const identifier = await account.importTemplate(text);
   console.log('template identifier as this project works it out:', identifier === template.identifier);
