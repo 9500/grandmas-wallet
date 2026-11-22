@@ -4,7 +4,7 @@ A Bitcoin Cash wallet that can recover access after a lost phone without manual 
 
 Built for BCH Blaze 2026 on the XO stack.
 
-**Status:** a working demonstration on chipnet, the Bitcoin Cash test network. The wallet, the recoverer's page, two applications and the backup stores are built and have run through their whole course on chipnet, in scripts and in browsers. Nothing has been audited, the pages keep their keys unencrypted in the browser, and a phone watches for recovery requests only while the page is open. Use it with test coins only.
+**Status:** a working demonstration. The wallet, the recoverer's page, two applications and the backup stores are built and have run through their whole course on chipnet, in scripts and in browsers. On mainnet, which the pages offer only to meet the requirements of BCH Blaze and with a warning, a first use with small amounts and a recovery were carried through on 21 and 22 November 2026 ([record](docs/runs/mainnet-recovery-completed.md)). Nothing has been audited, the pages keep their keys unencrypted in the browser, and a phone watches for recovery requests only while the page is open. Use it with play coins or test coins.
 
 `main` holds the third design of the wallet (design 3), which is what the pages under "Try it" serve. All three designs were made for BCH Blaze 2026, between 15 and 21 November 2026. [Designs](#designs) says what each design is, when it was made, and why the third was made.
 
@@ -16,7 +16,7 @@ Built for BCH Blaze 2026 on the XO stack.
 | Wallet | <https://wallet.9500.cash/> |
 | Recoverer, for a bank or a friend who sets wallets up and moves them to a new phone | <https://recoverer.9500.cash/> |
 | Savings Jar, an application the wallet uses from its XO template | <https://jar.9500.cash/> |
-| Loan desk, an independent page for ParyonUSD's contracts on chipnet, not affiliated with Paryon | <https://paryon.9500.cash/> |
+| Loan desk, an independent page for ParyonUSD's contracts on chipnet and mainnet, not affiliated with Paryon | <https://paryon.9500.cash/> |
 
 The wallet and the recoverer ask a first-time visitor where to try them: on **chipnet**, on **mainnet**, or on the **mockup**, a chain of this site's own (a Bitcoin Cash node in regtest mode) with the same contracts and the same steps. On the mockup coins are free at the press of a button and a button lets a waiting period pass, so every flow can be tried in a few minutes without bringing coins. The Savings Jar and the loan desk follow the wallet that connects. [docs/mockup.md](docs/mockup.md) describes it.
 
@@ -28,7 +28,9 @@ Every transaction the wallet sends is an invitation of an XO template, built and
 
 - **The wallet's own templates** define its controller, its addresses and its payments: [docs/templates/](docs/templates/).
 - **Applications arrive as templates.** The wallet's code names no application, and an application needs nothing but its XO template. The wallet carries out a template's actions, shows its own figures before anything is signed, and stores the template and a record of each position in the backup before it signs. After a recovery it reads those records, lets the chain confirm them, and lists what the owner holds again.
-- **ParyonUSD as an XO template.** [A template](packages/paryon/frozen/paryon-loan-v1-chipnet-fast-periods-6.json) for Paryon's public loan contracts, used unchanged: making a loan key, borrowing, managing and closing are actions of it.
+- **ParyonUSD as an XO template.** [A template](packages/paryon/frozen/paryon-loan-v3-chipnet-fast-periods-6.json) for Paryon's public loan contracts, used unchanged: making a loan key, borrowing, managing, repaying, closing and changing the interest rate are actions of it.
+- **An application's service.** A template can name, in its `resources`, a server that takes part in an action as a second participant and brings what only the application has, such as shared contract coins and their values. The wallet then carries out the template's actions from its own Apps screen, with the application's page closed, and checks everything the service adds against the template and the chain before the user approves. The loan template names the loan service that runs beside the loan page, so a loan can be managed and closed from the wallet alone, after a recovery too. [docs/xo-service.md](docs/xo-service.md) specifies the protocol, `xo_service_v1`.
+- **Templates of other applications.** A template can also be added to the wallet from a file. How templates published by others at XO Grid fare in the wallet is in section 12.4 of the [proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md#124-where-existing-applications-stand).
 - **Invitations.** [docs/xo-invitations.md](docs/xo-invitations.md) lists the invitations of complete runs on chipnet (the wallet's whole life, a Savings Jar and a ParyonUSD loan, each through the loss of a device), shows how to open one in XO's debug tool, and says how to produce them again. In the wallet and on the recoverer's page, developer mode saves the invitation of any transaction that browser sent.
 
 ## Designs
@@ -43,7 +45,7 @@ All three designs were made for BCH Blaze 2026, one after another in a single we
 
 - **Design 1** (15 to 17 November 2026) is at the tag [`design-1`](https://github.com/9500/grandmas-wallet/tree/design-1), with its web demonstration and chipnet runs. It spent every coin together with the wallet's controller, which linked all of a wallet's activity and got in the way of applications.
 - **Design 2** (17 to 20 November 2026) is at the tag [`design-2`](https://github.com/9500/grandmas-wallet/tree/design-2), and was what the pages under "Try it" ran until 20 November 2026. It gives each address its own key and uses the controller only for recovery. After a recovery, the new phone finds what the owner holds in an application from the application's token, its template, a second document written for this wallet, and the chain.
-- **Design 3** (since 20 November 2026) is what `main` holds, and what the pages under "Try it" serve since 21 November 2026. It keeps design 2's keys, addresses and controller, and changes how an application's position comes back after a recovery: from the application's XO template, the application's request and the wallet's own record in its sealed backup, checked against the chain. It has run on a local test node and on chipnet, in scripts and in browsers. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6.
+- **Design 3** (since 20 November 2026) is what `main` holds, and what the pages under "Try it" serve since 21 November 2026. It keeps design 2's keys, addresses and controller, and changes how an application's position comes back after a recovery: from the application's XO template, the application's request and the wallet's own record in its sealed backup, checked against the chain. It has run on a local test node and on chipnet, in scripts and in browsers, and on mainnet with small amounts. Its [architecture proposal](Grandmas_Wallet_Architecture_Proposal_v0.6.md) is version 0.6.
 
 ### Why a third design
 
@@ -63,7 +65,8 @@ All three designs were made for BCH Blaze 2026, one after another in a single we
 | `packages/paryon`, `packages/savings-jar` | The two applications' templates and what their pages need |
 | `packages/connect`, `packages/enrollment`, `packages/archive` | Messages between pages, setting a recoverer up, sealed backups |
 | `packages/chipnet`, `packages/testing` | Access to chain servers and a node; a simulated chain for tests |
-| `packages/ui`, `apps/` | The pages: wallet, recoverer, Savings Jar, loan desk, and the backup store's server |
+| `packages/ui`, `apps/` | The pages: wallet, recoverer, Savings Jar, loan desk; the backup store's server and the loan service |
+| `deploy/` | Serving the pages, their configuration for the three networks, and the mockup network |
 | `scripts/` | The scripted runs on the local node and on chipnet |
 | `docs/runs/` | The record each run wrote, with its transactions |
 
@@ -74,6 +77,8 @@ All three designs were made for BCH Blaze 2026, one after another in a single we
 - [Decisions log](docs/decisions.md)
 - [Token names and units from registries (BCMR)](docs/token-registries.md): how the wallet shows a token in its own units, from what its issuer published on chain
 - [XO templates and invitations](docs/xo-invitations.md)
+- [An application's service, `xo_service_v1`](docs/xo-service.md): the protocol by which a template's service joins the wallet's actions
+- [The mockup network](docs/mockup.md)
 - [Trying the wallet by hand](docs/walkthrough.md)
 - [The local test node](docs/local-node.md)
 - What was learned about the XO engine: [trial](docs/xo-spike.md), [signing problem](docs/xo-engine-signing-bug.md), [chipnet header verification](docs/xo-chipnet-header-verification.md), [notes for feedback](docs/xo-feedback-notes.md)
