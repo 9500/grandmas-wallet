@@ -252,6 +252,20 @@ export const templateTransaction = (template: XOTemplate, actionIdentifier: stri
   };
 };
 
+/**
+ * The actions of a role whose transaction has an output to a locking script, each with that output: how a key holder
+ * that learns of a script from an output it adds in that role (the XO engine) can be told to follow coins there. None
+ * where the role only spends coins that another role pays there.
+ */
+export const outputsToScriptInRole = (template: XOTemplate, lockingScriptIdentifier: string, role: string): { action: string; output: string }[] => {
+  const outputs = new Set(Object.entries(template.outputs ?? {}).filter(([, output]) => output.lockingScript === lockingScriptIdentifier).map(([name]) => name));
+  return Object.entries(template.actions ?? {}).flatMap(([action, { roles, transaction }]) => {
+    if (roles?.[role] === undefined) return [];
+    const output = (template.transactions?.[transaction ?? '']?.outputs ?? []).map((entry) => entry.output).find((name) => outputs.has(name));
+    return output === undefined ? [] : [{ action, output }];
+  });
+};
+
 /** The sequence number a template gives one of its inputs, or `undefined` when it states none. */
 export const templateSequenceNumber = (template: XOTemplate, inputIdentifier: string, values: TemplateValues): number | undefined => {
   const input = template.inputs?.[inputIdentifier] as { sequenceNumber?: number | string } | undefined;

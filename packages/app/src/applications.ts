@@ -30,6 +30,7 @@ import {
   readControllerHistory,
   readTemplate,
   requiredFee,
+  outputsToScriptInRole,
   smallestOutputValue,
   templateLockingBytecode,
   templateOmittedSatoshis,
@@ -1542,14 +1543,15 @@ export class Applications {
       const smallest = smallestOutputValue(output);
       if (output.valueSatoshis < smallest) return refuse(`The action would put ${output.valueSatoshis} satoshis in "${definition.outputs?.[identifier ?? '']?.name ?? identifier}", less than the ${smallest} the network relays there.`);
     }
-    // Scripts the template says the key holder need not track, and scripts many coins share, are not followed:
-    // those coins are given with their unlocking.
+    // Scripts the template says the key holder need not track, scripts no action of the role pays to (the key holder
+    // learns of a script from an output it adds in the role), and scripts many coins share, are not followed: those
+    // coins are given with their unlocking.
     const crowded = new Set<string>();
     const untracked = new Set(
       applicationCoins
         .filter(({ lockingScript }) => {
           const script = definition.lockingScripts?.[lockingScript] as { relevant?: unknown; roles?: Record<string, { relevant?: unknown }> } | undefined;
-          return script?.relevant === false || script?.roles?.[request.role]?.relevant === false;
+          return script?.relevant === false || script?.roles?.[request.role]?.relevant === false || outputsToScriptInRole(definition, lockingScript, request.role).length === 0;
         })
         .map(({ utxo }) => hex(utxo.output.lockingBytecode)),
     );

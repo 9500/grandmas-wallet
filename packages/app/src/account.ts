@@ -20,6 +20,7 @@ import {
   checkBeforeSending,
   invitationParts,
   templateGivenToFee,
+  outputsToScriptInRole,
   typedValues,
 } from '@grandmas-wallet/core';
 import type { Engine } from '@xo-cash/engine';
@@ -59,6 +60,28 @@ const intentFor = (template: XOTemplate, action: string, role: string): IntentLi
   }
   throw new Error(`The template "${definition.name ?? ''}" offers no action "${action}" to the role "${role}".`);
 };
+
+/**
+ * An output of the template as the engine is given it, tagged with the account's role where the output's locking script
+ * names that role. The engine reads a template's `relevant: false` for the role an output is added in, and with no role
+ * it follows every script an output pays to. A script that names no such role, such as a contract the role only pays
+ * into, is left untagged: the engine refuses a role a locking script does not name.
+ */
+export const outputForEngine = <T extends object>(template: XOTemplate, output: T, role: string): T & { roleIdentifier?: string } => {
+  if (!('outputIdentifier' in output) || typeof output.outputIdentifier !== 'string') return output;
+  const definition = template as unknown as { outputs?: Record<string, { lockingScript?: string }>; lockingScripts?: Record<string, { roles?: Record<string, unknown> }> };
+  const lockingScript = definition.outputs?.[output.outputIdentifier]?.lockingScript;
+  const named = lockingScript !== undefined && Object.hasOwn(definition.lockingScripts ?? {}, lockingScript) && Object.hasOwn(definition.lockingScripts?.[lockingScript]?.roles ?? {}, role);
+  return named ? { ...output, roleIdentifier: role } : output;
+};
+
+/**
+ * The inputs the engine is asked to sign: those it lists as its own, less the coins given with their unlocking. The
+ * engine lists a coin at a script it follows as its own even where the wallet gave the coin's unlocking, and refuses to
+ * set an unlocking a second time. Every input is given its place, so the engine's index of an input is its place in
+ * the request.
+ */
+export const inputsToSign = (ownIndexes: number[], inputs: { unlocking?: unknown }[]): number[] => ownIndexes.filter((index) => inputs[index]?.unlocking === undefined);
 
 const isWalletTemplate = (name: string): name is WalletTemplateName => Object.hasOwn(WALLET_TEMPLATES, name);
 const isRole = (role: string): role is Role => role === 'owner' || role === 'recoverer';
@@ -115,7 +138,7 @@ export class Account implements WalletBackend {
   /** Told of every transaction the account sends, with its invitation. */
   private onSent: ((sent: SentInvitation) => void | Promise<void>) | undefined;
   /** Invitations started for another participant to join, not yet finished or put aside, by their identifier. */
-  private readonly shared = new Map<string, { text: string; entityIdentifier: string; templateIdentifier: string; templateName: string; action: string; role: string; coins: AccountCoin[] }>();
+  private readonly shared = new Map<string, { text: string; entityIdentifier: string; templateIdentifier: string; templateName: string; definition: XOTemplate; action: string; role: string; coins: AccountCoin[] }>();
 
   private constructor(
     private readonly engine: Engine,
@@ -338,15 +361,14 @@ export class Account implements WalletBackend {
       ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
       ...(unlocking === undefined ? {} : { unlockingBytecode: unlocking.bytecode, sequenceNumber: unlocking.sequenceNumber }),
     }));
-    // An output of the template carries the account's role: the engine reads a template's `relevant: false` for the
-    // role an output is added in, and with no role it follows every script an output pays to.
-    const outputs = request.outputs.map((output, transactionIndex) => ({ ...output, transactionIndex, ...('outputIdentifier' in output ? { roleIdentifier: request.role } : {}) }));
+    // An output of the template carries the account's role where its script names it (`outputForEngine`).
+    const { identifier: templateIdentifier, definition: templateDefinition } = this.templateOf(request.template);
+    const outputs = request.outputs.map((output, transactionIndex) => ({ ...outputForEngine(templateDefinition, output, request.role), transactionIndex }));
     // The engine unlocks a script with the key of the invitation that first made the script known. The
     // action that makes the controller key must therefore be carried out in the invitation the key was made
     // for: a new invitation for it would make a second key, and the controller would later be signed with that.
     const walletRole = isRole(request.role) ? request.role : undefined;
     const makesKey = request.template === 'controller' && walletRole !== undefined && request.action === KEY_OF_ROLE[walletRole].action;
-    const { identifier: templateIdentifier, definition: templateDefinition } = this.templateOf(request.template);
     let invitationIdentifier: string;
     if (makesKey && walletRole !== undefined) {
       await this.controllerKey(walletRole);
@@ -364,7 +386,7 @@ export class Account implements WalletBackend {
     }
     try {
       await this.engine.appendInvitation(invitationIdentifier, { outputs } as unknown as Parameters<Engine['appendInvitation']>[1]);
-      for (const index of await this.engine.listOwnInputIndexes(invitationIdentifier)) await this.engine.signInvitation(invitationIdentifier, index);
+      for (const index of inputsToSign(await this.engine.listOwnInputIndexes(invitationIdentifier), request.inputs)) await this.engine.signInvitation(invitationIdentifier, index);
       const { builtTransaction } = await this.engine.executeAction(invitationIdentifier, { broadcastTransaction: false });
       const transaction = decodeTransactionBch(hexToBin(builtTransaction.serializedTransaction));
       if (typeof transaction === 'string') throw new Error(`The engine built something that is not a transaction: ${transaction}`);
@@ -426,6 +448,7 @@ export class Account implements WalletBackend {
       entityIdentifier: stored.entityIdentifier,
       templateIdentifier,
       templateName: (definition as { name?: string }).name ?? '',
+      definition,
       action: request.action,
       role: request.role,
       coins: request.inputs.map(({ coin }) => coin),
@@ -476,8 +499,8 @@ export class Account implements WalletBackend {
         ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
         ...(place === undefined ? {} : { transactionIndex: place }),
       }));
-      // As in `prepare`: an output of the template carries the account's role. A place becomes the engine's index.
-      const outputs = request.outputs.map(({ place, ...output }) => ({ ...output, ...('outputIdentifier' in output ? { roleIdentifier: started.role } : {}), ...(place === undefined ? {} : { transactionIndex: place }) }));
+      // As in `prepare`: an output of the template carries the account's role where its script names it. A place becomes the engine's index.
+      const outputs = request.outputs.map(({ place, ...output }) => ({ ...outputForEngine(started.definition, output, started.role), ...(place === undefined ? {} : { transactionIndex: place }) }));
       if (inputs.length > 0 || outputs.length > 0) {
         await this.engine.appendInvitation(invitationIdentifier, { ...(inputs.length === 0 ? {} : { inputs }), ...(outputs.length === 0 ? {} : { outputs }) } as unknown as Parameters<Engine['appendInvitation']>[1]);
       }
@@ -592,11 +615,7 @@ export class Account implements WalletBackend {
    */
   async followScript(script: FollowedScript): Promise<Uint8Array> {
     const { identifier, definition } = this.templateOf(script.template);
-    const outputs = Object.entries(definition.outputs ?? {}).filter(([, output]) => output.lockingScript === script.lockingScript).map(([name]) => name);
-    const actions = Object.entries(definition.actions ?? {}).filter(([, action]) => action.roles?.[script.role] !== undefined);
-    for (const [action, { transaction }] of actions) {
-      const outputIdentifier = (definition.transactions?.[transaction ?? '']?.outputs ?? []).map(({ output }) => output).find((output) => outputs.includes(output));
-      if (outputIdentifier === undefined) continue;
+    for (const { action, output: outputIdentifier } of outputsToScriptInRole(definition, script.lockingScript, script.role)) {
       const variables = Object.entries(typedValues(definition, script.variables)).map(([variableIdentifier, value]) => ({ variableIdentifier, roleIdentifier: script.role, value }));
       const stored = await this.engine.createInvitation({
         templateIdentifier: identifier,
