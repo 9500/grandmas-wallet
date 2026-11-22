@@ -6,6 +6,7 @@ import {
   type PriceThread,
   CHIPNET_FAST_PERIODS_6,
   MAINNET_V1,
+  MAXIMUM_INTEREST_RATE,
   MINIMUM_DEBT,
   borrowingFee,
   borrowingFor,
@@ -15,6 +16,7 @@ import {
   formatPrice,
   formatPusd,
   interestPerPeriod,
+  interestRateProblem,
   paryonContracts,
   paryonTemplateAlone,
   periodAt,
@@ -295,3 +297,68 @@ export const yearlyPercent = (rate: number, deployment: ParyonDeployment = DEPLO
 
 /** What a rate costs a loan each period at a price, in satoshis taken from the collateral, as `payInterest.cash` reckons it; each payment also takes 1,500 for its fee. */
 export const interestEachPeriod = (rate: number, debt: bigint, price: bigint): bigint => interestPerPeriod(rate, debt, price);
+
+/** Blocks of ten minutes in a year, by which Paryon's periods are counted. */
+const BLOCKS_A_YEAR = 52_560n;
+/** A yearly percentage in hundred-thousandths of a percent, the unit in which the page reads and writes one. */
+const PERCENT_PLACES = 5;
+const PERCENT_UNIT = 10n ** BigInt(PERCENT_PLACES);
+
+/** What a rate costs a loan in a year of periods at one price, in satoshis: the cost of a period, for each period of the year. */
+export const interestEachYear = (rate: number, debt: bigint, price: bigint, deployment: ParyonDeployment = DEPLOYMENT): bigint =>
+  (interestEachPeriod(rate, debt, price) * BLOCKS_A_YEAR) / BigInt(deployment.periodLengthBlocks);
+
+/**
+ * A rate as a share of the debt's value in a year, written as a percentage: 1,096 on mainnet is "4.0004%", 23 on chipnet
+ * "4.0296%". Exact for Paryon's deployments (a period of 144 blocks or of 3), whose rates come to whole hundred-thousandths
+ * of a percent; for another, rounded to the nearest. Trailing zeros are left out: 0 is "0%".
+ */
+export const formatYearlyPercent = (rate: number, deployment: ParyonDeployment = DEPLOYMENT): string => {
+  const blocks = BigInt(deployment.periodLengthBlocks);
+  const units = (2n * BigInt(rate) * BLOCKS_A_YEAR + blocks) / (2n * blocks);
+  const fraction = (units % PERCENT_UNIT).toString().padStart(PERCENT_PLACES, '0').replace(/0+$/, '');
+  return `${(units / PERCENT_UNIT).toLocaleString('en-US')}${fraction === '' ? '' : `.${fraction}`}%`;
+};
+
+/** A yearly rate as typed, and the rate the contracts take for it. */
+export interface TypedRate {
+  /** The whole number per 10,000,000 per period that is asked for: the nearest to what was typed. */
+  rate: number;
+  /** Whether what was typed lies between two of the rates the contracts take, so that the nearest is asked for. */
+  rounded: boolean;
+}
+
+/**
+ * A rate typed as a percentage a year, such as "4" or "4.5%", as the whole number per 10,000,000 per period the
+ * contracts take: the nearest one, a half rounded up. From 0% to the yearly percentage of 32,767 (119.59955% on
+ * mainnet), or the reason it cannot be asked for.
+ */
+export const parseYearlyRate = (text: string, deployment: ParyonDeployment = DEPLOYMENT): TypedRate | string => {
+  const cleaned = text.trim().replace(/\s/g, '').replace(/%$/, '');
+  if (cleaned === '') return 'Enter a rate.';
+  const match = /^(\d*)(?:\.(\d*))?$/.exec(cleaned);
+  if (match === null || (match[1] === '' && (match[2] ?? '') === '')) return 'Enter the rate as a percentage a year, for example 4 or 4.5.';
+  const fraction = match[2] ?? '';
+  if (fraction.length > PERCENT_PLACES) return 'Enter the rate with at most five decimal places.';
+  const units = BigInt(match[1] === '' ? '0' : (match[1] as string)) * PERCENT_UNIT + BigInt(fraction.padEnd(PERCENT_PLACES, '0'));
+  // rate = percent ÷ 100 × 10,000,000 ÷ (52,560 ÷ blocks a period) = hundred-thousandths × blocks ÷ 52,560
+  const exact = units * BigInt(deployment.periodLengthBlocks);
+  const rate = (2n * exact + BLOCKS_A_YEAR) / (2n * BLOCKS_A_YEAR);
+  if (rate > BigInt(MAXIMUM_INTEREST_RATE)) return `Paryon takes a rate from 0% to ${formatYearlyPercent(MAXIMUM_INTEREST_RATE, deployment)} a year.`;
+  const problem = interestRateProblem(Number(rate));
+  if (problem !== undefined) return problem;
+  return { rate: Number(rate), rounded: exact % BLOCKS_A_YEAR !== 0n };
+};
+
+/**
+ * How long one of a deployment's periods lasts, in words: "about a day" on mainnet, "about 30 minutes" on chipnet (whose
+ * heights are counted as at ten-minute blocks). On a chain of one's own, whose blocks come when they are made, in blocks.
+ */
+export const periodWords = (desk: Pick<Desk, 'deployment' | 'paryons'>): string => {
+  const blocks = desk.deployment.periodLengthBlocks;
+  if (!desk.paryons) return `${blocks.toLocaleString('en-US')} ${blocks === 1 ? 'block' : 'blocks'}`;
+  const minutes = blocks * 10;
+  if (minutes % 1_440 === 0) return minutes === 1_440 ? 'about a day' : `about ${minutes / 1_440} days`;
+  if (minutes % 60 === 0) return minutes === 60 ? 'about an hour' : `about ${minutes / 60} hours`;
+  return `about ${minutes} minutes`;
+};

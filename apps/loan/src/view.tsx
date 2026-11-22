@@ -1,5 +1,5 @@
 import type { RequestStage } from '@grandmas-wallet/connect';
-import { MINIMUM_DEBT, borrowingFee, collateralAtRatio, collateralRatio } from '@grandmas-wallet/paryon';
+import { MAXIMUM_INTEREST_RATE, MINIMUM_DEBT, borrowingFee, collateralAtRatio, collateralRatio } from '@grandmas-wallet/paryon';
 import { Amount, Button, Card, Field, HandOff, KeyValues, More, Notice, Pill, Segmented, Spinner, TemplateOffer, Status, Steps, type Step, formatBch, formatSatoshis, formatTime, parseBch, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
@@ -17,11 +17,17 @@ import {
   collateralProblem,
   formatPrice,
   formatPusd,
+  formatYearlyPercent,
+  interestEachPeriod,
+  interestEachYear,
   liquidationPrice,
   parsePercent,
   parsePusd,
+  parseYearlyRate,
   partRepayment,
   periodNeed,
+  periodWords,
+  periodsPerYear,
   priceBasis,
   ratioOf,
   repaymentProblem,
@@ -59,6 +65,10 @@ export const borrowName = 'borrow';
 export const manageName = (loan: Pick<LoanView, 'category'>): string => `manage:${loan.category}`;
 export const repayName = (loan: Pick<LoanView, 'category'>): string => `repay:${loan.category}`;
 export const closeName = (loan: Pick<LoanView, 'category'>): string => `close:${loan.category}`;
+export const interestName = (loan: Pick<LoanView, 'category'>): string => `interest:${loan.category}`;
+
+/** The panels a loan in the list can open, one at a time. */
+export type LoanPanel = 'collateral' | 'interest' | 'repay' | 'close';
 
 const Pusd = ({ cents }: { cents: bigint }) => (
   <>
@@ -427,29 +437,114 @@ const RepayPanel = ({ loan, busy, onRepay, onClose }: { loan: LoanView; busy: bo
   );
 };
 
+/** A loan's rate in the list: the yearly percentage, and what it costs this loan a period at the price the page reckons with. */
+const rateEntry = (label: ComponentChildren, rate: number | undefined, loan: LoanView, market: Market | undefined, desk: Desk): [ComponentChildren, ComponentChildren] => [
+  <>
+    {label}
+    {rate !== undefined && rate !== 0 && market !== undefined && loan.debt !== undefined && (
+      <small>
+        {formatSatoshis(interestEachPeriod(rate, loan.debt, market.lower))} sat a period at {formatPrice(market.lower)}
+      </small>
+    )}
+  </>,
+  rate === undefined || rate === 0 ? 'None' : `${formatYearlyPercent(rate, desk.deployment)} a year`,
+];
+
+const capitalised = (words: string): string => `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+
+const InterestPanel = ({ loan, market, desk, busy, onChange, onClose }: { loan: LoanView; market: Market; desk: Desk; busy: boolean; onChange: (rate: number) => void; onClose: () => void }) => {
+  const chosen = loan.nextInterestRate ?? loan.interestRate ?? 0;
+  const [amount, setAmount] = useState(formatYearlyPercent(chosen, desk.deployment).replace(/[,%]/g, ''));
+  const [tried, setTried] = useState(false);
+  const parsed = parseYearlyRate(amount, desk.deployment);
+  const problem =
+    typeof parsed === 'string'
+      ? parsed
+      : parsed.rate !== chosen
+        ? undefined
+        : chosen !== loan.interestRate
+          ? 'That rate is chosen already; it applies from the next interest payment.'
+          : 'That is the loan\'s rate now.';
+  const debt = loan.debt ?? 0n;
+  const periods = periodsPerYear(desk.deployment);
+  return (
+    <div class="panel">
+      <Field label="New rate, a year" id={`interest-${loan.category}`} error={tried ? problem : undefined} hint={`From 0% to ${formatYearlyPercent(MAXIMUM_INTEREST_RATE, desk.deployment)}, in steps of ${formatYearlyPercent(1, desk.deployment)}.`}>
+        <div class="inline-form">
+          <div class="input-unit long-unit">
+            <input id={`interest-${loan.category}`} type="text" inputMode="decimal" autocomplete="off" value={amount} aria-invalid={tried && problem !== undefined} onInput={(event) => setAmount((event.currentTarget as HTMLInputElement).value)} />
+            <span>% a year</span>
+          </div>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setTried(true);
+              if (problem === undefined && typeof parsed !== 'string') onChange(parsed.rate);
+            }}
+          >
+            Change
+          </Button>
+        </div>
+      </Field>
+      {typeof parsed !== 'string' && (
+        <div class="summary">
+          <KeyValues
+            entries={[
+              [<>Asked of the contracts<small>Per 10,000,000 of the debt's value, each period</small></>, <strong>{parsed.rate.toLocaleString('en-US')}</strong>],
+              [<>Each period<small>{capitalised(periodWords(desk))}, at {formatPrice(market.lower)} a BCH</small></>, <Amount satoshis={interestEachPeriod(parsed.rate, debt, market.lower)} exact />],
+              [<>In a year<small>{Number.isInteger(periods) ? periods.toLocaleString('en-US') : `About ${Math.round(periods).toLocaleString('en-US')}`} periods, at the same price</small></>, <Amount satoshis={interestEachYear(parsed.rate, debt, market.lower, desk.deployment)} />],
+            ]}
+          />
+          {parsed.rounded && (
+            <p class="small">
+              {amount.trim().replace(/%$/, '')}% lies between two of the rates the contracts take; the nearest, {formatYearlyPercent(parsed.rate, desk.deployment)} a year, is asked for.
+            </p>
+          )}
+        </div>
+      )}
+      <p class="small muted">A lower rate costs less, but a redemption may be moved onto a loan with a lower rate: someone hands in PUSD for the same value in BCH out of that loan's collateral, and its debt falls by as much.</p>
+      <p class="small muted">The new rate applies from the loan's next interest payment, which anyone may make once a period has passed. Interest is paid in BCH out of the collateral; the debt in PUSD does not grow.</p>
+      <div class="row end">
+        <Button kind="link" small onClick={onClose}>
+          Close
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 export const LoanItem = ({
   loan,
   market,
   facts,
   state,
+  desk = CHIPNET_DESK,
+  opened,
   onManage,
   onRepay,
   onClose,
+  onChangeInterest,
 }: {
   loan: LoanView;
   market: Market | undefined;
   facts: PageFacts;
   state: ActionState;
+  /** The deployment, for what the page says of Paryon's periods. */
+  desk?: Desk | undefined;
+  /** The panel open at first, as the fixtures show it. */
+  opened?: LoanPanel | undefined;
   onManage: (loan: LoanView, collateral: bigint) => void;
   onRepay: (loan: LoanView, repay: bigint) => void;
   onClose: (loan: LoanView) => void;
+  onChangeInterest: (loan: LoanView, rate: number) => void;
 }) => {
-  const [panel, setPanel] = useState<'collateral' | 'repay' | 'close' | undefined>();
+  const [panel, setPanel] = useState<LoanPanel | undefined>(opened);
   const busy = state.running !== undefined;
   const open = loan.status === 'open' && loan.debt !== undefined && loan.found !== undefined;
   const range = partRepayment(loan);
   const lowerRatio = market === undefined ? undefined : ratioOf(loan, market.lower);
   const { least } = collateralPercents(facts.network);
+  const newRate = loan.nextInterestRate !== undefined && loan.nextInterestRate !== loan.interestRate;
   return (
     <li class="loan" data-testid="loan">
       <div class="loan-top">
@@ -463,7 +558,8 @@ export const LoanItem = ({
               [<>Collateral</>, <Amount satoshis={loan.found?.loan.output.valueSatoshis ?? 0n} exact />],
               [market === undefined ? <>Worth</> : <>Worth, at {formatPrice(market.lower)}<small>{priceBasis(market.withoutOracle).explained}</small></>, <span class={`ratio${lowerRatio !== undefined && lowerRatio < least ? ' low' : ''}`}>{percent(lowerRatio)} of the debt</span>],
               ...(market === undefined || market.lower === market.priceThread.state.price ? [] : [[<>Worth, at the stored {formatPrice(market.priceThread.state.price)}</>, `${percent(ratioOf(loan, market.priceThread.state.price))} of the debt`] as [ComponentChildren, ComponentChildren]]),
-              [<>Interest</>, loan.interestRate === 0 || loan.interestRate === undefined ? 'None' : `${(loan.interestRate / 100_000).toFixed(3)}% a period`],
+              rateEntry(newRate ? <>Interest now</> : <>Interest</>, loan.interestRate, loan, market, desk),
+              ...(newRate ? [rateEntry(<>New rate, from the next interest payment</>, loan.nextInterestRate, loan, market, desk)] : []),
             ]}
           />
           {lowerRatio !== undefined && lowerRatio < least && <Notice tone="warn">The collateral is worth less than {least}% of the debt at {priceBasis(market?.withoutOracle).short}. Add collateral, or repay, before the price falls further: at 110% the contracts let anyone liquidate the loan.</Notice>}
@@ -474,6 +570,10 @@ export const LoanItem = ({
             <Button kind="secondary" small disabled={busy || market === undefined} onClick={() => setPanel(panel === 'collateral' ? undefined : 'collateral')}>
               {state.running?.name === manageName(loan) && <Spinner />}
               Change the collateral
+            </Button>
+            <Button kind="secondary" small disabled={busy || market === undefined} onClick={() => setPanel(panel === 'interest' ? undefined : 'interest')}>
+              {state.running?.name === interestName(loan) && <Spinner />}
+              Change the interest rate
             </Button>
             {range !== undefined && (
               <Button kind="secondary" small disabled={busy} onClick={() => setPanel(panel === 'repay' ? undefined : 'repay')}>
@@ -496,6 +596,19 @@ export const LoanItem = ({
               onManage={(collateral) => {
                 setPanel(undefined);
                 onManage(loan, collateral);
+              }}
+              onClose={() => setPanel(undefined)}
+            />
+          )}
+          {panel === 'interest' && market !== undefined && (
+            <InterestPanel
+              loan={loan}
+              market={market}
+              desk={desk}
+              busy={busy}
+              onChange={(rate) => {
+                setPanel(undefined);
+                onChangeInterest(loan, rate);
               }}
               onClose={() => setPanel(undefined)}
             />
@@ -539,6 +652,7 @@ export const LoanItem = ({
         <p class="loan-note">Your wallet holds the key, but where its loan stands could not be read just now.</p>
       )}
       <Outcome state={state} name={manageName(loan)} explorer={facts.explorer} />
+      <Outcome state={state} name={interestName(loan)} explorer={facts.explorer} />
       <Outcome state={state} name={repayName(loan)} explorer={facts.explorer} />
       <Outcome state={state} name={closeName(loan)} explorer={facts.explorer} />
     </li>
@@ -555,9 +669,13 @@ export const LoanList = (props: {
   market: Market | undefined;
   facts: PageFacts;
   state: ActionState;
+  desk?: Desk | undefined;
+  /** A loan's panel open at first, as the fixtures show it. */
+  opened?: { category: string; panel: LoanPanel } | undefined;
   onManage: (loan: LoanView, collateral: bigint) => void;
   onRepay: (loan: LoanView, repay: bigint) => void;
   onClose: (loan: LoanView) => void;
+  onChangeInterest: (loan: LoanView, rate: number) => void;
 }) => (
   <Card title="Your loans">
     {props.loans === undefined ? (
@@ -576,7 +694,19 @@ export const LoanList = (props: {
     ) : (
       <ul class="loans">
         {props.loans.map((loan) => (
-          <LoanItem key={loan.category} loan={loan} market={props.market} facts={props.facts} state={props.state} onManage={props.onManage} onRepay={props.onRepay} onClose={props.onClose} />
+          <LoanItem
+            key={loan.category}
+            loan={loan}
+            market={props.market}
+            facts={props.facts}
+            state={props.state}
+            desk={props.desk}
+            opened={props.opened?.category === loan.category ? props.opened.panel : undefined}
+            onManage={props.onManage}
+            onRepay={props.onRepay}
+            onClose={props.onClose}
+            onChangeInterest={props.onChangeInterest}
+          />
         ))}
       </ul>
     )}
