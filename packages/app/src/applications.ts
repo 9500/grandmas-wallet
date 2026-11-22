@@ -58,6 +58,7 @@ import {
   firstCommitPlaces,
   otherParticipants,
   startingActionsOf,
+  saidValue,
   statedValue,
   walletRoleOf,
 } from './application-services.js';
@@ -350,7 +351,8 @@ export interface ActionPreview {
   words: {
     action: { name: string; description: string };
     outcome: string;
-    values: { name: string; description: string; value: string }[];
+    /** By the template's names, with its type for each value where it gives one, so that a screen shows satoshis as an amount and numbers grouped. */
+    values: { name: string; description: string; value: string; type?: string }[];
   };
   /** The wallet's own figures. The application cannot influence them. */
   figures: {
@@ -1850,7 +1852,7 @@ export class Applications {
         values: declaredVariables.flatMap((variable) => {
           const value = plan.values[variable];
           const described = definition.variables?.[variable];
-          return value === undefined ? [] : [{ name: described?.name ?? variable, description: described?.description ?? '', value: String(value) }];
+          return value === undefined ? [] : [{ name: described?.name ?? variable, description: described?.description ?? '', value: String(value), ...(typeof described?.type === 'string' ? { type: described.type } : {}) }];
         }),
       },
       figures: {
@@ -2239,7 +2241,7 @@ export class Applications {
       if (item.category !== category || offered.some((known) => known.action === item.action)) continue;
       const checked = checkServiceItem(definition, service.walletRole, item, categories);
       if (!checked.ok) continue;
-      const says = (item.says ?? []).map(({ variable, value }) => ({ variable, name: definition.variables?.[variable]?.name ?? variable, value: String(value) }));
+      const says = (item.says ?? []).map(({ variable, value }) => saidValue(definition, variable, value));
       const offer = this.offerOf(definition, item.action, service.walletRole, { service: { checkedAt: possible.at, ...(says.length === 0 ? {} : { says }) } });
       if (offer !== undefined) offered.push({ ...offer, item, place: checked.place });
     }
@@ -2436,15 +2438,20 @@ export class Applications {
     await this.putAside(pending);
   }
 
-  /** The service's part of a review: its values by the template's names, and what it said beside them. */
+  /**
+   * The service's part of a review: its values by the template's names, and what it said beside them, less what it said
+   * of a value the wallet's own role gives the action: that value is in the review already, as the action sets it, and
+   * the service's word on it (what it is before the action) would stand beside it under the same name.
+   */
   private servicePart(definition: ReadTemplate['definition'], pending: PendingShared): ServicePart {
     const variables = (definition.actions?.[pending.request.action]?.roles?.[pending.role]?.requirements?.variables ?? []) as string[];
+    const walletGives = new Set((definition.actions?.[pending.request.action]?.roles?.[pending.request.role]?.requirements?.variables ?? []) as string[]);
     return {
       role: pending.role,
       roleName: definition.roles?.[pending.role]?.name ?? pending.role,
       url: pending.url,
       values: variables.flatMap((variable) => (pending.accepted.values[variable] === undefined ? [] : [statedValue(definition, variable, pending.accepted.values[variable])])),
-      says: (pending.item?.says ?? []).map(({ variable, value }) => ({ variable, name: definition.variables?.[variable]?.name ?? variable, value: String(value) })),
+      says: (pending.item?.says ?? []).filter(({ variable }) => !walletGives.has(variable)).map(({ variable, value }) => saidValue(definition, variable, value)),
     };
   }
 

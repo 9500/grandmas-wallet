@@ -2,7 +2,7 @@ import { type ApplicationAction, type RecordedPosition, type ServiceStatus, type
 import { describe, expect, it } from 'vitest';
 
 import { SERVICE_ANSWER_REFUSED, SPENT_FIRST, refusalOf } from '../apps/wallet/src/review-gate.js';
-import { actionsShown, checkedLine, notAsked, requestFor, saysLine, serviceHost, serviceShown, unavailable, usableService } from '../apps/wallet/src/template-actions.js';
+import { actionsShown, checkedLine, notAsked, requestFor, saysLine, serviceHost, serviceShown, typedWords, unavailable, usableService } from '../apps/wallet/src/template-actions.js';
 
 /**
  * What the wallet's screens show about a template's service (docs/xo-service.md): its state in a few words, which of the
@@ -72,6 +72,10 @@ describe('a template\'s actions, as its page lists them', () => {
     expect(unavailable(action('open', { service: { available: true } }))).toBeUndefined();
     expect(saysLine(action('act', { service: { says: [{ variable: 'price', name: 'Price', value: '7' }, { variable: 'due', name: 'Due', value: '12' }] } }))).toBe('From the service: Price 7 · Due 12');
     expect(saysLine(action('act'))).toBeUndefined();
+    // By the template's types, as the action's form asks for them: a run with real values showed bare digits, such as "Collateral 119789172".
+    expect(saysLine(action('act', { service: { says: [{ variable: 'held', name: 'Collateral', value: '119789172', type: 'satoshis' }, { variable: 'owed', name: 'Debt', value: '20000', type: 'token_amount' }, { variable: 'rate', name: 'Rate', value: '12345', type: 'integer' }, { variable: 'state', name: 'State', value: '22000000', type: 'bytes' }] } }))).toBe('From the service: Collateral 119,789,172 sat · Debt 20,000 units · Rate 12,345 · State 22000000');
+    expect(typedWords('satoshis', 'not a number')).toBe('not a number');
+    expect(typedWords(undefined, '1000000')).toBe('1000000');
     expect(checkedLine([action('a', { service: { checkedAt: 3 } }), action('b'), action('c', { service: { checkedAt: 8 } })], time)).toBe('Checked with its service at 8');
     expect(checkedLine([action('a')], time)).toBeUndefined();
   });

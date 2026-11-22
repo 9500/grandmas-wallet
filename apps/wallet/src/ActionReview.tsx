@@ -135,16 +135,13 @@ export const TheirWords = ({ words }: { words: ActionPreview['words'] }) => (
               {value.name}
               {value.description !== '' && <small>{value.description}</small>}
             </>,
-            /^[0-9a-f]{24,}$/i.test(value.value) ? <Hex value={value.value} /> : <span class="word-value">{value.value}</span>,
+            <TypedValue type={value.type ?? ''} value={value.value} />,
           ])}
         />
       )}
     </div>
   </Part>
 );
-
-/** A value as the template's words show it: a long hexadecimal value shortened, anything else as it is. */
-const WordValue = ({ value }: { value: string }) => (/^[0-9a-f]{24,}$/i.test(value) ? <Hex value={value} /> : <span class="word-value">{value}</span>);
 
 /**
  * What the template's service stated for the action, by the template's names: apart from the wallet's own figures and
@@ -164,9 +161,9 @@ export const FromService = ({ part }: { part: ServicePart }) => {
                 {value.name}
                 {value.description !== '' && <small>{value.description}</small>}
               </>,
-              <WordValue value={value.value} />,
+              <TypedValue type={value.type ?? ''} value={value.value} />,
             ]),
-            ...said.map((entry): [ComponentChildren, ComponentChildren] => [entry.name, <WordValue value={entry.value} />]),
+            ...said.map((entry): [ComponentChildren, ComponentChildren] => [entry.name, <TypedValue type={entry.type ?? ''} value={entry.value} />]),
           ]}
         />
       </div>
@@ -201,14 +198,18 @@ const KINDS: Record<string, string> = {
   'token change': 'tokens left over, as change',
 };
 
-/** A value of a template's variable, shown by the template's type for it: satoshis as an amount, numbers grouped, bytes shortened. */
+/**
+ * A value of a template's variable, shown by the template's type for it: satoshis as an amount, numbers grouped, long
+ * bytes shortened, short bytes as code, so that hexadecimal digits are not read as a number.
+ */
 export const TypedValue = ({ type, value }: { type: string; value: string }) => {
   if (/^-?\d+$/.test(value)) {
     if (type === 'satoshis') return <Amount satoshis={BigInt(value)} exact />;
     if (type === 'token_amount') return <span class="word-value">{BigInt(value).toLocaleString('en-US')} units</span>;
     if (type === 'integer' || type === 'bigint') return <span class="word-value">{BigInt(value).toLocaleString('en-US')}</span>;
   }
-  return /^[0-9a-f]{24,}$/i.test(value) ? <Hex value={value} /> : <span class="word-value">{value}</span>;
+  if (/^[0-9a-f]{24,}$/i.test(value)) return <Hex value={value} />;
+  return type === 'bytes' ? <span class="word-value mono">{value}</span> : <span class="word-value">{value}</span>;
 };
 
 /** The earliest time the network accepts a transaction: a Unix time from 500,000,000, else a block height. */

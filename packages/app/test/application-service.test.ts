@@ -128,7 +128,7 @@ const fakeService = (device: Device, behaviour: Behaviour = {}) => {
         height: 1,
         start: [{ action: 'open', ...(behaviour.open ?? { available: true }) }],
         items: asked.tokens.flatMap((token) => [
-          { ref: `act-${token.category.slice(0, 8)}`, category: token.category, action: 'act', about: { category: token.category, spent: true }, bindings: { userHolder: 'receive' }, says: [{ variable: 'servicePrice', value: String(PRICE) }] },
+          { ref: `act-${token.category.slice(0, 8)}`, category: token.category, action: 'act', about: { category: token.category, spent: true }, bindings: { userHolder: 'receive' }, says: [{ variable: 'servicePrice', value: String(PRICE) }, { variable: 'userAmount', value: '4000' }] },
           // A service cannot invent an action: neither one the template does not have, nor a starting action as a follow-up.
           { ref: 'invented', category: token.category, action: 'takeEverything' },
           { ref: 'not-a-follow-up', category: token.category, action: 'open' },
@@ -300,7 +300,8 @@ describe('an application\'s service: what the wallet offers', () => {
         name: 'Pay in',
         description: 'Pay an amount into the shared script with your token.',
         asks: [{ variable: 'userAmount', name: 'Amount', description: 'Satoshis to pay in.', type: 'satoshis' }],
-        service: { checkedAt: 1_795_000_000, says: [{ variable: 'servicePrice', name: 'Price', value: '7' }] },
+        // What the service says comes with the template's type for it, so that a screen shows it as the template's other values.
+        service: { checkedAt: 1_795_000_000, says: [{ variable: 'servicePrice', name: 'Price', value: '7', type: 'integer' }, { variable: 'userAmount', name: 'Amount', value: '4000', type: 'satoshis' }] },
       },
     ]);
   });
@@ -314,7 +315,9 @@ describe('an application\'s service: an action carried out with the page closed'
     const preview = await applications.preview(open);
     expect(preview.words.action.name).toBe('Open');
     expect(preview.words.values.map(({ name }) => name)).toEqual(['Token', 'Holder']);
-    expect(preview.service).toEqual({ role: 'service', roleName: 'Service', url: URL_, values: [{ variable: 'servicePrice', name: 'Price', description: 'The service\'s price.', value: '7' }], says: [] });
+    // Each with the template's type for it, so that the review shows it as the template means it.
+    expect(preview.words.values.map(({ type }) => type)).toEqual(['token_category', 'locking_script']);
+    expect(preview.service).toEqual({ role: 'service', roleName: 'Service', url: URL_, values: [{ variable: 'servicePrice', name: 'Price', description: 'The service\'s price.', value: '7', type: 'integer' }], says: [] });
     expect(preview.figures.applicationInputs.map(({ name, satoshis }) => [name, satoshis])).toEqual([['Shared coin', 2_000n]]);
     expect(preview.figures.toOthers.map(({ name, satoshis }) => [name, satoshis])).toEqual([['Shared coin', 2_000n]]);
     expect(preview.figures.toWallet.map(({ kind, token }) => [kind, token?.nft?.capability])).toEqual([['left over', undefined], ['receive', 'none']]);
@@ -371,7 +374,8 @@ describe('an application\'s service: an action carried out with the page closed'
     await expect(applications.preview(applications.actionOn(position, 'act'))).rejects.toThrow('Give a value for "Amount".');
     const act = applications.actionOn(position, 'act', { userAmount: '5000' });
     const preview = await applications.preview(act);
-    expect(preview.service?.says).toEqual([{ variable: 'servicePrice', name: 'Price', value: '7' }]);
+    // What the service said of the amount the user gives is left out of the review, which shows the amount the action sets.
+    expect(preview.service?.says).toEqual([{ variable: 'servicePrice', name: 'Price', value: '7', type: 'integer' }]);
     expect(preview.figures.toOthers.map(({ name, satoshis }) => [name, satoshis])).toEqual([['Shared coin', 2_000n], ['Paid in', 5_000n]]);
     expect(preview.figures.intoApplicationSatoshis).toBe(5_000n);
     expect(preview.tokensLeaving).toBeUndefined();

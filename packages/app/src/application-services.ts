@@ -94,8 +94,16 @@ export interface ServiceOffer {
   reason?: string;
   /** Unix seconds: the answer this comes from. */
   checkedAt?: number;
-  /** Values the service states beside the action, by the template's names: shown as "From the service", never trusted. */
-  says?: { variable: string; name: string; value: string }[];
+  /** Values the service states beside the action, by the template's names and types: shown as "From the service", never trusted. */
+  says?: SaidValue[];
+}
+
+/** A value a service said, by the template's name for its variable and the template's type for it (`satoshis`, `integer`, …) where it gives one. */
+export interface SaidValue {
+  variable: string;
+  name: string;
+  value: string;
+  type?: string;
 }
 
 /** The part of an action's review that the service gave: shown apart from the wallet's own figures. */
@@ -106,12 +114,12 @@ export interface ServicePart {
   /** Where the wallet spoke to it. */
   url: string;
   /**
-   * The values the service stated, by the template's names. The wallet checked them only through the application's
-   * contracts, which it ran against the transaction before anything was signed.
+   * The values the service stated, by the template's names and types. The wallet checked them only through the
+   * application's contracts, which it ran against the transaction before anything was signed.
    */
-  values: { variable: string; name: string; description: string; value: string }[];
+  values: (SaidValue & { description: string })[];
   /** What the service said beside them: for display, never trusted. */
-  says: { variable: string; name: string; value: string }[];
+  says: SaidValue[];
 }
 
 /** The roles of an action that need a participant other than the wallet's role: each named with at least one slot. */
@@ -220,10 +228,14 @@ export const firstCommitPlaces = (shape: ActionShape, options: { defining: boole
   return { ...(defining === undefined ? {} : { defining }), ...(token === undefined ? {} : { token }) };
 };
 
-/** The words for a value a service stated, by the template's names. */
-export const statedValue = (definition: Definition, variable: string, value: unknown): { variable: string; name: string; description: string; value: string } => ({
-  variable,
-  name: definition.variables?.[variable]?.name ?? variable,
+/** A value a service said, by the template's name and type for its variable, so that a screen can show it as the template's other values. */
+export const saidValue = (definition: Definition, variable: string, value: unknown): SaidValue => {
+  const type = definition.variables?.[variable]?.type;
+  return { variable, name: definition.variables?.[variable]?.name ?? variable, value: String(value), ...(typeof type === 'string' ? { type } : {}) };
+};
+
+/** The words for a value a service stated, by the template's names and type. */
+export const statedValue = (definition: Definition, variable: string, value: unknown): SaidValue & { description: string } => ({
+  ...saidValue(definition, variable, value),
   description: definition.variables?.[variable]?.description ?? '',
-  value: String(value),
 });

@@ -67,10 +67,20 @@ export const checkedLine = (actions: TokenAction[], time: TimeWords): string | u
 /** Why a starting action is not offered now, in the service's own words; `undefined` where it is, or where the service was never asked. */
 export const unavailable = (action: TokenAction): string | undefined => (action.service?.available === false ? `The service says: ${action.service.reason ?? 'not now.'}` : undefined);
 
+/**
+ * A value in a line of text, by the template's type for it: numbers grouped, satoshis and token amounts with their unit
+ * as the action's form names them; anything else as it is.
+ */
+export const typedWords = (type: string | undefined, value: string): string => {
+  if (!/^-?\d+$/.test(value)) return value;
+  const grouped = BigInt(value).toLocaleString('en-US');
+  return type === 'satoshis' ? `${grouped} sat` : type === 'token_amount' ? `${grouped} units` : type === 'integer' || type === 'bigint' ? grouped : value;
+};
+
 /** The values the service states beside an action, in one short line with the template's names. */
 export const saysLine = (action: TokenAction): string | undefined => {
   const says = action.service?.says ?? [];
-  return says.length === 0 ? undefined : `${SERVICE_WORDS.fromService}: ${says.map(({ name, value }) => `${name} ${value}`).join(' · ')}`;
+  return says.length === 0 ? undefined : `${SERVICE_WORDS.fromService}: ${says.map(({ name, value, type }) => `${name} ${typedWords(type, value)}`).join(' · ')}`;
 };
 
 /** A token the wallet made with a template and does not hold, with the actions its service offers for it. */
