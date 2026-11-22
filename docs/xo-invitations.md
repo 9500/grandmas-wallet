@@ -2,7 +2,7 @@
 
 Every transaction this wallet sends is an invitation of an XO template, built and signed by the XO engine. This page lists the templates and the invitations kept in this repository, shows how to open one in XO's debug tool, and says how to produce the invitations again.
 
-Everything kept here is on chipnet, the Bitcoin Cash test network, and was made by the third design, which is what `main` holds and what the public pages serve: the loan run on 22 November 2026, the others on 21 November. The engine is `@xo-cash/engine` `0.1.1-next.18170561234`, as published, with no local change.
+Everything kept here is on chipnet, the Bitcoin Cash test network, and was made by the third design, which is what `main` holds and what the public pages serve: the loan run on 22 November 2026, the others on 21 November. The engine that made them is `@xo-cash/engine` `0.1.1-next.18170561234`, as published, with no local change. Since 22 November 2026 `main` uses the release after it, `0.1.1-next.18230317763`, also as published; with it the Savings Jar run and the loan run were carried out again on the local node ([jar](runs/stage-17-jar-local-node.md), [loan](runs/stage-17-loan-local-node.md)), and the chipnet runs were not made again.
 
 ## Templates
 
