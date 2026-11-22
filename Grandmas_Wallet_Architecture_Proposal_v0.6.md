@@ -1863,7 +1863,7 @@ A second demonstration must show that during the wait the recoverer can do none 
 
 ## 22. Decisions to resolve
 
-Each has a proposed answer, which implementation follows unless the owner says otherwise. The implementation plan gives the stage by which each is needed. The numbers are this section's own; `D1` to `D16` in `docs/decisions.md` are decisions already taken.
+Each has a proposed answer, which implementation follows unless the owner says otherwise. The implementation plan gives the stage by which each is needed. The numbers are this section's own; `D1` to `D17` in `docs/decisions.md` are decisions already taken.
 
 | No. | Decision | Proposed |
 | --- | --- | --- |
@@ -1935,4 +1935,4 @@ Sources established existing primitives and interfaces; the architecture, extens
 - **S19 — BIP44:** address discovery with a gap limit. https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 - **S20 — XO state package:** `@xo-cash/state` 0.0.5, its type `ScriptHashData` and its class `RemoteEncryptedStateManager`, read from the published package on 20 November 2026. https://www.npmjs.com/package/@xo-cash/state
 - **S21 — XO's authors on state and recovery:** their replies of 20 November 2026 in XO's public chat to this project's question about `docs/xo-position-recovery.md`, and to its later question about a call that follows a script, as summarised in section 13.6.
-- **This repository:** `docs/decisions.md` (D1–D16), `docs/xo-service.md`, `docs/xo-spike.md`, `docs/xo-engine-signing-bug.md`, `docs/xo-chipnet-header-verification.md`, `docs/xo-position-recovery.md`, `docs/idea-viewing-secret-and-chain-log.md`.
+- **This repository:** `docs/decisions.md` (D1–D17), `docs/xo-service.md`, `docs/xo-spike.md`, `docs/xo-engine-signing-bug.md`, `docs/xo-chipnet-header-verification.md`, `docs/xo-position-recovery.md`, `docs/idea-viewing-secret-and-chain-log.md`.
