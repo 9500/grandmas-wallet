@@ -121,7 +121,6 @@ On the recoverer's page, **Your balance** pays for everything: setting a wallet 
 
 - **Watching in the background.** The page checks the wallet every fifteen seconds while it is open, and says so. A phone with the page closed, or switched off, does not watch, and nothing wakes it when a request appears. A released wallet needs an application that runs in the background, or a service that alerts the phone. The wallet does say afterwards when it was not running during a waiting period.
 - **A waiting period worth relying on.** Nine minutes is for trying things out. The choices go up to a week.
-- **Both pages at once, really.** The set-up and the lost phone need both pages open at the same moment. That was tried in browsers on one machine through a relay on that machine, not on real phones or through the public relays.
 - **The scanner on every phone.** Reading codes was tried in a browser with simulated cameras. Going round a phone's rear cameras, and zoom, have not been tried on real phones.
 - **Keys kept safely.** Both pages keep their keys in the browser's storage, unencrypted. That is acceptable for coins without value and nothing else.
 - **A real second person.** Pressing "lost their phone" stands for making sure who is asking, by a phone call or a visit.

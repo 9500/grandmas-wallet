@@ -140,7 +140,7 @@ The controller and the shared authorization interface accept a signature of type
 
 ## D15 — Web pages and the connection to applications
 
-**Date:** 16 Nov 2026 · **Status:** decided; the pages themselves are to be rebuilt
+**Date:** 16 Nov 2026 · **Status:** decided; the pages were rebuilt (`apps/wallet`, `apps/recoverer`, `apps/jar`, `apps/loan`) and are public
 
 - **The wallet, the recoverer and each application are pages on separate addresses**, so that the browser keeps their storage apart, and the connection between wallet and application is a real one between sites.
 - **Everything between the pages travels as links**, with the content after `#`. No server of this project sees a package, a request or a key.

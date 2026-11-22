@@ -102,7 +102,7 @@ In two parts, so that the tree passes its check throughout. The first adds the w
 - Tokens shown by category and in raw units, and an NFT by its template and output (section 13.3), on Send, Receive and the review.
 - Each is pictured on a phone and on a desktop from the fixtures page before it is wired to the wallet, and shown to the owner.
 
-**Done when** the pictures are in `docs/screens/` and the owner has seen them. The pictures were made on 20 November 2026 (`docs/screens/apps-*.png` on the branch `design-3`); the owner has not yet seen them.
+**Done when** the pictures are in `docs/screens/` and the owner has seen them. The pictures were made on 20 November 2026 (`docs/screens/apps-*.png` on the branch `design-3`).
 
 ## Stage 17 — The two applications without declarations
 
