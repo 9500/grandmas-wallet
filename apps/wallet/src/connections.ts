@@ -3,6 +3,7 @@ import { type ActionConsent, type ActionOutcome, type ApplicationAction, type Ow
 import type { Offer, Proposal, WalletConnector } from '@grandmas-wallet/connect';
 import { type LinkStatus, type WalletLink, newLinkKey, openWalletLink, pairingOf } from '@grandmas-wallet/connect/wizard';
 import type { SeedKeys } from '@grandmas-wallet/core';
+import { isOwnChain } from '@grandmas-wallet/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { BRAND } from './brand.js';
@@ -166,6 +167,8 @@ export const useApplications = ({ session, wallet, seed, onSent }: { session: Se
         identity: hexToBin(wallet.stored.identity ?? ''),
         chain: session.chain,
       }),
+      // Applications' services (docs/xo-service.md), on the page's network; on a chain of one's own an http address is allowed.
+      service: { network: session.environment.network, kind: isOwnChain(session.environment.network) ? 'local' : 'public' },
     });
     made.onAction = (request, outcome) => {
       sent.current(made.describeAction(request) ?? 'An action of an application\'s template', outcome);

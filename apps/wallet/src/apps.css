@@ -278,3 +278,40 @@ button.template-row > :first-child { display: flex; flex-direction: column; min-
 .elsewhere-line { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--ink); }
 .application-page { display: inline-block; margin-top: 2px; overflow-wrap: anywhere; }
 .tokens.unconfirmed .token-body p, .tokens.unconfirmed .amount { color: var(--muted); }
+
+/* ------------------------------------------------------------------ a template's service and its actions */
+
+/* An action offered as a button: the service's reason where it is not offered now, and what it states, under it. */
+.offered-action { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.action-note { overflow-wrap: anywhere; }
+/* An action done from its token: its name, and where it is done. */
+.token-actions > li.action-other > :first-child { flex: 1 1 10em; }
+.token-actions > li.action-other > .small { flex: none; }
+/* "Checked with its service …", quiet, under the actions it is about. */
+.checked-line { margin: 8px 0 0; }
+.token-body .checked-line { margin: 0; }
+/* The service's card: where it is and its state, with Connect or Check again beside them. */
+.service-row { flex-wrap: wrap; row-gap: 8px; }
+.service-row > :first-child { flex: 1 1 9em; }
+.service-row > button { flex: none; }
+.service-name { font-weight: 600; overflow-wrap: anywhere; }
+.service-state { display: flex; flex-direction: column; gap: 2px; }
+.service-busy { display: flex; align-items: center; gap: 6px; }
+.service-state .spinner { width: 14px; height: 14px; }
+.service-card > .notice { margin-top: 12px; }
+/* What the service stated, in a review: apart from the wallet's figures, and quieter. */
+.from-service .quote { border-left-style: dashed; }
+.from-service .kv > div { padding: 6px 0; }
+.from-service .kv dt, .from-service .kv dd { font-size: 14px; }
+.from-service .kv dd { color: var(--muted); }
+.from-service .kv dt small { font-size: 12.5px; }
+/* A template's page on a phone: the template, its service, what waits elsewhere, its actions, then who sees its tokens. */
+@media (max-width: 959.98px) {
+  .template-layout > .stack { display: contents; }
+  .template-layout .template-card { order: 1; }
+  .template-layout .service-card { order: 2; }
+  .template-layout .waiting-card { order: 3; }
+  .template-layout .template-actions-card { order: 4; }
+  .template-layout .seen-by-card { order: 5; }
+  .template-layout .stop-card { order: 6; }
+}

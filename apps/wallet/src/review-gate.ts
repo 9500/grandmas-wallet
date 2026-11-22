@@ -1,4 +1,4 @@
-import { type ActionPreview, type HeldToken, type RecordedPosition, type TokenLeaving, FindingRefusalError, NeedsApplicationError, NotStoredError } from '@grandmas-wallet/app';
+import { type ActionPreview, type HeldToken, type RecordedPosition, type TokenLeaving, FindingRefusalError, InputsSpentError, NeedsApplicationError, NotStoredError, ServiceAnswerRefusedError, ServiceDeclinedError, ServiceUnreachableError } from '@grandmas-wallet/app';
 
 /**
  * What the screens that review an action rest on, apart from how they look: when the approving button is shown and
@@ -58,15 +58,26 @@ export const consentOf = (gate: Pick<Gate, 'tick'>, ticked: boolean): { tokensLe
 
 export const BACKUP_UNREACHABLE = 'Your backup can\'t be reached. Try again in a moment.';
 
+/** An action the network refused, or a service would not join, because another transaction spent one of its coins first. */
+export const SPENT_FIRST = 'Another transaction used one of its coins first. Nothing was sent.';
+
+/** What the wallet refused of a service's answer, said plainly; the wallet's full reason is behind a "?". */
+export const SERVICE_ANSWER_REFUSED = 'This wallet refused what the service added. Nothing was signed.';
+
 /** A refusal, as a screen shows it in place of the review: a title, one plain line, and what lies behind a "?". */
 export interface Refusal {
-  kind: 'ties to phone' | 'cannot tell' | 'application' | 'backup' | 'other';
+  kind: 'ties to phone' | 'cannot tell' | 'application' | 'backup' | 'service' | 'declined' | 'spent first' | 'other';
   title: string;
   words: string;
   /** The wallet's full reason, behind a "?". */
   detail?: string;
   /** For an action done through the application: the address of its page. */
   page?: string;
+  /**
+   * What the user can do about it: `try`, the service could not be reached and the action can be worked out again;
+   * `ask`, a coin was spent first and the action is worked out afresh, for a new approval.
+   */
+  again?: 'try' | 'ask';
 }
 
 /**
@@ -84,6 +95,11 @@ export const refusalOf = (error: unknown, otherwise: string): Refusal => {
     const reason = error.message.replace(/^Open the application to do this(: \S+)?\. /, '');
     return { kind: 'application', title: 'Open the application to do this', words: error.page === undefined ? 'This wallet can\'t do it by itself.' : 'This wallet can\'t do it by itself. Its page:', detail: reason, ...(error.page === undefined ? {} : { page: error.page }) };
   }
+  // An action carried out with the template's service: the service's own words are quoted as its words.
+  if (error instanceof InputsSpentError) return { kind: 'spent first', title: 'Not carried out', words: SPENT_FIRST, detail: error.message, again: 'ask' };
+  if (error instanceof ServiceUnreachableError) return { kind: 'service', title: 'Not carried out', words: error.message, again: 'try' };
+  if (error instanceof ServiceDeclinedError) return { kind: 'declined', title: 'The service declined', words: `“${error.message.replace(/^The service declined: /, '')}”` };
+  if (error instanceof ServiceAnswerRefusedError) return { kind: 'service', title: 'Not carried out', words: SERVICE_ANSWER_REFUSED, detail: error.message };
   if (error instanceof NotStoredError && /Try again when a store can be reached/.test(error.message)) {
     return { kind: 'backup', title: 'Not carried out', words: BACKUP_UNREACHABLE, detail: error.message };
   }

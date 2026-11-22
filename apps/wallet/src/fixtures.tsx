@@ -31,6 +31,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { ActionReview, NOT_YET_MADE } from './ActionReview.js';
 import { TokenNames } from './token-words.js';
 import { Apps, TokenListView } from './Apps.js';
+import { ServiceApps } from './fixtures-service.js';
 import { Receive } from './Receive.js';
 import { Backup, Recovery } from './Recovery.js';
 import { Send } from './Send.js';
@@ -59,7 +60,8 @@ import { Welcome } from './Welcome.js';
  * wallet that holds too little to send everything) and with tokens to choose from (`show=send-token`, `&nft` to open
  * with the key chosen, `&nft=ticket` with a key whose record names no script, `&nft=spent` with one whose position is
  * emptied); the Receive screen (`show=receive`, `&again` for an address shown again); the Recovery screen
- * (`show=recovery`) and the user's own backup (`show=backup`, with a sample complete backup). Served by the
+ * (`show=recovery`) and the user's own backup (`show=backup`, with a sample complete backup); a template that names a
+ * service (`show=apps&service=`, see fixtures-service.tsx). Served by the
  * development server; the build of the page does not include it. The templates here are invented examples, as a
  * template would describe itself, and what is handed to the recoverer is a sample that their page cannot open.
  */
@@ -747,6 +749,7 @@ const appsOwner = {
       describeAction: () => undefined,
       recordedPositions: async () => (withRecords ? recordedHeld : []),
       offeredActions: offeredFor,
+      serviceOf: () => undefined,
       actionOn: (_target: unknown, action: string): ApplicationAction => ({ template: { identifier: moneyBox.identifier, contentHash: moneyBox.contentHash }, action, role: 'holder', variables: {} }),
       preview: async (request: ApplicationAction) => (asked !== undefined ? asked.preview() : (fromList[request.action] ?? emptyBox)),
       backupAnswers: async () => params.get('request') !== 'backup',
@@ -761,7 +764,7 @@ const appsOwner = {
 } as unknown as Owner;
 if (params.get('show') === 'apps') keep('incoming', params.has('linked') ? { kind: 'connect', text: 'wiz://relay.example.org/?p=example-from-a-link' } : undefined);
 // A backup arrangement, so that an action that is stored first can be offered: whether a store answers is the fixture's.
-if (params.get('show') === 'apps') keep('arrangement', asked !== undefined || withRecords ? ({ archive: { stores: ['https://store.example.org/'], archiveId: '4e'.repeat(16), contentKey: 'a1'.repeat(32) }, earlierArchives: [], earlierViewingKeyRecords: [] } as unknown as RecoveryArrangement) : undefined);
+if (params.get('show') === 'apps') keep('arrangement', asked !== undefined || withRecords || params.has('service') ? ({ archive: { stores: ['https://store.example.org/'], archiveId: '4e'.repeat(16), contentKey: 'a1'.repeat(32) }, earlierArchives: [], earlierViewingKeyRecords: [] } as unknown as RecoveryArrangement) : undefined);
 
 /** A wallet whose watch has found it quiet and protected, with a waiting period of a day. */
 const recoveryOwner = {
@@ -796,7 +799,7 @@ const chosenNft = new URLSearchParams(window.location.search).get('nft');
 if (show === 'send-token') chooseToken(chosenNft === null ? `fungible:${DOLLARS}` : `nft:${chosenNft === 'ticket' ? ticket.outpoint : chosenNft === 'spent' ? spentKey.outpoint : open.outpoint}`);
 const ignore = () => undefined;
 /** The list of tokens on its own: what the wallet offers at each position, and the template the backup holds. */
-const listOwner = { apps: { applications: { suggestions: [lendingSuggestion], offeredActions: offeredFor } }, navigate: ignore } as unknown as Owner;
+const listOwner = { apps: { applications: { suggestions: [lendingSuggestion], offeredActions: offeredFor, serviceOf: () => undefined } }, navigate: ignore } as unknown as Owner;
 const everyKind = tokenList([...recordedHeld.slice(0, 1), closedBox, ...recordedHeld.slice(1)], [...recordedHeld.map((position) => ({ ...position.token, amount: 0n, meaning: 'unknown' as const })), unknown, dollars, ...incomplete]);
 
 /** The wallet's own screens are shown in the frame the wallet gives them: with its navigation, and as wide. */
@@ -833,7 +836,7 @@ render(
       ) : show === 'receive' ? (
         <Receive owner={tokenOwner} />
       ) : show === 'apps' ? (
-        <Apps owner={appsOwner} />
+        params.has('service') ? <ServiceApps base={appsOwner} /> : <Apps owner={appsOwner} />
       ) : show === 'recovery' ? (
         <Recovery owner={recoveryOwner} />
       ) : show === 'backup' ? (
