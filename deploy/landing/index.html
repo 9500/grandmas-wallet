@@ -140,7 +140,7 @@
               <span class="role">App on your desktop</span>
               <h3>ParyonUSD loan</h3>
             </div>
-            <p>Borrow PUSD against BCH with Paryon's public contracts, unchanged, on their test deployment. The loan's key is a token in your wallet.</p>
+            <p>Borrow PUSD against BCH with Paryon's public contracts, unchanged, on chipnet, on mainnet and on the mockup. The loan's key is a token in your wallet, which can also manage the loan with this page closed.</p>
             <p class="small muted">An independent front end made for this demonstration. It is not Paryon's site and is not affiliated with or endorsed by Paryon.</p>
             <a class="open" href="https://paryon.9500.cash/" target="_blank" rel="noopener">Open loan page <span aria-hidden="true">↗</span></a>
           </article>
@@ -176,7 +176,7 @@
     <section id="try" class="section">
       <div class="wrap">
         <h2>What to try</h2>
-        <p class="section-lead">On the mockup the whole course takes a few minutes: nothing has to be brought and nothing has to be waited for. On chipnet it takes about half an hour, half of it the waiting period, so start the recovery (step 5) early and try the applications while it runs. On mainnet the waiting period is a day.</p>
+        <p class="section-lead">On the mockup the whole course takes a few minutes: nothing has to be brought and nothing has to be waited for. On chipnet it takes about half an hour, half of it the waiting period, so start the recovery (step 5) early and try the applications while it runs. On mainnet the recoverer starts wallets with a waiting period of a day; the shortest is chosen under <q>Settings</q>.</p>
         <ol class="steps">
           <li>
             <h3>Choose where to try it, and give the recoverer coins</h3>
@@ -205,7 +205,7 @@
               <h3>Empty the jar from the wallet, with its page closed</h3>
               <p>Close the Savings Jar's tab. In the wallet, <q>Apps</q> lists the jar's key under <q>Tokens</q>, with what the jar holds and a button: <q>Empty a savings jar</q>. Press it once the jar's date has passed. The wallet shows what the transaction does and carries it out by itself.</p>
               <p>Nothing in the wallet was written for the jar. The jar's XO template describes the action, and this action needs nothing that only the application has: it spends no coin of the application's, and every value it takes is in the record the wallet stored when the jar was opened. Every action of every template that meets this shows up as a button, automatically.</p>
-              <p>An action that does need the application is listed too, with <q>Open the application to do this</q> and the reason behind a <q>?</q>. Closing a ParyonUSD loan is one: it spends Paryon's price coin, which only the loan page can name.</p>
+              <p>An action that needs what only the application has is listed too. Where the application's template names a service, as the loan's does, the wallet asks that service for it and carries the action out itself: close the loan page, and the loan's key under <q>Tokens</q> offers <q>Change the collateral</q>, <q>Repay and close the loan</q> and <q>Change the interest rate</q>. Where a template names no service, the wallet says <q>Open the application to do this</q>, with the reason behind a <q>?</q>.</p>
               <ul class="by-network">
                 <li><strong>Mockup:</strong> press <q>Let time pass until the jar opens</q> on the jar's page before you close it.</li>
                 <li><strong>Chipnet:</strong> the network takes the transaction a few minutes after the jar's date; the wallet says from when.</li>
@@ -232,7 +232,7 @@
           </li>
           <li>
             <h3>Finish the move</h3>
-            <p>When the waiting period is over, press <q>Complete the move</q> on the recoverer. The new wallet takes the hand-over and moves every coin and token to addresses of its own: your balance, the jar's key, the loan's key. Under <q>Apps</q>, trust the templates the old phone stored in the backup: the jar is listed again from the old phone's record, checked against the chain, and the new wallet empties it by itself. For the loan, the wallet names the loan page: open it on the new phone, and it finds the loan from its key and closes it.</p>
+            <p>When the waiting period is over, press <q>Complete the move</q> on the recoverer. The new wallet takes the hand-over and moves every coin and token to addresses of its own: your balance, the jar's key, the loan's key. Under <q>Apps</q>, trust the templates the old phone stored in the backup: the jar is listed again from the old phone's record, checked against the chain, and the new wallet empties it by itself. For the loan, press <q>Connect</q> under its key: the wallet asks the loan service, lists the loan's actions, and closes the loan with the loan page closed. The loan page on the new phone can close it too.</p>
             <p>Open the old wallet again: it says that the wallet now belongs to another key.</p>
           </li>
         </ol>

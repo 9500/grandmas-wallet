@@ -74,7 +74,7 @@ The clock is shared: a skip moves it for everybody on the network.
 
 At its first start the service deploys Paryon's contracts as published (`@paryonusd/contracts` 1.1.0) with `packages/paryon/src/local-deployment.ts`, as the local runs do: ten Borrowing threads with 1,000,000,000.00 PUSD each to lend, ten price threads at $500.00, ten manage NFTs and ten loan key factories. Periods are 144 blocks. The rewards of blocks 1 and 2 define the two token categories, and PUSD's registry (`ParyonUSD (mockup network)`, symbol `PUSDMOCK`) is published at `https://mockup-api.9500.cash/paryon/registry.json` on the transaction that makes PUSD's first outputs. Paryon's fee goes to the treasury.
 
-A block reward does not depend on the block's time, and the treasury's key survives a reset, so a new chain gets the same categories and the same deployment. The loan page can therefore take the deployment from its configuration.
+A block reward does not depend on the block's time, and the treasury's key survives a reset, so a new chain gets the same categories and the same deployment. The loan page can therefore take the deployment from its configuration. The loan service that runs beside the loan page (`apps/paryon-service`) takes it from the same configuration, so the wallet can carry out a loan's actions on the mockup with the loan page closed, as on chipnet.
 
 It needs no upkeep for a week, skips included:
 

@@ -2,7 +2,7 @@
 
 A proposal to XO's authors. It describes a declarative addition to a template that lets any wallet holding an application's token find the position that token controls, and operate it, from the template and the chain alone.
 
-**Status.** Implemented as a document beside the template, with no change to XO, and run on chipnet with the unmodified engine (section 10). Whether and how it enters XO is for XO to decide. The field names are proposals.
+**Status.** Implemented as a document beside the template, with no change to XO, and run on chipnet with the unmodified engine (section 10), in the wallet's second design, which is at the tag `design-2`. Since 20 November 2026 the third design no longer uses it: an application needs only its XO template, and the wallet keeps a record of each position in its backup (proposal v0.6, section 13.3). This document stands as the record of that approach, and nothing in it is asked of XO any more. The field names are proposals.
 
 **How to read this.** Sections 1 to 3 make the case. Section 4 shows the whole idea on one small application. Sections 5 to 8 are the specification. Section 9 lists what is asked of XO.
 
