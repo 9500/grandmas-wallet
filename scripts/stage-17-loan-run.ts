@@ -66,6 +66,8 @@
 //   npx tsx ../../scripts/stage-17-loan-run.ts chipnet       paid from the key in .chipnet/funder-design-2.json:
 //                                                            the wallet with Paryon's public service, version 3
 //   npx tsx ../../scripts/stage-17-loan-run.ts chipnet --page the page drives every action, version 2
+//   ... --fee-rate <n>                                       every transaction pays at least n sat/byte (1 unless
+//                                                            given); kept in the run's file for a continued run
 //   npx tsx ../../scripts/stage-17-loan-run.ts chipnet --dry reads Paryon's deployment and the funding key, asks the
 //                                                            public service who it is, and says what a run would need;
 //                                                            sends no transaction (with `--page`: the page's course)
@@ -105,6 +107,7 @@ import {
   applicationArchive,
   checkPositionRecord,
   copyEarlierArchives,
+  creationFunding,
   newArchive,
   recoveryFees,
   walletTemplateNumbers,
@@ -162,9 +165,24 @@ const STOPPED = 3;
  */
 const withService = !process.argv.includes('--page');
 const PHASES = ['the owner opens a loan', 'the recoverer recovers', withService ? 'the new device closes the loan from its own list' : 'the new device closes the loan from the page', 'the recoverer returns its balance', 'the run returns what is left'];
-const { chainName, local, phase, dry, fresh } = runArguments(PHASES, 'stage-17-loan-run.ts');
+const { chainName, local, phase, dry, fresh, feeRate: givenFeeRate } = runArguments(PHASES, 'stage-17-loan-run.ts');
+/**
+ * The satoshis per byte every transaction of the run pays at least (`--fee-rate <n>`, 1 unless given). It is kept in
+ * the run's file, so that a continued run pays the same without being told again; a different one given then stops it.
+ * Set by the driver once it knows the run's file, and by each part once it has read it.
+ */
+let FEE_RATE = givenFeeRate ?? 1;
+const feeRateOf = (kept: number | undefined): number => {
+  if (kept !== undefined && givenFeeRate !== undefined && kept !== givenFeeRate) {
+    console.error(`The run under way pays ${kept} sat/byte, kept in its file; --fee-rate ${givenFeeRate} differs. Continue it with --fee-rate ${kept} or without the option.`);
+    process.exit(2);
+  }
+  return kept ?? givenFeeRate ?? 1;
+};
+/** An amount reckoned at 1 sat/byte, at the run's rate. */
+const atRate = (satoshis: bigint): bigint => BigInt(Math.ceil(Number(satoshis) * FEE_RATE));
 /** What a part is started with besides the chain and its name. */
-const MODE_ARGUMENTS = withService ? [] : ['--page'];
+const MODE_ARGUMENTS = (): string[] => [...(withService ? [] : ['--page']), '--fee-rate', String(FEE_RATE)];
 const runDirectory = local ? `${root}.local-runs` : `${root}.chipnet`;
 mkdirSync(runDirectory, { recursive: true });
 const stateFile = `${runDirectory}/stage-17-loan-${local ? (withService ? 'local' : 'local-page') : withService ? 'chipnet' : 'chipnet-page'}.json`;
@@ -208,6 +226,11 @@ const PERIOD_WAIT_MS = 6 * 60_000;
 const PRICE = 20_870n;
 /** On chipnet: what the wallet is given to create it, and what is left at the funding key for other runs. */
 const WALLET_CREATION = 80_000n;
+/** What the wallet is given to create it at the run's rate: the amount above, or what the creation takes there with a margin if more. */
+const walletCreation = (): bigint => {
+  const least = creationFunding({ feeRate: FEE_RATE }) + atRate(20_000n);
+  return least > WALLET_CREATION ? least : WALLET_CREATION;
+};
 const LEAVE_AT_FUNDER = 1_000_000n;
 /** On chipnet: the least share of the debt the collateral may be worth at the lowest stored price when borrowing. */
 const FLOOR_PERCENT = 112n;
@@ -238,6 +261,8 @@ interface Facts {
   /** A payment of the funder, written down before it is sent, by the step it belongs to. */
   pending?: Record<string, { transactionId: string; hex: string }>;
   finished: string[];
+  /** The satoshis per byte every transaction of the run pays at least. */
+  feeRate?: number;
   held?: string;
   funderAtStart?: string;
   log: Entry[];
@@ -333,8 +358,8 @@ const chipnetCourse = (state: ParyonState): { collateral: bigint; fee: bigint; p
   const { used, lowest } = pricesOf(state);
   const collateral = collateralAtRatio(DEBT, lowest, PERCENT);
   const fee = borrowingFee(DEBT, used);
-  const pay = collateral + fee + MANAGE_ADD + 50_000n;
-  return { collateral, fee, pay, needed: pay + WALLET_CREATION + 20_000n + LEAVE_AT_FUNDER, used, lowest };
+  const pay = collateral + fee + MANAGE_ADD + atRate(50_000n);
+  return { collateral, fee, pay, needed: pay + walletCreation() + atRate(20_000n) + LEAVE_AT_FUNDER, used, lowest };
 };
 /** The Borrowing thread the run would bring up to date, the one with the largest supply, and whether it needs it. */
 const threadToMove = (state: ParyonState, deployment: ParyonDeployment, height: number): { thread: ParyonState['borrowing'][number] | undefined; current: number; needed: boolean } => {
@@ -413,6 +438,8 @@ const serviceTables = (known: Facts): string[] => {
 if (phase === undefined && dry) {
   // A look at chipnet before a run: Paryon's deployment as it stands, the stored prices, what the loan would take from
   // the funding key, and whether the Borrowing thread would be brought up to date. Nothing is written or sent.
+  FEE_RATE = feeRateOf(existsSync(stateFile) ? (JSON.parse(readFileSync(stateFile, 'utf8')) as Facts).feeRate : undefined);
+  if (FEE_RATE !== 1) console.log(`Every transaction of the run would pay at least ${FEE_RATE} sat/byte.`);
   const server = await Electrum.connect(electrumEndpoint(false));
   try {
     const contracts = paryonContracts(CHIPNET_FAST_PERIODS_6);
@@ -455,8 +482,8 @@ if (phase === undefined && dry) {
     const coins = await server.listUnspent(funderLocking, 'exclude');
     const tokens = await server.listUnspent(funderLocking, 'only');
     const balance = coins.reduce((sum, coin) => sum + coin.valueSatoshis, 0n);
-    console.log(`The funding key holds ${sat(balance)} in ${coins.length} coins without tokens, and ${tokens.length} coins with tokens (left alone by the run). The run pays the wallet ${sat(WALLET_CREATION)} to create it and ${sat(course.pay)} for the loan, and leaves ${sat(LEAVE_AT_FUNDER)} at the key: it needs ${sat(course.needed)}. ${balance >= course.needed ? 'The key holds enough.' : 'The key holds TOO LITTLE.'}`);
-    console.log(`What the run would cost: Paryon's borrowing fee ${sat(course.fee)}, network fees of about 20,000 sat, and 1,500 sat for each interest payment someone else makes on the loan while it is open (a period is about 30 minutes on chipnet). The interest is 0 until the first payment after the rate is changed; from then on ${sat(interestPerPeriod(NEW_RATE, DEBT - REPAY, course.used))} a period at ${NEW_RATE} per 10,000,000 (on ${pusd(DEBT - REPAY)} PUSD after the repayment; ${sat(interestPerPeriod(NEW_RATE, DEBT, course.used))} on ${pusd(DEBT)}).`);
+    console.log(`The funding key holds ${sat(balance)} in ${coins.length} coins without tokens, and ${tokens.length} coins with tokens (left alone by the run). The run pays the wallet ${sat(walletCreation())} to create it and ${sat(course.pay)} for the loan, and leaves ${sat(LEAVE_AT_FUNDER)} at the key: it needs ${sat(course.needed)}. ${balance >= course.needed ? 'The key holds enough.' : 'The key holds TOO LITTLE.'}`);
+    console.log(`What the run would cost: Paryon's borrowing fee ${sat(course.fee)}, network fees of about ${sat(atRate(20_000n))}${FEE_RATE === 1 ? '' : ` at ${FEE_RATE} sat/byte`}, and 1,500 sat for each interest payment someone else makes on the loan while it is open (a period is about 30 minutes on chipnet). The interest is 0 until the first payment after the rate is changed; from then on ${sat(interestPerPeriod(NEW_RATE, DEBT - REPAY, course.used))} a period at ${NEW_RATE} per 10,000,000 (on ${pusd(DEBT - REPAY)} PUSD after the repayment; ${sat(interestPerPeriod(NEW_RATE, DEBT, course.used))} on ${pusd(DEBT)}).`);
     console.log(existsSync(stateFile) ? `A run is under way: ${stateFile.slice(root.length)} (finished: ${(JSON.parse(readFileSync(stateFile, 'utf8')) as Facts).finished.join(', ') || 'nothing yet'}). The same command without --dry continues it.` : `No run is under way; ${stateFile.slice(root.length)} does not exist.`);
   } finally {
     await server.disconnect().catch(() => undefined);
@@ -466,6 +493,7 @@ if (phase === undefined && dry) {
 
 if (phase === undefined) {
   if (fresh) startOver(local, stateFile, storeDirectory, PHASES);
+  FEE_RATE = feeRateOf(existsSync(stateFile) ? (JSON.parse(readFileSync(stateFile, 'utf8')) as Facts).feeRate : undefined);
   if (!existsSync(stateFile)) {
     rmSync(invitations, { recursive: true, force: true });
     if (withService && local) rmSync(serviceFiles.log, { force: true });
@@ -481,10 +509,10 @@ if (phase === undefined) {
       continue;
     }
     // A part that ends without saying why (the engine's packages can end the process) is continued, a few times.
-    let result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), chainName, next, ...MODE_ARGUMENTS], { stdio: 'inherit' });
+    let result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), chainName, next, ...MODE_ARGUMENTS()], { stdio: 'inherit' });
     for (let again = 0; again < 3 && result.status !== 0 && result.status !== STOPPED; again += 1) {
       console.log(`"${next}" ended unexpectedly; continuing it`);
-      result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), chainName, next, ...MODE_ARGUMENTS], { stdio: 'inherit' });
+      result = spawnSync('npx', ['tsx', fileURLToPath(import.meta.url), chainName, next, ...MODE_ARGUMENTS()], { stdio: 'inherit' });
     }
     if (result.status !== 0) {
       console.error(`Stopped in "${next}". The same command continues the run.`);
@@ -526,6 +554,7 @@ if (phase === undefined) {
         : `- The page's address in its requests: ${PAGE}`,
       `- Repository at commit \`${revision}\`${changed.length === 0 ? '' : `, with uncommitted changes to ${changed.map((line) => line.slice(3)).join(', ')}`}`,
       `- Started ${facts.startedAt}`,
+      ...((facts.feeRate ?? 1) === 1 ? [] : [`- Fee rate: every transaction of the run paid at least ${facts.feeRate} sat/byte (\`--fee-rate ${facts.feeRate}\`)`]),
       ...(local
         ? []
         : [
@@ -564,6 +593,8 @@ const facts: Facts = existsSync(stateFile)
   ? (JSON.parse(readFileSync(stateFile, 'utf8')) as Facts)
   : { startedAt: new Date().toISOString(), words: { owner: generateBip39Mnemonic(), next: generateBip39Mnemonic(), credential: generateBip39Mnemonic() }, steps: {}, finished: [], log: [], notes: [] };
 const keep = (): void => writeFileSync(stateFile, JSON.stringify(facts, (_key, value: unknown) => (typeof value === 'bigint' ? String(value) : value), 1), { mode: 0o600 });
+FEE_RATE = feeRateOf(facts.feeRate);
+facts.feeRate = FEE_RATE;
 keep();
 const say = (line: string): void => console.log(line);
 const note = (line: string, name?: string): void => {
@@ -579,7 +610,7 @@ const record = (step: string, sent: { transactionId: string; bytes: number; feeS
   if (!facts.log.some((entry) => entry.transactionId === sent.transactionId)) facts.log.push({ step, transactionId: sent.transactionId, bytes: sent.bytes, fee: String(sent.feeSatoshis), note: about });
   keep();
   say(`  ${step}: ${sent.transactionId}, ${sent.bytes} bytes, fee ${sent.feeSatoshis}${about === '' ? '' : `; ${about}`}`);
-  if (sent.feeSatoshis < BigInt(sent.bytes)) throw new Error('a fee below the size');
+  if (sent.feeSatoshis < atRate(BigInt(sent.bytes))) throw new Error(`a fee below ${FEE_RATE} sat/byte`);
 };
 const once = async (name: string, work: () => Promise<{ transactionIds?: string[]; data?: Record<string, number | string> } | undefined>): Promise<Record<string, number | string>> => {
   if (facts.steps[name] === undefined) {
@@ -616,7 +647,7 @@ console.error = () => undefined;
 
 const numbers = walletTemplateNumbers();
 const credential = deriveCredentialKeys(facts.words.credential, 'testnet', numbers);
-const RECOVERER_COINS = 5_000n;
+const RECOVERER_COINS = atRate(5_000n);
 const ownerSeed = deriveSeedKeys(facts.words.owner, 'testnet', numbers);
 const newSeed = deriveSeedKeys(facts.words.next, 'testnet', numbers);
 
@@ -667,9 +698,9 @@ const funderPays = async (step: string, outputs: Output[], options: { burn?: boo
   }
   for (let attempt = 1; ; attempt += 1) {
     const coins = await until('the funder\'s coins', async () => { const found = await funderCoins(); return found.length > 0 ? found : undefined; });
-    const chosen = coinsFor(local, coins, outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n));
-    const built = buildTransaction({ inputs: [...chosen, ...(options.extraInputs ?? [])].map((coin) => p2pkhInput(coin, funder)), outputs, changeLockingBytecode: funderLocking, allowTokenBurn: options.burn === true });
-    const check = checkBeforeSending(built);
+    const chosen = coinsFor(local, coins, outputs.reduce((sum, output) => sum + output.valueSatoshis, 0n), FEE_RATE);
+    const built = buildTransaction({ inputs: [...chosen, ...(options.extraInputs ?? [])].map((coin) => p2pkhInput(coin, funder)), outputs, changeLockingBytecode: funderLocking, allowTokenBurn: options.burn === true, feeRate: FEE_RATE });
+    const check = checkBeforeSending(built, FEE_RATE);
     if (check !== true) throw new Error(`a payment of the funder fails the check before sending: ${check}`);
     facts.pending = { ...facts.pending, [step]: { transactionId: built.transactionId, hex: hex(built.encoded) } };
     keep();
@@ -1291,9 +1322,9 @@ try {
       countLeftovers();
     }
     account = await openAccount(facts.words.owner, "the owner's device");
-    const wallet = await OwnerWallet.open({ backend: account, chain, seed: ownerSeed, ...(facts.ownerState === undefined ? {} : { state: facts.ownerState }), save: (state) => { facts.ownerState = state; keep(); } });
+    const wallet = await OwnerWallet.open({ backend: account, chain, seed: ownerSeed, feeRate: FEE_RATE, ...(facts.ownerState === undefined ? {} : { state: facts.ownerState }), save: (state) => { facts.ownerState = state; keep(); } });
     const funding = await wallet.fundingAddress();
-    await once('the wallet is funded', async () => ({ transactionIds: [await funderPays('the wallet is funded', [{ lockingBytecode: funding, valueSatoshis: WALLET_CREATION }])] }));
+    await once('the wallet is funded', async () => ({ transactionIds: [await funderPays('the wallet is funded', [{ lockingBytecode: funding, valueSatoshis: walletCreation() }])] }));
     if ((await wallet.creationStep()) !== 'created') {
       await until('the funding coin in the engine', async () => (await wallet.creationStep()) !== 'not funded');
       await wallet.create({ recovererKeyHash: credential.recoveryKey.keyHash, challengeDelay: { unit: 'time512', value: 1 } });
@@ -1311,7 +1342,7 @@ try {
     const createdAt = wallet.stored.creation.createTransactionId;
     if (createdAt !== undefined) {
       const bytes = ((await until('the transaction', async () => server.getTransaction(createdAt))) as string).length / 2;
-      record('create', { transactionId: createdAt, bytes, feeSatoshis: BigInt(bytes) }, 'the controller and the rest');
+      record('create', { ...(await sentAs(createdAt)), bytes }, 'the controller and the rest');
     }
     const created = await once('the wallet holds its first coin', async () => {
       const first = await until('the wallet\'s first coin', async () => { const now = await wallet.balance(); return now.recoverable === BigInt(paidRecoverer['recoverable'] as string) ? now : undefined; });
@@ -1323,7 +1354,7 @@ try {
     const lowestPrice = local ? PRICE : BigInt(checked['lowest'] as string);
     const collateral = local ? collateralAtRatio(DEBT, PRICE, PERCENT) : BigInt(checked['collateral'] as string);
     const fee = local ? borrowingFee(DEBT, PRICE) : BigInt(checked['fee'] as string);
-    const pay = collateral + fee + MANAGE_ADD + 50_000n;
+    const pay = collateral + fee + MANAGE_ADD + atRate(50_000n);
     const arrived = BigInt(created['recoverable'] as string) + pay;
     const identity = hexToBin(facts.identity as string);
     const given = await once('an address is given out', async () => ({ data: { first: (await wallet.receiveAddress()).address.number } }));
@@ -1585,9 +1616,9 @@ try {
   if (phase === 'the recoverer recovers') {
     const identity = hexToBin(facts.identity as string);
     account = await openAccount(facts.words.credential, 'the recoverer');
-    const funds = await RecovererFunds.open({ backend: account, chain });
+    const funds = await RecovererFunds.open({ backend: account, chain, feeRate: FEE_RATE });
     const recoverer = await RecovererWallet.open({ funds, chain, identity, recoveryKey: credential.recoveryKey });
-    const fees = recoveryFees();
+    const fees = recoveryFees(FEE_RATE);
     const before = await recoverer.state();
     if (hex(before.ownerKeyHash) !== hex(newSeed.controllerKey.keyHash)) {
       if (before.status === 'active') {
@@ -1649,8 +1680,8 @@ try {
     account = await openAccount(facts.words.next, 'the new device');
     const save = (state: OwnerWalletState): void => { facts.newState = state; keep(); };
     const wallet = facts.newState === undefined
-      ? await OwnerWallet.takeOver({ backend: account, chain, seed: newSeed, identity, earlierViewingKeys: [ownerSeed.viewingKey], save })
-      : await OwnerWallet.open({ backend: account, chain, seed: newSeed, state: facts.newState, save });
+      ? await OwnerWallet.takeOver({ backend: account, chain, seed: newSeed, identity, earlierViewingKeys: [ownerSeed.viewingKey], save, feeRate: FEE_RATE })
+      : await OwnerWallet.open({ backend: account, chain, seed: newSeed, state: facts.newState, save, feeRate: FEE_RATE });
     if ((await wallet.checkOwnership()) === 'closed') {
       say('  (the wallet is closed: done before)');
     } else {
@@ -1753,7 +1784,7 @@ try {
   if (phase === 'the recoverer returns its balance') {
     await once('the recoverer returns its balance', async () => {
       account = await openAccount(facts.words.credential, 'the recoverer');
-      const funds = await RecovererFunds.open({ backend: account, chain });
+      const funds = await RecovererFunds.open({ backend: account, chain, feeRate: FEE_RATE });
       await until('the recoverer\'s balance', async () => (await funds.balance()) > 0n);
       const [sent] = (await funds.sendEverything(funderLocking)).transactions;
       if (sent === undefined) return {};

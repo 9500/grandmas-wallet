@@ -25,6 +25,8 @@ export interface RunArguments {
   dry: boolean;
   /** Start a new run. */
   fresh: boolean;
+  /** `--fee-rate <n>`: the satoshis per byte every transaction pays at least, if given. */
+  feeRate: number | undefined;
 }
 
 /**
@@ -32,11 +34,18 @@ export interface RunArguments {
  * it always was. A part not among the run's own ends the process with the usage.
  */
 export const runArguments = (phases: string[], script: string): RunArguments => {
-  const words = process.argv.slice(2).filter((word) => !word.startsWith('--'));
+  const at = process.argv.indexOf('--fee-rate');
+  const feeRateWord = at === -1 ? undefined : process.argv[at + 1];
+  const feeRate = feeRateWord === undefined ? undefined : Number(feeRateWord);
+  if (at !== -1 && (feeRate === undefined || !Number.isFinite(feeRate) || feeRate < 1 || feeRate > 100)) {
+    console.error('--fee-rate takes a number of satoshis per byte, from 1 to 100');
+    process.exit(2);
+  }
+  const words = process.argv.slice(2).filter((word, index) => !word.startsWith('--') && !(at !== -1 && index + 2 === at + 1));
   const named = words[0] === 'local' || words[0] === 'chipnet' ? words[0] : undefined;
   const [phase, ...rest] = named === undefined ? words : words.slice(1);
   if ((phase !== undefined && !phases.includes(phase)) || rest.length > 0) {
-    console.error(`usage: npx tsx ../../scripts/${script} [local|chipnet] [--new] [--dry]`);
+    console.error(`usage: npx tsx ../../scripts/${script} [local|chipnet] [--new] [--dry] [--fee-rate <n>]`);
     process.exit(2);
   }
   const chainName = named ?? 'local';
@@ -45,7 +54,7 @@ export const runArguments = (phases: string[], script: string): RunArguments => 
     console.error('--dry reads chipnet; on the local node a run costs nothing and is simply run.');
     process.exit(2);
   }
-  return { chainName, local: chainName === 'local', phase, dry, fresh: process.argv.includes('--new') };
+  return { chainName, local: chainName === 'local', phase, dry, fresh: process.argv.includes('--new'), feeRate };
 };
 
 /**
@@ -91,12 +100,12 @@ export const chipnetFunder = (): KeyPair => keyPairFromPrivateKey(hexToBin((JSON
  * The coins a payment of the funder spends. On the local node all of them, as before. On chipnet, where the key
  * holds many coins and other runs pay from it too, as few as cover the payment, the largest first.
  */
-export const coinsFor = (local: boolean, coins: Utxo[], paying: bigint): Utxo[] => {
+export const coinsFor = (local: boolean, coins: Utxo[], paying: bigint, feeRate = 1): Utxo[] => {
   if (local) return coins;
   const chosen: Utxo[] = [];
   let held = 0n;
   for (const coin of coins.slice().sort((a, b) => (a.output.valueSatoshis > b.output.valueSatoshis ? -1 : a.output.valueSatoshis < b.output.valueSatoshis ? 1 : 0))) {
-    if (held >= paying + 5_000n) break;
+    if (held >= paying + BigInt(Math.ceil(5_000 * feeRate))) break;
     chosen.push(coin);
     held += coin.output.valueSatoshis;
   }
