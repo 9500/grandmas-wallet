@@ -35,6 +35,7 @@ export {
   PARYON_SERVICE_SPLIT,
   PARYON_TEMPLATE_VERSION,
   SERVICE_RESOURCE,
+  paryonAddressesAt,
   paryonTemplateSource,
 } from './template-source.js';
 export * from './transactions.js';

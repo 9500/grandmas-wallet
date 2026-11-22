@@ -7,10 +7,15 @@
 //                             oracle's prices this way, and the other pages are not given it
 //        [--document <file>]  a file of the root that is a document complete in itself, its styles and scripts
 //                             written in the page (repeatable): the design overview beside the landing page
+//        [--forward <prefix>=<address>]  requests whose path starts with the prefix are passed to a server on this
+//                             machine (repeatable): the loan page's host forwards /service/ to Paryon's service,
+//                             --forward /service/=http://127.0.0.1:8106
+import { Buffer } from 'node:buffer';
 import { execFileSync } from 'node:child_process';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
+import { clearTimeout, setTimeout } from 'node:timers';
 
 const argument = (name, fallback) => {
   const index = process.argv.indexOf(`--${name}`);
@@ -105,6 +110,96 @@ const documentPolicy = [
   "frame-ancestors 'none'",
 ].join('; ');
 
+/**
+ * Paths passed to another server on this machine. The request goes as it came: its method, path, body and the headers
+ * a service reads, with the client's address in X-Forwarded-For (as the reverse proxy in front gave it, or the
+ * connection's when there is none), so that the service's limits count each client. The answer comes back as the
+ * service gave it: its status, its headers (its own CORS headers among them; none of this server's are added) and its
+ * body. Bodies are capped both ways, and a service that does not answer in time or at all is answered for with 504 or 502.
+ */
+const forwards = process.argv
+  .flatMap((word, index) => (word === '--forward' && process.argv[index + 1] !== undefined ? [process.argv[index + 1]] : []))
+  .map((given) => {
+    const at = given.indexOf('=');
+    const prefix = given.slice(0, at);
+    let target;
+    try {
+      target = new URL(given.slice(at + 1));
+    } catch {
+      target = undefined;
+    }
+    if (at < 1 || !prefix.startsWith('/') || target?.protocol !== 'http:') {
+      console.error(`--forward ${given}: give a path prefix and a plain HTTP address on this machine, as /service/=http://127.0.0.1:8106. Not served.`);
+      process.exit(1);
+    }
+    return { prefix, target };
+  });
+const FORWARD_REQUEST_BYTES = 128 * 1024;
+const FORWARD_ANSWER_BYTES = 256 * 1024;
+const FORWARD_TIMEOUT_MS = 30_000;
+const FORWARDED_HEADERS = ['content-type', 'accept', 'origin', 'access-control-request-method', 'access-control-request-headers'];
+/** Headers of one connection, not of the answer. */
+const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'proxy-connection', 'upgrade', 'te', 'trailer']);
+
+const forward = (request, response, target) => {
+  let settled = false;
+  const fail = (status, error) => {
+    if (settled) return;
+    settled = true;
+    if (!response.headersSent) response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }).end(JSON.stringify({ error }));
+    else response.destroy();
+  };
+  const chunks = [];
+  let size = 0;
+  request.on('data', (chunk) => {
+    size += chunk.length;
+    if (size <= FORWARD_REQUEST_BYTES) chunks.push(chunk);
+    else if (!settled) {
+      fail(413, 'The request is too large.');
+      request.destroy();
+    }
+  });
+  request.on('error', () => fail(400, 'The request broke off.'));
+  request.on('end', () => {
+    if (settled) return;
+    const body = Buffer.concat(chunks);
+    const headers = Object.fromEntries(FORWARDED_HEADERS.flatMap((name) => (request.headers[name] === undefined ? [] : [[name, request.headers[name]]])));
+    const forwardedFor = request.headers['x-forwarded-for'];
+    headers['x-forwarded-for'] = (Array.isArray(forwardedFor) ? forwardedFor.join(', ') : forwardedFor) || request.socket.remoteAddress || 'unknown';
+    headers['content-length'] = String(body.length);
+    const outgoing = httpRequest({ host: target.hostname, port: target.port, method: request.method, path: request.url, headers }, (answer) => {
+      const parts = [];
+      let length = 0;
+      answer.on('data', (chunk) => {
+        length += chunk.length;
+        if (length <= FORWARD_ANSWER_BYTES) parts.push(chunk);
+        else {
+          answer.destroy();
+          fail(502, 'The service answered with more than is passed on.');
+        }
+      });
+      answer.on('error', () => fail(502, 'The service\'s answer broke off.'));
+      answer.on('end', () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        const passed = Object.fromEntries(Object.entries(answer.headers).filter(([name]) => !HOP_BY_HOP.has(name) && name !== 'content-length'));
+        const answerBody = Buffer.concat(parts);
+        response.writeHead(answer.statusCode ?? 502, { ...passed, 'content-length': String(answerBody.length) }).end(answerBody);
+      });
+    });
+    const timer = setTimeout(() => {
+      outgoing.destroy();
+      fail(504, 'The service did not answer in time.');
+    }, FORWARD_TIMEOUT_MS);
+    outgoing.on('error', () => {
+      clearTimeout(timer);
+      fail(502, 'The service cannot be reached just now.');
+    });
+    outgoing.end(body);
+  });
+};
+
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -117,6 +212,11 @@ const TYPES = {
 };
 
 const server = createServer((request, response) => {
+  const forwarded = forwards.find(({ prefix }) => (request.url ?? '/').startsWith(prefix));
+  if (forwarded !== undefined) {
+    forward(request, response, forwarded.target);
+    return;
+  }
   const headers = {
     'content-security-policy': contentSecurityPolicy,
     'referrer-policy': 'no-referrer',
@@ -151,4 +251,4 @@ const server = createServer((request, response) => {
   else createReadStream(file).pipe(response);
 });
 
-server.listen(port, host, () => console.log(`${root} at http://${host}:${port} with ${configPath}`));
+server.listen(port, host, () => console.log(`${root} at http://${host}:${port} with ${configPath}${forwards.map(({ prefix, target }) => `, ${prefix} to ${target.origin}`).join('')}`));
