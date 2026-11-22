@@ -87,10 +87,10 @@ export interface SharedActionStart {
   variables?: Record<string, string | number | bigint>;
   /**
    * The coins the wallet brings in its first commit, such as the token the action is about, in order. A coin that
-   * stands for a template input names it. No coin is given a place: the template's places and the order of the
-   * wallet's items decide where each goes.
+   * stands for a template input names it. A coin given a place goes there in the transaction; one without a place is
+   * put where the template's places and the order of the wallet's items put it.
    */
-  inputs: { coin: AccountCoin; inputIdentifier?: string }[];
+  inputs: { coin: AccountCoin; inputIdentifier?: string; place?: number }[];
 }
 
 /** An invitation the wallet started, ready to be sent. */
@@ -113,14 +113,14 @@ export interface SharedActionFinish {
   invitationIdentifier: string;
   /**
    * The wallet's coins that pay, after the coins of its first commit, in order. A coin that stands for a template
-   * input names it.
+   * input names it. A coin given a place goes there in the transaction.
    */
-  inputs: { coin: AccountCoin; inputIdentifier?: string }[];
+  inputs: { coin: AccountCoin; inputIdentifier?: string; place?: number }[];
   /**
    * The wallet's outputs, in order after the other participant's: an output of the template in the wallet's role by
-   * name, or any output given whole, such as its change at the exact fee.
+   * name, or any output given whole, such as its change at the exact fee. An output given a place goes there.
    */
-  outputs: ({ outputIdentifier: string } | Output)[];
+  outputs: (({ outputIdentifier: string } | Output) & { place?: number })[];
   /** The other participant's coins as the wallet read them from the chain, for the check before sending. */
   theirCoins: Utxo[];
 }

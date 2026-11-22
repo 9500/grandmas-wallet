@@ -80,7 +80,8 @@ export const applicationConnector = (
     onProposals: options.onProposals,
     trustedWith: (template, application) => applications.has(template) && !applications.mayAllow(template.identifier, application),
     trustOffered: async (template, texts, application) => {
-      const kept = await applications.trust(template, texts, application);
+      // The user trusts it now: its service, if it names one, is asked who it is and what is possible.
+      const kept = await applications.trust(template, texts, application, { contact: true });
       // A token the wallet already holds may depend on the template: it goes to the backup now, where a store answers.
       await applications.storeNow(kept.identifier);
     },

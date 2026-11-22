@@ -47,6 +47,20 @@ export interface ServiceCallOptions {
   id?: string;
 }
 
+/**
+ * The words the screens show about a template's service, in the wallet's voice. A refusal or failure is shown in the
+ * words of the error the wallet throws (`declined`, `carriageFailure`), which use these.
+ */
+export const SERVICE_WORDS = {
+  service: 'Service',
+  connect: 'Connect',
+  /** With the time of the answer the offered actions come from, as the screens write a time. */
+  checked: (time: string): string => `Checked with its service ${time}`,
+  fromService: 'From the service',
+  declined: (words: string): string => `The service declined: ${words}`,
+  unreachable: 'The service can\'t be reached. Nothing was sent.',
+} as const;
+
 const randomId = (): string => Array.from(crypto.getRandomValues(new Uint8Array(12)), (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const NOTHING_SENT = 'Nothing was sent.';
@@ -57,7 +71,7 @@ export const carriageFailure = (failure: ServiceCarriageFailure): ServiceCallFai
   switch (failure.failure) {
     case 'unreachable':
     case 'redirect':
-      return { ok: false, kind: 'unreachable', message: `The service can't be reached. ${NOTHING_SENT}`, ...code };
+      return { ok: false, kind: 'unreachable', message: SERVICE_WORDS.unreachable, ...code };
     case 'timeout':
       return { ok: false, kind: 'timeout', message: `The service did not answer in time. ${NOTHING_SENT}`, ...code };
     case 'cancelled':
@@ -77,7 +91,7 @@ export const carriageFailure = (failure: ServiceCarriageFailure): ServiceCallFai
 };
 
 /** The words for a service that answered and refused. Its own words are shown as they are, cut to the protocol's length. */
-export const declined = (error: string, code?: ServiceErrorCode): ServiceCallFailure => ({ ok: false, kind: 'declined', message: `The service declined: ${error}`, ...(code === undefined ? {} : { code }) });
+export const declined = (error: string, code?: ServiceErrorCode): ServiceCallFailure => ({ ok: false, kind: 'declined', message: SERVICE_WORDS.declined(error), ...(code === undefined ? {} : { code }) });
 
 /** A message that cannot be made is not sent. */
 const unsendable = (error: unknown): ServiceCallFailure => ({

@@ -11,6 +11,7 @@ import {
   type KeyedAddressKind,
   type PreparedTransaction,
   type SeedKeys,
+  type SharedActionFinish,
   type SpendableCoin,
   type TransactionRequest,
   type Utxo,
@@ -173,6 +174,11 @@ export interface WalletParts {
   /** The action did not happen and nothing was signed: the numbers may be handed out again. */
   giveBack(reserved: ReservedAddress[]): void;
   prepare(request: TransactionRequest): Promise<PreparedTransaction>;
+  /**
+   * Finish an invitation another participant joined (`WalletBackend.finishShared`), remembering, as `prepare` does,
+   * which of the wallet's coins it spends: those of its first commit (`committed`) and those it adds now.
+   */
+  finishShared?(request: SharedActionFinish, committed: AccountCoin[]): Promise<PreparedTransaction>;
   send(prepared: PreparedTransaction): Promise<void>;
   /** Pay the wallet itself, so that it has a coin that is output 0 of its transaction. Returns that coin. */
   payItself(satoshis: bigint): Promise<{ coin: AccountCoin; sent: Sent }>;
@@ -985,6 +991,11 @@ export class OwnerWallet {
       keep: (reserved) => numbersOf(reserved, keepNumber),
       giveBack: (reserved) => numbersOf(reserved, returnNumber),
       prepare: (request) => this.prepareTransaction(request),
+      finishShared: async (request, committed) => {
+        const prepared = await this.backend.finishShared(request);
+        this.preparedInputs.set(prepared.invitationIdentifier, [...committed, ...request.inputs.map(({ coin }) => coin)].map((coin) => `${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`));
+        return prepared;
+      },
       send: (prepared) => this.sendPrepared(prepared),
       payItself: async (satoshis) => {
         // The address is held before the payment is built, so that the payment's own change takes the next one.

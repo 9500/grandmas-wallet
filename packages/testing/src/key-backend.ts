@@ -258,7 +258,12 @@ export class KeyBackend implements WalletBackend {
     const invitationIdentifier = `shared-${this.nextHandle}`;
     const now = Date.now();
     const variables = Object.entries(typedValues(template.definition, request.variables ?? {})).map(([variableIdentifier, value]) => ({ variableIdentifier, roleIdentifier: request.role, value }));
-    const inputs = request.inputs.map(({ coin, inputIdentifier }) => ({ outpointTransactionHash: coin.utxo.transactionHash, outpointIndex: coin.utxo.index, ...(inputIdentifier === undefined ? {} : { inputIdentifier }) }));
+    const inputs = request.inputs.map(({ coin, inputIdentifier, place }) => ({
+      outpointTransactionHash: coin.utxo.transactionHash,
+      outpointIndex: coin.utxo.index,
+      ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
+      ...(place === undefined ? {} : { transactionIndex: place }),
+    }));
     const invitation = {
       invitationIdentifier,
       createdAtTimestamp: now,
@@ -364,9 +369,9 @@ export class KeyBackend implements WalletBackend {
           outputs.push({ output: { lockingBytecode, valueSatoshis, ...(token === undefined ? {} : { token }) }, place });
         }
       }
-      for (const { coin, inputIdentifier } of request.inputs) inputs.push({ spec: this.inputFor(coin, asRequest, inputIdentifier), place: inputIdentifier === undefined ? undefined : inputPlace.get(inputIdentifier) });
-      for (const output of request.outputs) {
-        outputs.push('outputIdentifier' in output ? { output: templateOutput(definition, output.outputIdentifier, values), place: outputPlace.get(output.outputIdentifier) } : { output, place: undefined });
+      for (const { coin, inputIdentifier, place } of request.inputs) inputs.push({ spec: this.inputFor(coin, asRequest, inputIdentifier), place: place ?? (inputIdentifier === undefined ? undefined : inputPlace.get(inputIdentifier)) });
+      for (const { place, ...output } of request.outputs) {
+        outputs.push('outputIdentifier' in output ? { output: templateOutput(definition, output.outputIdentifier, values), place: place ?? outputPlace.get(output.outputIdentifier) } : { output: output as Output, place });
       }
       const byPlace = <Item extends { place: number | undefined }>(items: Item[]): Item[] => items.map((item, order) => ({ item, order })).sort((a, b) => (a.item.place ?? Infinity) - (b.item.place ?? Infinity) || a.order - b.order).map(({ item }) => item);
       const built = buildTransaction({

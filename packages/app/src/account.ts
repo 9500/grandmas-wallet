@@ -395,16 +395,17 @@ export class Account implements WalletBackend {
 
   /**
    * Start an invitation that another participant joins: the wallet's values, tagged with its role, and the coins it
-   * brings in its first commit, which the engine holds for it. No item is given a place: the template's places hold
-   * only for items without one, and the wallet's own items follow in their order.
+   * brings in its first commit, which the engine holds for it. A coin given a place carries it as its index in the
+   * transaction; the others are put where the template's places and the order of the wallet's items put them.
    */
   async startShared(request: SharedActionStart): Promise<SharedInvitationStarted> {
     const { identifier: templateIdentifier, definition } = this.templateOf(request.template);
     const variables = Object.entries(request.variables ?? {}).map(([variableIdentifier, value]) => ({ variableIdentifier, roleIdentifier: request.role, value }));
-    const inputs = request.inputs.map(({ coin, inputIdentifier }) => ({
+    const inputs = request.inputs.map(({ coin, inputIdentifier, place }) => ({
       outpointTransactionHash: coin.utxo.transactionHash,
       outpointIndex: coin.utxo.index,
       ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
+      ...(place === undefined ? {} : { transactionIndex: place }),
     }));
     const stored = await this.engine.createInvitation({
       templateIdentifier,
@@ -454,7 +455,7 @@ export class Account implements WalletBackend {
   }
 
   /**
-   * The wallet's part after the other participant's: its coins and outputs, each without a place, then its
+   * The wallet's part after the other participant's: its coins and outputs, each at the place given, then its
    * signatures. The transaction is built and checked before sending as `prepare` checks it, with the other
    * participant's coins as the wallet read them from the chain. Nothing is sent.
    * @throws if the engine cannot build it, or if it fails the check before sending; the invitation is then put aside
@@ -464,13 +465,14 @@ export class Account implements WalletBackend {
     const started = this.shared.get(invitationIdentifier);
     if (started === undefined) throw new Error('This account started no such invitation, or has put it aside.');
     try {
-      const inputs = request.inputs.map(({ coin, inputIdentifier }) => ({
+      const inputs = request.inputs.map(({ coin, inputIdentifier, place }) => ({
         outpointTransactionHash: coin.utxo.transactionHash,
         outpointIndex: coin.utxo.index,
         ...(inputIdentifier === undefined ? {} : { inputIdentifier }),
+        ...(place === undefined ? {} : { transactionIndex: place }),
       }));
-      // As in `prepare`: an output of the template carries the account's role.
-      const outputs = request.outputs.map((output) => ('outputIdentifier' in output ? { ...output, roleIdentifier: started.role } : output));
+      // As in `prepare`: an output of the template carries the account's role. A place becomes the engine's index.
+      const outputs = request.outputs.map(({ place, ...output }) => ({ ...output, ...('outputIdentifier' in output ? { roleIdentifier: started.role } : {}), ...(place === undefined ? {} : { transactionIndex: place }) }));
       if (inputs.length > 0 || outputs.length > 0) {
         await this.engine.appendInvitation(invitationIdentifier, { ...(inputs.length === 0 ? {} : { inputs }), ...(outputs.length === 0 ? {} : { outputs }) } as unknown as Parameters<Engine['appendInvitation']>[1]);
       }

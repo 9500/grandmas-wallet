@@ -19,6 +19,8 @@ import {
   type PreparedTransaction,
   type ReadTemplate,
   type SeedKeys,
+  type SharedActionFinish,
+  type SharedInvitationStarted,
   type TemplateValues,
   type Utxo,
   ADDRESS_KIND,
@@ -41,7 +43,27 @@ import {
   variableType,
 } from '@grandmas-wallet/core';
 
+import { type ServiceItem, type ServiceResource, SERVICE_LIMITS, findServiceResource } from '@grandmas-wallet/connect';
+
 import { TYPEABLE, actionShape, applicationInputs, expressionVariable, offeredAt, paysTo, spendingInputs } from './action-shape.js';
+import {
+  type KeptService,
+  type MadeCategory,
+  type ServiceOffer,
+  type ServiceOptions,
+  type ServicePart,
+  type ServiceStatus,
+  askedValues,
+  checkServiceItem,
+  firstCommitPlaces,
+  otherParticipants,
+  startingActionsOf,
+  statedValue,
+  walletRoleOf,
+} from './application-services.js';
+import { type ServiceCallFailure, type ServiceCallOptions, SERVICE_WORDS, askServiceHello, askServiceJoin, askServicePossible, servedRole } from './service-client.js';
+import { SHARED_ANSWER_LIMIT_MS, takeJoinedInvitation } from './shared-action.js';
+import { type SharedAccepted, type SharedRefusalCode, checkOtherParticipant } from './shared-checks.js';
 import { type ActionFinding, actionFinding, findingReason, templateFindings, thisWalletRefuses } from './findings.js';
 import type { ReservedAddress, Sent, TokenCoin, WalletParts } from './owner-wallet.js';
 import { coinsAt } from './positions.js';
@@ -140,6 +162,13 @@ export interface ApplicationsState {
   positionRecords?: PositionRecordEntry[];
   /** Records of positions that an earlier seed wrote: suggestions, until the chain bears them out (section 10.6). */
   suggestedRecords?: PositionRecordEntry[];
+  /**
+   * What the wallet last heard from the service of each template the user trusts (docs/xo-service.md). A note of what a
+   * server said, kept on this device only: the backup holds templates and records, and a service is asked again.
+   */
+  services?: KeptService[];
+  /** Token categories the wallet created with templates' actions, for their services; kept on this device only. */
+  made?: MadeCategory[];
 }
 
 /** What an application, or the user, asks for: an action of a template. */
@@ -373,6 +402,11 @@ export interface ActionPreview {
    */
   notConfirmed?: string;
   /**
+   * For an action another participant joins through the template's service: what the service stated, shown apart from
+   * the wallet's own figures and checked only through the application's contracts.
+   */
+  service?: ServicePart;
+  /**
    * Tokens that the action does not deliver to the wallet unchanged (section 13.3): the token of the wallet's it
    * spends, where it leaves the wallet, comes back changed or ends; and a token made from the wallet's own coin
    * that goes elsewhere. The action is carried out only with the user's tick: `carryOut` with `{ tokensLeave: true }`.
@@ -437,6 +471,42 @@ export class TickNeededError extends ActionRefusedError {
  * coin of the application's or a value it works out (section 13.3). It is done through the application, whose
  * page the record names where there is one.
  */
+/**
+ * The template's service gave no usable answer, so the action could not be worked out: it cannot be reached, did not
+ * answer in time, or answered with something the wallet cannot read. Nothing was sent; the words are the client's.
+ */
+export class ServiceUnreachableError extends ActionRefusedError {
+  constructor(
+    message: string,
+    readonly kind: ServiceCallFailure['kind'],
+  ) {
+    super(message);
+    this.name = 'ServiceUnreachableError';
+  }
+}
+
+/** The template's service answered and declined, in its own words: "The service declined: …". */
+export class ServiceDeclinedError extends ActionRefusedError {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'ServiceDeclinedError';
+  }
+}
+
+/** The wallet refused what the service added to its invitation (`checkOtherParticipant`): nothing was signed. */
+export class ServiceAnswerRefusedError extends ActionRefusedError {
+  constructor(
+    reason: string,
+    readonly code: SharedRefusalCode,
+  ) {
+    super(`The service's answer was refused: ${reason} Nothing was signed.`);
+    this.name = 'ServiceAnswerRefusedError';
+  }
+}
+
 export class NeedsApplicationError extends ActionRefusedError {
   constructor(
     reason: string,
@@ -506,6 +576,25 @@ export interface TokenAction {
   needsApplication?: string;
   /** For an action done through the application: the address of its page, as the position's record names it. */
   page?: string;
+  /** For an action the template's service takes part in: what the service last said about it. */
+  service?: ServiceOffer;
+}
+
+/** A starting action of a template, or an action for a token the wallet made that it does not hold, as the wallet offers it. */
+export interface TemplateAction extends TokenAction {
+  /** For an action on a token the wallet made and does not hold: its category, and the template's name for where it waits. */
+  waiting?: { category: string; at: string };
+}
+
+/** What a template the user trusts offers from the wallet itself: its starting actions, and actions on tokens it made. */
+export interface TemplateActions {
+  template: { identifier: string; name: string };
+  /** The role the wallet takes, where the template gives its side one. */
+  role?: string;
+  /** The template's service, where it names one for the wallet's network. */
+  service?: ServiceStatus;
+  starting: TemplateAction[];
+  waiting: TemplateAction[];
 }
 
 /**
@@ -542,6 +631,26 @@ export interface HeldToken {
    * the screens only. Absent for an NFT a record ties to a position, which keeps the template's name.
    */
   registry?: ShownRegistry;
+}
+
+/** An action another participant joins, worked out to the satoshi and waiting for the user's approval. */
+interface PendingShared {
+  /** The request it was worked out for, with the position and bindings the service's item gave. */
+  request: ApplicationAction;
+  url: string;
+  /** The role the service takes. */
+  role: string;
+  started: SharedInvitationStarted;
+  /** The coins of the wallet's first commit. */
+  committed: AccountCoin[];
+  accepted: SharedAccepted;
+  plan: Plan;
+  /** The category the action makes, where it makes one. */
+  made?: string;
+  /** The service's item the action is for: absent for a starting action. */
+  item?: ServiceItem;
+  /** Worked out with a coin the wallet first pays itself: carried out only after a fresh round with that coin. */
+  virtual: boolean;
 }
 
 interface PlannedInput {
@@ -585,6 +694,8 @@ interface Plan {
   tokensLeaving?: TokenLeaving[];
   /** The position record the action took values from. */
   record?: PositionRecordEntry;
+  /** The token category the action makes, where it makes one. */
+  made?: string;
 }
 
 /** What the first half of working an action out leaves for the second. */
@@ -738,6 +849,31 @@ const recordTokenName = (definition: ReadTemplate['definition'], entry: Position
   return undefined;
 };
 
+/** The wallet's token coins, with the one an invitation of the wallet's holds out of the list. */
+const withHeld = (coins: TokenCoin[], holding: TokenCoin | undefined): TokenCoin[] =>
+  holding === undefined || coins.some(({ coin }) => outpointOf(coin.utxo) === outpointOf(holding.coin.utxo)) ? coins : [...coins, holding];
+
+/** A request, as the key of the action a review worked out for it: the same request, made again from the same entry, finds it. */
+const requestKey = (request: ApplicationAction): string =>
+  JSON.stringify([request.template.identifier, request.template.contentHash, request.action, request.role, request.variables, request.bindings ?? null, request.about ?? null, request.creates ?? null, request.fromWallet ?? null, request.application ?? null]);
+
+/** What the wallet gives, less what it gets, in satoshis and in fungible tokens by category, in a transaction worked out. */
+const walletBalance = (plan: Pick<Plan, 'inputs' | 'outputs'>): { satoshis: bigint; tokens: Map<string, bigint> } => {
+  const given = plan.inputs.filter(({ kind }) => kind !== 'application').map(({ coin }) => coin.utxo.output);
+  const got = plan.outputs.filter(({ wallet }) => wallet !== undefined).map(({ output }) => output);
+  const tokens = fungible(given);
+  for (const [category, amount] of fungible(got)) tokens.set(category, (tokens.get(category) ?? 0n) - amount);
+  return { satoshis: sum(given.map((output) => output.valueSatoshis)) - sum(got.map((output) => output.valueSatoshis)), tokens };
+};
+
+/** Whether a transaction worked out again gives more of the wallet's, or gets it less, than the one the user was shown. */
+const worseForTheWallet = (shown: Pick<Plan, 'inputs' | 'outputs'>, fresh: Pick<Plan, 'inputs' | 'outputs'>): boolean => {
+  const before = walletBalance(shown);
+  const after = walletBalance(fresh);
+  if (after.satoshis > before.satoshis) return true;
+  return [...new Set([...before.tokens.keys(), ...after.tokens.keys()])].some((category) => (after.tokens.get(category) ?? 0n) > (before.tokens.get(category) ?? 0n));
+};
+
 export class Applications {
   constructor(
     private readonly wallet: WalletParts,
@@ -767,8 +903,18 @@ export class Applications {
        * ending within a bounded time (`TokenRegistries.lookUpWithin`). A preview is returned when it has ended.
        */
       lookUp?: (categories: string[]) => Promise<void>;
+      /**
+       * Where the wallet speaks to applications' services (docs/xo-service.md). Without it no service is contacted, and
+       * an action that needs another participant is refused.
+       */
+      service?: ServiceOptions;
     } = {},
   ) {}
+
+  /** Actions worked out with a service and waiting for the user's approval, by the request they answer. */
+  private readonly pendingShared = new Map<string, PendingShared>();
+  /** Exchanges with a template's service under way, by the template's identifier. */
+  private readonly contacting = new Map<string, Promise<ServiceStatus | undefined>>();
 
   /** The wallet's own outputs of the action sent last, until the key holder lists them (`awaitOwnOutputs`). */
   private awaiting: { transactionId: string; outpoints: string[]; since: number } | undefined;
@@ -854,7 +1000,15 @@ export class Applications {
    * Trust a template on the user's word, and store it in the backup. Storing may fail; the template is then
    * trusted on this device and not yet stored, and no signature for one of its actions leaves the wallet.
    */
-  async trust(names: TemplateNames, presented: PresentedTexts | undefined, application?: string): Promise<KeptTemplate> {
+  async trust(names: TemplateNames, presented: PresentedTexts | undefined, application?: string, options: { contact?: boolean } = {}): Promise<KeptTemplate> {
+    const kept = await this.trustOnly(names, presented, application);
+    // The user trusts it now, in this session: its service, if it names one, is asked who it is and what is possible.
+    // A trust restored from the backup does not ask (docs/xo-service.md, "When a wallet speaks to a service").
+    if (options.contact === true) void this.connect(kept.identifier);
+    return kept;
+  }
+
+  private async trustOnly(names: TemplateNames, presented: PresentedTexts | undefined, application?: string): Promise<KeptTemplate> {
     let kept = this.keptTemplate(names);
     if (kept === undefined) {
       const suggestion = this.suggestions.find((suggested) => suggested.identifier === names.identifier && suggested.contentHash === names.contentHash);
@@ -886,11 +1040,14 @@ export class Applications {
     return kept;
   }
 
-  /** The NFTs among the wallet's tokens that a request names: what the action is about. */
-  private async named(request: Pick<ApplicationAction, 'about'>): Promise<PositionToken[]> {
+  /**
+   * The NFTs among the wallet's tokens that a request names: what the action is about. `holding`: the token of an
+   * invitation the wallet started, which holds it out of the list until the action is done.
+   */
+  private async named(request: Pick<ApplicationAction, 'about'>, holding?: TokenCoin): Promise<PositionToken[]> {
     const category = request.about?.category;
     if (category === undefined) return [];
-    return (await this.wallet.tokenCoins()).flatMap(({ coin }) => {
+    return withHeld(await this.wallet.tokenCoins(), holding).flatMap(({ coin }) => {
       const { token } = coin.utxo.output;
       return token?.nft === undefined || hex(token.category) !== category ? [] : [{ category, commitment: hex(token.nft.commitment), capability: token.nft.capability }];
     });
@@ -903,7 +1060,7 @@ export class Applications {
    * has values of its own; the record that made the position holds what acting on it takes.
    */
   private async recordsOf(plan: Plan, request: ApplicationAction): Promise<PositionRecordEntry[]> {
-    const about = await this.named(request);
+    const about = await this.named(request, plan.token);
     const due = recordsDue({
       template: plan.template,
       role: plan.role,
@@ -995,6 +1152,8 @@ export class Applications {
     if (kept === undefined) return refuse('This wallet does not trust that template.');
     const others = (this.state.suggested ?? []).filter((suggested) => !(suggested.identifier === kept.identifier && suggested.contentHash === kept.contentHash));
     const templates = this.state.templates.filter((template) => template !== kept);
+    // What its service said is not kept: trusted again, the template shows Connect.
+    if (this.state.services !== undefined) this.change({ services: this.state.services.filter((service) => !(service.identifier === kept.identifier && service.contentHash === kept.contentHash)) });
     if (!kept.stored) {
       // The backup never held this trust: nothing depends on it there. A record of an earlier trust keeps its withdrawal.
       this.change({ templates, suggested: this.state.suggested ?? [] });
@@ -1279,6 +1438,7 @@ export class Applications {
       ...(payItself === undefined ? {} : { payItself }),
       ...(tokensLeaving.length === 0 ? {} : { tokensLeaving }),
       ...(frame.record === undefined ? {} : { record: frame.record }),
+      ...(creates === undefined ? {} : { made: String(values[creates]) }),
     };
   }
 
@@ -1330,8 +1490,12 @@ export class Applications {
    * - **The application's coins:** each that the request names by outpoint, read from the chain and matched to a
    *   script of the template by its bytecode; and the position's coins at the record's script, for the input whose
    *   unlocking that script names. The wallet looks for no other coin of the application's.
+   *
+   * With `shared`, another participant joins the action and brings the application's coins: only the wallet's own
+   * share is worked out here. A position the request names by a category the wallet made with the template and holds
+   * no token of is taken as that category's value, for an action that does not spend the token.
    */
-  private async frame(request: ApplicationAction, template: ReadTemplate): Promise<Frame> {
+  private async frame(request: ApplicationAction, template: ReadTemplate, shared?: { made: Set<string> }): Promise<Frame> {
     const { definition } = template;
     const shape = actionShape(definition, request.action, request.role);
     if (typeof shape === 'string') return refuse(shape);
@@ -1352,10 +1516,10 @@ export class Applications {
     if (category !== undefined) {
       const held = (await this.wallet.tokenCoins()).filter(({ coin }) => coin.utxo.output.token?.nft !== undefined && hex(coin.utxo.output.token.category) === category);
       [token] = held;
-      if (token === undefined) return refuse('This wallet holds no such token.');
+      if (token === undefined && !(shared?.made.has(category) === true && !spends)) return refuse('This wallet holds no such token.');
       if (held.length > 1) return refuse('This wallet holds more than one coin with that token; it does not choose between them.');
-      if (spends && token.place === 'earlier') return refuse('The token is at an address of an earlier seed, where that seed could still spend it. It is swept first.');
-      if (spends && token.place === 'vault') return refuse('The token is at a vault address. It is moved to an ordinary address of the wallet first.');
+      if (spends && token?.place === 'earlier') return refuse('The token is at an address of an earlier seed, where that seed could still spend it. It is swept first.');
+      if (spends && token?.place === 'vault') return refuse('The token is at a vault address. It is moved to an ordinary address of the wallet first.');
     }
 
     // The position's record: one at a script the action spends, continues or pays into.
@@ -1494,7 +1658,7 @@ export class Applications {
       if (input === shape.tokenInput?.input) return refuse(`The request names a coin for ${inputName(input)}, where the wallet puts its own token.`);
     }
     try {
-      for (const { input, inputIndex } of applicationInputs(definition, shape)) {
+      for (const { input, inputIndex } of shared === undefined ? applicationInputs(definition, shape) : []) {
         if ((definition.inputs?.[input] as { unlockingScript?: string } | undefined)?.unlockingScript === undefined) {
           return refuse(`The template does not say how its input ${inputName(input)} is unlocked, and it is not the wallet's token.`);
         }
@@ -1604,18 +1768,40 @@ export class Applications {
    * InsufficientFundsError, with the figures, when the wallet's coins do not cover it
    */
   async preview(request: ApplicationAction): Promise<ActionPreview> {
-    const preview = await this.worked(request);
+    const preview = await this.reviewed(request);
     // The registries of the categories the review will write, those the wallet does not know yet, are looked up
     // first, for a bounded time: a lookup that fails or is slow leaves them in raw units and never fails the review.
     await this.options.lookUp?.(previewCategories(preview)).catch(() => undefined);
     return preview;
   }
 
-  private async worked(request: ApplicationAction): Promise<ActionPreview> {
+  /**
+   * The review of an action. One that another participant joins through the template's service is worked out with the
+   * service now: the invitation the service joined waits, checked, for the user's approval (`carryOut`), or until it is
+   * put aside (`discardPreview`).
+   */
+  private async reviewed(request: ApplicationAction): Promise<ActionPreview> {
+    this.wallet.requireUsable();
+    const { template } = this.templateOf(request);
+    const route = this.serviceRoute(request, template);
+    if (route === undefined) return this.worked(request);
+    await this.discardPreview(request);
+    const pending = await this.sharedRound(request, template, route);
+    try {
+      const preview = await this.worked(pending.request, pending);
+      this.pendingShared.set(requestKey(request), pending);
+      return preview;
+    } catch (error) {
+      await this.putAside(pending);
+      throw error;
+    }
+  }
+
+  private async worked(request: ApplicationAction, shared?: PendingShared): Promise<ActionPreview> {
     this.wallet.requireUsable();
     const { template, kept } = this.templateOf(request);
     const summary = this.summary(template, kept);
-    const plan = await this.plan(request);
+    const plan = shared?.plan ?? (await this.plan(request));
     const { definition } = template;
     const action = definition.actions?.[request.action];
     const transaction = definition.transactions?.[action?.transaction ?? ''];
@@ -1685,6 +1871,7 @@ export class Applications {
         ...(plan.payItself === undefined ? {} : { payingItself: { feeSatoshis: await this.wallet.quotePayItself(plan.payItself) } }),
       },
       firstUse: kept?.stored !== true,
+      ...(shared === undefined ? {} : { service: this.servicePart(definition, shared) }),
       ...(records.length === 0 ? {} : { recordsPosition: true }),
       ...(notConfirmed === undefined ? {} : { notConfirmed }),
       ...(plan.tokensLeaving === undefined ? {} : { tokensLeaving: plan.tokensLeaving }),
@@ -1728,6 +1915,8 @@ export class Applications {
    */
   async carryOut(request: ApplicationAction, onStage: (stage: 'recorded' | 'sent') => void = () => undefined, consent: ActionConsent = {}): Promise<ActionOutcome> {
     this.wallet.requireUsable();
+    const route = this.serviceRoute(request, this.templateOf(request).template);
+    if (route !== undefined) return this.carryOutShared(request, route, onStage, consent);
     // Everything that can refuse the action does so before the template is taken in.
     const first = await this.plan(request);
     this.requireTick(first, consent);
@@ -1785,9 +1974,24 @@ export class Applications {
       this.wallet.giveBack(plan.reserved.filter((entry) => !plan.used.includes(entry)));
     }
     onStage('sent');
+    return this.afterSending(plan, prepared, kept, plan.made);
+  }
+
+  /**
+   * What follows an action that was sent, whoever joined it: the next action waits for the key holder to list what this
+   * one left the wallet; a category it made is kept for the template's service; and the service, where the template
+   * names one, is asked again what is possible (the user has just carried out an action).
+   */
+  private async afterSending(plan: Plan, prepared: PreparedTransaction, kept: KeptTemplate, made: string | undefined): Promise<ActionOutcome> {
     // The next action waits for the key holder to list what this one left the wallet (`awaitOwnOutputs`).
     this.awaiting = { transactionId: prepared.transactionId, outpoints: plan.outputs.flatMap(({ wallet }, index) => (wallet === undefined ? [] : [`${prepared.transactionId}:${index}`])), since: Date.now() };
     if (await this.ownOutputsListed(this.awaiting)) this.awaiting = undefined;
+    const resource = this.resourceOf(readTemplate(kept.text).definition);
+    if (made !== undefined && resource !== undefined) {
+      this.change({ made: [...(this.state.made ?? []), { templateIdentifier: kept.identifier, category: made, transactionId: prepared.transactionId, madeAt: this.nowSeconds() }] });
+    }
+    // The action was sent: nothing the service says now, or fails to say, changes that.
+    if (resource?.usable === true) await this.connect(kept.identifier, { afterAction: true }).catch(() => undefined);
     const received = plan.outputs.filter(({ output, wallet }) => wallet !== undefined && output.token !== undefined);
     return {
       transactionId: prepared.transactionId,
@@ -1834,6 +2038,493 @@ export class Applications {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     throw new Error('The key holder does not see the coins the action spends. Try again in a moment.');
+  }
+
+  // ------------------------------------------------------------------ an application's service
+
+  private nowSeconds(): number {
+    return this.options.now?.() ?? Math.floor(Date.now() / 1000);
+  }
+
+  private callOptions(): ServiceCallOptions {
+    const { service } = this.options;
+    return { network: service?.network ?? '', ...(service?.fetch === undefined ? {} : { fetch: service.fetch }) };
+  }
+
+  /**
+   * The service a template names for the wallet's network (docs/xo-service.md, "How a template names its service"), or
+   * why it cannot be used; `undefined` where it names none.
+   */
+  private resourceOf(definition: ReadTemplate['definition']): { usable: true; url: string; description: string } | { usable: false; description: string; reason: string } | undefined {
+    const { service } = this.options;
+    const found: ServiceResource | undefined = findServiceResource(definition, { network: service?.network ?? '', kind: service?.kind ?? 'public' });
+    if (found === undefined) return undefined;
+    const description = found.usable ? found.description : ((definition as { resources?: { name: string; description?: string }[] }).resources ?? []).find((resource) => resource.name === found.name)?.description ?? '';
+    if (!found.usable) return { usable: false, description, reason: found.reason };
+    if (service === undefined) return { usable: false, description, reason: 'This wallet speaks to no service here.' };
+    return { usable: true, url: found.url, description };
+  }
+
+  /** What the wallet keeps about a template's service, where it was for the address the template names now. */
+  private keptService(names: Pick<TemplateNames, 'identifier' | 'contentHash'>, url?: string): KeptService | undefined {
+    return (this.state.services ?? []).find((service) => service.identifier === names.identifier && service.contentHash === names.contentHash && (url === undefined || service.url === url));
+  }
+
+  private updateService(names: Pick<TemplateNames, 'identifier' | 'contentHash'>, base: Pick<KeptService, 'url' | 'description' | 'walletRole'>, change: { [Key in keyof KeptService]?: KeptService[Key] | undefined }): void {
+    const services = this.state.services ?? [];
+    const same = (service: KeptService): boolean => service.identifier === names.identifier && service.contentHash === names.contentHash;
+    const known = services.find(same);
+    const fresh = known === undefined || known.url !== base.url || known.walletRole !== base.walletRole;
+    const next: KeptService = { ...(fresh ? { identifier: names.identifier, contentHash: names.contentHash } : known), ...base, ...change } as KeptService;
+    if ('failure' in change && change.failure === undefined) delete next.failure;
+    this.change({ services: [...services.filter((service) => !same(service)), next] });
+  }
+
+  /** Note an exchange that gave no usable answer, and give the error the wallet throws for it. */
+  private serviceFailed(names: Pick<TemplateNames, 'identifier' | 'contentHash'>, base: Pick<KeptService, 'url' | 'description' | 'walletRole'>, failure: ServiceCallFailure): Error {
+    this.updateService(names, base, { failure: { at: this.nowSeconds(), kind: failure.kind, message: failure.message, ...(failure.code === undefined ? {} : { code: failure.code }) } });
+    if (failure.kind !== 'declined') return new ServiceUnreachableError(failure.message, failure.kind);
+    return failure.code === 'inputs-spent' ? new InputsSpentError(failure.message) : new ServiceDeclinedError(failure.message, failure.code);
+  }
+
+  /**
+   * The role the service takes in the template, from its hello answer: the one kept, unless `fresh`.
+   * @throws ServiceUnreachableError, ServiceDeclinedError
+   */
+  private async serviceRoleFor(names: Pick<TemplateNames, 'identifier' | 'contentHash'>, base: Pick<KeptService, 'url' | 'description' | 'walletRole'>, fresh: boolean): Promise<string> {
+    const known = this.keptService(names, base.url);
+    if (!fresh && known?.walletRole === base.walletRole && known.role !== undefined) return known.role;
+    const answer = await askServiceHello(base.url, { template: { identifier: names.identifier, contentHash: names.contentHash }, role: base.walletRole }, this.callOptions());
+    if (!answer.ok) throw this.serviceFailed(names, base, answer);
+    const role = servedRole(answer.serves, { identifier: names.identifier, contentHash: names.contentHash }, base.walletRole);
+    if (role === undefined) throw this.serviceFailed(names, base, { ok: false, kind: 'declined', message: 'The service does not serve this template.' });
+    this.updateService(names, base, { role, reachedAt: this.nowSeconds(), failure: undefined });
+    return role;
+  }
+
+  /**
+   * The NFTs the wallet holds under a template (those its records tie to it, and those of categories it made with it),
+   * and the categories it made with it and does not hold: what a service is told, and nothing else. A made category
+   * the wallet now holds a token of is no longer kept as made.
+   */
+  private async heldUnder(identifier: string): Promise<{ tokens: { category: string; commitment: string; capability: 'none' | 'mutable' | 'minting'; outpoint: string }[]; made: MadeCategory[] }> {
+    const made = (this.state.made ?? []).filter((entry) => entry.templateIdentifier === identifier);
+    const categories = new Set([...this.positionRecords, ...this.suggestedRecords].flatMap((entry) => (entry.templateIdentifier === identifier && entry.token !== undefined ? [entry.token.category] : [])));
+    for (const entry of made) categories.add(entry.category);
+    const tokens = (await this.wallet.tokenCoins()).flatMap(({ coin }) => {
+      const token = tokenOf(coin);
+      return token === undefined || !categories.has(hex(token.category)) ? [] : [{ category: hex(token.category), commitment: hex(token.commitment), capability: token.capability, outpoint: outpointOf(coin.utxo) }];
+    });
+    const held = new Set(tokens.map((token) => token.category));
+    if (made.some((entry) => held.has(entry.category))) this.change({ made: (this.state.made ?? []).filter((entry) => !(entry.templateIdentifier === identifier && held.has(entry.category))) });
+    return { tokens, made: made.filter((entry) => !held.has(entry.category)) };
+  }
+
+  /**
+   * Ask the service what is possible now, with the wallet's tokens under the template, and keep the answer.
+   * @throws ServiceUnreachableError, ServiceDeclinedError
+   */
+  private async possibleFor(names: Pick<TemplateNames, 'identifier' | 'contentHash'>, base: Pick<KeptService, 'url' | 'description' | 'walletRole'>): Promise<NonNullable<KeptService['possible']>> {
+    const { tokens, made } = await this.heldUnder(names.identifier);
+    const limit = SERVICE_LIMITS.entries;
+    const answer = await askServicePossible(
+      base.url,
+      { template: { identifier: names.identifier, contentHash: names.contentHash }, role: base.walletRole, tokens: tokens.slice(0, limit), made: made.slice(-limit).map(({ category, transactionId }) => ({ category, transactionId })) },
+      this.callOptions(),
+    );
+    if (!answer.ok) throw this.serviceFailed(names, base, answer);
+    const possible = { at: this.nowSeconds(), height: answer.height, start: answer.start, items: answer.items };
+    this.updateService(names, base, { possible, reachedAt: possible.at, failure: undefined });
+    return possible;
+  }
+
+  /**
+   * Speak to a template's service, when the user presses Connect: its hello, then what is possible for the wallet's
+   * tokens under the template. Also done when the user trusts the template in this session (`trust` with `contact`) and
+   * after an action of the template. Never otherwise: nothing here runs in the background or on start-up. A failure
+   * leaves the template trusted and the service noted as not reached, in plain words (`serviceOf`).
+   * @returns the service as the screens show it, or `undefined` for a template that is not trusted
+   */
+  async connect(identifier: string, options: { afterAction?: boolean } = {}): Promise<ServiceStatus | undefined> {
+    const running = this.contacting.get(identifier);
+    if (running !== undefined) return running;
+    const contact = this.contact(identifier, options).finally(() => this.contacting.delete(identifier));
+    this.contacting.set(identifier, contact);
+    return contact;
+  }
+
+  /** The exchange with a template's service under way, if one is: for a screen that shows it, and for tests. */
+  serviceContact(identifier: string): Promise<ServiceStatus | undefined> | undefined {
+    return this.contacting.get(identifier);
+  }
+
+  private async contact(identifier: string, options: { afterAction?: boolean }): Promise<ServiceStatus | undefined> {
+    const kept = this.keptById(identifier);
+    if (kept === undefined) return undefined;
+    const { definition } = readTemplate(kept.text);
+    const resource = this.resourceOf(definition);
+    const walletRole = this.keptService(kept)?.walletRole ?? walletRoleOf(definition);
+    if (resource?.usable !== true || walletRole === undefined) return this.serviceOf(identifier);
+    const base = { url: resource.url, description: resource.description, walletRole };
+    try {
+      await this.serviceRoleFor(kept, base, options.afterAction !== true);
+      await this.possibleFor(kept, base);
+    } catch (error) {
+      // Noted in what the wallet keeps about the service; the template stays trusted.
+      if (!(error instanceof ActionRefusedError || error instanceof InputsSpentError)) throw error;
+    }
+    return this.serviceOf(identifier);
+  }
+
+  /** A trusted template's service, as the screens show it: `undefined` where the template names none for this network. */
+  serviceOf(identifier: string): ServiceStatus | undefined {
+    const kept = this.keptById(identifier);
+    if (kept === undefined) return undefined;
+    const { definition } = readTemplate(kept.text);
+    const resource = this.resourceOf(definition);
+    if (resource === undefined) return undefined;
+    if (!resource.usable) return { description: resource.description, state: 'not usable', problem: resource.reason };
+    const roleName = (role: string): { role: string; name: string } => ({ role, name: definition.roles?.[role]?.name ?? role });
+    const service = this.keptService(kept, resource.url);
+    const walletRole = service?.walletRole ?? walletRoleOf(definition);
+    const state = service?.failure !== undefined ? 'not reached' : service?.reachedAt !== undefined ? 'reached' : 'never asked';
+    return {
+      description: resource.description,
+      url: resource.url,
+      state,
+      ...(walletRole === undefined ? {} : { walletRole: roleName(walletRole) }),
+      ...(service?.role === undefined ? {} : { role: roleName(service.role) }),
+      ...(service?.reachedAt === undefined ? {} : { reachedAt: service.reachedAt }),
+      ...(service?.possible === undefined ? {} : { checkedAt: service.possible.at }),
+      ...(service?.failure === undefined ? {} : { failure: service.failure }),
+    };
+  }
+
+  /**
+   * An action as the wallet offers it, in the template's words: what a person is asked to type, and, where the action
+   * needs what only the application gives, why it is not offered by the wallet alone.
+   */
+  private offerOf(definition: ReadTemplate['definition'], action: string, role: string, options: { service?: ServiceOffer; alone?: boolean }): TokenAction | undefined {
+    const shape = actionShape(definition, action, role);
+    if (typeof shape === 'string') return undefined;
+    const described = (variable: string) => ({ variable, name: definition.variables?.[variable]?.name ?? variable, description: definition.variables?.[variable]?.description ?? '', type: String(variableType(definition, variable) ?? 'bytes') });
+    const { asks, missing } = askedValues(definition, shape);
+    const reasons = [
+      ...(options.alone === true ? applicationInputs(definition, shape).map(({ input }) => `It spends a coin of the application's, "${definition.inputs?.[input]?.name ?? input}", which only the application can name.`) : []),
+      ...(missing.length === 0 ? [] : [`It needs ${missing.map((variable) => `"${described(variable).name}"`).join(', ')}, which only the application gives.`]),
+    ];
+    const words = definition.actions?.[action];
+    return {
+      action,
+      role,
+      name: words?.name ?? action,
+      description: words?.description ?? '',
+      ...(asks.length === 0 ? {} : { asks: asks.map(described) }),
+      ...(reasons.length === 0 ? {} : { needsApplication: reasons.join(' ') }),
+      ...(options.service === undefined ? {} : { service: options.service }),
+    };
+  }
+
+  /** The follow-up actions the template's service last said a token of a category offers, each one the template allows. */
+  private serviceActions(kept: KeptTemplate, category: string, categories: Set<string>): (TokenAction & { item: ServiceItem; place: string })[] {
+    const { definition } = readTemplate(kept.text);
+    const resource = this.resourceOf(definition);
+    const service = resource?.usable === true ? this.keptService(kept, resource.url) : undefined;
+    const possible = service?.possible;
+    if (service === undefined || possible === undefined) return [];
+    const offered: (TokenAction & { item: ServiceItem; place: string })[] = [];
+    for (const item of possible.items) {
+      if (item.category !== category || offered.some((known) => known.action === item.action)) continue;
+      const checked = checkServiceItem(definition, service.walletRole, item, categories);
+      if (!checked.ok) continue;
+      const says = (item.says ?? []).map(({ variable, value }) => ({ variable, name: definition.variables?.[variable]?.name ?? variable, value: String(value) }));
+      const offer = this.offerOf(definition, item.action, service.walletRole, { service: { checkedAt: possible.at, ...(says.length === 0 ? {} : { says }) } });
+      if (offer !== undefined) offered.push({ ...offer, item, place: checked.place });
+    }
+    return offered;
+  }
+
+  /**
+   * What a template the user trusts offers from the wallet itself (decision of 22 November 2026: every action is visible
+   * once the template is trusted): its starting actions for the wallet's role, each with what its service last said of
+   * it (never asked: offered, and checked when the user acts); and the actions its service offers on tokens the wallet
+   * made with it and does not hold, such as one that waits in the application's contract, under the template's name for
+   * where it waits. Nothing is asked of the service here.
+   */
+  async templateActions(identifier: string): Promise<TemplateActions | undefined> {
+    const kept = this.keptById(identifier);
+    if (kept === undefined) return undefined;
+    const { definition } = readTemplate(kept.text);
+    const service = this.serviceOf(identifier);
+    const resource = this.resourceOf(definition);
+    const keptService = resource?.usable === true ? this.keptService(kept, resource.url) : undefined;
+    const role = keptService?.walletRole ?? walletRoleOf(definition);
+    const template = { identifier, name: kept.name };
+    if (role === undefined) return { template, ...(service === undefined ? {} : { service }), starting: [], waiting: [] };
+    const possible = keptService?.possible;
+    const starting = startingActionsOf(definition, role).flatMap((action): TemplateAction[] => {
+      const needsService = otherParticipants(definition, action, role).length > 0;
+      if (!needsService) return [this.offerOf(definition, action, role, { alone: true })].filter((offer): offer is TokenAction => offer !== undefined);
+      const said = possible?.start.find((entry) => entry.action === action);
+      const offer = this.offerOf(definition, action, role, {
+        service: { ...(said === undefined ? {} : { available: said.available, ...(said.reason === undefined ? {} : { reason: said.reason }) }), ...(possible === undefined ? {} : { checkedAt: possible.at }) },
+      });
+      if (offer === undefined) return [];
+      return [resource?.usable === true ? offer : { ...offer, needsApplication: `It needs the template's service, which this wallet cannot use here${resource === undefined ? '' : `: ${resource.reason}`}` }];
+    });
+    const { made } = await this.heldUnder(identifier);
+    const categories = new Set(made.map((entry) => entry.category));
+    const waiting = made.flatMap((entry) => this.serviceActions(kept, entry.category, categories).map(({ item, place, ...offer }): TemplateAction => ({ ...offer, waiting: { category: item.category, at: place } })));
+    return { template, role, ...(service === undefined ? {} : { service }), starting, waiting };
+  }
+
+  /** A starting action of a trusted template, as the user asks for it from the wallet itself, with what they typed. */
+  startAction(identifier: string, action: string, typed: Record<string, string | number> = {}): ApplicationAction {
+    const kept = this.keptById(identifier);
+    if (kept === undefined) return refuse('This wallet does not trust that template.');
+    const { definition } = readTemplate(kept.text);
+    const role = this.keptService(kept)?.walletRole ?? walletRoleOf(definition);
+    if (role === undefined || !startingActionsOf(definition, role).includes(action)) return refuse(`The template "${kept.name}" offers no starting action "${action}" to the wallet.`);
+    return { template: { identifier: kept.identifier, contentHash: kept.contentHash }, action, role, variables: {}, fromWallet: { typed } };
+  }
+
+  /** An action on a token the wallet made with a template and does not hold (`TemplateActions.waiting`), with what the user typed. */
+  waitingAction(identifier: string, category: string, action: string, typed: Record<string, string | number> = {}): ApplicationAction {
+    const kept = this.keptById(identifier);
+    if (kept === undefined) return refuse('This wallet does not trust that template.');
+    const service = this.keptService(kept);
+    const item = service?.possible?.items.find((candidate) => candidate.category === category && candidate.action === action);
+    if (service === undefined || item === undefined) return refuse('Its service does not offer that action for this token now.');
+    return { template: { identifier: kept.identifier, contentHash: kept.contentHash }, action, role: service.walletRole, variables: {}, about: { category, spent: item.about?.spent ?? false }, fromWallet: { typed } };
+  }
+
+  /**
+   * Whether an action is carried out with the template's service, and where (decision E of 22 November 2026): an action
+   * whose template requires a participant in a role other than the request's goes through the service the template
+   * names; one that requires no other participant is carried out by the wallet alone, from the request, as always.
+   * @throws ActionRefusedError for an action that needs another participant where no usable service is named
+   */
+  private serviceRoute(request: ApplicationAction, template: ReadTemplate): { url: string; description: string } | undefined {
+    const { definition } = template;
+    const others = otherParticipants(definition, request.action, request.role);
+    if (others.length === 0) return undefined;
+    const action = `"${definition.actions?.[request.action]?.name ?? request.action}"`;
+    const roles = others.map((role) => `"${definition.roles?.[role]?.name ?? role}"`).join(' and ');
+    if (others.length > 1) return refuse(`${action} needs ${roles} to take part; this wallet carries out an action with one service at most. Nothing was signed.`);
+    const resource = this.resourceOf(definition);
+    if (resource?.usable !== true) return refuse(`${action} needs ${roles} to take part, and the template names no service this wallet can use${resource === undefined ? '' : `: ${resource.reason}`}. Nothing was signed.`);
+    if (Object.keys(request.inputs ?? {}).length > 0) return refuse(`In ${action} the service brings the application's coins: a request names none. Nothing was signed.`);
+    return { url: resource.url, description: resource.description };
+  }
+
+  /**
+   * One round with the service for an action it joins (docs/xo-service.md): what is possible for this token, asked
+   * afresh, and the service's item for it; the wallet's own share, worked out as for an action it carries out alone;
+   * the invitation started with it and sent; what the service added, taken back and checked; and the whole action
+   * worked out to the satoshi by the same rules, with the service's coins as the application's. On any refusal or
+   * failure the invitation is put aside. Nothing is signed.
+   */
+  private async sharedRound(request: ApplicationAction, template: ReadTemplate, route: { url: string; description: string }, definingCoin?: AccountCoin): Promise<PendingShared> {
+    const { definition } = template;
+    const names = { identifier: template.identifier, contentHash: template.contentHash };
+    const actionName = `"${definition.actions?.[request.action]?.name ?? request.action}"`;
+    this.judge(template, request);
+    await this.awaitOwnOutputs();
+    const base = { url: route.url, description: route.description, walletRole: request.role };
+    const role = await this.serviceRoleFor(names, base, false);
+    if (!otherParticipants(definition, request.action, request.role).includes(role)) return refuse(`The service takes the role "${role}", which ${actionName} does not need. Nothing was signed.`);
+    const possible = await this.possibleFor(names, base);
+    const made = new Set((this.state.made ?? []).filter((entry) => entry.templateIdentifier === template.identifier).map((entry) => entry.category));
+    let item: ServiceItem | undefined;
+    let asked = request;
+    if (request.about === undefined) {
+      const said = possible.start.find((entry) => entry.action === request.action);
+      if (said?.available === false) throw new ServiceDeclinedError(SERVICE_WORDS.declined(said.reason ?? 'not now.'));
+    } else {
+      const { category } = request.about;
+      const categories = new Set([...made, ...(await this.wallet.tokenCoins()).flatMap(({ coin }) => (tokenOf(coin) === undefined ? [] : [hex(tokenOf(coin)?.category as Uint8Array)]))]);
+      item = possible.items.find((candidate) => candidate.action === request.action && candidate.category === category && checkServiceItem(definition, request.role, candidate, categories).ok);
+      if (item === undefined) return refuse(`Its service does not offer ${actionName} for this token now.`);
+      const bindings = request.bindings ?? item.bindings;
+      asked = { ...request, about: item.about ?? request.about, ...(bindings === undefined ? {} : { bindings }) };
+    }
+
+    // The wallet's own share, by the rules of an action it carries out alone; the coins of its first commit.
+    const frame = await this.frame(asked, template, { made });
+    const shape = actionShape(definition, asked.action, asked.role);
+    if (typeof shape === 'string') return refuse(shape);
+    let defining = definingCoin;
+    if (frame.creates !== undefined) defining ??= (await this.wallet.ownCoins()).filter((coin) => coin.utxo.index === 0).sort((a, b) => (a.utxo.output.valueSatoshis > b.utxo.output.valueSatoshis ? -1 : 1))[0];
+    const virtual = frame.creates !== undefined && defining === undefined;
+    const token = frame.spends ? frame.token : undefined;
+    const places = firstCommitPlaces(shape, { defining: frame.creates !== undefined && defining !== undefined, token: token !== undefined });
+    const committed = [
+      ...(frame.creates === undefined || defining === undefined ? [] : [{ coin: defining, place: places.defining }]),
+      ...(token === undefined ? [] : [{ coin: token.coin, place: places.token, ...(frame.tokenInput === undefined ? {} : { inputIdentifier: frame.tokenInput.input }) }]),
+    ];
+    const values: TemplateValues = { ...frame.values, ...(frame.creates === undefined ? {} : { [frame.creates]: defining === undefined ? PLACEHOLDER_CATEGORY : hex(defining.utxo.transactionHash) }) };
+    const identifier = await this.wallet.backend.importTemplate(template.text);
+    if (identifier !== template.identifier) throw new Error('The key holder gives the template another identifier than the one it was trusted under.');
+    const started = await this.wallet.backend.startShared({
+      template: identifier,
+      action: asked.action,
+      role: asked.role,
+      variables: values,
+      inputs: committed.map(({ coin, place, ...rest }) => ({ coin, ...rest, ...(place === undefined ? {} : { place }) })),
+    });
+    const sentAt = Date.now();
+    try {
+      const joined = await askServiceJoin(route.url, { invitation: started.text, ...(item === undefined ? {} : { ref: item.ref }) }, this.callOptions());
+      if (!joined.ok) throw this.serviceFailed(names, base, joined);
+      this.updateService(names, base, { reachedAt: this.nowSeconds(), failure: undefined });
+      const took = await takeJoinedInvitation(this.wallet.backend, started, joined.invitation);
+      if (!took.ok) throw new ServiceAnswerRefusedError(took.reason, took.code);
+      const accepted = await checkOtherParticipant({
+        template: definition,
+        action: asked.action,
+        walletRole: asked.role,
+        otherRole: role,
+        committed: took.taken.own,
+        added: took.taken.others,
+        chain: this.wallet.chain,
+        now: Date.now(),
+        answerBy: sentAt + SHARED_ANSWER_LIMIT_MS,
+      });
+      if (!accepted.ok) throw new ServiceAnswerRefusedError(accepted.reason, accepted.code);
+      const notBrought = accepted.left.inputs.filter((input) => input !== frame.tokenInput?.input);
+      if (notBrought.length > 0) return refuse(`The service did not bring ${notBrought.map((input) => `"${definition.inputs?.[input]?.name ?? input}"`).join(', ')}, which only it can give. Nothing was signed.`);
+      // The whole action, by the rules of one the wallet carries out alone, with the service's coins in the template's order.
+      const order = shape.inputs.map(({ input }) => input);
+      const theirs = [...accepted.theirInputs].sort((a, b) => order.indexOf(a.inputIdentifier) - order.indexOf(b.inputIdentifier));
+      const plan = await this.complete(
+        {
+          ...frame,
+          values: { ...accepted.values },
+          applicationCoins: theirs.map(({ inputIdentifier, index, utxo, lockingScript }) => ({ input: inputIdentifier, ...(index === undefined ? {} : { index }), utxo, lockingScript })),
+          follow: new Map(),
+          following: new Map(),
+        },
+        asked,
+        defining,
+      );
+      for (const { coin, place } of committed) {
+        if (place === undefined || plan.inputs[place]?.coin !== coin) return refuse('The service\'s part does not leave the wallet\'s coins where the wallet put them. Nothing was signed.');
+      }
+      return { request: asked, url: route.url, role, started, committed: committed.map(({ coin }) => coin), accepted, plan, ...(item === undefined ? {} : { item }), ...(plan.made === undefined ? {} : { made: plan.made }), virtual };
+    } catch (error) {
+      await this.wallet.backend.abandonShared(started.invitationIdentifier).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Put aside an invitation worked out with a service: the coins it held are free again. */
+  private async putAside(pending: PendingShared): Promise<void> {
+    await this.wallet.backend.abandonShared(pending.started.invitationIdentifier).catch(() => undefined);
+  }
+
+  /**
+   * Put aside the action a review worked out with a service, when the user declines it or leaves the review: the coins
+   * the invitation held are free again. Nothing is sent to the service.
+   */
+  async discardPreview(request: ApplicationAction): Promise<void> {
+    const key = requestKey(request);
+    const pending = this.pendingShared.get(key);
+    if (pending === undefined) return;
+    this.pendingShared.delete(key);
+    await this.putAside(pending);
+  }
+
+  /** The service's part of a review: its values by the template's names, and what it said beside them. */
+  private servicePart(definition: ReadTemplate['definition'], pending: PendingShared): ServicePart {
+    const variables = (definition.actions?.[pending.request.action]?.roles?.[pending.role]?.requirements?.variables ?? []) as string[];
+    return {
+      role: pending.role,
+      roleName: definition.roles?.[pending.role]?.name ?? pending.role,
+      url: pending.url,
+      values: variables.flatMap((variable) => (pending.accepted.values[variable] === undefined ? [] : [statedValue(definition, variable, pending.accepted.values[variable])])),
+      says: (pending.item?.says ?? []).map(({ variable, value }) => ({ variable, name: definition.variables?.[variable]?.name ?? variable, value: String(value) })),
+    };
+  }
+
+  /**
+   * Carry out an action another participant joins through the template's service, on the user's approval: the round the
+   * review worked out (or a fresh one, for an approval given without a review), with every safeguard of an action the
+   * wallet carries out alone: the user's tick, a position that is not confirmed, the template and the records stored in
+   * the backup before anything is signed, the wallet paying itself first where it has no coin that can define a new
+   * token, and what is built held against what was worked out. On any refusal or failure the invitation is put aside.
+   */
+  private async carryOutShared(request: ApplicationAction, route: { url: string; description: string }, onStage: (stage: 'recorded' | 'sent') => void, consent: ActionConsent): Promise<ActionOutcome> {
+    const key = requestKey(request);
+    const { template } = this.templateOf(request);
+    let pending = this.pendingShared.get(key);
+    // A tick not given leaves the review's invitation waiting, for the approval with the tick.
+    if (pending !== undefined) this.requireTick(pending.plan, consent);
+    this.pendingShared.delete(key);
+    pending ??= await this.sharedRound(request, template, route);
+    let held: ReservedAddress[] = [];
+    let prepared: PreparedTransaction;
+    let kept: KeptTemplate;
+    try {
+      // Everything that can refuse the action does so before the template is taken in.
+      this.requireTick(pending.plan, consent);
+      await this.onlyTakingOut(pending.plan, pending.request);
+      kept = await this.ensureStored(await this.trustOnly(request.template, request.presented, request.application));
+      onStage('recorded');
+      if (pending.virtual) {
+        // As for an action the wallet carries out alone, it first pays itself a coin that can define the new category,
+        // then works the action out again with that coin: here with a fresh answer of the service, which may give the
+        // wallet no less than was shown.
+        const shown = pending;
+        await this.putAside(shown);
+        const { coin } = await this.wallet.payItself(shown.plan.payItself as bigint);
+        pending = await this.sharedRound(request, template, route, coin);
+        if (worseForTheWallet(shown.plan, pending.plan)) return refuse('The service\'s answer changed after the review: the wallet would give more or get less than was shown. Nothing was signed. Ask again.');
+        this.requireTick(pending.plan, consent);
+      }
+      const { plan } = pending;
+      await this.wallet.hold(plan.reserved);
+      held = plan.reserved;
+      // What the action leaves is recorded, from the transaction worked out, before anything is signed.
+      await this.storeRecords(await this.recordsOf(plan, pending.request));
+      const theirs = new Set(pending.accepted.theirOutputs.map(({ outputIdentifier }) => outputIdentifier));
+      const finish: SharedActionFinish = {
+        invitationIdentifier: pending.started.invitationIdentifier,
+        inputs: plan.inputs.flatMap(({ coin, kind }, place) => (kind === 'own' || kind === 'tokens' ? [{ coin, place }] : [])),
+        outputs: plan.outputs.flatMap(({ output, identifier, wallet }, place) =>
+          identifier !== undefined && theirs.has(identifier) ? [] : [identifier === undefined || wallet === 'left over' ? { ...output, place } : { outputIdentifier: identifier, place }],
+        ),
+        theirCoins: pending.accepted.theirInputs.map(({ utxo }) => utxo),
+      };
+      const { committed } = pending;
+      prepared = await (this.wallet.finishShared?.(finish, committed) ?? this.wallet.backend.finishShared(finish));
+      try {
+        this.check(plan, prepared);
+      } catch (error) {
+        await this.wallet.backend.discard(prepared.invitationIdentifier);
+        throw error;
+      }
+    } catch (error) {
+      // Nothing was sent and no signature left the wallet.
+      await this.putAside(pending);
+      this.wallet.giveBack(held);
+      throw error;
+    }
+    await this.sendShared(pending.plan, prepared);
+    onStage('sent');
+    return this.afterSending(pending.plan, prepared, kept, pending.made);
+  }
+
+  /** Send what was built, as for an action the wallet carries out alone. */
+  private async sendShared(plan: Plan, prepared: PreparedTransaction): Promise<void> {
+    try {
+      await this.wallet.send(prepared);
+    } catch (error) {
+      if (error instanceof Error && inputsSpentRefusal(error.message)) throw new InputsSpentError(error.message);
+      throw error;
+    } finally {
+      this.wallet.keep(plan.used);
+      this.wallet.giveBack(plan.reserved.filter((entry) => !plan.used.includes(entry)));
+    }
   }
 
   // ------------------------------------------------------------------ tokens and positions
@@ -1987,7 +2678,7 @@ export class Applications {
    *   checked as if it were trusted, since nothing is done unless the user approves
    * @throws when the chain cannot be read: the list is then not to be taken as empty
    */
-  async recordedPositions(options: { template?: string; categories?: Set<string>; trusting?: ReadTemplate } = {}): Promise<RecordedPosition[]> {
+  async recordedPositions(options: { template?: string; categories?: Set<string>; trusting?: ReadTemplate; holding?: TokenCoin } = {}): Promise<RecordedPosition[]> {
     await this.awaitOwnOutputs();
     const check = this.options.checkRecord ?? checkPositionRecord;
     const records: { entry: PositionRecordEntry; standing: RecordedPosition['standing'] }[] = [];
@@ -2002,7 +2693,10 @@ export class Applications {
       }
     }
     if (records.length === 0) return [];
-    const coins = (await this.wallet.tokenCoins()).filter(({ coin }) => coin.utxo.output.token?.nft !== undefined);
+    const coins = withHeld(await this.wallet.tokenCoins(), options.holding).filter(({ coin }) => coin.utxo.output.token?.nft !== undefined);
+    // The check reads the wallet's tokens too: with the one an invitation holds, where one does.
+    const held = options.holding;
+    const viewed: Pick<WalletParts, 'chain' | 'tokenCoins'> = held === undefined ? this.wallet : { chain: this.wallet.chain, tokenCoins: async () => withHeld(await this.wallet.tokenCoins(), held) };
     const nameOf = (identifier: string): string | undefined => this.state.templates.find((template) => template.identifier === identifier)?.name ?? (this.state.suggested ?? []).find((template) => template.identifier === identifier)?.name;
     const read = new Map<string, ReadTemplate>();
     const trusted = (identifier: string): ReadTemplate | undefined => {
@@ -2035,7 +2729,7 @@ export class Applications {
         // A record of a template the user does not trust cannot be checked: its token is listed as a token of that
         // template, with the way to trust it, and not as a position the chain does not confirm.
         if (trusted(entry.templateIdentifier) === undefined) continue;
-        const verdict = await check(entry, this.wallet, trusted(entry.templateIdentifier));
+        const verdict = await check(entry, viewed, trusted(entry.templateIdentifier));
         // A record that counts belongs to the coin the check tied it to.
         if (verdict.counts && verdict.heldAt !== undefined && verdict.heldAt !== outpoint) continue;
         const script = verdict.lockingBytecode === undefined ? this.recordScript(entry) : hex(verdict.lockingBytecode);
@@ -2043,7 +2737,11 @@ export class Applications {
       }
       const position = async (item: (typeof checked)[number], status: RecordedStatus, reason?: string): Promise<RecordedPosition> => {
         const lockingScript = item.entry.lockingScriptIdentifier === undefined ? undefined : (trusted(item.entry.templateIdentifier)?.definition.lockingScripts?.[item.entry.lockingScriptIdentifier] as { roles?: Record<string, { actions?: { action: string }[] }> } | undefined);
-        const actions = lockingScript?.roles?.[item.entry.roleIdentifier ?? '']?.actions?.map(({ action }) => action);
+        const scriptActions = lockingScript?.roles?.[item.entry.roleIdentifier ?? '']?.actions?.map(({ action }) => action);
+        // And those the template's service last said the token offers.
+        const keptTemplate = this.keptById(item.entry.templateIdentifier);
+        const serviceActions = keptTemplate === undefined ? [] : this.serviceActions(keptTemplate, category, new Set([category])).map(({ action }) => action).filter((action) => !(scriptActions ?? []).includes(action));
+        const actions = scriptActions === undefined && serviceActions.length === 0 ? undefined : [...(scriptActions ?? []), ...serviceActions];
         const name = nameOf(item.entry.templateIdentifier);
         const definition = this.state.templates.some((kept) => kept.identifier === item.entry.templateIdentifier) ? trusted(item.entry.templateIdentifier)?.definition : undefined;
         const tokenName = definition === undefined ? undefined : recordTokenName(definition, item.entry);
@@ -2087,14 +2785,15 @@ export class Applications {
    * of a record that the wallet lists as not confirmed.
    */
   private async notConfirmedAt(plan: Plan, request: ApplicationAction): Promise<string | undefined> {
+    // A category the request names whose token the wallet does not hold (one it made, waiting elsewhere) is no position of the wallet's.
     const about = new Set([
-      ...(request.about === undefined ? [] : [request.about.category]),
+      ...(request.about === undefined || plan.token === undefined ? [] : [request.about.category]),
       ...(plan.token === undefined ? [] : [hex(plan.token.coin.utxo.output.token?.category ?? new Uint8Array())]),
     ]);
     const touched = new Set([...plan.outputs.filter(({ wallet }) => wallet === undefined).map(({ output }) => hex(output.lockingBytecode)), ...plan.inputs.filter(({ kind }) => kind === 'application').map(({ coin }) => hex(coin.utxo.output.lockingBytecode))]);
     const named = [...this.positionRecords, ...this.suggestedRecords].filter((entry) => entry.token !== undefined && touched.has(this.recordScript(entry) ?? '')).map((entry) => entry.token?.category as string);
     if (about.size === 0 && named.length === 0) return undefined;
-    const listed = await this.recordedPositions({ categories: new Set([...about, ...named]), trusting: plan.template });
+    const listed = await this.recordedPositions({ categories: new Set([...about, ...named]), trusting: plan.template, ...(plan.token === undefined ? {} : { holding: plan.token }) });
     const confirmed = (position: RecordedPosition): boolean => position.status !== 'unconfirmed';
     for (const category of about) {
       const ofToken = listed.filter((position) => position.token.category === category);
@@ -2219,13 +2918,25 @@ export class Applications {
    * record names. An action that spends the position is not offered once it is closed, and one that only pays into
    * it is not offered while it is not confirmed. A record that names no script offers nothing here: what its token
    * controls is the application's to show, at the page the record names (`RecordedPosition.page`).
+   *
+   * For a template whose service takes part in its actions, the follow-up actions its service last said the token
+   * offers come after, each one the template allows (a service cannot invent an action), with the time of that answer.
+   * Nothing is asked of the service here.
    */
   offeredActions(position: Pick<RecordedPosition, 'template' | 'record' | 'status'>): TokenAction[] {
     const kept = this.keptById(position.template.identifier);
+    if (kept === undefined) return [];
+    const category = position.record.token?.category;
+    const fromService = category === undefined ? [] : this.serviceActions(kept, category, new Set([category])).map(({ item: _item, place: _place, ...offer }) => offer);
+    const fromScript = this.scriptActions(kept, position).filter((offer) => !fromService.some((known) => known.action === offer.action));
+    return [...fromScript, ...fromService];
+  }
+
+  private scriptActions(kept: KeptTemplate, position: Pick<RecordedPosition, 'template' | 'record' | 'status'>): TokenAction[] {
     const { record } = position;
     const script = record.lockingScriptIdentifier;
     const role = record.roleIdentifier;
-    if (kept === undefined || script === undefined || role === undefined) return [];
+    if (script === undefined || role === undefined) return [];
     const { definition } = readTemplate(kept.text);
     const page = record.applicationPage;
     const described = (variable: string) => ({ variable, name: definition.variables?.[variable]?.name ?? variable, description: definition.variables?.[variable]?.description ?? '', type: String(variableType(definition, variable) ?? 'bytes') });
