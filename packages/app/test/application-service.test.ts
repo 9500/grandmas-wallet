@@ -338,6 +338,33 @@ describe('an application\'s service: an action carried out with the page closed'
     expect(device.state().applications?.made ?? []).toEqual([]);
   });
 
+  it('after an action, the service is asked what is possible once the key holder lists what the action gave the wallet: a token received is told as held', async () => {
+    const asked: ServicePossibleRequest[] = [];
+    const { device, applications } = await withService({
+      possible: (request) => {
+        asked.push(request);
+        return { ok: true, height: 1, start: [{ action: 'open', available: true }], items: [] };
+      },
+    });
+    await trusted(applications);
+    // The key holder lists what a transaction gave the wallet a moment after it was sent, as a server does.
+    const listed = device.backend.coins.bind(device.backend);
+    const before = new Set((await listed()).map((coin) => `${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`));
+    let shownFrom: number | undefined;
+    device.backend.coins = async () => {
+      const all = await listed();
+      const fresh = all.filter((coin) => !before.has(`${hex(coin.utxo.transactionHash)}:${coin.utxo.index}`));
+      if (fresh.length === 0) return all;
+      shownFrom ??= Date.now() + 600;
+      return Date.now() >= shownFrom ? all : all.filter((coin) => !fresh.includes(coin));
+    };
+    const outcome = await applications.carryOut(applications.startAction(NAMES.identifier, 'open'));
+    const [category] = outcome.tokens.map((token) => token.category);
+    const after = asked.at(-1);
+    expect(after?.tokens.map((token) => token.category)).toEqual([category]);
+    expect(after?.made).toEqual([]);
+  });
+
   it('a follow-up: the value a person gives is asked for and committed as a number; the wallet pays in, and its token comes back', async () => {
     const { service, applications } = await withService();
     const { position } = await opened(applications);

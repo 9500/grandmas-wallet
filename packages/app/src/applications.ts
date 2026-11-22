@@ -2125,6 +2125,8 @@ export class Applications {
    * @throws ServiceUnreachableError, ServiceDeclinedError
    */
   private async possibleFor(names: Pick<TemplateNames, 'identifier' | 'contentHash'>, base: Pick<KeptService, 'url' | 'description' | 'walletRole'>): Promise<NonNullable<KeptService['possible']>> {
+    // Right after an action, what it gave the wallet is told as held, not as made: the key holder lists it first.
+    await this.awaitOwnOutputs();
     const { tokens, made } = await this.heldUnder(names.identifier);
     const limit = SERVICE_LIMITS.entries;
     const answer = await askServicePossible(
