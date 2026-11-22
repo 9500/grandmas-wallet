@@ -119,7 +119,8 @@ NAMES=(wallet recoverer jar landing)
 # /service/ to Paryon's service, which listens on this machine only.
 if [ "$LOAN" = yes ]; then
   page loan "loan page" 8104 --connect https://oracles.generalprotocols.com --forward /service/=http://127.0.0.1:8106
-  unit paryon-service "Paryon's service" "$ROOT" --import tsx apps/paryon-service/src/cli.ts --config "$RELEASE/config.json" --host 127.0.0.1 --port 8106
+  # The public address is behind Cloudflare, then the reverse proxy: the client's address is the one Cloudflare gives.
+  unit paryon-service "Paryon's service" "$ROOT" --import tsx apps/paryon-service/src/cli.ts --config "$RELEASE/config.json" --host 127.0.0.1 --port 8106 --client-address-header cf-connecting-ip
   NAMES+=(loan paryon-service)
 fi
 for number in $(seq 1 "$STORES"); do

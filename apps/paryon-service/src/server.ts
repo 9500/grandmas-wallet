@@ -1,4 +1,5 @@
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
+import { isIP } from 'node:net';
 
 import { binToHex } from '@bitauth/libauth';
 import {
@@ -277,12 +278,42 @@ export const paryonServiceHandlers = (served: readonly ServedNetwork[], dependen
 export const PER_HOUR = { hello: 120, possible: 60, join: 30 } as const;
 type Kind = keyof typeof PER_HOUR;
 
-/** Requests per address and hour, kept in memory: the address the reverse proxy adds last to X-Forwarded-For, or the connection's. */
-export const clientOf = (request: IncomingMessage): string => {
+/** A client's address for the limits, and where it came from, in words that hold no address (`address-source …`). */
+export interface ClientAddress {
+  address: string;
+  source: string;
+}
+
+/**
+ * The client's address, by which requests are counted per address and hour: kept in memory, never logged.
+ *
+ * - With `trustedHeader` (an installation behind a proxy that sets it, such as Cloudflare's `cf-connecting-ip`): that
+ *   header, where the request has it once, holding one plausible IP address.
+ * - Otherwise, and where that header is missing or malformed: the address the reverse proxy adds last to
+ *   X-Forwarded-For, then the connection's.
+ *
+ * Without `trustedHeader` no such header is read: on an installation not behind that proxy anyone could set it to
+ * dodge the limits.
+ */
+export const clientAddressOf = (request: IncomingMessage, trustedHeader?: string): ClientAddress => {
+  if (trustedHeader !== undefined) {
+    const given = request.headers[trustedHeader.toLowerCase()];
+    const value = typeof given === 'string' ? given.trim() : undefined;
+    if (value !== undefined && isIP(value) !== 0) return { address: value, source: trustedHeader.toLowerCase() };
+  }
   const forwarded = request.headers['x-forwarded-for'];
-  const last = (Array.isArray(forwarded) ? forwarded.join(',') : (forwarded ?? '')).split(',').map((part) => part.trim()).filter((part) => part !== '').pop();
-  return last ?? request.socket.remoteAddress ?? 'unknown';
+  const entries = (Array.isArray(forwarded) ? forwarded.join(',') : (forwarded ?? '')).split(',').map((part) => part.trim()).filter((part) => part !== '');
+  const last = entries.at(-1);
+  if (last !== undefined) return { address: last, source: `x-forwarded-for entries=${entries.length}` };
+  return { address: request.socket.remoteAddress ?? 'unknown', source: 'connection' };
 };
+
+/** Requests per address and hour, kept in memory: the address the reverse proxy adds last to X-Forwarded-For, or the connection's. */
+export const clientOf = (request: IncomingMessage): string => clientAddressOf(request).address;
+
+/** A header name a client address may be taken from (`--client-address-header`), or the reason it cannot be. */
+export const clientAddressHeaderProblem = (name: string): string | undefined =>
+  /^[a-z0-9][a-z0-9-]{0,63}$/i.test(name) && !['host', 'content-type', 'content-length', 'origin'].includes(name.toLowerCase()) ? undefined : `"${name}" is not a header a client's address can be taken from.`;
 
 export class RateLimit {
   private readonly recent = new Map<string, number[]>();
@@ -324,6 +355,11 @@ export interface ServerOptions {
   joinWaitMs?: number;
   /** One line per answered message. Default: standard output. */
   log?: (line: string) => void;
+  /**
+   * A header that holds the client's address, set by the proxy in front (`clientAddressOf`): only for an installation
+   * behind that proxy. Without it, X-Forwarded-For and the connection, as before.
+   */
+  clientAddressHeader?: string;
 }
 
 const KINDS: Record<string, Kind> = { [SERVICE_HELLO]: 'hello', [SERVICE_POSSIBLE_REQUEST]: 'possible', [SERVICE_JOIN_REQUEST]: 'join' };
@@ -371,6 +407,12 @@ export const createServiceServer = (options: ServerOptions): Server => {
   const joins = options.joins ?? new Gate(2, 4);
   const joinWaitMs = options.joinWaitMs ?? 5_000;
   const log = options.log ?? ((line: string) => console.log(line));
+  if (options.clientAddressHeader !== undefined) {
+    const problem = clientAddressHeaderProblem(options.clientAddressHeader);
+    if (problem !== undefined) throw new Error(problem);
+  }
+  // Where the client's address came from, said on the first request and whenever it changes; the address itself never.
+  let addressSource: string | undefined;
   const sweeper = setInterval(() => limit.sweep(), 600_000);
   sweeper.unref();
 
@@ -406,7 +448,12 @@ export const createServiceServer = (options: ServerOptions): Server => {
       if (!whole) request.destroy();
       log(`${kind ?? 'unreadable'} ${network} ${outcomeOf(answer)} ${Math.round(performance.now() - started)}ms`);
     };
-    const wait = limit.take(kind ?? 'hello', clientOf(request));
+    const client = clientAddressOf(request, options.clientAddressHeader);
+    if (client.source !== addressSource) {
+      addressSource = client.source;
+      log(`address-source ${client.source}`);
+    }
+    const wait = limit.take(kind ?? 'hello', client.address);
     if (wait !== undefined) {
       finish(serviceCarriageFailure(429, `At most ${PER_HOUR[kind ?? 'hello']} such messages an hour are taken from one address. Try again later.`, { code: 'too-many', retryAfter: wait }));
       return;
@@ -451,6 +498,8 @@ export interface ServiceOptions {
   /** Readings of the chain at once, over every network. Default 8. */
   readsAtOnce?: number;
   log?: (line: string) => void;
+  /** A header the proxy in front sets with the client's address (`ServerOptions.clientAddressHeader`). */
+  clientAddressHeader?: string;
 }
 
 /**
@@ -480,6 +529,7 @@ export const paryonServiceServer = (options: ServiceOptions): { server: Server; 
     ...(options.path === undefined ? {} : { path: options.path }),
     joins: new Gate(options.joinsAtOnce ?? 2, options.joinsWaiting ?? 4),
     ...(options.log === undefined ? {} : { log: options.log }),
+    ...(options.clientAddressHeader === undefined ? {} : { clientAddressHeader: options.clientAddressHeader }),
   });
   return {
     server,

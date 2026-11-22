@@ -137,7 +137,8 @@ const forwards = process.argv
 const FORWARD_REQUEST_BYTES = 128 * 1024;
 const FORWARD_ANSWER_BYTES = 256 * 1024;
 const FORWARD_TIMEOUT_MS = 30_000;
-const FORWARDED_HEADERS = ['content-type', 'accept', 'origin', 'access-control-request-method', 'access-control-request-headers'];
+// cf-connecting-ip: the client's address as Cloudflare in front gives it, which the service may be told to trust.
+const FORWARDED_HEADERS = ['content-type', 'accept', 'origin', 'access-control-request-method', 'access-control-request-headers', 'cf-connecting-ip'];
 /** Headers of one connection, not of the answer. */
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'proxy-connection', 'upgrade', 'te', 'trailer']);
 

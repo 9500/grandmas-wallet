@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
+import type { IncomingMessage, Server } from 'node:http';
 
 import { type Output, binToHex, hexToBin } from '@bitauth/libauth';
 import {
@@ -33,7 +33,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { FixtureChain, outputOf, recordedDeployment, recordedOutputs } from '../../../packages/paryon/test/fixture-chain.js';
 import type { EngineShare } from '../src/engine.js';
-import { type EnginePart, type ServedNetwork, type ServiceConfig, Gate, RateLimit, createServiceServer, itemRef, paryonServiceHandlers, servedNetworks } from '../src/server.js';
+import { type EnginePart, type ServedNetwork, type ServiceConfig, Gate, RateLimit, clientAddressHeaderProblem, clientAddressOf, createServiceServer, itemRef, paryonServiceHandlers, servedNetworks } from '../src/server.js';
 
 /**
  * Paryon's service app: the networks a configuration has it serve, its answers to each message against Paryon's chipnet
@@ -297,7 +297,9 @@ describe('the messages', () => {
 
   it('logs one line per message: its kind, its network, what became of it and how long it took; no address, token, coin or value', () => {
     expect(lines.length).toBeGreaterThan(10);
-    for (const line of lines) expect(line).toMatch(/^(hello|possible|join|unreadable) (chipnet|mainnet|mockup|regtest|testnet3|testnet4|-) [a-z0-9-]+ \d+ms$/);
+    // Where the client's address came from is said once, on the first request (all came the same way here), never the address.
+    expect(lines.filter((line) => line.startsWith('address-source '))).toEqual(['address-source connection']);
+    for (const line of lines.filter((entry) => !entry.startsWith('address-source '))) expect(line).toMatch(/^(hello|possible|join|unreadable) (chipnet|mainnet|mockup|regtest|testnet3|testnet4|-) [a-z0-9-]+ \d+ms$/);
     expect(lines).toContain(lines.find((line) => /^join chipnet not-possible \d+ms$/.test(line)));
     const secrets = [keyCategory, ...shares.flatMap((share) => share.inputs.map(({ outpoint: coin }) => coin.split(':')[0] as string)), '127.0.0.1', WALLET_HEX];
     for (const secret of secrets) expect(lines.join('\n')).not.toContain(secret.slice(0, 16));
@@ -322,6 +324,60 @@ describe('the limits', () => {
       expect((await hello('203.0.113.8')).status).toBe(200);
       expect(lines.at(-2)).toMatch(/^hello chipnet http-429 \d+ms$/);
       expect(lines.join('\n')).not.toContain('203.0.113');
+    } finally {
+      await close(server);
+    }
+  });
+
+  it('the client\'s address: from a header the proxy sets only when the service is told to trust it and it holds one address; then X-Forwarded-For; then the connection', () => {
+    const asked = (headers: Record<string, string | string[]>, remoteAddress = '192.0.2.9') => ({ headers, socket: { remoteAddress } }) as unknown as IncomingMessage;
+    const both = { 'cf-connecting-ip': '203.0.113.5', 'x-forwarded-for': '198.51.100.1, 198.51.100.2' };
+    expect(clientAddressOf(asked(both), 'cf-connecting-ip')).toEqual({ address: '203.0.113.5', source: 'cf-connecting-ip' });
+    expect(clientAddressOf(asked({ 'cf-connecting-ip': '2001:db8::7' }), 'CF-Connecting-IP')).toEqual({ address: '2001:db8::7', source: 'cf-connecting-ip' });
+    // Not told to trust it: the header is not read, whatever it holds.
+    expect(clientAddressOf(asked(both))).toEqual({ address: '198.51.100.2', source: 'x-forwarded-for entries=2' });
+    // Missing, malformed, more than one address, or given twice: X-Forwarded-For, then the connection.
+    for (const value of ['', 'not-an-address', '203.0.113.5, 203.0.113.6', '203.0.113.300', ['203.0.113.5', '203.0.113.6']]) {
+      expect(clientAddressOf(asked({ 'cf-connecting-ip': value, 'x-forwarded-for': '198.51.100.1' }), 'cf-connecting-ip')).toEqual({ address: '198.51.100.1', source: 'x-forwarded-for entries=1' });
+      expect(clientAddressOf(asked({ 'cf-connecting-ip': value }), 'cf-connecting-ip')).toEqual({ address: '192.0.2.9', source: 'connection' });
+    }
+    expect(clientAddressOf(asked({}), 'cf-connecting-ip')).toEqual({ address: '192.0.2.9', source: 'connection' });
+    expect(clientAddressHeaderProblem('cf-connecting-ip')).toBeUndefined();
+    for (const name of ['', 'cf connecting ip', 'host', 'x'.repeat(80)]) expect(clientAddressHeaderProblem(name)).toMatch(/not a header/);
+    expect(() => createServiceServer({ handlers: handlersWith(standIn()), clientAddressHeader: 'two words', log: () => undefined })).toThrow(/not a header/);
+  });
+
+  it('behind a proxy that sets the client\'s address, each client is limited by it; the log says where the address came from when that changes, never the address', async () => {
+    const lines: string[] = [];
+    const server = createServiceServer({ handlers: handlersWith(standIn()), limit: new RateLimit({ hello: 1, possible: 1, join: 1 }, () => 1_000_000), clientAddressHeader: 'cf-connecting-ip', log: (line) => lines.push(line) });
+    const url = await listen(server);
+    try {
+      // Every request through the same edge and proxy: the same X-Forwarded-For.
+      const hello = (headers: Record<string, string>) =>
+        fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.1, 172.64.0.9', ...headers }, body: JSON.stringify({ xo_service_v1: buildServiceHello(fields(nextId())) }) });
+      expect((await hello({ 'cf-connecting-ip': '203.0.113.7' })).status).toBe(200);
+      expect((await hello({ 'cf-connecting-ip': '203.0.113.7' })).status).toBe(429);
+      expect((await hello({ 'cf-connecting-ip': '203.0.113.8' })).status).toBe(200);
+      expect((await hello({ 'cf-connecting-ip': '203.0.113.9' })).status).toBe(200);
+      // Without the header, or with one that is not an address, the proxy's entry counts: one client, the edge.
+      expect((await hello({ 'cf-connecting-ip': 'unknown' })).status).toBe(200);
+      expect((await hello({})).status).toBe(429);
+      expect((await hello({ 'cf-connecting-ip': '203.0.113.10' })).status).toBe(200);
+      expect(lines.filter((line) => line.startsWith('address-source '))).toEqual(['address-source cf-connecting-ip', 'address-source x-forwarded-for entries=2', 'address-source cf-connecting-ip']);
+      for (const secret of ['203.0.113', '198.51.100', '172.64', '127.0.0.1']) expect(lines.join('\n')).not.toContain(secret);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it('without being told to trust such a header, the service ignores it: X-Forwarded-For counts, as before', async () => {
+    const server = createServiceServer({ handlers: handlersWith(standIn()), limit: new RateLimit({ hello: 1, possible: 1, join: 1 }, () => 1_000_000), log: () => undefined });
+    const url = await listen(server);
+    try {
+      const hello = (client: string) =>
+        fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.1', 'cf-connecting-ip': client }, body: JSON.stringify({ xo_service_v1: buildServiceHello(fields(nextId())) }) });
+      expect((await hello('203.0.113.7')).status).toBe(200);
+      expect((await hello('203.0.113.8')).status).toBe(429);
     } finally {
       await close(server);
     }
