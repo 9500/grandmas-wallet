@@ -475,8 +475,9 @@ export const course = (options: { directory: string; continuing: boolean; until:
   /**
    * @param apps - the pages the course uses
    * @param served - on the local node, more of the configuration the pages are served with (the loan page's deployment of Paryon's contracts)
+   * @param more - more arguments of `deploy/serve.mjs` for a page, after its own (`--connect`, `--forward`): a service beside the loan page
    */
-  const prepare = async (apps: App[], served: Record<string, unknown> = {}): Promise<void> => {
+  const prepare = async (apps: App[], served: Record<string, unknown> = {}, more: Partial<Record<App, string[]>> = {}): Promise<void> => {
     if (chipnet && !localPages) {
       for (const app of apps) {
         const url = app === 'wallet' ? WALLET : app === 'recoverer' ? RECOVERER : app === 'jar' ? JAR : LOAN;
@@ -509,7 +510,7 @@ export const course = (options: { directory: string; continuing: boolean; until:
     // Each is started as a process of its own, not through a wrapper, so that it ends when the run does.
     for (const app of apps) {
       const port = PORTS[app];
-      await serve(`http://127.0.0.1:${port}/`, process.execPath, ['deploy/serve.mjs', '--root', `apps/${app}/dist`, '--config', configFile, '--host', '127.0.0.1', '--port', String(port), ...(EXTRA[app] ?? [])], `the ${app} page`);
+      await serve(`http://127.0.0.1:${port}/`, process.execPath, ['deploy/serve.mjs', '--root', `apps/${app}/dist`, '--config', configFile, '--host', '127.0.0.1', '--port', String(port), ...(EXTRA[app] ?? []), ...(more[app] ?? [])], `the ${app} page`);
       const version = (await (await fetch(`http://127.0.0.1:${port}/version.json`)).json()) as { commit?: string; network?: string };
       if (version.network !== config.network) throw new Error(`the ${app} page on port ${port} serves ${version.network}, not ${config.network}: something else answers there`);
       log(`${app} page: http://localhost:${port}/, this checkout at ${version.commit}, ${version.network}`);

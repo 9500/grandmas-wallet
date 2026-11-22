@@ -5,13 +5,10 @@
 // loan page is a second tab of the phone that uses it. The wallet reads no recovery declaration: the loan reaches it as
 // Paryon's template, in the page's requests of `xo_v1`.
 //
-// The loan page now sends version 3 of the template, whose actions Paryon's service joins: its requests carry only the
-// borrower's values, and the wallet asks the service for the rest. Until the wallet's screens for services are in this
-// branch, the wallet page refuses those actions. Once they are, this course also needs, on the local node: Paryon's
-// service (apps/paryon-service) started with the same configuration as the loan page, whose `loanUrl` names the loan
-// page's port, and the loan page's server forwarding /service/ to it (`--forward`, in scripts/browser-course.ts
-// `EXTRA`); the wallet page given its service as `local`, so that an `http:` address is allowed; and the steps that read
-// the wallet's review taught the service's part. On chipnet, Paryon's public service serving version 3.
+// The loan page of this checkout sends version 3 of the template, whose actions Paryon's service joins: its requests
+// carry only the borrower's values, and the wallet asks the service for the rest. This course drives the page-driven
+// flow of version 2 and is kept for chipnet's public pages. On the local node, the course of version 3 with Paryon's
+// service, carried out from the wallet's screens with the page closed, is scripts/stage-17-loan-service-browser.ts.
 //
 //   1. Anna opens the recoverer's page and funds her balance    7. the phone is lost, with the loan open
 //   2. Anna sets up Grandma's wallet: the phone scans her code   8. a new phone takes the wallet over and sweeps
