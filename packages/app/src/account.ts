@@ -140,6 +140,8 @@ export class Account implements WalletBackend {
   private readonly preparedAs = new Map<string, { templateIdentifier: string; templateName: string; action: string; role: string }>();
   /** Told of every transaction the account sends, with its invitation. */
   private onSent: ((sent: SentInvitation) => void | Promise<void>) | undefined;
+  /** The satoshis per byte the transactions built from invitations are checked against before sending: 1 unless given. */
+  private feeRate = 1;
   /** Invitations started for another participant to join, not yet finished or put aside, by their identifier. */
   private readonly shared = new Map<string, { text: string; entityIdentifier: string; templateIdentifier: string; templateName: string; definition: XOTemplate; action: string; role: string; coins: AccountCoin[] }>();
 
@@ -164,6 +166,8 @@ export class Account implements WalletBackend {
       onProgress?: (checked: { verifiedHeight: number; currentHeight: number }) => void;
       /** Told of every transaction the account sends, with the invitation it was built from. */
       onSent?: (sent: SentInvitation) => void | Promise<void>;
+      /** The satoshis per byte the wallet pays (its `feeRate`), against which each transaction is checked before sending; 1 unless given. */
+      feeRate?: number;
     } = {},
   ): Promise<Account> {
     const deadline = Date.now() + (options.headerCheckTimeoutMs ?? 120_000);
@@ -189,6 +193,7 @@ export class Account implements WalletBackend {
     }
     const account = new Account(engine, templates);
     account.onSent = options.onSent;
+    account.feeRate = options.feeRate ?? 1;
     await engine.setDefaultPolicies(account.coinPolicies);
     return account;
   }
@@ -403,7 +408,7 @@ export class Account implements WalletBackend {
       // They pay toward the template's own outputs first; only what is left of them may go to the fee.
       const templateOutputsSatoshis = request.outputs.reduce((sum, output, index) => ('outputIdentifier' in output ? sum + (transaction.outputs[index]?.valueSatoshis ?? 0n) : sum), 0n);
       const givenToFee = templateGivenToFee(templateDefinition, request.inputs.map(({ coin, inputIdentifier }) => ({ inputIdentifier, valueSatoshis: coin.utxo.output.valueSatoshis })), typedValues(templateDefinition, request.variables ?? {}), templateOutputsSatoshis);
-      const check = checkBeforeSending({ transaction, sourceOutputs }, undefined, givenToFee);
+      const check = checkBeforeSending({ transaction, sourceOutputs }, this.feeRate, givenToFee);
       if (check !== true) {
         throw new Error(`The transaction fails the check before sending: ${check}`, { cause: { transactionHex: builtTransaction.serializedTransaction, sourceOutputs } });
       }
@@ -517,7 +522,7 @@ export class Account implements WalletBackend {
       const sourceOutputs = transaction.inputs.map((input) => known.get(`${hex(input.outpointTransactionHash)}:${input.outpointIndex}`));
       if (transaction.inputs.length !== known.size || sourceOutputs.some((output) => output === undefined)) throw new Error('The engine built a transaction with other inputs than the ones planned.');
       const spent = sourceOutputs as NonNullable<(typeof sourceOutputs)[number]>[];
-      const check = checkBeforeSending({ transaction, sourceOutputs: spent });
+      const check = checkBeforeSending({ transaction, sourceOutputs: spent }, this.feeRate);
       if (check !== true) {
         throw new Error(`The transaction fails the check before sending: ${check}`, { cause: { transactionHex: builtTransaction.serializedTransaction, sourceOutputs: spent } });
       }

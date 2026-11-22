@@ -168,16 +168,17 @@ const PHASES = ['the owner opens a loan', 'the recoverer recovers', withService 
 const { chainName, local, phase, dry, fresh, feeRate: givenFeeRate } = runArguments(PHASES, 'stage-17-loan-run.ts');
 /**
  * The satoshis per byte every transaction of the run pays at least (`--fee-rate <n>`, 1 unless given). It is kept in
- * the run's file, so that a continued run pays the same without being told again; a different one given then stops it.
- * Set by the driver once it knows the run's file, and by each part once it has read it.
+ * the run's file, so that a continued run pays the same without being told again. A continued run may be given a
+ * higher rate, which it pays from then on (when the node asks for more); a lower one stops it. Set by the driver once
+ * it knows the run's file, and by each part once it has read it.
  */
 let FEE_RATE = givenFeeRate ?? 1;
 const feeRateOf = (kept: number | undefined): number => {
-  if (kept !== undefined && givenFeeRate !== undefined && kept !== givenFeeRate) {
-    console.error(`The run under way pays ${kept} sat/byte, kept in its file; --fee-rate ${givenFeeRate} differs. Continue it with --fee-rate ${kept} or without the option.`);
+  if (givenFeeRate !== undefined && givenFeeRate < (kept ?? 1)) {
+    console.error(`The run under way pays ${kept ?? 1} sat/byte, kept in its file; --fee-rate ${givenFeeRate} is lower. Continue it with --fee-rate ${kept ?? 1} or higher, or without the option.`);
     process.exit(2);
   }
-  return kept ?? givenFeeRate ?? 1;
+  return givenFeeRate ?? kept ?? 1;
 };
 /** An amount reckoned at 1 sat/byte, at the run's rate. */
 const atRate = (satoshis: bigint): bigint => BigInt(Math.ceil(Number(satoshis) * FEE_RATE));
@@ -261,8 +262,11 @@ interface Facts {
   /** A payment of the funder, written down before it is sent, by the step it belongs to. */
   pending?: Record<string, { transactionId: string; hex: string }>;
   finished: string[];
-  /** The satoshis per byte every transaction of the run pays at least. */
+  /** The satoshis per byte every transaction of the run pays at least, from now on. */
   feeRate?: number;
+  /** Where the rate was raised in a continued run: the lowest rate the run paid, and the part from which the last raise holds. */
+  lowestFeeRate?: number;
+  feeRaisedAt?: string;
   held?: string;
   funderAtStart?: string;
   log: Entry[];
@@ -554,7 +558,11 @@ if (phase === undefined) {
         : `- The page's address in its requests: ${PAGE}`,
       `- Repository at commit \`${revision}\`${changed.length === 0 ? '' : `, with uncommitted changes to ${changed.map((line) => line.slice(3)).join(', ')}`}`,
       `- Started ${facts.startedAt}`,
-      ...((facts.feeRate ?? 1) === 1 ? [] : [`- Fee rate: every transaction of the run paid at least ${facts.feeRate} sat/byte (\`--fee-rate ${facts.feeRate}\`)`]),
+      ...(facts.lowestFeeRate !== undefined && facts.lowestFeeRate < (facts.feeRate ?? 1)
+        ? [`- Fee rate: every transaction of the run paid at least ${facts.lowestFeeRate} sat/byte; from "${facts.feeRaisedAt}" on at least ${facts.feeRate} sat/byte (\`--fee-rate ${facts.feeRate}\`; see the notes)`]
+        : (facts.feeRate ?? 1) === 1
+          ? []
+          : [`- Fee rate: every transaction of the run paid at least ${facts.feeRate} sat/byte (\`--fee-rate ${facts.feeRate}\`)`]),
       ...(local
         ? []
         : [
@@ -593,7 +601,13 @@ const facts: Facts = existsSync(stateFile)
   ? (JSON.parse(readFileSync(stateFile, 'utf8')) as Facts)
   : { startedAt: new Date().toISOString(), words: { owner: generateBip39Mnemonic(), next: generateBip39Mnemonic(), credential: generateBip39Mnemonic() }, steps: {}, finished: [], log: [], notes: [] };
 const keep = (): void => writeFileSync(stateFile, JSON.stringify(facts, (_key, value: unknown) => (typeof value === 'bigint' ? String(value) : value), 1), { mode: 0o600 });
+const earlierFeeRate = facts.feeRate ?? 1;
 FEE_RATE = feeRateOf(facts.feeRate);
+const feeRaised = existsSync(stateFile) && facts.log.length + Object.keys(facts.steps).length > 0 && FEE_RATE > earlierFeeRate;
+if (feeRaised) {
+  facts.lowestFeeRate = Math.min(facts.lowestFeeRate ?? earlierFeeRate, earlierFeeRate);
+  facts.feeRaisedAt = phase as string;
+}
 facts.feeRate = FEE_RATE;
 keep();
 const say = (line: string): void => console.log(line);
@@ -606,11 +620,14 @@ const note = (line: string, name?: string): void => {
   keep();
   say(`  ${line}`);
 };
+if (feeRaised) note(`From "${phase}" on the run paid at least ${FEE_RATE} sat/byte (continued with --fee-rate ${FEE_RATE}; ${earlierFeeRate} sat/byte before), because the node asked for more.`);
 const record = (step: string, sent: { transactionId: string; bytes: number; feeSatoshis: bigint }, about = ''): void => {
   if (!facts.log.some((entry) => entry.transactionId === sent.transactionId)) facts.log.push({ step, transactionId: sent.transactionId, bytes: sent.bytes, fee: String(sent.feeSatoshis), note: about });
   keep();
   say(`  ${step}: ${sent.transactionId}, ${sent.bytes} bytes, fee ${sent.feeSatoshis}${about === '' ? '' : `; ${about}`}`);
-  if (sent.feeSatoshis < atRate(BigInt(sent.bytes))) throw new Error(`a fee below ${FEE_RATE} sat/byte`);
+  // A run whose rate was raised may record again a transaction it sent before, at the lower rate.
+  const least = Math.min(FEE_RATE, facts.lowestFeeRate ?? FEE_RATE);
+  if (sent.feeSatoshis < BigInt(Math.ceil(sent.bytes * least))) throw new Error(`a fee below ${least} sat/byte`);
 };
 const once = async (name: string, work: () => Promise<{ transactionIds?: string[]; data?: Record<string, number | string> } | undefined>): Promise<Record<string, number | string>> => {
   if (facts.steps[name] === undefined) {
@@ -724,7 +741,7 @@ const funderPays = async (step: string, outputs: Output[], options: { burn?: boo
 };
 
 const openAccount = async (words: string, who: string): Promise<Account> =>
-  Account.open(await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers: await engineServers(local) }), { onSent: writeInvitationFiles(invitations, who) });
+  Account.open(await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers: await engineServers(local) }), { onSent: writeInvitationFiles(invitations, who), feeRate: FEE_RATE });
 let account: Account | undefined;
 
 /** A backup store kept as a directory of the run: sealed blobs under their own names, as a store server keeps them. */
