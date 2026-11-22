@@ -3,7 +3,7 @@ import { type MemoryStore, type PositionRecordEntry, positionEntry } from '@gran
 import { type RecordedPosition, ActionRefusedError, NeedsApplicationError, TickNeededError, applicationArchive, applicationConnector, walletAnnouncement } from '@grandmas-wallet/app';
 import { type ActionDetails, type Channel, type Proposal, DappRequests, XO_EXTENSION, readAdvertisement } from '@grandmas-wallet/connect';
 import { ADDRESS_KIND, p2pkhLockingBytecode, readTemplate, takeNumber, templateLockingBytecode, walletAddress } from '@grandmas-wallet/core';
-import { cloakroomTemplate, keyedStrongboxTemplate, lockerClubTemplate, strongboxTemplate, testKey } from '@grandmas-wallet/testing';
+import { cloakroomTemplate, furnaceTemplate, keyedStrongboxTemplate, lockerClubTemplate, strongboxTemplate, testKey } from '@grandmas-wallet/testing';
 import { describe, expect, it } from 'vitest';
 
 import { type Device, deviceWith, finishCopying, presentation, request, seedOf } from './support/applications.js';
@@ -31,6 +31,7 @@ const plainBox = presentation(strongboxTemplate);
 const keyedBox = presentation(keyedStrongboxTemplate);
 const club = presentation(lockerClubTemplate);
 const cloakroom = presentation(cloakroomTemplate);
+const furnace = presentation(furnaceTemplate);
 type Presented = ReturnType<typeof presentation>;
 
 const definitionOf = (presented: Presented) => readTemplate(presented.texts.template).definition;
@@ -490,5 +491,39 @@ describe('a token category an action carries on, and one it makes', () => {
     const drawn = await device.applications.carryOut(draw);
     expect(drawn.tokens).toEqual([expect.objectContaining({ category: MINT, commitment: '01' })]);
     expect(hex((await transactionOf(device, drawn.transactionId)).inputs[0]?.outpointTransactionHash as Uint8Array)).toBe('f0'.repeat(32));
+  });
+
+  it('a category the request gives for a variable an output names as its token\'s category is one that exists: the wallet pays its tokens from its own coins, keeps the rest, and asks for the tick', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    const FUEL = 'f5'.repeat(32);
+    device.chain.adopt([{ transactionId: 'f6'.repeat(32), index: 1, output: { lockingBytecode: hexToBin(addressOf(device, change, 0)), valueSatoshis: 1000n, token: { category: hexToBin(FUEL), amount: 5000n } } }]);
+    await device.wallet.search({ passes: ['quick'] });
+    const feed = request(furnace, 'feed', 'stoker', { fuel: FUEL, fuelAmount: 200, feedSatoshis: 1000 });
+    const preview = await device.applications.preview(feed);
+    expect(preview.words.values.find(({ name }) => name === 'Fuel')?.value).toBe(FUEL);
+    expect(preview.figures.tokensNet).toEqual([{ category: FUEL, amount: -200n }]);
+    expect(preview.tokensLeaving).toEqual([{ token: expect.objectContaining({ category: FUEL, amount: 200n }) as object, how: 'leaves', to: 'Fuel' }]);
+    await expect(device.applications.carryOut(feed)).rejects.toBeInstanceOf(TickNeededError);
+    const fed = await device.applications.carryOut(feed, undefined, { tokensLeave: true });
+    const outputs = (await transactionOf(device, fed.transactionId)).outputs;
+    expect(outputs.map(({ token }) => (token === undefined ? undefined : [hex(token.category), token.amount]))).toEqual([[FUEL, 200n], [FUEL, 4800n], undefined]);
+    // The wallet keeps the rest of its tokens, and holds too few for more than that.
+    const kept = (await device.wallet.parts.tokenCoins()).filter(({ coin }) => hex(coin.utxo.output.token?.category ?? new Uint8Array()) === FUEL);
+    expect(kept.map(({ coin }) => coin.utxo.output.token?.amount)).toEqual([4800n]);
+    await refused(device, () => device.applications.preview(request(furnace, 'feed', 'stoker', { fuel: FUEL, fuelAmount: 10_000, feedSatoshis: 1000 })), `The action needs 10000 tokens of the category ${FUEL} from the wallet, and the wallet holds 4800`);
+  });
+
+  it('a category nothing gives is made now from the wallet\'s coin, as one the request says the action makes; a request cannot both give it and say it is made', async () => {
+    const device = await deviceWith([100_000n, 100_000n]);
+    const FUEL = 'f5'.repeat(32);
+    for (const asked of [request(furnace, 'feed', 'stoker', { fuelAmount: 200, feedSatoshis: 1000 }), request(furnace, 'feed', 'stoker', { fuelAmount: 200, feedSatoshis: 1000 }, { creates: 'fuel' })]) {
+      const preview = await device.applications.preview(asked);
+      expect(preview.tokensLeaving).toEqual([{ token: expect.objectContaining({ amount: 200n }) as object, how: 'leaves', made: true, to: 'Fuel' }]);
+      expect(preview.tokensLeaving?.[0]?.token.category).not.toBe(FUEL);
+    }
+    const made = await device.applications.carryOut(request(furnace, 'feed', 'stoker', { fuelAmount: 200, feedSatoshis: 1000 }), undefined, { tokensLeave: true });
+    const transaction = await transactionOf(device, made.transactionId);
+    expect(hex(transaction.outputs[0]?.token?.category ?? new Uint8Array())).toBe(hex(transaction.inputs[0]?.outpointTransactionHash ?? new Uint8Array()));
+    await refused(device, () => device.applications.preview(request(furnace, 'feed', 'stoker', { fuel: FUEL, fuelAmount: 200, feedSatoshis: 1000 }, { creates: 'fuel' })), 'A new category cannot be given');
   });
 });

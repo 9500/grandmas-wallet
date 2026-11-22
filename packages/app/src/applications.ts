@@ -814,6 +814,8 @@ interface Frame {
   walletScripts: Map<string, WalletOutputKind>;
   /** The variable that receives the category of the token the action creates. */
   creates?: string;
+  /** Existing token categories the request gives for variables that an output names as its token's category and no input does. */
+  givenCategories: string[];
   applicationCoins: { input: string; index?: number; utxo: Utxo; lockingScript: string }[];
   follow: Map<string, FollowedScript>;
   following: Map<string, string>;
@@ -833,9 +835,10 @@ const nftOf = (token: Output['token']): PositionToken | undefined =>
 /**
  * What becomes of the wallet's tokens in a transaction as worked out (section 13.3): the token the action spends
  * has to come back to an address of the wallet's unchanged; a token made from the wallet's coin that does not come
- * to the wallet goes to the application, or elsewhere. Either is shown, and asks for the user's tick.
+ * to the wallet goes to the application, or elsewhere, and so do the wallet's tokens of a category the request gives that
+ * the wallet pays. Each is shown, and asks for the user's tick.
  */
-const leavingTokens = (definition: ReadTemplate['definition'], planned: PlannedOutput[], spent: TokenCoin | undefined, made: string | undefined): TokenLeaving[] => {
+const leavingTokens = (definition: ReadTemplate['definition'], planned: PlannedOutput[], spent: TokenCoin | undefined, made: string | undefined, given: string[] = []): TokenLeaving[] => {
   const leaving: TokenLeaving[] = [];
   const outputName = (identifier: string | undefined): string | undefined => (identifier === undefined ? undefined : (definition.outputs?.[identifier]?.name ?? identifier));
   const own = spent === undefined ? undefined : nftOf(spent.coin.utxo.output.token);
@@ -845,17 +848,19 @@ const leavingTokens = (definition: ReadTemplate['definition'], planned: PlannedO
     const to = outputName((away ?? ofCategory[0])?.identifier);
     leaving.push({ token: own, how: away !== undefined ? 'leaves' : ofCategory.length > 0 ? 'changes' : 'ends', ...(to === undefined ? {} : { to }) });
   }
-  if (made !== undefined) {
-    for (const { output, wallet, identifier } of planned) {
-      if (wallet !== undefined || output.token === undefined || hex(output.token.category) !== made) continue;
-      const to = outputName(identifier);
-      leaving.push({
-        token: { category: made, commitment: hex(output.token.nft?.commitment ?? new Uint8Array()), capability: output.token.nft?.capability ?? 'none', ...(output.token.amount > 0n ? { amount: output.token.amount } : {}) },
-        how: isDataOutput(output) ? 'ends' : 'leaves',
-        made: true,
-        ...(to === undefined ? {} : { to }),
-      });
-    }
+  // A token made now from the wallet's coin, and tokens of a category the request gave that the wallet pays from its
+  // own coins: each output that is not the wallet's and carries them takes them out of the wallet.
+  const categories = new Set([...(made === undefined ? [] : [made]), ...given]);
+  for (const { output, wallet, identifier } of planned) {
+    if (wallet !== undefined || output.token === undefined || !categories.has(hex(output.token.category))) continue;
+    const category = hex(output.token.category);
+    const to = outputName(identifier);
+    leaving.push({
+      token: { category, commitment: hex(output.token.nft?.commitment ?? new Uint8Array()), capability: output.token.nft?.capability ?? 'none', ...(output.token.amount > 0n ? { amount: output.token.amount } : {}) },
+      how: isDataOutput(output) ? 'ends' : 'leaves',
+      ...(category === made ? { made: true as const } : {}),
+      ...(to === undefined ? {} : { to }),
+    });
   }
   return leaving;
 };
@@ -1548,6 +1553,8 @@ export class Applications {
     const tokenChange: { category: string; amount: bigint }[] = [];
     const fungibleCoins = (await this.wallet.tokenCoins()).filter(({ coin, place }) => place === 'address' && coin.utxo.output.token !== undefined && coin.utxo.output.token.nft === undefined && coin !== token?.coin);
     for (const [category, amount] of fungible(templateOutputs.map(({ output }) => output))) {
+      // Tokens of a category made now are made by the transaction itself: nobody pays them.
+      if (creates !== undefined && category === String(values[creates])) continue;
       const needed = amount - (brought.get(category) ?? 0n);
       if (needed <= 0n) continue;
       const candidates = fungibleCoins.filter(({ coin }) => hex(coin.utxo.output.token?.category ?? new Uint8Array()) === category).sort((a, b) => ((a.coin.utxo.output.token?.amount ?? 0n) > (b.coin.utxo.output.token?.amount ?? 0n) ? -1 : 1));
@@ -1655,7 +1662,8 @@ export class Applications {
     // The coin at the template's input for the token is the token (the engine does not look), and what becomes of
     // the wallet's tokens is shown, and asks for the user's tick (section 13.3).
     if (spentAsItem && token !== undefined) this.tokenInputHolds(definition, frame.tokenInput?.input as string, token, values);
-    const tokensLeaving = leavingTokens(definition, planned, spentToken === undefined ? undefined : token, creates === undefined ? undefined : String(values[creates]));
+    const paidFromWallet = new Set(tokenInputs.map(({ coin }) => hex(coin.utxo.output.token?.category ?? new Uint8Array())));
+    const tokensLeaving = leavingTokens(definition, planned, spentToken === undefined ? undefined : token, creates === undefined ? undefined : String(values[creates]), frame.givenCategories.filter((given) => paidFromWallet.has(given)));
 
     // The application's contracts are evaluated against the transaction the wallet worked out, before anything
     // is signed: a value the application gave that its own contracts do not accept is a refusal, not a loss.
@@ -1725,7 +1733,8 @@ export class Applications {
  *   that stand alike the one recorded last, which is where the wallet last moved the position. An action the user
  *   asks for from the wallet's own list names the script of the entry it was asked on.
    * - **Each value the role provides,** from the first that applies: (1) the record, for the values of the
-   *   position's own script; (2) the wallet itself: a token category the action creates, the category of the token
+   *   position's own script; (2) the wallet itself: a token category the action creates where the request gives no
+   *   value for it (a value it gives is a category that exists, and the wallet pays its tokens), the category of the token
    *   the action is about where an output names the variable as its token's category and no input does, a locking
    *   script the request does not supply (of the kind the request names, a plain receipt where it names none), and
    *   the category of the template's input for the token from the token itself; (3) the request; (4) the record's
@@ -1789,17 +1798,18 @@ export class Applications {
     const bound: [string, BindingKind][] = [];
     const missing: string[] = [];
     const supplied = (variable: string): string | number | undefined => request.variables[variable];
-    // A category is made only once. One that the request gives as that of the wallet's own token, or of a token on a
-    // coin the request names, is not made now: the action carries it on, as a contract that mints from its own coin does.
-    const existing = new Set(category === undefined ? [] : [category]);
-    for (const outpoint of Object.values(request.inputs ?? {})) {
-      const token = (await this.namedOutput(outpoint))?.token;
-      if (token !== undefined) existing.add(hex(token.category));
+    // A category made now is the identifier of the wallet's coin at input 0, which no request can choose. A value the
+    // request gives for such a variable is therefore a category that exists: the action uses it as given, and the
+    // wallet pays tokens of it from its own coins, as a contract that mints from its own coin carries its category on.
+    for (const variable of shape.creating) {
+      if (request.creates === variable && supplied(variable) !== undefined) return refuse(`The request gives a value for ${nameOf(variable)} and says that the action makes a new token category there. A new category cannot be given.`);
     }
     // Where the request says which token the action is about, that token's category is the value of a variable an
     // output names as its token's category and no input does, unless the request says the action makes it now.
     const aboutCategory = (variable: string): boolean => category !== undefined && supplied(variable) === undefined && request.creates !== variable && shape.creating.includes(variable);
-    const creating = shape.creating.filter((variable) => !aboutCategory(variable) && !existing.has(String(supplied(variable) ?? '')));
+    const creating = shape.creating.filter((variable) => !aboutCategory(variable) && supplied(variable) === undefined);
+    // The existing categories the request gives in this way: tokens of them that the wallet pays leave the wallet.
+    const givenCategories = shape.creating.flatMap((variable) => (supplied(variable) === undefined ? [] : [String(supplied(variable)).toLowerCase()]));
     let creates: string | undefined;
     for (const variable of shape.required) {
       const type = variableType(definition, variable) ?? '';
@@ -1944,6 +1954,7 @@ export class Applications {
       leftOver,
       walletScripts,
       ...(creates === undefined ? {} : { creates }),
+      givenCategories,
       applicationCoins,
       follow,
       following,

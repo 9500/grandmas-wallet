@@ -533,5 +533,72 @@ export const jointEnvelopeTemplate = {
   variables: { ...envelopeTemplate.variables, giverKey: { ...view('Giver\'s key', 'The giver\'s half of the envelope\'s lock.'), type: 'private_key' } },
 } as const;
 
+/*
+ * Templates for how the wallet reads a template's inputs and scripts:
+ *
+ * - **Furnace**: fuel fed to a furnace every stoker shares. Feeding names the fuel's category as a value of the
+ *   request, or leaves it to the wallet to make a new one.
+ */
+
+const furnaceInput = (name: string, description: string, marked: boolean) => ({
+  ...view(name, description),
+  unlockingScript: 'unlockFurnace',
+  ...(marked ? { omitChangeAmounts: { satoshis: true, fungibleTokens: true, nonfungibleTokens: true } } : {}),
+});
+
+/** A furnace every stoker shares: anything in it can be burned by anyone, its satoshis going to the fee. */
+export const furnaceTemplate = {
+  $schema: SCHEMA,
+  ...view('Furnace', 'Fuel fed to a shared furnace, where anyone can burn it.'),
+  version: '1',
+  supported: ['BCH_2026_05'],
+  roles: { stoker: view('Stoker', 'Feeds the furnace and burns what is in it.') },
+  start: [
+    { action: 'feed', role: 'stoker' },
+    { action: 'stoke', role: 'stoker' },
+  ],
+  actions: {
+    feed: action('Feed fuel', 'Put fungible tokens into the furnace.', 'stoker', ['fuel', 'fuelAmount', 'feedSatoshis'], 'feedTransaction'),
+    stoke: action('Stoke', 'Put satoshis into the furnace.', 'stoker', ['feedSatoshis'], 'stokeTransaction'),
+    burn: action('Burn', 'Burn a furnace coin. Its satoshis go to the fee and its tokens are destroyed.', 'stoker', ['note'], 'burnTransaction'),
+    relight: action('Relight', 'Put the satoshis of a furnace coin back into the furnace.', 'stoker', ['feedSatoshis'], 'relightTransaction'),
+    sweep: action('Sweep', 'Burn a furnace coin through an input that does not leave its satoshis to the fee.', 'stoker', ['note'], 'sweepTransaction'),
+  },
+  transactions: {
+    feedTransaction: { ...view('Fuel fed', '$(<fuelAmount>) tokens were fed to the furnace.'), inputs: [], outputs: [{ output: 'fuelOutput' }], version: 2, locktime: 0 },
+    stokeTransaction: { ...view('Stoked', '$(<feedSatoshis>) satoshis were put into the furnace.'), inputs: [], outputs: [{ output: 'heatOutput' }], version: 2, locktime: 0 },
+    burnTransaction: { ...view('Burned', 'A furnace coin was burned: $(<note>)'), inputs: [{ input: 'furnaceInput' }], outputs: [{ output: 'ashOutput', outputIndex: 0 }], version: 2, locktime: 0 },
+    relightTransaction: { ...view('Relit', '$(<feedSatoshis>) satoshis went back into the furnace.'), inputs: [{ input: 'furnaceInput' }], outputs: [{ output: 'heatOutput' }], version: 2, locktime: 0 },
+    sweepTransaction: { ...view('Swept', 'A furnace coin was swept: $(<note>)'), inputs: [{ input: 'sweptInput' }], outputs: [{ output: 'ashOutput', outputIndex: 0 }], version: 2, locktime: 0 },
+  },
+  inputs: {
+    furnaceInput: furnaceInput('Furnace coin', 'A coin in the furnace. What it holds goes to the fee or is destroyed.', true),
+    sweptInput: furnaceInput('Swept coin', 'A coin in the furnace.', false),
+  },
+  outputs: {
+    fuelOutput: { ...view('Fuel', '$(<fuelAmount>) tokens in the furnace.'), lockingScript: 'furnaceLockingScript', valueSatoshis: '$(<feedSatoshis>)', token: { category: '$(<fuel>)', amount: '$(<fuelAmount>)', nft: null } },
+    heatOutput: { ...view('Heat', '$(<feedSatoshis>) satoshis in the furnace.'), lockingScript: 'furnaceLockingScript', valueSatoshis: '$(<feedSatoshis>)' },
+    ashOutput: { ...view('Ash', 'A data output with a note: $(<note>)'), lockingScript: 'ashLockingScript', valueSatoshis: '0' },
+  },
+  lockingScripts: {
+    furnaceLockingScript: {
+      ...view('Furnace', 'Anyone can spend what is here.'),
+      lockingType: 'p2sh',
+      lockingBytecode: 'furnaceBytecode',
+      unlockingBytecode: 'unlockFurnace',
+      state: { variables: [] },
+      roles: { stoker: { selectable: false, actions: [{ action: 'burn', role: 'stoker' }] } },
+    },
+    ashLockingScript: { ...view('Ash', 'A data output.'), lockingType: 'p2s', lockingBytecode: 'ashBytecode' },
+  },
+  scripts: { furnaceBytecode: 'OP_TXOUTPUTCOUNT OP_0 OP_GREATERTHAN', unlockFurnace: '', ashBytecode: 'OP_RETURN <note>' },
+  variables: {
+    fuel: { ...view('Fuel', 'The token category of the fuel.'), type: 'token_category' },
+    fuelAmount: { ...view('Fuel amount', 'How many tokens to feed.'), type: 'token_amount' },
+    feedSatoshis: { ...view('Satoshis', 'Satoshis that go into the furnace.'), type: 'satoshis' },
+    note: { ...view('Note', 'Words written into the data output.'), type: 'string' },
+  },
+} as const;
+
 /** A template as an application would send it: its text. */
 export const templateText = (template: unknown): string => JSON.stringify(template);
