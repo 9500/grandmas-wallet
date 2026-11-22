@@ -156,6 +156,15 @@ button.netmenu-item.real .netmenu-coins { color: var(--bad); }
 
 .page-head { margin: 8px 0 16px; }
 .page-head p { color: var(--muted); margin-top: 4px; }
+/* A back button left of a sub-screen's heading: the chevron lines up with the content's edge and the heading's first line. */
+.page-head-title { display: flex; align-items: flex-start; gap: 2px; }
+.page-head-title h1 { min-width: 0; overflow-wrap: anywhere; }
+button.back-button {
+  flex: none; width: 40px; height: 40px; min-height: 40px; padding: 0; margin: -5px 0 -5px -10px;
+  background: transparent; border-color: transparent; color: var(--ink); border-radius: var(--r-s);
+}
+button.back-button:hover:not(:disabled) { background: var(--sunken); }
+button.back-button svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* bottom navigation on phones */
 /* What is scrolled into view, by the keyboard's focus too, stops above the bar at the bottom of a phone's screen. */
@@ -198,6 +207,7 @@ button.netmenu-item.real .netmenu-coins { color: var(--bad); }
   .narrow .content { padding-top: 48px; }
   .page-head { margin: 0 0 24px; }
   h1 { font-size: 28px; }
+  button.back-button { margin-top: -2px; margin-bottom: -2px; }
 }
 @media (max-width: 959.98px) { .rail { display: contents; } .rail .brand, .rail-foot { display: none; } }
 

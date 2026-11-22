@@ -23,6 +23,7 @@ const ICONS = {
   inbox: 'M4 13l2-8h12l2 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5',
   key: 'M14 10a4 4 0 1 0-3.5 4L9 15.5V18H6.5v2.5H4V18l6.5-6.5M15.5 7.5h.01',
   apps: 'M4 4h6.5v6.5H4zM13.5 4H20v6.5h-6.5zM4 13.5h6.5V20H4zM13.5 13.5H20V20h-6.5z',
+  back: 'M15 5l-7 7 7 7',
 } as const;
 
 export type IconName = keyof typeof ICONS;
@@ -36,25 +37,40 @@ export const Icon = ({ name }: { name: IconName }) => (
 // ------------------------------------------------------------------ routes
 
 /** Navigation by the page's path, so that the browser's back button works. The part after `#` is left to links. */
-export const useRoute = <Route extends string>(routes: readonly Route[], fallback: Route): [Route, (route: Route) => void] => {
+export const useRoute = <Route extends string>(routes: readonly Route[], fallback: Route): [Route, (route: Route) => void, string] => {
   const read = (): Route => {
     const name = window.location.pathname.replace(/^\/+|\/+$/g, '') as Route;
     return routes.includes(name) ? name : fallback;
   };
-  const [route, setRoute] = useState<Route>(read);
+  const [at, setAt] = useState<RouteVisit<Route>>(() => ({ route: read(), visit: 0 }));
   useEffect(() => {
-    const onPop = () => setRoute(read());
+    const onPop = () => setAt((current) => visitOf(current, read()));
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   const navigate = useCallback((next: Route) => {
     const path = next === fallback ? '/' : `/${next}`;
     if (window.location.pathname !== path) window.history.pushState(null, '', path);
-    setRoute(next);
+    setAt((current) => visitOf(current, next));
     window.scrollTo(0, 0);
   }, []);
-  return [route, navigate];
+  return [at.route, navigate, screenKey(at)];
 };
+
+/** Where the navigation stands: the route, and how many times a route was chosen since the page opened. */
+export interface RouteVisit<Route extends string = string> {
+  route: Route;
+  visit: number;
+}
+
+/**
+ * Choosing a route, from the navigation or the browser's history, is a new visit, also when it is the route already
+ * shown: a tap on the tab one is in brings that tab back to its first screen.
+ */
+export const visitOf = <Route extends string>(current: RouteVisit<Route>, next: Route): RouteVisit<Route> => ({ route: next, visit: current.visit + 1 });
+
+/** The key a page gives the screen of a route, so that each visit starts the screen afresh. Leaving a screen this way is leaving it like any other. */
+export const screenKey = (at: RouteVisit): string => `${at.route}/${at.visit}`;
 
 // ------------------------------------------------------------------ the frame
 
@@ -145,9 +161,19 @@ export const Frame = <Route extends string>({
   );
 };
 
-export const PageHead = ({ title, children }: { title: string; children?: ComponentChildren }) => (
+/** A screen's heading. A screen inside a tab has `onBack`: a back button left of the heading, to the screen it came from. */
+export const PageHead = ({ title, children, onBack }: { title: string; children?: ComponentChildren; onBack?: () => void }) => (
   <div class="page-head">
-    <h1>{title}</h1>
+    {onBack === undefined ? (
+      <h1>{title}</h1>
+    ) : (
+      <div class="page-head-title">
+        <button type="button" class="back-button" aria-label="Back" title="Back" onClick={onBack}>
+          <Icon name="back" />
+        </button>
+        <h1>{title}</h1>
+      </div>
+    )}
     {children !== undefined && <p>{children}</p>}
   </div>
 );

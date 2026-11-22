@@ -24,7 +24,7 @@ import {
 import type { LedgerEntry } from '@grandmas-wallet/connect';
 import { type ChallengeDelay, INPUT_BYTES, InsufficientFundsError, deriveSeedKeys, smallestOutputValue, transactionBytes } from '@grandmas-wallet/core';
 import { sealPackage, signEnrollmentRequest } from '@grandmas-wallet/enrollment';
-import { type Environment, Button, Card, Field, Frame, PageHead, Pill, TextArea, TextInput, formatTime } from '@grandmas-wallet/ui';
+import { type Environment, Button, Card, Field, Frame, PageHead, Pill, TextArea, TextInput, formatTime, screenKey, visitOf } from '@grandmas-wallet/ui';
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
@@ -816,13 +816,15 @@ const navigation =
           { route: 'recovery', label: 'Recovery', icon: 'shield' as const },
         ],
         current: screen,
-        onNavigate: ignore,
       };
 
-render(
+/** The fixtures in the wallet's frame. A tap on the tab that is shown starts its screen again, as on the wallet's page. */
+const Fixtures = () => {
+  const [visit, setVisit] = useState({ route: screen ?? '', visit: 0 });
+  return (
   <TokenNames.Provider value={(category) => REGISTRIES[category]}>
-  <Frame brand="Grandma's Wallet" role="Fixtures" environment={FIXTURE_ENVIRONMENT} {...navigation}>
-    <div class="stack">
+  <Frame brand="Grandma's Wallet" role="Fixtures" environment={FIXTURE_ENVIRONMENT} {...navigation} {...(screen === undefined ? {} : { onNavigate: (route: string) => (route === screen ? setVisit((current) => visitOf(current, route)) : undefined) })}>
+    <div class="stack" key={screenKey(visit)}>
       {show === 'send-token' ? (
         <>
           <Send owner={tokenOwner} />
@@ -872,6 +874,11 @@ render(
       )}
     </div>
   </Frame>
-  </TokenNames.Provider>,
+  </TokenNames.Provider>
+  );
+};
+
+render(
+  <Fixtures />,
   document.getElementById('app') as HTMLElement,
 );

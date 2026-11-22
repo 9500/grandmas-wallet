@@ -696,16 +696,9 @@ const TemplatePage = ({ owner, identifier, onBack, onView }: { owner: Owner; ide
   if (kept === undefined) {
     return (
       <div class="stack">
-        <PageHead title="Template" />
+        <PageHead title="Template" onBack={onBack} />
         <Card>
-          <div class="stack">
-            <p>This phone does not trust that template.</p>
-            <div>
-              <Button kind="secondary" onClick={onBack}>
-                Back
-              </Button>
-            </div>
-          </div>
+          <p>This phone does not trust that template.</p>
         </Card>
       </div>
     );
@@ -719,7 +712,7 @@ const TemplatePage = ({ owner, identifier, onBack, onView }: { owner: Owner; ide
     });
   return (
     <div class="stack">
-      <PageHead title="Template" />
+      <PageHead title="Template" onBack={onBack} />
       <div class="grid two template-layout">
         <div class="stack">
           <Card cls="request-card template-card">
@@ -732,11 +725,6 @@ const TemplatePage = ({ owner, identifier, onBack, onView }: { owner: Owner; ide
                   ['Your tokens of it', tokens === undefined ? <Spinner /> : tokens.length === 0 ? 'None' : tokens.map(tokenName).join(', ')],
                 ]}
               />
-              <div>
-                <Button kind="quiet" onClick={onBack}>
-                  Back
-                </Button>
-              </div>
             </div>
           </Card>
           {summary !== undefined && (
@@ -1452,7 +1440,7 @@ const ActOn = ({ owner, target, action, onBack }: { owner: Owner; target: ActTar
 
   return (
     <div class="stack">
-      <PageHead title={action.name}>{action.description !== '' ? action.description : `An action of the template "${templateName ?? ''}".`}</PageHead>
+      <PageHead title={action.name} onBack={onBack}>{action.description !== '' ? action.description : `An action of the template "${templateName ?? ''}".`}</PageHead>
       <div class="grid two">
         <div class="stack">
           {acting.at === 'form' && wanted.length > 0 && (
@@ -1475,9 +1463,6 @@ const ActOn = ({ owner, target, action, onBack }: { owner: Owner; target: ActTar
                 <Button task={task} name="review" onClick={() => void review()}>
                   Review
                 </Button>
-                <Button kind="quiet" onClick={onBack}>
-                  Back
-                </Button>
               </div>
             </Card>
           )}
@@ -1492,17 +1477,16 @@ const ActOn = ({ owner, target, action, onBack }: { owner: Owner; target: ActTar
               <div class="stack">
                 <RefusalView refusal={acting.refusal} />
                 <TaskStatus task={task} name="review" />
-                <div class="actions">
-                  {again(acting.refusal)}
-                  {wanted.length > 0 && (acting.refusal.kind === 'other' || acting.refusal.kind === 'declined') && (
-                    <Button kind="secondary" onClick={() => setActing({ at: 'form' })}>
-                      Change the values
-                    </Button>
-                  )}
-                  <Button kind="quiet" onClick={onBack}>
-                    Back
-                  </Button>
-                </div>
+                {(acting.refusal.again !== undefined || (wanted.length > 0 && (acting.refusal.kind === 'other' || acting.refusal.kind === 'declined'))) && (
+                  <div class="actions">
+                    {again(acting.refusal)}
+                    {wanted.length > 0 && (acting.refusal.kind === 'other' || acting.refusal.kind === 'declined') && (
+                      <Button kind="secondary" onClick={() => setActing({ at: 'form' })}>
+                        Change the values
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             </Card>
           )}
@@ -1519,9 +1503,11 @@ const ActOn = ({ owner, target, action, onBack }: { owner: Owner; target: ActTar
                       Carry it out
                     </Button>
                   )}
-                  <Button kind={gate.shown ? 'quiet' : 'secondary'} disabled={task.busy !== undefined} onClick={wanted.length > 0 ? () => setActing({ at: 'form' }) : onBack}>
-                    {wanted.length > 0 ? 'Change the values' : 'Back'}
-                  </Button>
+                  {wanted.length > 0 && (
+                    <Button kind={gate.shown ? 'quiet' : 'secondary'} disabled={task.busy !== undefined} onClick={() => setActing({ at: 'form' })}>
+                      Change the values
+                    </Button>
+                  )}
                 </div>
                 {gate.shown && <p class="small muted">Nothing is signed or sent until you carry it out.</p>}
               </div>
@@ -1546,12 +1532,7 @@ const ActOn = ({ owner, target, action, onBack }: { owner: Owner; target: ActTar
                 <RefusalView refusal={acting.refusal.kind === 'other' ? { ...acting.refusal, title: 'Not carried out' } : acting.refusal} />
                 {acting.notStored && <NoBackup owner={owner}>A template is stored in your backup before its first action, and no backup store confirmed it. Set up recovery, or try again when a store can be reached.</NoBackup>}
                 <TaskStatus task={task} name="review" />
-                <div class="actions">
-                  {again(acting.refusal)}
-                  <Button kind="quiet" onClick={onBack}>
-                    Back
-                  </Button>
-                </div>
+                {acting.refusal.again !== undefined && <div class="actions">{again(acting.refusal)}</div>}
               </div>
             </Card>
           )}
@@ -1628,7 +1609,7 @@ const TrustSuggested = ({ owner, identifier, onBack }: { owner: Owner; identifie
     });
   return (
     <div class="stack">
-      <PageHead title="A template from your backup" />
+      <PageHead title="A template from your backup" onBack={onBack} />
       <div class="grid two">
         <Card cls="request-card">
           <div class="stack">
@@ -1648,9 +1629,6 @@ const TrustSuggested = ({ owner, identifier, onBack }: { owner: Owner; identifie
                   Trust this template
                 </Button>
               )}
-              <Button kind="quiet" onClick={onBack}>
-                Back
-              </Button>
             </div>
           </div>
         </Card>

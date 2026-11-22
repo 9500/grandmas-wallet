@@ -3,7 +3,7 @@ import type { RecoveryStatus } from '@grandmas-wallet/archive';
 import { type Balance, type OwnerWallet, type Sent, actionSent, checkRecovery, copyEarlierArchives, makeChange } from '@grandmas-wallet/app';
 import type { SeedKeys } from '@grandmas-wallet/core';
 import { Button, Card, Frame, Info, Loading, More, type NavItem, Notice, plainError, recheckChain, useEvery, useRoute, useToast } from '@grandmas-wallet/ui';
-import type { JSX } from 'preact';
+import { type JSX, Fragment } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
 import { Apps } from './Apps.js';
@@ -132,7 +132,8 @@ const Opening = () => {
 
 const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: OwnerWallet; onLost: () => void }) => {
   const seed = useMemo(() => seedOf(session, deviceWords()), []);
-  const [route, navigate] = useRoute(ROUTES, 'home');
+  // Each choice of a tab is a new visit: its screen starts again at its first view, also when it is the tab already shown.
+  const [route, navigate, visit] = useRoute(ROUTES, 'home');
   const [balance, setBalance] = useState<Balance | undefined>();
   const [canCancel, setCanCancel] = useState<boolean | undefined>();
   const [recovery, setRecovery] = useState<RecoveryStatus | undefined>();
@@ -315,7 +316,7 @@ const OwnerScreens = ({ session, wallet, onLost }: { session: Session; wallet: O
       recovery: () => <Recovery owner={owner} />,
       details: () => <Details owner={owner} />,
     };
-    screen = screens[route]();
+    screen = <Fragment key={visit}>{screens[route]()}</Fragment>;
   }
   const incoming = kept('incoming');
   const asked = apps.proposals.length + apps.asks.length;
