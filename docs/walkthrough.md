@@ -1,8 +1,8 @@
 # Trying Grandma's Wallet by hand
 
-This is the walkthrough of the third design (design 3, the branch `design-3`). The second design's is at the tag `design-2`: `git show design-2:docs/walkthrough.md`.
+This is the walkthrough of the third design (design 3, on `main`). The second design's is at the tag `design-2`: `git show design-2:docs/walkthrough.md`.
 
-It walks through the wallet in a browser: a helper sets up a wallet for Grandma from their own coins, Grandma receives and pays, opens a savings jar and a loan from their pages, a recovery request nobody asked for is refused, the phone is lost, and the wallet comes back on a new one, with the jar and the loan. It uses chipnet, the Bitcoin Cash test network; the coins have no value.
+It walks through the wallet in a browser: a helper sets up a wallet for Grandma from their own coins, Grandma receives and pays, opens a savings jar and a loan from their pages, a recovery request nobody asked for is refused, the phone is lost, and the wallet comes back on a new one, with the jar and the loan. It uses chipnet, the Bitcoin Cash test network; the coins have no value. The wallet and the recoverer ask a first-time visitor where to try them: choose **Chipnet** on both. The same course runs on the **mockup**, a chain of the site's own where play coins come at a press and a button lets a waiting period pass ([mockup.md](mockup.md)), and on mainnet, which is offered only to meet the requirements of BCH Blaze, with a warning.
 
 | Page | Address |
 | --- | --- |
@@ -11,7 +11,7 @@ It walks through the wallet in a browser: a helper sets up a wallet for Grandma 
 | Savings Jar | <https://jar.9500.cash/> |
 | Loan desk, an independent page for ParyonUSD's contracts, not affiliated with Paryon | <https://paryon.9500.cash/> |
 
-The public pages are released from this repository; `version.json` at each address names the commit and the branch, `design-3` for this design. The same pages run on your own machine (at the end).
+The public pages are released from this repository; `version.json` at each address names the commit and the branch, `main` for this design. The same pages run on your own machine (at the end).
 
 The same course runs unattended in scripts on the local node: setting up and recovering in `scripts/browser-run.ts` ([runs/wallet-set-up-local-node.md](runs/wallet-set-up-local-node.md)), the jar in `scripts/stage-17-jar-browser.ts` ([runs/stage-17-jar-browser-local-node.md](runs/stage-17-jar-browser-local-node.md)) and the loan in `scripts/stage-17-loan-browser.ts` ([runs/stage-17-loan-browser-local-node.md](runs/stage-17-loan-browser-local-node.md)). Pictures of their screens are in [screens/](screens/), those of the applications as `live-jar-*` and `live-loan-*`.
 
@@ -46,7 +46,7 @@ Within a short while the home screen says **Protected**: the wallet found Anna's
 - **Receive** shows a fresh address each time. "For regular payments" gives a vault address instead, for someone who pays to the same address again and again; the **?** under the choice says what each kind is for. For the loan, send the test coins of "What you need" here.
 - **Send** asks for an address and an amount, with what is available beside it, and then shows the fee before anything is sent: one satoshi per byte, exactly.
 - The home screen's "What it is made of" shows where the coins are.
-- **Tokens.** The Receive screen shows the address in the form that wallets sending tokens ask for; untick **Receiving a token?** for the plain form of the same address. Once the wallet holds a token, **Send** offers **Bitcoin Cash** or **A token**, and each token on the **Apps** screen has a **Send** button. A token goes only to a token address; a plain address is refused, with what to ask the receiver for. Fungible tokens, such as PUSD, are shown by their category and in raw units, 100 PUSD as 10,000 units: nothing here gives them a name or decimals.
+- **Tokens.** The Receive screen shows the address in the form that wallets sending tokens ask for; untick **Receiving a token?** for the plain form of the same address. Once the wallet holds a token, **Send** offers **Bitcoin Cash** or **A token**, and each token on the **Apps** screen has a **Send** button. A token goes only to a token address; a plain address is refused, with what to ask the receiver for. A fungible token whose issuer published a registry on chain is shown by its name and in its own units, PUSD on chipnet as "100.00 PUSDTEST", with the raw amount and the category behind the **?**; any other by its category and in raw units ([token-registries.md](token-registries.md)).
 
 ## 4. Applications: a savings jar and a loan
 
@@ -65,11 +65,11 @@ The wallet uses an application from its XO template alone. Before it signs anyth
 1. On the loan desk's page, connect as above. Under **Open a loan**, press **Make a loan key**. The phone's review has a box to tick, **I understand that whoever gets this token gets what it controls**: the key is made from your wallet's coin and waits in Paryon's contract until the loan is opened. Tick it and press **Approve**. This is asked once per loan.
 2. If the page says the contracts are behind, press **Bring the contracts up to date** and approve; it costs only the network's fee.
 3. Keep 100 PUSD and the proposed collateral of 125%, check the figures, and press **Borrow 100.00 PUSD**. The phone's review shows the BCH going into the loan, the PUSD and the key coming back, and a token of Paryon's that is destroyed. **Approve**.
-4. The page lists the loan under **Your loans**, with its collateral, **Change the collateral** and **Repay and close**. On the phone, **Apps** lists "**Loan key** · ParyonUSD loan (chipnet-fast-periods-6)" with **Open the application to do this** and the page's address: the loan's coins are Paryon's, so it is operated from its page. The PUSD are listed as "A token of unknown meaning".
+4. The page lists the loan under **Your loans**, with its collateral, **Change the collateral**, **Change the interest rate** and **Repay and close**. On the phone, **Apps** lists "**Loan key** · ParyonUSD loan (chipnet-fast-periods-6)" under **Tokens**, with the same actions. The loan's template names the loan service that runs beside the page, which brings Paryon's coins and their values, so the wallet carries these out by itself, with the page closed; what the service states is shown in the review under **From the service**, apart from the wallet's own figures. The PUSD are listed in their units.
 
 **Sending a token that controls something.** On **Send**, choose **A token** and the jar's key: the review says which template's position it controls and what it holds now, or, for the loan key, that the application shows what it holds, with the page's address. It is sent only once you tick **I understand that whoever receives this token gets what it controls**. Do not send them now: the recovery below brings them back.
 
-The **Apps** screen also lists the templates you trust; open one to see its tokens and the apps that are told about them, or to **Stop trusting** it.
+The **Apps** screen also lists the templates you trust; open one to see its service, its actions, its tokens and the apps that are told about them, or to **Stop trusting** it, and delete it too if you like. **Add from a file** under **Templates** adds a template from a JSON file on the phone, or **Paste it instead**: the wallet shows it as it shows an app's offer, and trusts it only on your word.
 
 ## 5. A request nobody asked for
 
@@ -98,9 +98,11 @@ The new phone reads the old phone's records from the backup, with the templates 
 1. On the new phone, open **Apps**. Under **Tokens**, the jar's key and the loan key are each listed by their template's name, with **Template not trusted** and **Trust this template**.
 2. Press **Trust this template** under the jar's key. The phone shows the template: "An earlier owner of this wallet stored this template in the backup". Press **Trust this template**. The wallet checks the record against the chain and lists the jar as before the loss: "**Jar key** · Savings Jar", **Open**, "Holds 0.0001 BCH".
 3. Press **Empty a savings jar**. Every value comes from the record or from the wallet itself. The review, **Check and carry out**, shows what comes back, and from when the network accepts it: the jar's date, by the chain's clock, which runs a little behind the real one. Once that has passed, press **Carry it out**. The jar's page is not needed: the list then shows the jar as **Closed**.
-4. Trust the loan's template the same way. The loan key is listed under the template's name with **Open the application to do this** and the page's address from the record; the wallet offers no closing of its own.
-5. On the computer, open the loan page (or the address the wallet shows) and connect the new phone. The phone asks **Loan desk asks to see your tokens**: press **Allow**. The page finds the loan from the key and lists it.
-6. Press **Repay and close**, then **Repay and close the loan**. The phone's review shows the PUSD repaid and destroyed and the collateral coming back. **Approve**. The page then says "Closed and repaid. The key stays in your wallet; it opens nothing now."
+4. Trust the loan's template the same way. The loan key is listed under the template's name with **Connect**: a template trusted again from the backup asks its service nothing until you say so.
+5. Press **Connect**. The wallet asks the loan service what can be done, and lists the loan's actions under the key, with what the service says the loan holds.
+6. Press **Repay and close the loan**. The review, **Check and carry out**, shows the PUSD repaid and destroyed and the collateral coming back. Press **Carry it out**. The key is then listed with "Its service offers nothing for it now."
+
+The loan page can do the same: open it on the computer, connect the new phone, press **Allow** when the phone asks **Loan desk asks to see your tokens**, and the page finds the loan from its key and offers **Repay and close**.
 
 ## 8. More to try
 
@@ -123,9 +125,9 @@ On the recoverer's page, **Your balance** pays for everything: setting a wallet 
 - **The scanner on every phone.** Reading codes was tried in a browser with simulated cameras. Going round a phone's rear cameras, and zoom, have not been tried on real phones.
 - **Keys kept safely.** Both pages keep their keys in the browser's storage, unencrypted. That is acceptable for coins without value and nothing else.
 - **A real second person.** Pressing "lost their phone" stands for making sure who is asking, by a phone call or a visit.
-- **A position for a token from someone else.** The wallet finds a position only from its own record. A jar's key or a loan key sent to you is held and can be sent on; the wallet does not say what it controls.
+- **A position for a token from someone else.** The wallet finds a position only from its own record. A jar's key or a loan key sent to you is held and can be sent on; the wallet does not say what it controls, unless the template's service says what can be done with it.
 - **Closing a wallet.** The wallet's code can close a wallet and take the last satoshi out; the page does not offer it.
-- **The main network.** The code makes no assumption that holds only on chipnet, and is tested under the main network's rules on a local node, but these pages are set up for test networks.
+- **The main network, in full.** The pages offer mainnet beside chipnet, with a warning, and a first use with small amounts and a recovery ran there ([runs/mainnet-recovery-completed.md](runs/mainnet-recovery-completed.md)). Nothing is audited, and no loan has been opened on mainnet.
 
 ## On your own machine
 

@@ -2,7 +2,7 @@
 
 Design and implementation notes for stage 19 of the [implementation plan](../IMPLEMENTATION_PLAN_v0.6.md). Written on 20 November 2026. Built on 21 November 2026 on the branch `token-registries`, with the decisions of section 8 taken as recommended; section 10 says where building differed from what is written here.
 
-Today the wallet shows a fungible token by its category and in raw units: 100.00 PUSD reads "10,000 units" of "a token of unknown meaning" (proposal section 13.3, decision 25). This document says how the wallet can show "100.00 PUSDTEST" instead, from what the token's issuer has published, without trusting anyone for it and without learning anything about any application.
+When this was written the wallet showed a fungible token by its category and in raw units: 100.00 PUSD read "10,000 units" of "a token of unknown meaning" (proposal section 13.3, decision 25). This document says how the wallet can show "100.00 PUSDTEST" instead, from what the token's issuer has published, without trusting anyone for it and without learning anything about any application.
 
 ## 1. What a registry is
 
