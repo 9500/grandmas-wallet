@@ -140,6 +140,17 @@ export const walletRoleOf = (definition: Definition): string | undefined => {
   return roles.size === 1 ? [...roles][0] : undefined;
 };
 
+/** The template's starting actions, each under the role its entry names, in its order. */
+export const startEntriesOf = (definition: Definition): { action: string; role: string }[] => {
+  const entries: { action: string; role: string }[] = [];
+  for (const entry of (definition.start ?? []) as { action?: string; role?: string }[]) {
+    const { action, role } = entry;
+    if (action === undefined || role === undefined || entries.some((known) => known.action === action && known.role === role)) continue;
+    entries.push({ action, role });
+  }
+  return entries;
+};
+
 /** The template's starting actions for a role, in its order. */
 export const startingActionsOf = (definition: Definition, role: string): string[] => [
   ...new Set((definition.start ?? []).flatMap((entry) => ((entry as { role?: string }).role === role ? [(entry as { action: string }).action] : []))),

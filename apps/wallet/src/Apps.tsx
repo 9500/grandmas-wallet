@@ -1054,11 +1054,15 @@ const OfferedAction = ({ action, disabled, onAct }: { action: TokenAction; disab
   );
 };
 
-/** One action in a list: a button where the wallet offers it, else its name and why the application is needed. */
-const ActionRow = ({ action, disabled, onAct }: { action: TokenAction; disabled?: boolean; onAct: () => void }) =>
+/**
+ * One action in a list: a button where the wallet offers it, else its name and why the application is needed; beside it,
+ * quietly, the template's name for its role where the list has actions of more than one role.
+ */
+const ActionRow = ({ action, role, disabled, onAct }: { action: TokenAction; role?: string | undefined; disabled?: boolean; onAct: () => void }) =>
   action.needsApplication === undefined ? (
     <li>
       <OfferedAction action={action} {...(disabled === undefined ? {} : { disabled })} onAct={onAct} />
+      {role !== undefined && <span class="small muted">{role}</span>}
     </li>
   ) : (
     <li class="through-application">
@@ -1066,6 +1070,7 @@ const ActionRow = ({ action, disabled, onAct }: { action: TokenAction; disabled?
         <div class="token-action-name">{action.name}</div>
         <ThroughApplication label={`Why "${action.name}" needs the application`} page={action.page} why={action.needsApplication} />
       </div>
+      {role !== undefined && <span class="small muted">{role}</span>}
     </li>
   );
 
@@ -1115,8 +1120,8 @@ const TemplateActionsCards = ({ summary, offered, onAct }: { summary: TemplateSu
         <Card cls="template-actions-card">
           <TitleInfo title="Actions" label="About its actions" info="Start one of this template's actions here. The others act on a token you hold, and are done from that token under Tokens." />
           <ul class="token-actions">
-            {shown.starting.map((action) => (
-              <ActionRow action={action} onAct={() => onAct({ kind: 'start', template }, action)} />
+            {shown.starting.map((action, index) => (
+              <ActionRow action={action} role={shown.roles?.[index]} onAct={() => onAct({ kind: 'start', template, role: action.role }, action)} />
             ))}
             {shown.others.map((action) => (
               <li class="action-other">

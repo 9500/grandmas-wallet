@@ -52,6 +52,16 @@ describe('a template\'s actions, as its page lists them', () => {
     expect(shown.waiting).toEqual([]);
   });
 
+  it('names the role beside each starting action only where they are under more than one role', () => {
+    const summary = { actions: [{ action: 'open', name: 'The open', description: '' }, { action: 'join', name: 'The join', description: '' }] };
+    const two = actionsShown(summary, { starting: [action('open', { role: 'host' }), action('join', { role: 'guest' }), action('open', { role: 'guest' })], roleNames: { host: 'The host', guest: 'The guest' }, waiting: [] });
+    expect(two.starting.map(({ action: name, role }) => [name, role])).toEqual([['open', 'host'], ['join', 'guest'], ['open', 'guest']]);
+    expect(two.roles).toEqual(['The host', 'The guest', 'The guest']);
+    expect(two.others).toEqual([]);
+    const one = actionsShown(summary, { starting: [action('open', { role: 'host' })], waiting: [] });
+    expect(one).not.toHaveProperty('roles');
+  });
+
   it('lists each token that waits elsewhere once, under the template\'s name for where it waits, with its actions', () => {
     const waiting = [
       action('act', { waiting: { category: 'aa'.repeat(32), at: 'Shared script' } }),
@@ -92,11 +102,12 @@ describe('an action screen', () => {
     const template = { identifier: 'cc'.repeat(32), name: 'Test' };
     const position = { template } as unknown as RecordedPosition;
     requestFor(applications, { kind: 'token', position }, 'act', { amount: '5' });
-    requestFor(applications, { kind: 'start', template }, 'open', {});
+    requestFor(applications, { kind: 'start', template, role: 'user' }, 'open', {});
     requestFor(applications, { kind: 'waiting', template, category: 'aa'.repeat(32), at: 'Shared script' }, 'act', { amount: '6' });
     expect(asked).toEqual([
       ['on', position, 'act', { amount: '5' }],
-      ['start', template.identifier, 'open', {}],
+      // A starting action goes with the role its offer named.
+      ['start', template.identifier, 'open', {}, 'user'],
       ['waiting', template.identifier, 'aa'.repeat(32), 'act', { amount: '6' }],
     ]);
   });

@@ -58,6 +58,7 @@ import {
   checkServiceItem,
   firstCommitPlaces,
   otherParticipants,
+  startEntriesOf,
   startingActionsOf,
   saidValue,
   statedValue,
@@ -697,8 +698,13 @@ export interface TemplateAction extends TokenAction {
 /** What a template the user trusts offers from the wallet itself: its starting actions, and actions on tokens it made. */
 export interface TemplateActions {
   template: { identifier: string; name: string };
-  /** The role the wallet takes, where the template gives its side one. */
+  /**
+   * The role the wallet takes, where one is settled: the role the template's service was told, or the one role of the
+   * template's starting actions. Where none is, each starting action is offered under the role its entry names.
+   */
   role?: string;
+  /** Where the starting actions are under more than one role: the template's name for each of their roles. */
+  roleNames?: Record<string, string>;
   /** The template's service, where it names one for the wallet's network. */
   service?: ServiceStatus;
   starting: TemplateAction[];
@@ -2565,10 +2571,11 @@ export class Applications {
 
   /**
    * What a template the user trusts offers from the wallet itself (decision of 22 November 2026: every action is visible
-   * once the template is trusted): its starting actions for the wallet's role, each with what its service last said of
-   * it (never asked: offered, and checked when the user acts); and the actions its service offers on tokens the wallet
-   * made with it and does not hold, such as one that waits in the application's contract, under the template's name for
-   * where it waits. Nothing is asked of the service here.
+   * once the template is trusted): its starting actions for the wallet's role, or, where no role is settled, every
+   * starting action under the role its entry names, each with what its service last said of it (never asked: offered,
+   * and checked when the user acts); and the actions its service offers on tokens the wallet made with it and does not
+   * hold, such as one that waits in the application's contract, under the template's name for where it waits. Nothing is
+   * asked of the service here.
    */
   async templateActions(identifier: string): Promise<TemplateActions | undefined> {
     const kept = this.keptById(identifier);
@@ -2577,11 +2584,12 @@ export class Applications {
     const service = this.serviceOf(identifier);
     const resource = this.resourceOf(definition);
     const keptService = resource?.usable === true ? this.keptService(kept, resource.url) : undefined;
-    const role = keptService?.walletRole ?? walletRoleOf(definition);
+    const settled = keptService?.walletRole ?? walletRoleOf(definition);
     const template = { identifier, name: kept.name };
-    if (role === undefined) return { template, ...(service === undefined ? {} : { service }), starting: [], waiting: [] };
+    const entries = this.startEntries(definition, settled);
+    if (settled === undefined && entries.length === 0) return { template, ...(service === undefined ? {} : { service }), starting: [], waiting: [] };
     const possible = keptService?.possible;
-    const starting = startingActionsOf(definition, role).flatMap((action): TemplateAction[] => {
+    const starting = entries.flatMap(({ action, role }): TemplateAction[] => {
       const needsService = otherParticipants(definition, action, role).length > 0;
       if (!needsService) return [this.offerOf(definition, action, role, { alone: true })].filter((offer): offer is TokenAction => offer !== undefined);
       const said = possible?.start.find((entry) => entry.action === action);
@@ -2594,17 +2602,34 @@ export class Applications {
     const { made } = await this.heldUnder(identifier);
     const categories = new Set(made.map((entry) => entry.category));
     const waiting = made.flatMap((entry) => this.serviceActions(kept, entry.category, categories).map(({ item, place, ...offer }): TemplateAction => ({ ...offer, waiting: { category: item.category, at: place } })));
-    return { template, role, ...(service === undefined ? {} : { service }), starting, waiting };
+    const roles = [...new Set(starting.map(({ role }) => role))];
+    const roleNames = roles.length > 1 ? { roleNames: Object.fromEntries(roles.map((role) => [role, definition.roles?.[role]?.name ?? role])) } : {};
+    return { template, ...(settled === undefined ? {} : { role: settled }), ...roleNames, ...(service === undefined ? {} : { service }), starting, waiting };
   }
 
-  /** A starting action of a trusted template, as the user asks for it from the wallet itself, with what they typed. */
-  startAction(identifier: string, action: string, typed: Record<string, string | number> = {}): ApplicationAction {
+  /**
+   * The starting actions the wallet offers, each with its role: those of the settled role where there is one; else every
+   * starting action of the template, under the role its entry names (the user picks the action, and the role with it).
+   */
+  private startEntries(definition: ReadTemplate['definition'], settled: string | undefined): { action: string; role: string }[] {
+    return settled === undefined ? startEntriesOf(definition) : startingActionsOf(definition, settled).map((action) => ({ action, role: settled }));
+  }
+
+  /**
+   * A starting action of a trusted template, as the user asks for it from the wallet itself, with what they typed, under
+   * the role the offer named (`TemplateActions.starting`). The role may be left out where the action is offered under one
+   * role only.
+   */
+  startAction(identifier: string, action: string, typed: Record<string, string | number> = {}, role?: string): ApplicationAction {
     const kept = this.keptById(identifier);
     if (kept === undefined) return refuse('This wallet does not trust that template.');
     const { definition } = readTemplate(kept.text);
-    const role = this.keptService(kept)?.walletRole ?? walletRoleOf(definition);
-    if (role === undefined || !startingActionsOf(definition, role).includes(action)) return refuse(`The template "${kept.name}" offers no starting action "${action}" to the wallet.`);
-    return { template: { identifier: kept.identifier, contentHash: kept.contentHash }, action, role, variables: {}, fromWallet: { typed } };
+    const entries = this.startEntries(definition, this.keptService(kept)?.walletRole ?? walletRoleOf(definition));
+    const under = entries.filter((entry) => entry.action === action && (role === undefined || entry.role === role)).map((entry) => entry.role);
+    const [only] = under;
+    if (only === undefined) return refuse(`The template "${kept.name}" offers no starting action "${action}" to the wallet${role === undefined ? '' : ` as "${definition.roles?.[role]?.name ?? role}"`}.`);
+    if (under.length > 1) return refuse(`The template "${kept.name}" offers "${definition.actions?.[action]?.name ?? action}" as ${under.map((each) => `"${definition.roles?.[each]?.name ?? each}"`).join(' and ')}: the request has to say which.`);
+    return { template: { identifier: kept.identifier, contentHash: kept.contentHash }, action, role: only, variables: {}, fromWallet: { typed } };
   }
 
   /** An action on a token the wallet made with a template and does not hold (`TemplateActions.waiting`), with what the user typed. */

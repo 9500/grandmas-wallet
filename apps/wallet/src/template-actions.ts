@@ -93,15 +93,17 @@ export interface WaitingToken {
 
 /** A template's actions, as its screen lists them. */
 export interface ActionsShown {
-  /** The starting actions of the wallet's role: each with a button. */
+  /** The starting actions: each with a button. */
   starting: TemplateAction[];
+  /** Where they are under more than one role: the template's name for each action's role, by its place among them. */
+  roles?: string[];
   /** The template's other actions: named, with their description, and done from the token they act on. */
   others: { action: string; name: string; description: string }[];
   /** Tokens the wallet made that wait elsewhere, one entry each, with the actions offered for them. */
   waiting: WaitingToken[];
 }
 
-export const actionsShown = (summary: Pick<TemplateSummary, 'actions'>, offered: Pick<TemplateActions, 'starting' | 'waiting'>): ActionsShown => {
+export const actionsShown = (summary: Pick<TemplateSummary, 'actions'>, offered: Pick<TemplateActions, 'starting' | 'waiting' | 'roleNames'>): ActionsShown => {
   const starting = new Set(offered.starting.map(({ action }) => action));
   const others = summary.actions.filter((action, index) => !starting.has(action.action) && summary.actions.findIndex((other) => other.action === action.action) === index);
   const waiting: WaitingToken[] = [];
@@ -111,13 +113,18 @@ export const actionsShown = (summary: Pick<TemplateSummary, 'actions'>, offered:
     if (known === undefined) waiting.push({ category: action.waiting.category, at: action.waiting.at, actions: [action] });
     else if (!known.actions.some((other) => other.action === action.action)) known.actions.push(action);
   }
-  return { starting: offered.starting, others, waiting };
+  const { roleNames } = offered;
+  const roles = roleNames === undefined ? undefined : offered.starting.map(({ role }) => roleNames[role] ?? role);
+  return { starting: offered.starting, ...(roles === undefined ? {} : { roles }), others, waiting };
 };
 
-/** What an action screen acts on: a token the wallet holds, nothing yet (a starting action), or a token it made that waits elsewhere. */
+/**
+ * What an action screen acts on: a token the wallet holds, nothing yet (a starting action, under the role its offer
+ * names), or a token it made that waits elsewhere.
+ */
 export type ActTarget =
   | { kind: 'token'; position: RecordedPosition }
-  | { kind: 'start'; template: { identifier: string; name: string } }
+  | { kind: 'start'; template: { identifier: string; name: string }; role: string }
   | { kind: 'waiting'; template: { identifier: string; name: string }; category: string; at: string };
 
 /** The request the wallet works out for an action screen, with what the user typed. */
@@ -126,7 +133,7 @@ export const requestFor = (applications: Pick<Applications, 'actionOn' | 'startA
     case 'token':
       return applications.actionOn(target.position, action, typed);
     case 'start':
-      return applications.startAction(target.template.identifier, action, typed);
+      return applications.startAction(target.template.identifier, action, typed, target.role);
     case 'waiting':
       return applications.waitingAction(target.template.identifier, target.category, action, typed);
   }
