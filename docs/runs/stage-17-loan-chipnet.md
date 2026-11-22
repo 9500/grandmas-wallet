@@ -7,7 +7,7 @@ Written by the run itself (`scripts/stage-17-loan-run.ts chipnet`). The owner's 
 - Template "ParyonUSD loan (chipnet-fast-periods-6)" `160a451f5398db649de7d660855db24113b774559534361f8334cbfe9a583e20`, content `f7cdfbc37a81b71dd879bc3c07756151501aea5bfce0f5c51e7147c18d66deab`, with no declaration
 - Paryon's deployment `chipnet-fast-periods-6`: PUSD `e7979ccdae259293c7d0bee45ce8b7ad7660ea99477f802ed6a5161b0d30e6b8`, factories `8a51671cdc956212bd6b9c5ff2ad75a5d5364ef916162d1b82ee64a3438557f8`
 - Paryon's service as the template names it: https://paryon.9500.cash/service/v1, Paryon's public service, not started by the run; the loan page offered the template and asked for no action
-- Repository at commit `9027966`, with uncommitted changes to docs/xo-invitations.md, docs/goals-and-constraints.md
+- Repository at commit `9027966`, with uncommitted changes to documents only
 - Started 2026-11-22T11:06:19.283Z
 - Fee rate: every transaction of the run paid at least 1 sat/byte; from "the recoverer recovers" on at least 3 sat/byte, but for the return of the recoverer's balance, at 2 sat/byte (`--fee-rate 3`; see the notes)
 - The XO invitation behind each transaction an account of the run sent, as the engine serializes it for sharing: `docs/runs/invitations/stage-17-loan-chipnet/`, with `index.json` naming the template, action and role of each.
