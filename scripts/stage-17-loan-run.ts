@@ -81,7 +81,7 @@ import { fileURLToPath } from 'node:url';
 
 import { type Output, binToHex, decodeTransactionBch, generateBip39Mnemonic, hexToBin } from '@bitauth/libauth';
 import { type ArchiveStore, type PositionRecordEntry, blobIdOf } from '@grandmas-wallet/archive';
-import { type ChainReader, type KeyPair, type Utxo, buildTransaction, checkBeforeSending, deriveCredentialKeys, deriveSeedKeys, invitationFromText, keyPairFromPrivateKey, p2pkhInput, p2pkhLockingBytecode, readControllerHistory, readTemplate } from '@grandmas-wallet/core';
+import { type ChainReader, type KeyPair, type Utxo, InsufficientFundsError, buildTransaction, checkBeforeSending, deriveCredentialKeys, deriveSeedKeys, invitationFromText, keyPairFromPrivateKey, p2pkhInput, p2pkhLockingBytecode, readControllerHistory, readTemplate } from '@grandmas-wallet/core';
 import { Engine, XO_SUPPORTED_NETWORKS } from '@xo-cash/engine';
 
 import { Electrum } from '../packages/chipnet/src/electrum.js';
@@ -267,6 +267,8 @@ interface Facts {
   /** Where the rate was raised in a continued run: the lowest rate the run paid, and the part from which the last raise holds. */
   lowestFeeRate?: number;
   feeRaisedAt?: string;
+  /** A transaction that paid less than the run's rate because what it spent could not pay it, in the record's words. */
+  feeBelow?: string;
   held?: string;
   funderAtStart?: string;
   log: Entry[];
@@ -559,10 +561,10 @@ if (phase === undefined) {
       `- Repository at commit \`${revision}\`${changed.length === 0 ? '' : `, with uncommitted changes to ${changed.map((line) => line.slice(3)).join(', ')}`}`,
       `- Started ${facts.startedAt}`,
       ...(facts.lowestFeeRate !== undefined && facts.lowestFeeRate < (facts.feeRate ?? 1)
-        ? [`- Fee rate: every transaction of the run paid at least ${facts.lowestFeeRate} sat/byte; from "${facts.feeRaisedAt}" on at least ${facts.feeRate} sat/byte (\`--fee-rate ${facts.feeRate}\`; see the notes)`]
+        ? [`- Fee rate: every transaction of the run paid at least ${facts.lowestFeeRate} sat/byte; from "${facts.feeRaisedAt}" on at least ${facts.feeRate} sat/byte${facts.feeBelow === undefined ? '' : `, but for ${facts.feeBelow}`} (\`--fee-rate ${facts.feeRate}\`; see the notes)`]
         : (facts.feeRate ?? 1) === 1
           ? []
-          : [`- Fee rate: every transaction of the run paid at least ${facts.feeRate} sat/byte (\`--fee-rate ${facts.feeRate}\`)`]),
+          : [`- Fee rate: every transaction of the run paid at least ${facts.feeRate} sat/byte${facts.feeBelow === undefined ? '' : `, but for ${facts.feeBelow}`} (\`--fee-rate ${facts.feeRate}\`)`]),
       ...(local
         ? []
         : [
@@ -621,12 +623,12 @@ const note = (line: string, name?: string): void => {
   say(`  ${line}`);
 };
 if (feeRaised) note(`From "${phase}" on the run paid at least ${FEE_RATE} sat/byte (continued with --fee-rate ${FEE_RATE}; ${earlierFeeRate} sat/byte before), because the node asked for more.`);
-const record = (step: string, sent: { transactionId: string; bytes: number; feeSatoshis: bigint }, about = ''): void => {
+const record = (step: string, sent: { transactionId: string; bytes: number; feeSatoshis: bigint }, about = '', rate = FEE_RATE): void => {
   if (!facts.log.some((entry) => entry.transactionId === sent.transactionId)) facts.log.push({ step, transactionId: sent.transactionId, bytes: sent.bytes, fee: String(sent.feeSatoshis), note: about });
   keep();
   say(`  ${step}: ${sent.transactionId}, ${sent.bytes} bytes, fee ${sent.feeSatoshis}${about === '' ? '' : `; ${about}`}`);
   // A run whose rate was raised may record again a transaction it sent before, at the lower rate.
-  const least = Math.min(FEE_RATE, facts.lowestFeeRate ?? FEE_RATE);
+  const least = Math.min(rate, facts.lowestFeeRate ?? rate);
   if (sent.feeSatoshis < BigInt(Math.ceil(sent.bytes * least))) throw new Error(`a fee below ${least} sat/byte`);
 };
 const once = async (name: string, work: () => Promise<{ transactionIds?: string[]; data?: Record<string, number | string> } | undefined>): Promise<Record<string, number | string>> => {
@@ -1800,12 +1802,27 @@ try {
 
   if (phase === 'the recoverer returns its balance') {
     await once('the recoverer returns its balance', async () => {
-      account = await openAccount(facts.words.credential, 'the recoverer');
-      const funds = await RecovererFunds.open({ backend: account, chain, feeRate: FEE_RATE });
-      await until('the recoverer\'s balance', async () => (await funds.balance()) > 0n);
-      const [sent] = (await funds.sendEverything(funderLocking)).transactions;
+      const backend = await openAccount(facts.words.credential, 'the recoverer');
+      account = backend;
+      // What is left may be too little to pay the run's rate and still leave an output: it then pays the highest whole
+      // rate that does. Nothing is sent by an attempt that finds too little.
+      const returned = async (rate: number): Promise<{ sent: { transactionId: string; bytes: number; feeSatoshis: bigint } | undefined; paid: number }> => {
+        const funds = await RecovererFunds.open({ backend, chain, feeRate: rate });
+        if (rate === FEE_RATE) await until('the recoverer\'s balance', async () => (await funds.balance()) > 0n);
+        try {
+          return { sent: (await funds.sendEverything(funderLocking)).transactions[0], paid: rate };
+        } catch (error) {
+          if (!(error instanceof InsufficientFundsError) || rate <= 1) throw error;
+          return returned(rate - 1);
+        }
+      };
+      const { sent, paid } = await returned(FEE_RATE);
       if (sent === undefined) return {};
-      record('return the recoverer\'s balance', sent, 'what the recoverer did not use');
+      if (paid !== FEE_RATE) {
+        facts.feeBelow = `the return of the recoverer's balance, at ${paid} sat/byte`;
+        note(`What the recoverer had left was too little to pay ${FEE_RATE} sat/byte and leave an output; it was returned at ${paid} sat/byte.`);
+      }
+      record('return the recoverer\'s balance', sent, 'what the recoverer did not use', paid);
       return { transactionIds: [sent.transactionId] };
     });
     await block();
