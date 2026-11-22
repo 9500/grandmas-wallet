@@ -3,7 +3,15 @@
 // Paryon's contracts as published are deployed on the local chain by this script (packages/paryon/src/local-deployment.ts)
 // and named to the loan page in its configuration; on chipnet the public pages use Paryon's own test deployment. Each device is a browser profile of its own, kept on disk; the
 // loan page is a second tab of the phone that uses it. The wallet reads no recovery declaration: the loan reaches it as
-// Paryon's template, in the page's requests of `xo_v1` version 2.
+// Paryon's template, in the page's requests of `xo_v1`.
+//
+// The loan page now sends version 3 of the template, whose actions Paryon's service joins: its requests carry only the
+// borrower's values, and the wallet asks the service for the rest. Until the wallet's screens for services are in this
+// branch, the wallet page refuses those actions. Once they are, this course also needs, on the local node: Paryon's
+// service (apps/paryon-service) started with the same configuration as the loan page, whose `loanUrl` names the loan
+// page's port, and the loan page's server forwarding /service/ to it (`--forward`, in scripts/browser-course.ts
+// `EXTRA`); the wallet page given its service as `local`, so that an `http:` address is allowed; and the steps that read
+// the wallet's review taught the service's part. On chipnet, Paryon's public service serving version 3.
 //
 //   1. Anna opens the recoverer's page and funds her balance    7. the phone is lost, with the loan open
 //   2. Anna sets up Grandma's wallet: the phone scans her code   8. a new phone takes the wallet over and sweeps
@@ -627,7 +635,7 @@ const writeRecord = async (outcome: string): Promise<void> => {
     [
       `# Stage 17 in browsers on ${chipnet ? 'chipnet (run H)' : 'the local node'}: a ParyonUSD loan from its template alone, through the loss of a phone (PR20)`,
       '',
-      `Written by \`scripts/stage-17-loan-browser.ts${(kept.command ?? '') === '' ? '' : ` ${kept.command}`}\` on ${new Date(kept.startedAt ?? started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the loan page is a second tab of the phone that uses it. ${chipnet ? `${pagesUsed([WALLET, RECOVERER, LOAN], 'Blocks and the waiting period took their real time; the coins came from the funding address and went back to it.')}${served} The loan page used Paryon's own test deployment \`${DEPLOYMENT.name}\`, unchanged, and read the oracle's price.` : `The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${LOAN}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. Paryon's contracts as published (\`@paryonusd/contracts\` 1.1.0) were deployed on the local chain by the run (\`packages/paryon/src/local-deployment.ts\`, the price at $${(Number(PRICE) / 100).toFixed(2)}, periods of 10 blocks) and named to the loan page in its configuration; the oracle is not read for such a deployment. The run made the blocks and moved the chain's clock.`} The wallet reads no recovery declaration: the loan reached it as Paryon's template, in the page's requests of \`xo_v1\` version 2. Times in the log are seconds since the start.`,
+      `Written by \`scripts/stage-17-loan-browser.ts${(kept.command ?? '') === '' ? '' : ` ${kept.command}`}\` on ${new Date(kept.startedAt ?? started).toISOString().slice(0, 16).replace('T', ' ')} UTC. Chromium (Playwright), one browser profile per device kept on disk under \`${work.slice(root.length)}\`; the loan page is a second tab of the phone that uses it. ${chipnet ? `${pagesUsed([WALLET, RECOVERER, LOAN], 'Blocks and the waiting period took their real time; the coins came from the funding address and went back to it.')}${served} The loan page used Paryon's own test deployment \`${DEPLOYMENT.name}\`, unchanged, and read the oracle's price.` : `The pages are this checkout's production builds (\`deploy/preview.sh build\`) served by \`deploy/serve.mjs\` with the content security policy at ${WALLET}, ${RECOVERER} and ${LOAN}, against the regtest node, with two backup stores and a relay for the sessions between the pages, all on this machine. Paryon's contracts as published (\`@paryonusd/contracts\` 1.1.0) were deployed on the local chain by the run (\`packages/paryon/src/local-deployment.ts\`, the price at $${(Number(PRICE) / 100).toFixed(2)}, periods of 10 blocks) and named to the loan page in its configuration; the oracle is not read for such a deployment. The run made the blocks and moved the chain's clock.`} The wallet reads no recovery declaration: the loan reached it as Paryon's template, in the page's requests of \`xo_v1\`. Times in the log are seconds since the start.`,
       '',
       `Outcome: ${outcome}`,
       ...(kept.continued.length === 0 ? [] : ['', ...kept.continued]),
