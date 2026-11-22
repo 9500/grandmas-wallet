@@ -742,8 +742,8 @@ const funderPays = async (step: string, outputs: Output[], options: { burn?: boo
   }
 };
 
-const openAccount = async (words: string, who: string): Promise<Account> =>
-  Account.open(await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers: await engineServers(local) }), { onSent: writeInvitationFiles(invitations, who), feeRate: FEE_RATE });
+const openAccount = async (words: string, who: string, feeRate = FEE_RATE): Promise<Account> =>
+  Account.open(await Engine.create(words, { network: XO_SUPPORTED_NETWORKS.chipnet, electrumServers: await engineServers(local) }), { onSent: writeInvitationFiles(invitations, who), feeRate });
 let account: Account | undefined;
 
 /** A backup store kept as a directory of the run: sealed blobs under their own names, as a store server keeps them. */
@@ -1802,17 +1802,19 @@ try {
 
   if (phase === 'the recoverer returns its balance') {
     await once('the recoverer returns its balance', async () => {
-      const backend = await openAccount(facts.words.credential, 'the recoverer');
-      account = backend;
       // What is left may be too little to pay the run's rate and still leave an output: it then pays the highest whole
-      // rate that does. Nothing is sent by an attempt that finds too little.
+      // rate that does, from an account opened at that rate. Nothing is sent by an attempt that finds too little.
       const returned = async (rate: number): Promise<{ sent: { transactionId: string; bytes: number; feeSatoshis: bigint } | undefined; paid: number }> => {
+        const backend = await openAccount(facts.words.credential, 'the recoverer', rate);
+        account = backend;
         const funds = await RecovererFunds.open({ backend, chain, feeRate: rate });
         if (rate === FEE_RATE) await until('the recoverer\'s balance', async () => (await funds.balance()) > 0n);
         try {
           return { sent: (await funds.sendEverything(funderLocking)).transactions[0], paid: rate };
         } catch (error) {
           if (!(error instanceof InsufficientFundsError) || rate <= 1) throw error;
+          await backend.close();
+          account = undefined;
           return returned(rate - 1);
         }
       };
