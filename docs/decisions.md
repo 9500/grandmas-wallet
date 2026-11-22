@@ -153,3 +153,12 @@ The controller and the shared authorization interface accept a signature of type
 - **A template has to be kept as the text it arrived in.** Its identifier depends on the order of its fields.
 - **A template variable of type `timestamp` cannot be used in a script that is to be unlocked later:** the engine reads the stored value back as text.
 - **Preact and Vite**, with the XO engine in the page and its Node-only imports replaced by empty stand-ins, as the XO web tool does.
+
+## D16 — Deleting a template, and adding one from a file
+
+**Date:** 22 Nov 2026 · **Status:** implemented and tested (`packages/app`, `packages/archive`, `apps/wallet`)
+
+- **A template can be deleted from the wallet,** when the user stops trusting it or later, from the backup's suggestion. The device drops its text, what its service said, which applications may see its tokens and the categories it made; it keeps the template's names and a number, so that it neither trusts nor offers it again.
+- **The backup is only added to.** A store cannot remove a blob, and the wallet asks none to. The template's record stays, sealed; a withdrawal that says the template was deleted reaches it, and a reader that sees the mark offers it to no one. A reader of an earlier version takes the mark for a plain withdrawal. Trusting the same template again stores it under the next number, which the mark does not reach.
+- **Tokens and records stay.** The tokens are listed as tokens the wallet does not understand and still move in a recovery; the records of their positions are kept, so that adding the template again restores the actions. While the wallet holds a token of it, a position made with it is open, or a token made with it waits elsewhere, the deletion needs the user's tick.
+- **A template can be added from a file or pasted text,** read on the device and checked as an offer: the offer's size limit, the XO validator, the wallet's own identifier and hash, and its findings. The review is the offer's, marked as coming from the device. Trusted, it is stored in the backup and its service is asked once, as for an offer. The page's content security policy does not change.
