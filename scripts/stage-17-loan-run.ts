@@ -269,6 +269,8 @@ interface Facts {
   feeRaisedAt?: string;
   /** A transaction that paid less than the run's rate because what it spent could not pay it, in the record's words. */
   feeBelow?: string;
+  /** The rate the return of the recoverer's balance pays, where what is left could not pay the run's. */
+  returnFeeRate?: number;
   held?: string;
   funderAtStart?: string;
   log: Entry[];
@@ -1803,22 +1805,23 @@ try {
   if (phase === 'the recoverer returns its balance') {
     await once('the recoverer returns its balance', async () => {
       // What is left may be too little to pay the run's rate and still leave an output: it then pays the highest whole
-      // rate that does, from an account opened at that rate. Nothing is sent by an attempt that finds too little.
-      const returned = async (rate: number): Promise<{ sent: { transactionId: string; bytes: number; feeSatoshis: bigint } | undefined; paid: number }> => {
-        const backend = await openAccount(facts.words.credential, 'the recoverer', rate);
-        account = backend;
-        const funds = await RecovererFunds.open({ backend, chain, feeRate: rate });
-        if (rate === FEE_RATE) await until('the recoverer\'s balance', async () => (await funds.balance()) > 0n);
-        try {
-          return { sent: (await funds.sendEverything(funderLocking)).transactions[0], paid: rate };
-        } catch (error) {
-          if (!(error instanceof InsufficientFundsError) || rate <= 1) throw error;
-          await backend.close();
-          account = undefined;
-          return returned(rate - 1);
-        }
-      };
-      const { sent, paid } = await returned(FEE_RATE);
+      // rate that does. An engine is opened once in a process and the account checks at the rate it was opened with,
+      // so an attempt that finds too little sends nothing, writes the next lower rate down and stops; the same command
+      // then returns the balance at that rate.
+      const paid = facts.returnFeeRate ?? FEE_RATE;
+      const backend = await openAccount(facts.words.credential, 'the recoverer', paid);
+      account = backend;
+      const funds = await RecovererFunds.open({ backend, chain, feeRate: paid });
+      await until('the recoverer\'s balance', async () => (await funds.balance()) > 0n);
+      const sent = await funds.sendEverything(funderLocking).then(
+        (done) => done.transactions[0],
+        (error: unknown) => {
+          if (!(error instanceof InsufficientFundsError) || paid <= 1) throw error;
+          facts.returnFeeRate = paid - 1;
+          keep();
+          throw new Error(`what the recoverer has left is too little to pay ${paid} sat/byte and leave an output; nothing was sent, and the same command returns it at ${paid - 1} sat/byte`, { cause: error });
+        },
+      );
       if (sent === undefined) return {};
       if (paid !== FEE_RATE) {
         facts.feeBelow = `the return of the recoverer's balance, at ${paid} sat/byte`;
