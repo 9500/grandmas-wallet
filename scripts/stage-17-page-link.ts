@@ -7,7 +7,7 @@
 // The wallet's screens do not ask for the user's tick yet (proposal section 13.3: a token made from the wallet's
 // coin that does not come to the wallet). Where a run needs it, the approval carries the tick, and the run says so.
 import { type ActionPreview, type Applications, actionOf, applicationConnector } from '../packages/app/src/index.js';
-import { type Channel, type LedgerEntry, type Proposal, type XoMessage, DappRequests } from '../packages/connect/src/index.js';
+import { type Channel, type LedgerEntry, type Offer, type Proposal, type XoMessage, DappRequests } from '../packages/connect/src/index.js';
 
 export interface PageLink {
   requests: DappRequests;
@@ -18,15 +18,21 @@ export interface PageLink {
    * it, with the tick where `tick` says so.
    */
   approve: <T>(asked: Promise<T>, options?: { tick?: boolean; seen?: (preview: ActionPreview, entry: LedgerEntry) => void }) => Promise<T>;
+  /**
+   * Wait until the wallet lists a template the page offered without an action (`DappRequests.offerTemplate`), let the
+   * user look at it, and trust it, as the user would in the wallet.
+   */
+  acceptOffer: <T>(offered: Promise<T>, seen?: (offer: Offer) => void) => Promise<T>;
 }
 
 export const pageLink = (applications: Applications, pairing: string): PageLink => {
   let proposals: Proposal[] = [];
+  let offers: Offer[] = [];
   let ticks = false;
   // The user's approval, with the tick when it is given: the wallet's own `carryOut`, with the consent passed on.
   const user = Object.create(applications) as Applications;
   user.carryOut = (request, onStage, consent) => applications.carryOut(request, onStage, { ...consent, ...(ticks ? { tokensLeave: true } : {}) });
-  const connector = applicationConnector(user, { onProposals: (open) => (proposals = open) });
+  const connector = applicationConnector(user, { onProposals: (open) => (proposals = open), onOffers: (open) => (offers = open) });
   const toWallet: ((message: unknown) => void)[] = [];
   const toPage: ((message: unknown) => void)[] = [];
   const sent: XoMessage[] = [];
@@ -66,5 +72,20 @@ export const pageLink = (applications: Applications, pairing: string): PageLink 
     }
     return asked;
   };
-  return { requests, sent, approve };
+  const acceptOffer = async <T>(offered: Promise<T>, seen?: (offer: Offer) => void): Promise<T> => {
+    const early = offered.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    for (let turn = 0; turn < 600 && offers.length === 0; turn++) {
+      const settled = await Promise.race([early, new Promise((resolve) => setTimeout(() => resolve('waiting'), 50))]);
+      if (settled !== 'waiting' && settled !== undefined) throw settled;
+    }
+    const [offer] = offers;
+    if (offer === undefined) throw new Error('The wallet shows no template to trust.');
+    seen?.(offer);
+    await offer.accept();
+    return offered;
+  };
+  return { requests, sent, approve, acceptOffer };
 };
