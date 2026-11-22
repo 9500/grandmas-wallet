@@ -225,7 +225,11 @@ describe('satoshis a template input leaves out of the change', () => {
     expect(templateOmittedSatoshis(marked('9000'), 'markedInput', 5000n, {})).toBe(5000n);
     expect(templateOmittedSatoshis(marked('$(<burned>)'), 'markedInput', 5000n, { burned: 700n })).toBe(700n);
     expect(templateOmittedSatoshis(marked(true), 'plainInput', 5000n, {})).toBe(0n);
-    expect(templateGivenToFee(marked(true), [{ inputIdentifier: 'markedInput', valueSatoshis: 5000n }, { inputIdentifier: 'plainInput', valueSatoshis: 3000n }, { valueSatoshis: 1000n }], {})).toBe(5000n);
+    const coins = [{ inputIdentifier: 'markedInput', valueSatoshis: 5000n }, { inputIdentifier: 'plainInput', valueSatoshis: 3000n }, { valueSatoshis: 1000n }];
+    expect(templateGivenToFee(marked(true), coins, {}, 0n)).toBe(5000n);
+    // Such a coin pays toward the template's own outputs first: only what is left of it may go to the fee.
+    expect(templateGivenToFee(marked(true), coins, {}, 4200n)).toBe(800n);
+    expect(templateGivenToFee(marked(true), coins, {}, 9000n)).toBe(0n);
   });
 
   it('FE04: the check before sending and the builder take a fee above the required one by what such coins give up to it, and no more', () => {

@@ -278,12 +278,14 @@ export const templateOmittedSatoshis = (template: XOTemplate, inputIdentifier: s
 };
 
 /**
- * What the coins of a transaction leave out of the change by their template inputs, together: the most the fee may
- * exceed the required one by on their account, for the check before sending. An amount that cannot be worked out
- * counts as nothing.
+ * What the coins of a transaction give to the fee by their template inputs, together: what they leave out of the
+ * change, less what the template's own outputs hold, which they pay toward first. It is the most the fee may exceed
+ * the required one by on their account, for the check before sending. An amount that cannot be worked out counts as
+ * nothing.
+ * @param templateOutputsSatoshis - the satoshis in the transaction's outputs that the template names
  */
-export const templateGivenToFee = (template: XOTemplate, inputs: { inputIdentifier?: string | undefined; valueSatoshis: bigint }[], values: TemplateValues): bigint =>
-  inputs.reduce((total, { inputIdentifier, valueSatoshis }) => {
+export const templateGivenToFee = (template: XOTemplate, inputs: { inputIdentifier?: string | undefined; valueSatoshis: bigint }[], values: TemplateValues, templateOutputsSatoshis: bigint): bigint => {
+  const omitted = inputs.reduce((total, { inputIdentifier, valueSatoshis }) => {
     if (inputIdentifier === undefined) return total;
     try {
       return total + templateOmittedSatoshis(template, inputIdentifier, valueSatoshis, values);
@@ -292,6 +294,8 @@ export const templateGivenToFee = (template: XOTemplate, inputs: { inputIdentifi
       return total;
     }
   }, 0n);
+  return omitted > templateOutputsSatoshis ? omitted - templateOutputsSatoshis : 0n;
+};
 
 /** A template's text with the values put in where it refers to them as `$(<name>)`: its own words about an action. */
 export const templateWords = (template: XOTemplate, text: string | undefined, values: TemplateValues): string => {

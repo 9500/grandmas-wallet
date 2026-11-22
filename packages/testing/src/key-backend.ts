@@ -227,11 +227,17 @@ export class KeyBackend implements WalletBackend {
   async prepare(request: TransactionRequest): Promise<PreparedTransaction> {
     const imported = this.imported.get(request.template);
     // As the account does: coins whose template input leaves satoshis out of the change give them to the fee.
-    const givenToFee = imported === undefined ? 0n : templateGivenToFee(imported.definition, request.inputs.map(({ coin, inputIdentifier }) => ({ inputIdentifier, valueSatoshis: coin.utxo.output.valueSatoshis })), typedValues(imported.definition, request.variables ?? {}));
+    // They pay toward the template's own outputs first; only what is left of them may go to the fee.
+    const outputs = request.outputs.map((output) => this.outputFor(output, request));
+    const templateOutputsSatoshis = request.outputs.reduce((sum, output, index) => ('outputIdentifier' in output ? sum + (outputs[index]?.valueSatoshis ?? 0n) : sum), 0n);
+    const givenToFee =
+      imported === undefined
+        ? 0n
+        : templateGivenToFee(imported.definition, request.inputs.map(({ coin, inputIdentifier }) => ({ inputIdentifier, valueSatoshis: coin.utxo.output.valueSatoshis })), typedValues(imported.definition, request.variables ?? {}), templateOutputsSatoshis);
     const built = buildTransaction({
       givenToFee,
       inputs: request.inputs.map(({ coin, inputIdentifier, unlocking }) => this.inputFor(coin, request, inputIdentifier, unlocking)),
-      outputs: request.outputs.map((output) => this.outputFor(output, request)),
+      outputs,
       // An action of an application's template has the lock time its template gives it.
       ...(imported === undefined ? {} : { locktime: templateTransaction(imported.definition, request.action, typedValues(imported.definition, request.variables ?? {})).locktime }),
       signingType: ENGINE_SIGNING_TYPE,

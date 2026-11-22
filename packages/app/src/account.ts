@@ -375,7 +375,9 @@ export class Account implements WalletBackend {
       );
       if (transaction.inputs.length !== request.inputs.length || !spendsWhatWasAsked) throw new Error('The engine built a transaction with other inputs than the ones asked for.');
       // Coins whose template input leaves satoshis out of the change give them to the fee, as the template says.
-      const givenToFee = templateGivenToFee(templateDefinition, request.inputs.map(({ coin, inputIdentifier }) => ({ inputIdentifier, valueSatoshis: coin.utxo.output.valueSatoshis })), typedValues(templateDefinition, request.variables ?? {}));
+      // They pay toward the template's own outputs first; only what is left of them may go to the fee.
+      const templateOutputsSatoshis = request.outputs.reduce((sum, output, index) => ('outputIdentifier' in output ? sum + (transaction.outputs[index]?.valueSatoshis ?? 0n) : sum), 0n);
+      const givenToFee = templateGivenToFee(templateDefinition, request.inputs.map(({ coin, inputIdentifier }) => ({ inputIdentifier, valueSatoshis: coin.utxo.output.valueSatoshis })), typedValues(templateDefinition, request.variables ?? {}), templateOutputsSatoshis);
       const check = checkBeforeSending({ transaction, sourceOutputs }, undefined, givenToFee);
       if (check !== true) {
         throw new Error(`The transaction fails the check before sending: ${check}`, { cause: { transactionHex: builtTransaction.serializedTransaction, sourceOutputs } });
