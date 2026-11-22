@@ -1,4 +1,4 @@
-import { type ActionPreview, type MovedOutput, type TemplateSummary, matchNfts, previewCategories, thisWalletRefuses } from '@grandmas-wallet/app';
+import { type ActionPreview, type MovedOutput, type ServicePart, type TemplateSummary, SERVICE_WORDS, matchNfts, previewCategories, thisWalletRefuses } from '@grandmas-wallet/app';
 import { InsufficientFundsError } from '@grandmas-wallet/core';
 import { Amount, Choice, Icon, Info, KeyValues, More, Notice, Sat, Status, formatBch, formatSatoshis, formatTime, plainError, shorten } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
@@ -142,6 +142,37 @@ export const TheirWords = ({ words }: { words: ActionPreview['words'] }) => (
     </div>
   </Part>
 );
+
+/** A value as the template's words show it: a long hexadecimal value shortened, anything else as it is. */
+const WordValue = ({ value }: { value: string }) => (/^[0-9a-f]{24,}$/i.test(value) ? <Hex value={value} /> : <span class="word-value">{value}</span>);
+
+/**
+ * What the template's service stated for the action, by the template's names: apart from the wallet's own figures and
+ * quieter than them. The wallet checked these values only through the rules of the template's contracts.
+ */
+export const FromService = ({ part }: { part: ServicePart }) => {
+  // What it said beside its values, where it is not one of them.
+  const said = part.says.filter((entry) => !part.values.some((value) => value.variable === entry.variable));
+  if (part.values.length + said.length === 0) return null;
+  return (
+    <Part title={SERVICE_WORDS.fromService} info="These values come from the template's service. This wallet checks them only through the rules of the template's contracts, before anything is signed." cls="from-service">
+      <div class="quote">
+        <KeyValues
+          entries={[
+            ...part.values.map((value): [ComponentChildren, ComponentChildren] => [
+              <>
+                {value.name}
+                {value.description !== '' && <small>{value.description}</small>}
+              </>,
+              <WordValue value={value.value} />,
+            ]),
+            ...said.map((entry): [ComponentChildren, ComponentChildren] => [entry.name, <WordValue value={entry.value} />]),
+          ]}
+        />
+      </div>
+    </Part>
+  );
+};
 
 /** A token that moves, in words: an amount in raw units, or an NFT, and its category. */
 export const TokenWords = ({ token }: { token: NonNullable<MovedOutput['token']> }) => {
@@ -614,6 +645,7 @@ export const ActionReview = ({ preview, summary, tick }: { preview: ActionPrevie
       </div>
       <Cautions preview={preview} summary={template} tick={tick} />
       <TheirWords words={preview.words} />
+      {preview.service !== undefined && <FromService part={preview.service} />}
       <div class="folds">
         <OwnFigures figures={preview.figures} />
         <TheTemplate summary={template} />

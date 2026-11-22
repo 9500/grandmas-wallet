@@ -1,17 +1,18 @@
 import { binToHex } from '@bitauth/libauth';
-import { type ActionOutcome, type ActionPreview, type ApplicationAction, type Applications, type HeldToken, type RecordedPosition, type TemplateSummary, type TokenAction, NotStoredError, WALLET_TEMPLATES, actionOf } from '@grandmas-wallet/app';
+import { type ActionOutcome, type ActionPreview, type ApplicationAction, type Applications, type HeldToken, type RecordedPosition, type ServiceStatus, type TemplateActions, type TemplateSummary, type TokenAction, NotStoredError, SERVICE_WORDS, WALLET_TEMPLATES, actionOf } from '@grandmas-wallet/app';
 import { readLink } from '@grandmas-wallet/app/links';
 import type { LedgerEntry, Offer, Proposal } from '@grandmas-wallet/connect';
-import { Amount, Button, Card, Field, Info, KeyValues, Loading, Notice, PageHead, Pill, Spinner, TaskStatus, TextInput, Value, formatTime, lockingBytecodeOfAddress, useTask } from '@grandmas-wallet/ui';
+import { type Task, Amount, Button, Card, Field, Info, KeyValues, Loading, Notice, PageHead, Pill, Spinner, TaskStatus, TextInput, Value, formatTime, lockingBytecodeOfAddress, useTask } from '@grandmas-wallet/ui';
 import type { ComponentChildren } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { ActionReview, Hex, Part, RefusalView, TemplateView, plainRefusal, refusalOf } from './ActionReview.js';
-import { type BackupState, type Refusal, type TokenList, BACKUP_UNREACHABLE, approval, consentOf, needsStore, refusalOf as refusalShown, tokenList } from './review-gate.js';
+import { type BackupState, type Refusal, type TokenList, BACKUP_UNREACHABLE, SPENT_FIRST, approval, consentOf, needsStore, refusalOf as refusalShown, tokenList } from './review-gate.js';
 import { type ApplicationsPart, type PositionsAsk, relayOf } from './connections.js';
 import type { Owner } from './OwnerApp.js';
 import { CONNECTION_ADDRESS } from './scan.js';
 import { CameraIcon, ScanDialog } from './Scanner.js';
+import { type ActTarget, actionsShown, checkedLine, notAsked, requestFor, saysLine, serviceShown, targetTemplateName, unavailable, usableService } from './template-actions.js';
 import { chooseToken } from './token-choice.js';
 import { titledByRegistry, tokenTitle } from './token-stake.js';
 import { type Connection, keep, kept } from './session.js';
@@ -24,7 +25,7 @@ import './apps.css';
  * shows about one comes from the application's template, and its name for itself is marked as unverified.
  */
 
-type View = { at: 'main' } | { at: 'act'; position: RecordedPosition; action: TokenAction } | { at: 'trust'; identifier: string } | { at: 'template'; identifier: string };
+type View = { at: 'main' } | { at: 'act'; target: ActTarget; action: TokenAction; back: View } | { at: 'trust'; identifier: string } | { at: 'template'; identifier: string };
 
 /** Requests the user decided while the page has been open: their outcome stays on the screen until dismissed. */
 const followed = new Set<string>();
@@ -46,22 +47,15 @@ export const Apps = ({ owner }: { owner: Owner }) => {
       console.warn(error);
     });
   }, []);
-  const back = () => {
-    setView({ at: 'main' });
+  const go = (next: View) => {
+    setView(next);
     window.scrollTo(0, 0);
   };
-  if (view.at === 'act') return <ActOnToken owner={owner} position={view.position} action={view.action} onBack={back} />;
+  const back = () => go({ at: 'main' });
+  if (view.at === 'act') return <ActOn owner={owner} target={view.target} action={view.action} onBack={() => go(view.back)} />;
   if (view.at === 'trust') return <TrustSuggested owner={owner} identifier={view.identifier} onBack={back} />;
-  if (view.at === 'template') return <TemplatePage owner={owner} identifier={view.identifier} onBack={back} />;
-  return (
-    <Main
-      owner={owner}
-      onView={(next) => {
-        setView(next);
-        window.scrollTo(0, 0);
-      }}
-    />
-  );
+  if (view.at === 'template') return <TemplatePage owner={owner} identifier={view.identifier} onBack={back} onView={go} />;
+  return <Main owner={owner} onView={go} />;
 };
 
 const Main = ({ owner, onView }: { owner: Owner; onView: (view: View) => void }) => {
@@ -107,9 +101,6 @@ const Main = ({ owner, onView }: { owner: Owner; onView: (view: View) => void })
 };
 
 /** A card's title with its explanation behind a "?", and what goes on the other side. */
-/** An action the network refused because another transaction spent one of its coins first. */
-const SPENT_FIRST = 'Another transaction used one of its coins first. Nothing was sent.';
-
 const TitleInfo = ({ title, label, info, aside }: { title: string; label: string; info: ComponentChildren; aside?: ComponentChildren }) => (
   <div class="card-head">
     <h2 class="title-info">
@@ -351,6 +342,28 @@ const Unreachable = ({ onRetry, busy }: { onRetry: () => void; busy: boolean }) 
   </Notice>
 );
 
+/**
+ * A review worked out with a template's service holds what its invitation took until it is carried out or put aside.
+ * It is put aside whenever the review is left: another review in its place, back, another screen, the page closed.
+ * Not while it is being carried out: the wallet puts it aside itself if that fails.
+ * @returns the mark to set while the action is carried out
+ */
+const useHeldReview = (applications: Pick<Applications, 'discardPreview'>, request: ApplicationAction | undefined): { current: boolean } => {
+  const carrying = useRef(false);
+  useEffect(() => {
+    if (request === undefined) return undefined;
+    const free = (): void => {
+      if (!carrying.current) void applications.discardPreview(request).catch(() => undefined);
+    };
+    window.addEventListener('pagehide', free);
+    return () => {
+      window.removeEventListener('pagehide', free);
+      free();
+    };
+  }, [request]);
+  return carrying;
+};
+
 const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entry: LedgerEntry; proposal: Proposal | undefined; onDismiss: () => void }) => {
   const { apps } = owner;
   const { applications } = apps;
@@ -367,9 +380,11 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
   const [notStored, setNotStored] = useState(false);
   const [ticked, setTicked] = useState(false);
   const [backup, checkBackup] = useBackup(applications, preview);
+  const request = useMemo(() => actionOf(entry), [keyOf(entry)]);
+  const carrying = useHeldReview(applications, request);
   useEffect(() => {
     if (entry.status !== 'asked' || summary === undefined) return;
-    applications.preview(actionOf(entry)).then(setPreview, (error: unknown) => setRefusal(refusalShown(error, refusalOf(error))));
+    applications.preview(request).then(setPreview, (error: unknown) => setRefusal(refusalShown(error, refusalOf(error))));
   }, [keyOf(entry)]);
   const gate = approval({ ...(preview === undefined ? {} : { preview }), refused: summary === undefined || refusal !== undefined, backup, ticked });
 
@@ -392,6 +407,7 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
       if (proposal === undefined) return;
       followed.add(keyOf(entry));
       if (!agree) {
+        await applications.discardPreview(request).catch(() => undefined);
         await proposal.decline();
         apps.changed();
         return;
@@ -403,9 +419,11 @@ const RequestCard = ({ owner, entry, proposal, onDismiss }: { owner: Owner; entr
       }
       progress(preview?.firstUse === true ? 'Storing the template in your backup' : 'Checking the action again');
       const stop = applications.watch((stage) => progress(stage === 'recorded' ? 'Signing and sending' : 'Sent. Finishing'));
+      carrying.current = true;
       try {
         await proposal.approve(consentOf(gate, ticked));
       } finally {
+        carrying.current = false;
         stop();
       }
       setNotStored(applications.lastError instanceof NotStoredError);
@@ -632,8 +650,11 @@ const Templates = ({ owner, onView }: { owner: Owner; onView: (view: View) => vo
   );
 };
 
-/** One trusted template: what it is, what depends on it, who may see its tokens, and the way to stop trusting it. */
-const TemplatePage = ({ owner, identifier, onBack }: { owner: Owner; identifier: string; onBack: () => void }) => {
+/**
+ * One trusted template: what it is, its actions (the starting ones carried out from here), the tokens it made that wait
+ * elsewhere, its service, who may see its tokens, and the way to stop trusting it.
+ */
+const TemplatePage = ({ owner, identifier, onBack, onView }: { owner: Owner; identifier: string; onBack: () => void; onView: (view: View) => void }) => {
   const { apps } = owner;
   const { applications } = apps;
   const kept = applications.templates.find((template) => template.identifier === identifier);
@@ -663,6 +684,15 @@ const TemplatePage = ({ owner, identifier, onBack }: { owner: Owner; identifier:
       return undefined;
     }
   }, [apps.version]);
+  // What it offers from the wallet itself, as its service last said: nothing is asked of the service here.
+  const [offered, setOffered] = useState<TemplateActions | undefined>();
+  useEffect(() => {
+    applications.templateActions(identifier).then(
+      (actions) => setOffered(actions ?? { template: { identifier, name: kept?.name ?? '' }, starting: [], waiting: [] }),
+      () => setOffered({ template: { identifier, name: kept?.name ?? '' }, starting: [], waiting: [] }),
+    );
+  }, [apps.version]);
+  const service = kept === undefined ? undefined : applications.serviceOf(identifier);
   if (kept === undefined) {
     return (
       <div class="stack">
@@ -690,11 +720,11 @@ const TemplatePage = ({ owner, identifier, onBack }: { owner: Owner; identifier:
   return (
     <div class="stack">
       <PageHead title="Template" />
-      <div class="grid two">
+      <div class="grid two template-layout">
         <div class="stack">
-          <Card cls="request-card">
+          <Card cls="request-card template-card">
             <div class="stack">
-              {summary !== undefined && <TemplateView summary={summary} showActions />}
+              {summary !== undefined && <TemplateView summary={summary} />}
               <KeyValues
                 entries={[
                   ['Trusted since', formatTime(kept.trustedAt)],
@@ -709,9 +739,17 @@ const TemplatePage = ({ owner, identifier, onBack }: { owner: Owner; identifier:
               </div>
             </div>
           </Card>
+          {summary !== undefined && (
+            <TemplateActionsCards
+              summary={summary}
+              offered={offered}
+              onAct={(target, action) => onView({ at: 'act', target, action, back: { at: 'template', identifier } })}
+            />
+          )}
         </div>
         <div class="stack">
-          <Card>
+          {service !== undefined && <ServiceCard owner={owner} identifier={identifier} status={service} />}
+          <Card cls="seen-by-card">
             <TitleInfo title="Apps that see its tokens" label="About apps that see its tokens" info="These apps are told which tokens of this template you hold and where their positions stand, whenever they ask. They learn nothing else, and every action still waits for your approval." />
             {kept.applications.length === 0 ? (
               <p class="templates-none">None.</p>
@@ -743,7 +781,7 @@ const TemplatePage = ({ owner, identifier, onBack }: { owner: Owner; identifier:
               </ul>
             )}
           </Card>
-          <Card title="Stop trusting">
+          <Card title="Stop trusting" cls="stop-card">
             <div class="stack">
               {!confirming ? (
                 <div data-testid="template-stop">
@@ -775,6 +813,165 @@ const TemplatePage = ({ owner, identifier, onBack }: { owner: Owner; identifier:
         </div>
       </div>
     </div>
+  );
+};
+
+/** An action the wallet offers, as a button with its description behind a "?", the service's reason where it is not offered now, and what the service states beside it. */
+const OfferedAction = ({ action, disabled, onAct }: { action: TokenAction; disabled?: boolean; onAct: () => void }) => {
+  const why = unavailable(action);
+  const says = saysLine(action);
+  return (
+    <div class="offered-action">
+      <div class="token-action">
+        <Button small kind="secondary" disabled={disabled === true || why !== undefined} onClick={onAct}>
+          {action.name}
+        </Button>
+        {action.description !== '' && <Info label={`About "${action.name}"`}>{action.description}</Info>}
+      </div>
+      {why !== undefined && <div class="small muted action-note">{why}</div>}
+      {says !== undefined && <div class="small muted action-note">{says}</div>}
+    </div>
+  );
+};
+
+/** One action in a list: a button where the wallet offers it, else its name and why the application is needed. */
+const ActionRow = ({ action, disabled, onAct }: { action: TokenAction; disabled?: boolean; onAct: () => void }) =>
+  action.needsApplication === undefined ? (
+    <li>
+      <OfferedAction action={action} {...(disabled === undefined ? {} : { disabled })} onAct={onAct} />
+    </li>
+  ) : (
+    <li class="through-application">
+      <div>
+        <div class="token-action-name">{action.name}</div>
+        <ThroughApplication label={`Why "${action.name}" needs the application`} page={action.page} why={action.needsApplication} />
+      </div>
+    </li>
+  );
+
+/**
+ * A template's actions on its page: its starting actions, each with a button, and its other actions named, done from the
+ * token they act on. Before them, the tokens it made that wait elsewhere, with what its service offers for each.
+ */
+const TemplateActionsCards = ({ summary, offered, onAct }: { summary: TemplateSummary; offered: TemplateActions | undefined; onAct: (target: ActTarget, action: TokenAction) => void }) => {
+  if (offered === undefined) {
+    return (
+      <Card cls="template-actions-card">
+        <div class="tokens-loading">
+          <Spinner /> Reading its actions…
+        </div>
+      </Card>
+    );
+  }
+  const shown = actionsShown(summary, offered);
+  const template = { identifier: summary.identifier, name: summary.name };
+  return (
+    <>
+      {shown.waiting.length > 0 && (
+        <Card cls="waiting-card">
+          <TitleInfo title="Waiting elsewhere" label="About tokens waiting elsewhere" info="Tokens this wallet made with this template that are not in the wallet yet. Each waits where the template says, and its service offers what can be done next." />
+          <ul class="list tokens">
+            {shown.waiting.map((token) => (
+              <li class="token">
+                <div class="token-head">
+                  <div>
+                    <div class="token-title">{token.at}</div>
+                    <div class="small muted token-id">
+                      Made by this wallet · <Hex value={token.category} />
+                    </div>
+                  </div>
+                </div>
+                <ul class="token-actions">
+                  {token.actions.map((action) => (
+                    <ActionRow action={action} onAct={() => onAct({ kind: 'waiting', template, category: token.category, at: token.at }, action)} />
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+      {shown.starting.length + shown.others.length > 0 && (
+        <Card cls="template-actions-card">
+          <TitleInfo title="Actions" label="About its actions" info="Start one of this template's actions here. The others act on a token you hold, and are done from that token under Tokens." />
+          <ul class="token-actions">
+            {shown.starting.map((action) => (
+              <ActionRow action={action} onAct={() => onAct({ kind: 'start', template }, action)} />
+            ))}
+            {shown.others.map((action) => (
+              <li class="action-other">
+                <span class="token-line">
+                  <span>{action.name}</span>
+                  {action.description !== '' && <Info label={`About "${action.name}"`}>{action.description}</Info>}
+                </span>
+                <span class="small muted">From its token</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+    </>
+  );
+};
+
+/** The service of a template, where it names one: where it is, its state in a few words, and Connect or Check again. */
+const ServiceCard = ({ owner, identifier, status }: { owner: Owner; identifier: string; status: ServiceStatus }) => {
+  const { apps } = owner;
+  const task = useTask();
+  // An exchange already under way, such as the one that trusting the template started: shown as busy until it ends.
+  const [asking, setAsking] = useState(() => apps.applications.serviceContact(identifier) !== undefined);
+  useEffect(() => {
+    const running = apps.applications.serviceContact(identifier);
+    if (running === undefined) return;
+    setAsking(true);
+    const done = () => {
+      setAsking(false);
+      apps.changed();
+    };
+    running.then(done, done);
+  }, []);
+  const connect = () =>
+    task.run('connect', async () => {
+      await apps.applications.connect(identifier);
+      apps.changed();
+    });
+  const shown = serviceShown(status, formatTime);
+  const busy = asking || task.busy === 'connect';
+  return (
+    <Card cls="service-card">
+      <TitleInfo
+        title={SERVICE_WORDS.service}
+        label="About the service"
+        info="A server the template names to take part in its actions. This wallet contacts it only when you trust the template, press Connect, or carry out an action, and checks everything it adds before you approve."
+      />
+      <div class="list-item service-row">
+        <div>
+          <div class="service-name">{shown.name}</div>
+          <div class="small muted service-state" role="status">
+            {busy ? (
+              <span class="service-busy">
+                <Spinner /> Asking the service…
+              </span>
+            ) : (
+              <>
+                <span class="token-line">
+                  {shown.state}
+                  {shown.problem !== undefined && <Info label="Why the address can't be used">{shown.problem}</Info>}
+                </span>
+                {shown.when !== undefined && <span class="service-when">{shown.when}</span>}
+              </>
+            )}
+          </div>
+        </div>
+        {shown.button !== undefined && (
+          <Button small kind={shown.button === 'Connect' ? 'secondary' : 'quiet'} task={task} name="connect" disabled={asking} onClick={() => void connect()}>
+            {shown.button === 'Connect' ? SERVICE_WORDS.connect : 'Check again'}
+          </Button>
+        )}
+      </div>
+      {shown.failure !== undefined && !busy && <Notice tone="warn">{shown.failure}</Notice>}
+      <TaskStatus task={task} name="connect" />
+    </Card>
   );
 };
 
@@ -943,6 +1140,19 @@ const ThroughApplication = ({ why, label, page }: { why: ComponentChildren; labe
   </>
 );
 
+/** Connect, in place of an action the template's service has not been asked about yet; what the last try said is behind the "?". */
+const ServiceConnect = ({ task, failure, onConnect }: { task: Task; failure: string | undefined; onConnect: () => void }) => (
+  <div class="token-action">
+    <Button small kind="secondary" task={task} name="connect" onClick={onConnect}>
+      {SERVICE_WORDS.connect}
+    </Button>
+    <Info label="About connecting">
+      <span>The template's service says what can be done with this token. This wallet asks it only when you press Connect.</span>
+      {failure !== undefined && <span>{failure}</span>}
+    </Info>
+  </div>
+);
+
 /**
  * A position from a record (sections 10.4 and 13.3): the token by the template's name for the output that made it and
  * the template's name, what its script holds, and the actions the script offers, each carried out by the wallet or
@@ -950,9 +1160,46 @@ const ThroughApplication = ({ why, label, page }: { why: ComponentChildren; labe
  * word on whether the position is open: what it controls is shown and operated by the application's page.
  */
 export const PositionRow = ({ owner, position, onView }: { owner: Owner; position: RecordedPosition; onView: (view: View) => void }) => {
-  const actions = owner.apps.applications.offeredActions(position);
+  const { applications } = owner.apps;
+  const actions = applications.offeredActions(position);
   const usable = position.token.place === 'address';
   const { status } = position;
+  // A template's service says what can be done with its token: where it was never asked, Connect takes the place of
+  // "Open the application to do this", which stays for templates without a service this wallet can use.
+  const service = applications.serviceOf(position.template.identifier);
+  const withService = usableService(service);
+  const ask = withService && notAsked(service);
+  const checked = checkedLine(actions, formatTime);
+  const task = useTask();
+  const connect = (
+    <ServiceConnect
+      task={task}
+      failure={service?.failure?.message}
+      onConnect={() =>
+        void task.run('connect', async () => {
+          await applications.connect(position.template.identifier);
+          owner.apps.changed();
+        })
+      }
+    />
+  );
+  const act = (action: TokenAction) => onView({ at: 'act', target: { kind: 'token', position }, action, back: { at: 'main' } });
+  const list = actions.length > 0 && (
+    <ul class="token-actions">
+      {actions.map((action) =>
+        action.needsApplication !== undefined && withService ? (
+          <li class="through-application">
+            <div>
+              <div class="token-action-name">{action.name}</div>
+              {ask ? connect : <div class="small muted">Not offered by its service now</div>}
+            </div>
+          </li>
+        ) : (
+          <ActionRow action={action} disabled={!usable} onAct={() => act(action)} />
+        ),
+      )}
+    </ul>
+  );
   return (
     <li class={`token position${status === 'unconfirmed' ? ' unconfirmed' : ''}`} data-testid={`position-${status}`}>
       <div class="token-head">
@@ -976,7 +1223,17 @@ export const PositionRow = ({ owner, position, onView }: { owner: Owner; positio
       </div>
       {status === 'held' ? (
         <div class="token-body">
-          <ThroughApplication label="Why this needs the application" page={position.page} why="What this token controls is shown and operated by the application's page, not by this wallet." />
+          {!withService ? (
+            <ThroughApplication label="Why this needs the application" page={position.page} why="What this token controls is shown and operated by the application's page, not by this wallet." />
+          ) : actions.length > 0 ? (
+            list
+          ) : ask ? (
+            connect
+          ) : (
+            <p class="small muted">Its service offers nothing for it now.</p>
+          )}
+          {checked !== undefined && <p class="small muted checked-line">{checked}</p>}
+          <TaskStatus task={task} name="connect" />
         </div>
       ) : (
         <div class="token-body">
@@ -990,27 +1247,9 @@ export const PositionRow = ({ owner, position, onView }: { owner: Owner; positio
               </p>
             )
           )}
-          {actions.length > 0 && (
-            <ul class="token-actions">
-              {actions.map((action) => (
-                <li class={action.needsApplication === undefined ? undefined : 'through-application'}>
-                  {action.needsApplication === undefined ? (
-                    <div class="token-action">
-                      <Button small kind="secondary" disabled={!usable} onClick={() => onView({ at: 'act', position, action })}>
-                        {action.name}
-                      </Button>
-                      {action.description !== '' && <Info label={`About "${action.name}"`}>{action.description}</Info>}
-                    </div>
-                  ) : (
-                    <div>
-                      <div class="token-action-name">{action.name}</div>
-                      <ThroughApplication label={`Why "${action.name}" needs the application`} page={action.page} why={action.needsApplication} />
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+          {list}
+          {checked !== undefined && <p class="small muted checked-line">{checked}</p>}
+          <TaskStatus task={task} name="connect" />
         </div>
       )}
       {position.token.place === 'earlier' && <Notice tone="warn">This token is at an address of an earlier phone. It is moved to this phone's addresses first; until then it cannot be used here.</Notice>}
@@ -1144,11 +1383,12 @@ const valueOf = (wanted: Wanted, text: string, network: Owner['session']['networ
 type Acting = { at: 'form' } | { at: 'review'; request: ApplicationAction; preview: ActionPreview } | { at: 'refused'; refusal: Refusal } | { at: 'done'; outcome: ActionOutcome } | { at: 'failed'; refusal: Refusal; notStored: boolean };
 
 /**
- * An action the user starts from the wallet's own list, on a position from a record: the values the user types where
- * the action needs them, then the same review as for a request, with its tick and its backup check; a refusal in place
- * of the review.
+ * An action the user starts from the wallet itself: on a position from a record, a starting action of a template, or an
+ * action on a token the wallet made that waits elsewhere. The values the user types where the action needs them, in the
+ * template's words; then the same review as for a request, with its tick and its backup check; a refusal in place of
+ * the review. A review worked out with the template's service is put aside when it is left.
  */
-const ActOnToken = ({ owner, position, action, onBack }: { owner: Owner; position: RecordedPosition; action: TokenAction; onBack: () => void }) => {
+const ActOn = ({ owner, target, action, onBack }: { owner: Owner; target: ActTarget; action: TokenAction; onBack: () => void }) => {
   const { applications } = owner.apps;
   // What the user gives: the library says which values neither the record nor the wallet supplies.
   const wanted: Wanted[] = action.asks ?? [];
@@ -1160,6 +1400,8 @@ const ActOnToken = ({ owner, position, action, onBack }: { owner: Owner; positio
   const [backup, checkBackup] = useBackup(applications, preview);
   const gate = approval({ ...(preview === undefined ? {} : { preview }), refused: false, backup, ticked });
   const task = useTask();
+  const carrying = useHeldReview(applications, acting.at === 'review' ? acting.request : undefined);
+  const templateName = targetTemplateName(target);
 
   const review = () =>
     task.run('review', async () => {
@@ -1173,7 +1415,7 @@ const ActOnToken = ({ owner, position, action, onBack }: { owner: Owner; positio
       setProblems(found);
       if (Object.keys(found).length > 0) return;
       try {
-        const request = applications.actionOn(position, action.action, variables);
+        const request = requestFor(applications, target, action.action, variables);
         setTicked(false);
         setActing({ at: 'review', request, preview: await applications.preview(request) });
       } catch (error) {
@@ -1189,17 +1431,28 @@ const ActOnToken = ({ owner, position, action, onBack }: { owner: Owner; positio
       if (acting.at !== 'review') return;
       if (!(await checkBackup())) return;
       progress(acting.preview.firstUse ? 'Storing the template in your backup' : 'Checking the action again');
+      carrying.current = true;
       try {
         const outcome = await applications.carryOut(acting.request, (stage) => progress(stage === 'recorded' ? 'Signing and sending' : 'Sent. Finishing'), consentOf(gate, ticked));
         setActing({ at: 'done', outcome });
       } catch (error) {
         setActing({ at: 'failed', refusal: refusalShown(error, refusalOf(error)), notStored: error instanceof NotStoredError && !/Try again when a store can be reached/.test(error.message) });
+      } finally {
+        carrying.current = false;
       }
     });
 
+  /** Where the service could not be reached, or a coin was spent first: the action worked out afresh, for a new approval. */
+  const again = (refusal: Refusal) =>
+    refusal.again !== undefined && (
+      <Button kind="secondary" task={task} name="review" onClick={() => void review()}>
+        {refusal.again === 'ask' ? 'Ask again' : 'Try again'}
+      </Button>
+    );
+
   return (
     <div class="stack">
-      <PageHead title={action.name}>{action.description !== '' ? action.description : `An action of the template "${position.template.name ?? ''}".`}</PageHead>
+      <PageHead title={action.name}>{action.description !== '' ? action.description : `An action of the template "${templateName ?? ''}".`}</PageHead>
       <div class="grid two">
         <div class="stack">
           {acting.at === 'form' && wanted.length > 0 && (
@@ -1238,8 +1491,10 @@ const ActOnToken = ({ owner, position, action, onBack }: { owner: Owner; positio
             <Card cls="request-card refused-card">
               <div class="stack">
                 <RefusalView refusal={acting.refusal} />
+                <TaskStatus task={task} name="review" />
                 <div class="actions">
-                  {wanted.length > 0 && acting.refusal.kind === 'other' && (
+                  {again(acting.refusal)}
+                  {wanted.length > 0 && (acting.refusal.kind === 'other' || acting.refusal.kind === 'declined') && (
                     <Button kind="secondary" onClick={() => setActing({ at: 'form' })}>
                       Change the values
                     </Button>
@@ -1279,7 +1534,7 @@ const ActOnToken = ({ owner, position, action, onBack }: { owner: Owner; positio
                 <Transaction id={acting.outcome.transactionId} explorer={owner.session.environment.explorer} />
                 <div class="actions">
                   <Button kind="secondary" onClick={onBack}>
-                    Back to the tokens
+                    {target.kind === 'token' ? 'Back to the tokens' : 'Back to the template'}
                   </Button>
                 </div>
               </div>
@@ -1290,7 +1545,9 @@ const ActOnToken = ({ owner, position, action, onBack }: { owner: Owner; positio
               <div class="stack">
                 <RefusalView refusal={acting.refusal.kind === 'other' ? { ...acting.refusal, title: 'Not carried out' } : acting.refusal} />
                 {acting.notStored && <NoBackup owner={owner}>A template is stored in your backup before its first action, and no backup store confirmed it. Set up recovery, or try again when a store can be reached.</NoBackup>}
+                <TaskStatus task={task} name="review" />
                 <div class="actions">
+                  {again(acting.refusal)}
                   <Button kind="quiet" onClick={onBack}>
                     Back
                   </Button>
@@ -1302,19 +1559,39 @@ const ActOnToken = ({ owner, position, action, onBack }: { owner: Owner; positio
         <div class="stack">
           <Card flat>
             <div class="stack-s token-aside">
-              <h3>The token</h3>
-              <p class="small">
-                {position.tokenName ?? 'A token'}
-                {position.template.name !== undefined && <span class="muted"> · {position.template.name}</span>}
-                <br />
-                <Hex value={position.token.category} />
-              </p>
-              {position.status !== 'held' && position.satoshis !== undefined && (
-                <p class="small">
-                  Holds <Amount satoshis={position.satoshis} exact />
-                </p>
+              {target.kind === 'start' ? (
+                <>
+                  <h3>The template</h3>
+                  <p class="small">{target.template.name}</p>
+                </>
+              ) : target.kind === 'waiting' ? (
+                <>
+                  <h3>The token</h3>
+                  <p class="small">
+                    {target.at}
+                    <span class="muted"> · {target.template.name}</span>
+                    <br />
+                    <Hex value={target.category} />
+                  </p>
+                  <p class="small muted">Made by this wallet, not in it yet.</p>
+                </>
+              ) : (
+                <>
+                  <h3>The token</h3>
+                  <p class="small">
+                    {target.position.tokenName ?? 'A token'}
+                    {target.position.template.name !== undefined && <span class="muted"> · {target.position.template.name}</span>}
+                    <br />
+                    <Hex value={target.position.token.category} />
+                  </p>
+                  {target.position.status !== 'held' && target.position.satoshis !== undefined && (
+                    <p class="small">
+                      Holds <Amount satoshis={target.position.satoshis} exact />
+                    </p>
+                  )}
+                </>
               )}
-              <p class="small muted">From the wallet itself. No application is asked.</p>
+              <p class="small muted">{action.service !== undefined ? 'From the wallet itself, with the template\'s service.' : 'From the wallet itself. No application is asked.'}</p>
             </div>
           </Card>
         </div>
