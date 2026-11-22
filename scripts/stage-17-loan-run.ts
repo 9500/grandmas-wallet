@@ -32,19 +32,30 @@
 //
 // One script, two chains: the local node (regtest) and chipnet, as in run B (scripts/run-b.ts). On the local node the
 // run deploys Paryon's contracts itself, makes its blocks and moves the chain's clock. On chipnet it uses Paryon's own
-// public deployment `chipnet-fast-periods-6`, unchanged, with the frozen template
-// (packages/paryon/frozen/paryon-loan-v2-chipnet-fast-periods-6.json) as the page sends it; it is paid from the saved
-// funding key, leaves a reserve there, reckons the collateral from the price stored in Paryon's price contract (no
-// oracle and nothing of Paryon's but its contracts on the chain is consulted), never makes a block, waits for one only
-// where a confirmation is needed, and lets the waiting period pass on the chain's own clock. There Paryon's keeper moves
-// the Borrowing threads on as soon as a period begins: the run moves one on itself only where a thread is behind, or
-// where a period begins within a few minutes and it takes a thread before the keeper does; otherwise it goes on without
-// that action and says so in the record. The loan key is destroyed
+// public deployment `chipnet-fast-periods-6`, unchanged; it is paid from the saved funding key, leaves a reserve there,
+// reckons the collateral from the price stored in Paryon's price contract, never makes a block, waits for one only
+// where a confirmation is needed, and lets the waiting period pass on the chain's own clock. The loan key is destroyed
 // at the end, and everything else goes back to the funding key; Paryon's borrowing fee stays with Paryon.
 //
+// On chipnet the course with the service is the default too: the frozen template, version 3
+// (packages/paryon/frozen/paryon-loan-v3-chipnet-fast-periods-6.json), offered unchanged, and the public service it
+// names in its resources (https://paryon.9500.cash/service/v1), which the run does not start: it is Paryon's service
+// as it runs for everyone. The wallet's requests to it are counted by moment as on the local node; the service's own
+// log cannot be read there, so the run checks the wallet's side only: every request inside one of the three moments,
+// none outside them. "Bring Paryon up to date" is carried out when the service says it can be; when it says it cannot,
+// or the thread is taken by Paryon's keeper or another user first (nothing sent), the run goes on without it and says
+// so in the record.
+//
+// With `--page` on chipnet the page drives every action with the frozen template, version 2
+// (packages/paryon/frozen/paryon-loan-v2-chipnet-fast-periods-6.json), as the page sends it (no oracle and nothing of
+// Paryon's but its contracts on the chain is consulted). There Paryon's keeper moves the Borrowing threads on as soon as
+// a period begins: the run moves one on itself only where a thread is behind, or where a period begins within a few
+// minutes and it takes a thread before the keeper does; otherwise it goes on without that action and says so in the
+// record.
+//
 // Each part is a process of its own with an empty engine state, as a device session would be. What the run knows
-// between parts is in .local-runs/stage-17-loan-local.json (on chipnet .chipnet/stage-17-loan-chipnet.json); the
-// stores are directories beside it. Every step is written to that file once it is carried out. A run that stops is
+// between parts is in .local-runs/stage-17-loan-local.json (on chipnet .chipnet/stage-17-loan-chipnet.json; with
+// `--page` the names end in `-page`); the stores are directories beside it. Every step is written to that file once it is carried out. A run that stops is
 // continued with the same command; `--new` starts again (on chipnet only once the earlier run has finished, and its
 // file is kept under another name).
 //
@@ -52,11 +63,15 @@
 //   npx tsx ../../scripts/stage-17-loan-run.ts [local]       with the local node running (deploy/regtest/regtest.sh):
 //                                                            the wallet with Paryon's service, version 3
 //   npx tsx ../../scripts/stage-17-loan-run.ts local --page  the page drives every action, version 2
-//   npx tsx ../../scripts/stage-17-loan-run.ts chipnet       paid from the key in .chipnet/funder-design-2.json
-//   npx tsx ../../scripts/stage-17-loan-run.ts chipnet --dry reads Paryon's deployment and the funding key, and says
-//                                                            what a run would need; sends nothing
+//   npx tsx ../../scripts/stage-17-loan-run.ts chipnet       paid from the key in .chipnet/funder-design-2.json:
+//                                                            the wallet with Paryon's public service, version 3
+//   npx tsx ../../scripts/stage-17-loan-run.ts chipnet --page the page drives every action, version 2
+//   npx tsx ../../scripts/stage-17-loan-run.ts chipnet --dry reads Paryon's deployment and the funding key, asks the
+//                                                            public service who it is, and says what a run would need;
+//                                                            sends no transaction (with `--page`: the page's course)
 // The log is written to docs/runs/stage-17-loan-local-node.md (with `--page` docs/runs/stage-17-loan-local-node-page.md;
-// on chipnet docs/runs/stage-17-loan-chipnet.md, with the invitations in docs/runs/invitations/stage-17-loan-chipnet/).
+// on chipnet docs/runs/stage-17-loan-chipnet.md, with the invitations in docs/runs/invitations/stage-17-loan-chipnet/;
+// with `--page` on chipnet docs/runs/stage-17-loan-chipnet-page.md and docs/runs/invitations/stage-17-loan-chipnet-page/).
 import 'fake-indexeddb/auto';
 import { type ChildProcess, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -70,13 +85,15 @@ import { Engine, XO_SUPPORTED_NETWORKS } from '@xo-cash/engine';
 import { Electrum } from '../packages/chipnet/src/electrum.js';
 import { invitationDirectory, invitationFiles, writeInvitationFiles } from './invitation-files.js';
 import { chipnetFunder, coinsFor, electrumEndpoint, engineServers, medianTime as medianTimeAt, runArguments, startOver } from './stage-17-chain.js';
-import type { ServiceFetch } from '../packages/connect/src/index.js';
+import { type ServiceFetch, buildServiceHello, buildServicePossibleRequest, serviceExchange } from '../packages/connect/src/index.js';
 import {
   type ActionOutcome,
   type ActionPreview,
   type ApplicationAction,
   type OwnerWalletState,
   type TokenAction,
+  ActionRefusedError,
+  InputsSpentError,
   NeedsApplicationError,
   type RecoveryArrangement,
   Account,
@@ -119,6 +136,7 @@ import {
   movePeriodRequestAloneV2,
   paryonAddressesAt,
   paryonChipnetTemplateTextV2,
+  paryonChipnetTemplateTextV3,
   paryonContracts,
   paryonTemplateAlone,
   periodAt,
@@ -138,21 +156,24 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 /** The exit code of a part that stopped at a step of its own and said why. */
 const STOPPED = 3;
 /**
- * Whether the wallet carries the actions out with Paryon's service, the page closed (version 3): the course on the local
- * node unless `--page` asks for the page-driven one. On chipnet the page drives, with version 2, as before.
+ * Whether the wallet carries the actions out with Paryon's service, the page closed (version 3): the course on both
+ * chains unless `--page` asks for the page-driven one (version 2). On the local node the run starts the service itself;
+ * on chipnet it is Paryon's public one, which the template names.
  */
-const withService = !process.argv.slice(2).includes('chipnet') && !process.argv.includes('--page');
+const withService = !process.argv.includes('--page');
 const PHASES = ['the owner opens a loan', 'the recoverer recovers', withService ? 'the new device closes the loan from its own list' : 'the new device closes the loan from the page', 'the recoverer returns its balance', 'the run returns what is left'];
 const { chainName, local, phase, dry, fresh } = runArguments(PHASES, 'stage-17-loan-run.ts');
 /** What a part is started with besides the chain and its name. */
-const MODE_ARGUMENTS = local && !withService ? ['--page'] : [];
+const MODE_ARGUMENTS = withService ? [] : ['--page'];
 const runDirectory = local ? `${root}.local-runs` : `${root}.chipnet`;
 mkdirSync(runDirectory, { recursive: true });
-const stateFile = `${runDirectory}/stage-17-loan-${local ? (withService ? 'local' : 'local-page') : 'chipnet'}.json`;
-const storeDirectory = `${runDirectory}/stage-17-loan-${local ? (withService ? '' : 'page-') : 'chipnet-'}stores`;
+const stateFile = `${runDirectory}/stage-17-loan-${local ? (withService ? 'local' : 'local-page') : withService ? 'chipnet' : 'chipnet-page'}.json`;
+const storeDirectory = `${runDirectory}/stage-17-loan-${local ? (withService ? '' : 'page-') : withService ? 'chipnet-' : 'chipnet-page-'}stores`;
+/** On chipnet, the name of the run's invitations in docs/runs/invitations/, kept in git beside the record. */
+const CHIPNET_RUN = withService ? 'stage-17-loan-chipnet' : 'stage-17-loan-chipnet-page';
 /** The XO invitation behind every transaction an account of the run sends, a file each (scripts/invitation-files.ts). */
-const invitations = local ? `${runDirectory}/invitations/stage-17-loan${withService ? '' : '-page'}/` : invitationDirectory('stage-17-loan-chipnet', false);
-const logFile = `${root}docs/runs/stage-17-loan-${local ? (withService ? 'local-node' : 'local-node-page') : 'chipnet'}.md`;
+const invitations = local ? `${runDirectory}/invitations/stage-17-loan${withService ? '' : '-page'}/` : invitationDirectory(CHIPNET_RUN, false);
+const logFile = `${root}docs/runs/stage-17-loan-${local ? (withService ? 'local-node' : 'local-node-page') : withService ? 'chipnet' : 'chipnet-page'}.md`;
 /**
  * Paryon's service on the local node: where the run starts it, and the address of the loan page the template made for
  * the local deployment names, beside which the service is (`paryonAddressesAt`): no page is served there in this run.
@@ -192,6 +213,12 @@ const LEAVE_AT_FUNDER = 1_000_000n;
 const FLOOR_PERCENT = 112n;
 /** Paryon's deployment on chipnet and the identifier of its frozen template, version 2, which the run sends unchanged. */
 const CHIPNET_TEMPLATE_IDENTIFIER = '3fa4baf9f313ee2a5046ae30fdf1f7affc6aca21a29e3f6b38227b4a826e9235';
+/** The identifier of the frozen template, version 3, which the run offers unchanged on chipnet with the service. */
+const CHIPNET_TEMPLATE_IDENTIFIER_V3 = '160a451f5398db649de7d660855db24113b774559534361f8334cbfe9a583e20';
+/** Paryon's public service on chipnet, as the frozen template version 3 names it in its resources; not started by the run. */
+const CHIPNET_SERVICE_URL = 'https://paryon.9500.cash/service/v1';
+/** On chipnet: how long the run waits for the service or the wallet's side of something (chain waits are longer). */
+const SERVICE_PATIENCE_MS = local ? 60_000 : 20_000;
 
 interface Entry { step: string; transactionId: string; bytes: number; fee: string; note: string }
 interface Facts {
@@ -232,8 +259,8 @@ interface ServiceMoment {
   part: string;
   /** The requests the wallet sent, by the protocol's action. */
   sent: Record<string, number>;
-  /** The requests the service answered meanwhile, by its own log. */
-  atService: number;
+  /** The requests the service answered meanwhile, by its own log: on the local node only, where the run starts it. */
+  atService?: number;
 }
 interface ServiceActionEntry {
   step: string;
@@ -254,9 +281,14 @@ const sat = (value: bigint): string => `${value.toLocaleString('en-US')} sat`;
 const templateOf = (deployment: ParyonDeployment): { names: { identifier: string; contentHash: string }; texts: { template: string } } => {
   if (local) return withService ? paryonTemplateAlone(paryonContracts(deployment), paryonAddressesAt(SERVICE_LOAN_URL)) : paryonTemplateAlone(paryonContracts(deployment), 2);
   if (deployment.name !== CHIPNET_FAST_PERIODS_6.name) throw new Error(`on chipnet the run uses Paryon's deployment ${CHIPNET_FAST_PERIODS_6.name}, not ${deployment.name}`);
-  const read = readTemplate(paryonChipnetTemplateTextV2);
-  if (read.identifier !== CHIPNET_TEMPLATE_IDENTIFIER) throw new Error(`the frozen template's identifier is ${read.identifier}, not ${CHIPNET_TEMPLATE_IDENTIFIER}`);
-  return { names: { identifier: read.identifier, contentHash: read.contentHash }, texts: { template: paryonChipnetTemplateTextV2 } };
+  const [text, expected] = withService ? [paryonChipnetTemplateTextV3, CHIPNET_TEMPLATE_IDENTIFIER_V3] : [paryonChipnetTemplateTextV2, CHIPNET_TEMPLATE_IDENTIFIER];
+  const read = readTemplate(text);
+  if (read.identifier !== expected) throw new Error(`the frozen template's identifier is ${read.identifier}, not ${expected}`);
+  if (withService) {
+    const named = ((JSON.parse(text) as { resources?: { name?: string; url?: string }[] }).resources ?? []).find((resource) => resource.name === 'xo_service_v1');
+    if (named?.url !== CHIPNET_SERVICE_URL) throw new Error(`the frozen template names the service ${named?.url ?? 'none'}, not ${CHIPNET_SERVICE_URL}`);
+  }
+  return { names: { identifier: read.identifier, contentHash: read.contentHash }, texts: { template: text } };
 };
 /** The price threads as the run reckons with them: the highest, which the page names and the contracts take, and the lowest, at which the collateral is reckoned. */
 const pricesOf = (state: ParyonState): { thread: ParyonState['price'][number]; used: bigint; lowest: bigint } => {
@@ -316,7 +348,38 @@ const serviceTables = (known: Facts): string[] => {
   const moments = known.serviceMoments ?? [];
   const kinds: MomentKind[] = ['trust', 'Connect', 'acting'];
   const total = (entries: ServiceMoment[], action: string): number => entries.reduce((sum, entry) => sum + (entry.sent[action] ?? 0), 0);
-  const answered = moments.reduce((sum, entry) => sum + entry.atService, 0);
+  const answered = moments.reduce((sum, entry) => sum + (entry.atService ?? 0), 0);
+  const kindName = (kind: MomentKind): string => (kind === 'trust' ? 'the user trusts the template' : kind === 'Connect' ? 'the user presses Connect' : 'the user acts');
+  if (!local) {
+    // On chipnet the service is Paryon's public one: its log is not the run's to read, and only the wallet's side is counted.
+    const sentAll = moments.reduce((sum, entry) => sum + total([entry], 'hello') + total([entry], 'possible') + total([entry], 'join'), 0);
+    return [
+      'Each action, carried out by the wallet from its own list with the page closed:',
+      '',
+      '| Step | Who took part | What the wallet asked the user for | What came from the service | Requests to the service |',
+      '| --- | --- | --- | --- | --- |',
+      ...(known.serviceActions ?? []).map((entry) => `| ${entry.step} | ${entry.participants} | ${entry.asked} | ${entry.fromService} | ${entry.requests} |`),
+      '',
+      `Every request the wallet sent the service, in the moment it sent it, as the wallet counted it. The service is Paryon's public one at ${CHIPNET_SERVICE_URL}, which the run did not start; its own log is not available on chipnet, so what it answered is not counted here:`,
+      '',
+      '| Moment | Kind | Part | hello | possible | join |',
+      '| --- | --- | --- | --- | --- | --- |',
+      ...moments.map((entry) => `| ${entry.moment} | ${entry.kind} | ${entry.part} | ${entry.sent['hello'] ?? 0} | ${entry.sent['possible'] ?? 0} | ${entry.sent['join'] ?? 0} |`),
+      '',
+      'By moment:',
+      '',
+      '| Moment | hello | possible | join | All |',
+      '| --- | --- | --- | --- | --- |',
+      ...kinds.map((kind) => {
+        const of = moments.filter((entry) => entry.kind === kind);
+        return `| ${kindName(kind)} | ${total(of, 'hello')} | ${total(of, 'possible')} | ${total(of, 'join')} | ${total(of, 'hello') + total(of, 'possible') + total(of, 'join')} |`;
+      }),
+      '| at any other time | 0 | 0 | 0 | 0 |',
+      '',
+      `The wallet sent the service ${sentAll} requests in all, each of them in one of the three moments; before and after each moment, and at the end of every part, the run checked that the wallet had sent nothing outside them. The new device, which trusted the template again from the backup, had sent none when the user pressed Connect.`,
+      '',
+    ];
+  }
   return [
     'Each action, carried out by the wallet from its own list with the page closed:',
     '',
@@ -328,7 +391,7 @@ const serviceTables = (known: Facts): string[] => {
     '',
     '| Moment | Kind | Part | hello | possible | join | Answered at the service |',
     '| --- | --- | --- | --- | --- | --- | --- |',
-    ...moments.map((entry) => `| ${entry.moment} | ${entry.kind} | ${entry.part} | ${entry.sent['hello'] ?? 0} | ${entry.sent['possible'] ?? 0} | ${entry.sent['join'] ?? 0} | ${entry.atService} |`),
+    ...moments.map((entry) => `| ${entry.moment} | ${entry.kind} | ${entry.part} | ${entry.sent['hello'] ?? 0} | ${entry.sent['possible'] ?? 0} | ${entry.sent['join'] ?? 0} | ${entry.atService ?? 0} |`),
     '',
     'By moment:',
     '',
@@ -336,7 +399,7 @@ const serviceTables = (known: Facts): string[] => {
     '| --- | --- | --- | --- | --- | --- |',
     ...kinds.map((kind) => {
       const of = moments.filter((entry) => entry.kind === kind);
-      return `| ${kind === 'trust' ? 'the user trusts the template' : kind === 'Connect' ? 'the user presses Connect' : 'the user acts'} | ${total(of, 'hello')} | ${total(of, 'possible')} | ${total(of, 'join')} | ${total(of, 'hello') + total(of, 'possible') + total(of, 'join')} | ${of.reduce((sum, entry) => sum + entry.atService, 0)} |`;
+      return `| ${kindName(kind)} | ${total(of, 'hello')} | ${total(of, 'possible')} | ${total(of, 'join')} | ${total(of, 'hello') + total(of, 'possible') + total(of, 'join')} | ${of.reduce((sum, entry) => sum + (entry.atService ?? 0), 0)} |`;
     }),
     `| at any other time | 0 | 0 | 0 | 0 | ${(known.serviceUnaccounted ?? 0) === 0 ? 0 : `${known.serviceUnaccounted} in parts that stopped`} |`,
     '',
@@ -354,8 +417,22 @@ if (phase === undefined && dry) {
   try {
     const contracts = paryonContracts(CHIPNET_FAST_PERIODS_6);
     const template = templateOf(CHIPNET_FAST_PERIODS_6);
-    const made = paryonTemplateAlone(contracts, 2);
-    console.log(`The frozen template "${readTemplate(template.texts.template).definition.name ?? ''}" ${template.names.identifier}, content ${template.names.contentHash}; the template made from the deployment's parameters today ${made.names.identifier === template.names.identifier && made.names.contentHash === template.names.contentHash ? 'is the same' : `DIFFERS (${made.names.identifier}, ${made.names.contentHash}); the run sends the frozen one`}.`);
+    const made = withService ? paryonTemplateAlone(contracts, 3, paryonAddressesAt(new URL('../', CHIPNET_SERVICE_URL).href)) : paryonTemplateAlone(contracts, 2);
+    console.log(`The course: ${withService ? 'the wallet with Paryon\'s public service, the page closed (version 3)' : 'the page drives every action (version 2)'}.`);
+    console.log(`The frozen template "${readTemplate(template.texts.template).definition.name ?? ''}", version ${withService ? 3 : 2}, ${template.names.identifier}, content ${template.names.contentHash}; the template made from the deployment's parameters today ${made.names.identifier === template.names.identifier && made.names.contentHash === template.names.contentHash ? 'is the same' : `DIFFERS (${made.names.identifier}, ${made.names.contentHash}); the run sends the frozen one`}.`);
+    if (withService) {
+      // Read-only: who the service is, and what it says is possible for a wallet that holds nothing of the template yet.
+      const hello = await serviceExchange(CHIPNET_SERVICE_URL, buildServiceHello({ network: 'chipnet', id: `dry-${Date.now()}`, template: template.names, role: 'borrower' }), { timeoutMs: 20_000 });
+      if (!hello.carried) console.log(`Paryon's service at ${CHIPNET_SERVICE_URL}, as the template names it (not started by the run): xo_service_hello got NO usable answer (${hello.failure}: ${hello.reason}). The run would stop at the first moment it speaks to it.`);
+      else if (!hello.answer.ok) console.log(`Paryon's service at ${CHIPNET_SERVICE_URL}, as the template names it (not started by the run): xo_service_hello was DECLINED: ${hello.answer.error}.`);
+      else {
+        const serves = hello.answer.serves.find((entry) => entry.template.identifier === template.names.identifier && entry.template.contentHash === template.names.contentHash);
+        console.log(`Paryon's service at ${CHIPNET_SERVICE_URL}, as the template names it (not started by the run): xo_service_hello answered; it serves ${hello.answer.serves.length} template${hello.answer.serves.length === 1 ? '' : 's'}, ${serves === undefined ? 'NOT the frozen one' : `the frozen one as the role "${serves.role}"`}.`);
+        const possible = await serviceExchange(CHIPNET_SERVICE_URL, buildServicePossibleRequest({ network: 'chipnet', id: `dry-${Date.now()}`, template: template.names, role: 'borrower', tokens: [], made: [] }), { timeoutMs: 20_000 });
+        if (possible.carried && possible.answer.ok) console.log(`xo_service_possible_request for a wallet that holds nothing yet: at height ${possible.answer.height} the service says ${possible.answer.start.map((entry) => `${entry.action} ${entry.available ? 'possible now' : `not now (${entry.reason ?? ''})`}`).join(', ')}.`);
+        else console.log(`xo_service_possible_request got no usable answer: ${possible.carried ? (possible.answer.ok ? '' : possible.answer.error) : possible.reason}`);
+      }
+    }
     const tip = await server.tip();
     const lockHeight = earliestLockHeight(tip.height);
     const state = aliveOrStop(await readParyonState(server, contracts));
@@ -366,12 +443,13 @@ if (phase === undefined && dry) {
     const current = periodAt(CHIPNET_FAST_PERIODS_6, lockHeight);
     const behind = state.borrowing.filter((thread) => thread.period < current);
     const nextTip = tipForLock(periodStart(CHIPNET_FAST_PERIODS_6, current + 1));
-    console.log(
-      behind.length > 0
+    console.log(withService
+      ? `${behind.length === 0 ? 'No Borrowing thread is' : `${behind.length} of the Borrowing threads are`} behind the current period ${current}. The wallet carries out "Bring Paryon up to date" ("movePeriod") if the service says it can be, the service choosing the thread and the lock time; if it says it cannot, or Paryon's keeper or another user takes the thread first (nothing sent), the run goes on without it and says so in the record.`
+      : behind.length > 0
         ? `${behind.length} of the Borrowing threads are behind the current period ${current}: the run would bring one up to date ("movePeriod"), if Paryon's keeper does not first.`
         : `No Borrowing thread is behind the current period ${current}: Paryon's keeper moved them on. The next period begins for a transaction in the block after tip ${nextTip}, ${nextTip - tip.height} blocks from now; the run waits for it only if it is at most ${PERIOD_WAIT_BLOCKS} blocks away when it gets there, and then tries to move a thread on before the keeper does, for at most ${PERIOD_WAIT_MS / 60_000} minutes. Otherwise it goes on without "movePeriod" and says so in the record.`,
     );
-    console.log(`The course: make a key, bring a Borrowing thread up to date where it can, borrow ${pusd(DEBT)} PUSD, add ${sat(MANAGE_ADD)} of collateral, change the interest rate to ${NEW_RATE} per 10,000,000 per period, repay ${pusd(REPAY)} PUSD; the device is lost and recovered; the new device closes the loan from the page, repaying the remaining ${pusd(DEBT - REPAY)} PUSD.`);
+    console.log(`The steps: make a key, bring a Borrowing thread up to date where it can, borrow ${pusd(DEBT)} PUSD, add ${sat(MANAGE_ADD)} of collateral, change the interest rate to ${NEW_RATE} per 10,000,000 per period, repay ${pusd(REPAY)} PUSD${withService ? ', each from the wallet\'s own list, the user typing the debt, the collateral and the starting rate 0 for the borrowing, and each joined by the service' : ''}; the device is lost and recovered; the new device ${withService ? 'trusts the template again from the backup, the user presses Connect, and it closes the loan from its own list' : 'closes the loan from the page'}, repaying the remaining ${pusd(DEBT - REPAY)} PUSD.`);
     console.log(`The loan: ${pusd(DEBT)} PUSD against ${sat(course.collateral)} of collateral, ${PERCENT}% at the lowest stored price ${dollars(course.lowest)} (${collateralRatio(course.collateral, DEBT, course.used)}% at the highest, ${dollars(course.used)}, at which the contracts take it; their least there is ${sat(minimumCollateral(DEBT, course.used))}); Paryon's borrowing fee ${sat(course.fee)}, kept by Paryon; ${sat(MANAGE_ADD)} added later.`);
     const funderLocking = p2pkhLockingBytecode(chipnetFunder().keyHash);
     const coins = await server.listUnspent(funderLocking, 'exclude');
@@ -390,7 +468,7 @@ if (phase === undefined) {
   if (fresh) startOver(local, stateFile, storeDirectory, PHASES);
   if (!existsSync(stateFile)) {
     rmSync(invitations, { recursive: true, force: true });
-    if (withService) rmSync(serviceFiles.log, { force: true });
+    if (withService && local) rmSync(serviceFiles.log, { force: true });
   }
   if (local && !existsSync(stateFile) && Number(execFileSync(`${root}deploy/regtest/regtest.sh`, ['cli', 'getblockcount'], { encoding: 'utf8' })) > 1000) {
     console.error('The local chain is long and its block rewards are small. Start a new one: deploy/regtest/regtest.sh reset');
@@ -419,11 +497,12 @@ if (phase === undefined) {
     const found = written.find((entry) => entry.transactionId === transactionId);
     if (found === undefined) return '';
     // On chipnet the files are kept in git beside the record, and the table links each.
-    return local ? `${found.action} (${found.templateName})` : `[${found.action}](invitations/stage-17-loan-chipnet/${found.file})`;
+    return local ? `${found.action} (${found.templateName})` : `[${found.action}](invitations/${CHIPNET_RUN}/${found.file})`;
   };
   const sent = templateOf(facts.deployment as ParyonDeployment);
   const serviceIntro =
     'Written by the run itself (`scripts/stage-17-loan-run.ts`). The owner\'s wallet, the recoverer and the new device, each on the unmodified XO engine, against the local node in regtest mode with the public networks\' relay rules, on which the run deployed Paryon\'s contracts as published (`packages/paryon/src/local-deployment.ts`). Each part ran in a process of its own with an empty engine state. The template is version 3 of the ParyonUSD loan template, made for the local deployment; it names Paryon\'s service (`xo_service_v1`), which takes part in every action as the role `service`. Paryon\'s service app (`apps/paryon-service`) ran as a process of its own on 127.0.0.1, started by the run from its command line with a configuration of the local chain, as it runs in production, for the two parts that needed it, and stopped at the end of each. The loan page\'s only part was to offer the template to the wallet over `xo_v1` (`xo_template_offer`, sent with the page\'s `DappRequests` to the wallet\'s connector for applications over a session in memory, every message through JSON and back as it travels); it asked for no action. From then on the wallet (`Applications`, with the service option) carried out every action from its own lists: the starting actions under the template, the borrowing under the key that waited in Paryon\'s contract, and the loan\'s actions under the key. Each action is an invitation the wallet started with its own share, which the service joined over HTTP with one commit, bringing Paryon\'s coins and the values read from them; the wallet checked what the service added, worked the whole transaction out by its own rules, evaluated every input of Paryon\'s in the virtual machine before the user was asked, and compared what the engine built with what it had worked out before it was sent. The backup stores are two directories of the run, read and written as a store server\'s are. No recovery declaration was sent, stored, kept or read anywhere in the run.';
+  const chipnetServiceIntro = `Written by the run itself (\`scripts/stage-17-loan-run.ts chipnet\`). The owner's wallet, the recoverer and the new device, each on the unmodified XO engine, on chipnet, against Paryon's own public deployment \`${CHIPNET_FAST_PERIODS_6.name}\`, unchanged. The template is the frozen text of version 3 of the ParyonUSD loan template (\`packages/paryon/frozen/paryon-loan-v3-chipnet-fast-periods-6.json\`), offered unchanged and checked against its identifier; it names Paryon's service (\`xo_service_v1\`) at ${CHIPNET_SERVICE_URL}, which takes part in every action as the role \`service\`. That service is Paryon's public one, as it runs for everyone; the run did not start it, and its log is not the run's to read. The run was paid from the funding address and returned everything to it at the end but Paryon's borrowing fee; it made no block, and the waiting period passed on the chain's own clock. Each part ran in a process of its own with an empty engine state. The loan page's only part was to offer the template to the wallet over \`xo_v1\` (\`xo_template_offer\`, sent with the page's \`DappRequests\` to the wallet's connector for applications over a session in memory, every message through JSON and back as it travels); it asked for no action. From then on the wallet (\`Applications\`, with the service option for chipnet, which takes only an \`https:\` address) carried out every action from its own lists: the starting actions under the template, the borrowing under the key that waited in Paryon's contract, and the loan's actions under the key. Each action is an invitation the wallet started with its own share, which the service joined over HTTPS with one commit, bringing Paryon's coins and the values read from them; the wallet checked what the service added, worked the whole transaction out by its own rules, evaluated every input of Paryon's in the virtual machine before the user was asked, and compared what the engine built with what it had worked out before it was sent. Every request the wallet sent the service was counted by the wallet in the moment it was sent. The backup stores are two directories of the run, read and written as a store server's are. No recovery declaration was sent, stored, kept or read anywhere in the run.`;
   const revision = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const changed = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).split('\n').filter((line) => line.trim() !== '' && !line.includes('docs/runs/') && !line.includes('.chipnet'));
   writeFileSync(
@@ -431,7 +510,7 @@ if (phase === undefined) {
     [
       `# Stage 17 run on ${local ? 'the local node' : 'chipnet'}: a ParyonUSD loan without a declaration, through the loss of a device (PR20)${withService ? ', carried out by the wallet with Paryon\'s service, the page closed' : ''}`,
       '',
-      withService ? serviceIntro : (local
+      withService ? (local ? serviceIntro : chipnetServiceIntro) : (local
         ? 'Written by the run itself (`scripts/stage-17-loan-run.ts`). The owner\'s wallet, the recoverer and the new device, each on the unmodified XO engine, against the local node in regtest mode with the public networks\' relay rules, on which the run deployed Paryon\'s contracts as published, as the run of stage 9 did (`packages/paryon/src/local-deployment.ts`).'
         : `Written by the run itself (\`scripts/stage-17-loan-run.ts chipnet\`). The owner's wallet, the recoverer and the new device, each on the unmodified XO engine, on chipnet, against Paryon's own public deployment \`${CHIPNET_FAST_PERIODS_6.name}\`, unchanged, with its frozen template, version 2 (\`packages/paryon/frozen/paryon-loan-v2-chipnet-fast-periods-6.json\`), as the page sent it; nothing of Paryon's but its contracts on the chain was consulted. The run was paid from the funding address and returned everything to it at the end but Paryon's borrowing fee; it made no block, and the waiting period passed on the chain's own clock.`) +
         ' Each part ran in a process of its own with an empty engine state. The Paryon template reached the wallet alone, as a text, in the requests of the loan page: the library the page uses (`packages/paryon`: `page-requests.ts`, `findLoan`, `loanCoins`, `readParyonState`) made each request from what it read on the chain, and the page\'s `DappRequests` sent it to the wallet\'s connector for applications over a session in memory, every message through JSON and back as it travels; only the relay and the page\'s screens were left out. Every transaction of the loan is an invitation of that template, built by the unmodified engine, which signed the wallet\'s own inputs, and compared with what the wallet\'s own code had worked out before it was sent; every input of Paryon\'s was evaluated in the virtual machine before the user was asked. The backup stores are two directories of the run, read and written as a store server\'s are. No recovery declaration was sent, stored, kept or read anywhere in the run.',
@@ -440,7 +519,9 @@ if (phase === undefined) {
       `- Loan key (token category): \`${facts.loan?.keyCategory}\``,
       `- Template "${readTemplate(sent.texts.template).definition.name ?? ''}" \`${sent.names.identifier}\`, content \`${sent.names.contentHash}\`, with no declaration`,
       `- Paryon's deployment ${local ? 'on the local chain' : `\`${facts.deployment?.name}\``}: PUSD \`${facts.deployment?.tokenIds.paryon}\`, factories \`${facts.deployment?.tokenIds.loanKeyFactory}\``,
-      withService
+      withService && !local
+        ? `- Paryon's service as the template names it: ${CHIPNET_SERVICE_URL}, Paryon's public service, not started by the run; the loan page offered the template and asked for no action`
+        : withService
         ? `- Paryon's service as the template names it: ${paryonAddressesAt(SERVICE_LOAN_URL).service}, started by the run for each part that needed it (\`apps/paryon-service\`, its command line, with the configuration \`${serviceFiles.config.slice(root.length)}\`); the loan page's address the template names, ${SERVICE_LOAN_URL}, serves no page in this run`
         : `- The page's address in its requests: ${PAGE}`,
       `- Repository at commit \`${revision}\`${changed.length === 0 ? '' : `, with uncommitted changes to ${changed.map((line) => line.slice(3)).join(', ')}`}`,
@@ -806,22 +887,27 @@ const countingFetch: ServiceFetch = (url, init) => {
   return fetch(url, init);
 };
 const SHORT: Record<string, string> = { xo_service_hello: 'hello', xo_service_possible_request: 'possible', xo_service_join_request: 'join' };
-/** The service as the wallet is given it on the local chain: `local`, where an `http:` address is allowed, with every request counted. */
-const serviceOption = { service: { network: 'regtest', kind: 'local' as const, fetch: countingFetch } };
-/** The requests the service answered that the run has counted, in the moments and in parts that stopped. */
-const accounted = (): number => (facts.serviceMoments ?? []).reduce((sum, entry) => sum + entry.atService, 0) + (facts.serviceUnaccounted ?? 0);
 /**
- * Outside the moments in which the wallet may speak to the service: the wallet sent nothing, and the service answered
- * nothing that the run has not counted in one of them.
+ * The service as the wallet is given it, with every request counted: on the local chain `local`, where an `http:`
+ * address is allowed; on chipnet `public`, which takes only an `https:` address.
+ */
+const serviceOption = { service: local ? { network: 'regtest', kind: 'local' as const, fetch: countingFetch } : { network: 'chipnet', kind: 'public' as const, fetch: countingFetch } };
+/** The requests the service answered that the run has counted, in the moments and in parts that stopped. */
+const accounted = (): number => (facts.serviceMoments ?? []).reduce((sum, entry) => sum + (entry.atService ?? 0), 0) + (facts.serviceUnaccounted ?? 0);
+/**
+ * Outside the moments in which the wallet may speak to the service: the wallet sent nothing, and (on the local node,
+ * where the run reads the service's log) the service answered nothing that the run has not counted in one of them.
  */
 const noneOutside = (where: string): void => {
   const stray = sentToService.filter((entry) => entry.moment === undefined);
   if (stray.length > 0) throw new Error(`the wallet sent the service ${stray.map((entry) => SHORT[entry.action] ?? entry.action).join(', ')} ${where}, outside the moments in which it may speak to it`);
+  if (!local) return;
   const at = atTheService().total;
   if (at !== accounted()) throw new Error(`the service answered ${at - accounted()} requests ${where} that came outside the moments in which the wallet may speak to it`);
 };
 /** A part that starts: requests a part that stopped could not count are counted as such, and said. */
 const countLeftovers = (): void => {
+  if (!local) return;
   const missing = atTheService().total - accounted();
   if (missing === 0) return;
   facts.serviceUnaccounted = (facts.serviceUnaccounted ?? 0) + missing;
@@ -835,7 +921,7 @@ const countLeftovers = (): void => {
 const inMoment = async <T>(moment: string, kind: MomentKind, work: () => Promise<T>): Promise<T> => {
   noneOutside(`before "${moment}"`);
   const from = sentToService.length;
-  const atStart = atTheService().total;
+  const atStart = local ? atTheService().total : 0;
   momentNow = moment;
   let outcome: { value: T } | { error: unknown };
   try {
@@ -845,14 +931,15 @@ const inMoment = async <T>(moment: string, kind: MomentKind, work: () => Promise
   }
   momentNow = undefined;
   const mine = sentToService.slice(from);
-  const answered = await until('the service\'s log of the requests', async () => (atTheService().total - atStart >= mine.length ? atTheService().total - atStart : undefined), 10_000, 100).catch(() => atTheService().total - atStart);
+  // On chipnet the service's log is not the run's to read: the wallet's side alone is counted.
+  const answered = local ? await until('the service\'s log of the requests', async () => (atTheService().total - atStart >= mine.length ? atTheService().total - atStart : undefined), 10_000, 100).catch(() => atTheService().total - atStart) : undefined;
   const sent: Record<string, number> = {};
   for (const { action } of mine) sent[SHORT[action] ?? action] = (sent[SHORT[action] ?? action] ?? 0) + 1;
-  facts.serviceMoments = [...(facts.serviceMoments ?? []), { moment, kind, part: phase as string, sent, atService: answered }];
+  facts.serviceMoments = [...(facts.serviceMoments ?? []), { moment, kind, part: phase as string, sent, ...(answered === undefined ? {} : { atService: answered }) }];
   keep();
-  say(`  requests to the service in "${moment}": ${Object.entries(sent).map(([action, count]) => `${action} ${count}`).join(', ') || 'none'}; the service answered ${answered}`);
+  say(`  requests to the service in "${moment}": ${Object.entries(sent).map(([action, count]) => `${action} ${count}`).join(', ') || 'none'}${answered === undefined ? '' : `; the service answered ${answered}`}`);
   if ('error' in outcome) throw outcome.error;
-  if (answered !== mine.length) throw new Error(`in "${moment}" the wallet sent the service ${mine.length} requests and the service answered ${answered}`);
+  if (answered !== undefined && answered !== mine.length) throw new Error(`in "${moment}" the wallet sent the service ${mine.length} requests and the service answered ${answered}`);
   return outcome.value;
 };
 /**
@@ -888,7 +975,9 @@ const figuresOf = (preview: ActionPreview): string =>
 const actWithService = async (applications: Applications, stepName: string, step: string, offer: TokenAction | undefined, request: ApplicationAction, typed: Record<string, string>, about: string, tick = false): Promise<ActionOutcome> => {
   if (offer === undefined) throw new Error(`the wallet does not offer "${step}" from its own list`);
   let review: ActionPreview | undefined;
-  const outcome = await inMoment(step, 'acting', async () => {
+  // On chipnet Paryon's keeper or another user may spend one of Paryon's coins between the service's join and the
+  // sending: the network refuses, nothing is sent, and the wallet asks the service anew, three times at most.
+  const attempt = (): Promise<ActionOutcome> => inMoment(step, 'acting', async () => {
     review = await applications.preview(request);
     let done: ActionOutcome;
     try {
@@ -902,6 +991,16 @@ const actWithService = async (applications: Applications, stepName: string, step
     keep();
     return done;
   });
+  let outcome: ActionOutcome | undefined;
+  for (let tries = 1; outcome === undefined; tries += 1) {
+    try {
+      outcome = await attempt();
+    } catch (error) {
+      if (local || !(error instanceof InputsSpentError) || tries >= 3) throw error;
+      note(`${about}: the network said that another transaction had spent one of the coins first ("${String(error.message).slice(0, 160)}"); nothing was sent, and the wallet asked the service again.`);
+      await wait(5_000);
+    }
+  }
   const shown = review as ActionPreview;
   const asks = (offer.asks ?? []).map(({ variable, name }) => `"${name}" (${variable}) ${typed[variable] ?? '?'}`);
   const asked = [
@@ -928,18 +1027,18 @@ const actWithService = async (applications: Applications, stepName: string, step
  * trusts it in the wallet; from then on the wallet carries out every action from its own lists. Returns the key's
  * category.
  */
-const theOwnerWithTheService = async (applications: Applications, collateral: bigint): Promise<string> => {
+const theOwnerWithTheService = async (applications: Applications, collateral: bigint, lowestPrice: bigint, paidFee: bigint): Promise<string> => {
   const id = template().names.identifier;
   // 0. The page, connected to the wallet as the pages are, offers its template without an action (`xo_template_offer`);
   // the user trusts it in the wallet, which then asks the service the template names who it is and what is possible.
   await once('the user trusts the template the page offered', async () => {
     const link = pageLink(applications, 'the loan page');
     await inMoment('the user trusts the template', 'trust', async () => {
-      const trusted = await link.acceptOffer(link.requests.offerTemplate(template().names, template().texts, PATIENCE_MS, 5_000), (offer) =>
+      const trusted = await link.acceptOffer(link.requests.offerTemplate(template().names, template().texts, SERVICE_PATIENCE_MS, 5_000), (offer) =>
         note(`The page offered its template without an action; the wallet listed the offer of "${readTemplate(offer.definition.template).definition.name ?? ''}" ${offer.template.identifier.slice(0, 12)}… from "${offer.application}" for the user to trust, and the user trusted it.`),
       );
       if (!trusted) throw new Error('the wallet did not answer the offer as trusted');
-      await until('the wallet to speak to the service', async () => (applications.serviceOf(id)?.state === 'never asked' ? undefined : true));
+      await until('the wallet to speak to the service', async () => (applications.serviceOf(id)?.state === 'never asked' ? undefined : true), SERVICE_PATIENCE_MS);
       await applications.serviceContact(id);
     });
     const status = applications.serviceOf(id);
@@ -968,12 +1067,29 @@ const theOwnerWithTheService = async (applications: Applications, collateral: bi
   keep();
 
   // 2. Bring a Borrowing thread up to date, from the starting actions: the service chooses the thread and the lock time.
+  // On chipnet Paryon's keeper moves the threads on as a period begins: where the service says it cannot be done, or
+  // the keeper or another user takes the thread first (the wallet or the network refuses, nothing sent), the run goes on
+  // without it and says so. Anything else stops the part, and nothing is asked again that may have been sent.
   await once('the Borrowing thread is brought up to date', async () => {
     await block();
     const before = await readParyonState(server, contracts());
     const offer = (await applications.templateActions(id))?.starting.find(({ action }) => action === 'movePeriod');
-    if (offer?.service?.available === false) throw new Error(`the service says Paryon is up to date already: ${offer.service.reason ?? ''}`);
-    const outcome = await actWithService(applications, 'the Borrowing thread is brought up to date', 'bring the Borrowing thread up to date', offer, applications.startAction(id, 'movePeriod'), {}, 'Bringing Paryon up to date');
+    const without = (why: string): undefined => {
+      note(`The template's action "Bring Paryon up to date" (\`movePeriod\`) was not carried out on chipnet: ${why}. The loan was opened from a thread Paryon's keeper had brought up to date.`, 'no movePeriod on chipnet');
+      amount('brought up to date by Paryon\'s keeper; the run did not move one on itself (see the notes)', 'Borrowing thread');
+      return undefined;
+    };
+    if (offer?.service?.available === false) {
+      if (local) throw new Error(`the service says Paryon is up to date already: ${offer.service.reason ?? ''}`);
+      return without(`the service said it could not be carried out now ("${offer.service.reason ?? ''}")`);
+    }
+    let outcome: ActionOutcome;
+    try {
+      outcome = await actWithService(applications, 'the Borrowing thread is brought up to date', 'bring the Borrowing thread up to date', offer, applications.startAction(id, 'movePeriod'), {}, 'Bringing Paryon up to date');
+    } catch (error) {
+      if (local || !(error instanceof ActionRefusedError || error instanceof InputsSpentError) || facts.steps['the Borrowing thread is brought up to date'] !== undefined) throw error;
+      return without(`the wallet's attempt ended with "${String((error as Error).message).slice(0, 200)}", and nothing was sent`);
+    }
     const moved = decodeTransactionBch(hexToBin((await until('the transaction', async () => server.getTransaction(outcome.transactionId))) as string));
     if (typeof moved === 'string') throw new Error(moved);
     const from = before.borrowing.find((thread) => hex(thread.transactionHash) === hex(moved.inputs[0]?.outpointTransactionHash as Uint8Array) && thread.index === moved.inputs[0]?.outpointIndex);
@@ -990,11 +1106,28 @@ const theOwnerWithTheService = async (applications: Applications, collateral: bi
     const waiting = await until('the borrowing offered with the waiting key', async () => (await applications.templateActions(id))?.waiting.find(({ action, waiting: at }) => action === 'borrow' && at?.category === keyCategory));
     const typed = { debt: String(DEBT), collateral: String(collateral), startingRate: '0' };
     note(`After the key was made, the wallet offers "${waiting.name}" under the template, for the key that waits at "${waiting.waiting?.at}"; it asks for ${(waiting.asks ?? []).map(({ name }) => `"${name}"`).join(', ')}.`, 'the waiting key offered');
+    if (!local) {
+      // The prices may have moved since the check before starting: the collateral the wallet was paid for must still be
+      // what the contracts take at the highest stored price, and a safe share of the debt at the lowest.
+      const now = pricesOf(aliveOrStop(await readParyonState(server, contracts())));
+      if (collateral < minimumCollateral(DEBT, now.used) || collateral < collateralAtRatio(DEBT, now.lowest, FLOOR_PERCENT)) throw new Error(`STOP before borrowing: ${sat(collateral)} of collateral is ${collateralRatio(collateral, DEBT, now.lowest)}% of the debt at the lowest stored price ${dollars(now.lowest)} now, below ${FLOOR_PERCENT}%. Nothing was borrowed; the loan key waits in Paryon's contract.`);
+      if (borrowingFee(DEBT, now.lowest) > paidFee + 40_000n) throw new Error(`STOP before borrowing: Paryon's fee would be up to ${sat(borrowingFee(DEBT, now.lowest))} at ${dollars(now.lowest)} now, more than the wallet was paid for. Nothing was borrowed.`);
+    }
     const outcome = await actWithService(applications, BORROWED, 'borrow', waiting, applications.waitingAction(id, keyCategory, 'borrow', typed), typed, 'Borrowing');
-    const fee = borrowingFee(DEBT, PRICE);
+    // Paryon's fee as the transaction paid it (the template's output 4), and the price it was reckoned at (input 1).
+    const borrowed = decodeTransactionBch(hexToBin((await until('the transaction', async () => server.getTransaction(outcome.transactionId))) as string));
+    if (typeof borrowed === 'string') throw new Error(borrowed);
+    const fee = local ? borrowingFee(DEBT, PRICE) : (borrowed.outputs[4]?.valueSatoshis ?? 0n);
+    // The price contract is put back as it was, as output 1: the price named is that of the thread there now, if no one spent it since.
+    const named = local ? PRICE : (await readParyonState(server, contracts()).catch(() => undefined))?.price.find((entry) => hex(entry.transactionHash) === outcome.transactionId)?.state.price;
     record('borrow', await sentAs(outcome.transactionId), `from the wallet's own list, joined by the service: ${pusd(DEBT)} PUSD against ${sat(collateral)} of collateral, starting rate 0, as the user typed them; Paryon's fee ${sat(fee)}; the service brought the Borrowing thread, the price, the key waiting in Paryon's contract and its proof, and the values read from them; the key and the PUSD to fresh addresses of the wallet; the record of the key on both stores before the engine signed`);
     amount(`${pusd(DEBT)} PUSD`, 'Debt');
-    amount(`${sat(collateral)}: ${PERCENT}% of the debt at the stored price ${dollars(PRICE)}; Paryon's fee ${sat(fee)}, paid to the address that paid for the run`, 'Collateral');
+    amount(
+      local
+        ? `${sat(collateral)}: ${PERCENT}% of the debt at the stored price ${dollars(PRICE)}; Paryon's fee ${sat(fee)}, paid to the address that paid for the run`
+        : `${sat(collateral)}: ${PERCENT}% of the debt at the lowest stored price ${dollars(lowestPrice)} when the run started${named === undefined ? '' : `, ${collateralRatio(collateral, DEBT, named)}% at the price the service named, ${dollars(named)}, at which the contracts take it (their least there: ${sat(minimumCollateral(DEBT, named))})`}; Paryon's fee ${sat(fee)}, kept by Paryon`,
+      'Collateral',
+    );
     return { transactionIds: [outcome.transactionId], data: { fee: String(fee) } };
   });
   await block();
@@ -1017,9 +1150,12 @@ const theOwnerWithTheService = async (applications: Applications, collateral: bi
     return { transactionIds: [outcome.transactionId] };
   });
   await block();
+  // On chipnet anyone may pay a loan's interest once a period has passed, which takes 1,500 satoshis from the loan.
   const added = await until('the loan with the collateral added', async () => {
     const now = await findLoan(server, contracts(), hexToBin(keyCategory));
-    return now !== undefined && now.loan.output.valueSatoshis === collateral + MANAGE_ADD ? now : undefined;
+    if (now === undefined) return undefined;
+    const holds = now.loan.output.valueSatoshis;
+    return holds === collateral + MANAGE_ADD || (!local && holds > collateral + MANAGE_ADD - 20_000n && holds < collateral + MANAGE_ADD) ? now : undefined;
   });
 
   // 5. Change the interest rate for the periods to come, from the key's follow-ups: the user types the rate, a whole number.
@@ -1028,7 +1164,7 @@ const theOwnerWithTheService = async (applications: Applications, collateral: bi
     const typed = { interestRate: String(NEW_RATE) };
     const outcome = await actWithService(applications, 'the interest rate is changed', 'change the interest rate', applications.offeredActions(position).find(({ action }) => action === 'changeInterest'), applications.actionOn(position, 'changeInterest', typed), typed, 'Changing the interest rate');
     record('change the interest rate', await sentAs(outcome.transactionId), `from the key's follow-ups in the wallet, joined by the service: the loan's rate for the periods to come set from ${added.state.nextInterestRate} to ${NEW_RATE} per 10,000,000 per period, as the user typed it; the service brought the loan, its sidecar, a coin of Paryon's interest function, the loan's new record and what the key's coin holds; no price; the key back to the address it was spent from`);
-    amount(`${added.state.currentInterestRate} per 10,000,000 per period when the loan was opened, ${NEW_RATE} from its next interest payment on (${sat(interestPerPeriod(NEW_RATE, DEBT, PRICE))} a period on ${pusd(DEBT)} PUSD at ${dollars(PRICE)}, ${sat(interestPerPeriod(NEW_RATE, DEBT - REPAY, PRICE))} on ${pusd(DEBT - REPAY)})`, 'Interest rate');
+    amount(`${added.state.currentInterestRate} per 10,000,000 per period when the loan was opened, ${NEW_RATE} from its next interest payment on (${sat(interestPerPeriod(NEW_RATE, DEBT, lowestPrice))} a period on ${pusd(DEBT)} PUSD at ${dollars(lowestPrice)}, ${sat(interestPerPeriod(NEW_RATE, DEBT - REPAY, lowestPrice))} on ${pusd(DEBT - REPAY)})`, 'Interest rate');
     return { transactionIds: [outcome.transactionId] };
   });
   await block();
@@ -1059,6 +1195,16 @@ const theNewDeviceWithTheService = async (applications: Applications, listed: Aw
   const id = template().names.identifier;
   await once('the new device has not spoken to the service', async () => {
     noneOutside('on the new device before Connect');
+    if (!local) {
+      // On chipnet only the wallet's side is counted: the public service's log is not the run's to read.
+      if (sentToService.length !== 0) throw new Error(`the new device spoke to the service before Connect: it sent ${sentToService.length} requests`);
+      const status = applications.serviceOf(id);
+      if (status?.state !== 'never asked') throw new Error(`the new device shows the service as "${status?.state}" before Connect`);
+      const actions = await applications.templateActions(id);
+      const offered = applications.offeredActions(listed);
+      note(`Before Connect, the new device had sent the service no request (the public service's own log is not available on chipnet). The wallet shows the service "${status.description}" at ${status.url} as "${status.state}" and offers Connect; from its own list it offers ${(actions?.starting ?? []).map(({ name }) => `"${name}"`).join(' and ')} under the template, as the template gives them, and ${offered.length === 0 ? 'nothing for the key, which names no script of its own: its loan\'s actions come from the service' : offered.map(({ name }) => `"${name}"`).join(', ')}.`);
+      return undefined;
+    }
     const at = atTheService().total;
     if (sentToService.length !== 0 || at !== facts.serviceAtLoss) throw new Error(`the new device spoke to the service before Connect: it sent ${sentToService.length} requests, and the service answered ${at} in all against ${facts.serviceAtLoss} when the device was lost`);
     const status = applications.serviceOf(id);
@@ -1107,7 +1253,7 @@ try {
         keep();
         const tip = await server.tip();
         const move = threadToMove(state, contracts().deployment, earliestLockHeight(tip.height));
-        note(`Before starting: Paryon's deployment \`${contracts().deployment.name}\` showed ${state.borrowing.length} Borrowing threads (periods ${[...new Set(state.borrowing.map((entry) => entry.period))].join(', ')}), ${state.price.length} price threads (${[...new Set(state.price.map((entry) => dollars(entry.state.price)))].join(', ')}), ${state.loanKeyFactory.length} loan key factories, ${state.manage.length} manage functions and ${interestFunctions} interest functions, at the tip ${tip.height} (the period of the highest height a lock time may name for the next block: ${move.current}). The funding address held ${sat(balance)}: enough for ${sat(course.collateral)} of collateral, ${PERCENT}% of the debt at the lowest stored price ${dollars(course.lowest)}, Paryon's fee ${sat(course.fee)} at ${dollars(course.used)}, and ${sat(LEAVE_AT_FUNDER)} left there. The template sent is the frozen one of version 2, \`${template().names.identifier}\`.`);
+        note(`Before starting: Paryon's deployment \`${contracts().deployment.name}\` showed ${state.borrowing.length} Borrowing threads (periods ${[...new Set(state.borrowing.map((entry) => entry.period))].join(', ')}), ${state.price.length} price threads (${[...new Set(state.price.map((entry) => dollars(entry.state.price)))].join(', ')}), ${state.loanKeyFactory.length} loan key factories, ${state.manage.length} manage functions and ${interestFunctions} interest functions, at the tip ${tip.height} (the period of the highest height a lock time may name for the next block: ${move.current}). The funding address held ${sat(balance)}: enough for ${sat(course.collateral)} of collateral, ${PERCENT}% of the debt at the lowest stored price ${dollars(course.lowest)}, Paryon's fee ${sat(course.fee)} at ${dollars(course.used)}, and ${sat(LEAVE_AT_FUNDER)} left there. The template ${withService ? 'offered' : 'sent'} is the frozen one of version ${withService ? 3 : 2}, \`${template().names.identifier}\`${withService ? `, whose service is Paryon's public one at ${CHIPNET_SERVICE_URL}` : ''}.`);
         return { data: { collateral: String(course.collateral), fee: String(course.fee), used: String(course.used), lowest: String(course.lowest) } };
       });
     }
@@ -1139,7 +1285,8 @@ try {
       facts.funderAtStart = String(coins.reduce((sum, coin) => sum + coin.output.valueSatoshis, 0n));
       keep();
     }
-    if (withService) {
+    // On chipnet the service is Paryon's public one, which the run does not start.
+    if (withService && local) {
       await startService();
       countLeftovers();
     }
@@ -1197,7 +1344,7 @@ try {
     facts.loan ??= { collateral: String(collateral) };
     keep();
     let keyCategory: string;
-    if (withService) keyCategory = await theOwnerWithTheService(applications, collateral);
+    if (withService) keyCategory = await theOwnerWithTheService(applications, collateral, lowestPrice, fee);
     else {
       const { link, ask } = thePage(applications);
 
@@ -1430,7 +1577,7 @@ try {
     note(`The old device holds the loan key and ${pusd(DEBT - REPAY)} PUSD at its addresses, and ${sat(balance.recoverable)} without tokens; the loan holds ${sat(after.loan.output.valueSatoshis)} and owes ${pusd(after.state.borrowed)} PUSD, at the rate ${after.state.currentInterestRate} now and ${after.state.nextInterestRate} from its next interest payment on. Then the device is lost, with the loan open.`, 'what the old device holds');
     if (withService) {
       noneOutside('after the last action');
-      facts.serviceAtLoss ??= atTheService().total;
+      if (local) facts.serviceAtLoss ??= atTheService().total;
       keep();
     }
   }
@@ -1494,7 +1641,8 @@ try {
   if (phase === PHASES[2]) {
     const identity = hexToBin(facts.identity as string);
     // The service runs from the start of this part, so that a request the new device sent it would reach it and be counted.
-    if (withService) {
+    // On chipnet it is Paryon's public one, which the run does not start.
+    if (withService && local) {
       await startService();
       countLeftovers();
     }
@@ -1651,7 +1799,7 @@ try {
       if (found.length > 0) left.push(`${found.length} coins at addresses of a seed`);
     }
     if ((await findLoan(server, contracts(), hexToBin(facts.loan?.keyCategory as string))) !== undefined) left.push('the loan');
-    if (withService && (await endLeftoverService())) left.push('a process of Paryon\'s service, now ended');
+    if (withService && local && (await endLeftoverService())) left.push('a process of Paryon\'s service, now ended');
     const spent = BigInt(facts.funderAtStart as string) - total;
     if (local) {
       amount(`${sat(BigInt(facts.funderAtStart as string))} before the run (after deploying Paryon's contracts), ${sat(total)} after it`, 'Funder');
