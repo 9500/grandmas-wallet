@@ -488,7 +488,8 @@ No record per payment or per address is needed for any of this. What must not be
 | Ways to spend | The key | The key, or the controller |
 | What gives the addresses | The seed, or the extended public key | The seed or the viewing key, **and** the identity. The identity exists only once the controller is created on chain and cannot be worked out from the seed. |
 | Per-address data | A key | A key and a secret |
-| Watch-only key | Extended public key | Extended public key and blinding seed |
+| The extended public key by itself | Gives every address and balance | Can be made from the seed in the same way, one for each of the two address nodes. It gives each address's public key and no address: an address also holds a tag, made from the address's secret and the identity. |
+| Watch-only key | The extended public key | The viewing key: the two extended public keys and the blinding seed, which gives each address's secret. With the identity it finds every address and balance. |
 | Keys outside the address chain | None | The controller key |
 | Losing the seed | Loses the coins | A new seed takes over the identity and the coins are moved to its addresses |
 

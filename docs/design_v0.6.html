@@ -506,6 +506,8 @@ pre.code.rec { font-size: 12.5px; }
     <tr><td>Address</td><td>Hash of a public key</td><td>Hash of a script that holds the key's hash and a tag</td></tr>
     <tr><td>Ways to spend</td><td>The key</td><td>The key, or the controller</td></tr>
     <tr><td>What gives the addresses</td><td>The seed, or the extended public key</td><td>The seed or the viewing key, and also the identity</td></tr>
+    <tr><td>The extended public key by itself</td><td>Gives every address and balance</td><td>Can be made from the seed in the same way, one for each of the two address branches. It gives each address's public key and no address: an address also holds a tag, made from the address's secret and the identity.</td></tr>
+    <tr><td>Key for watching without spending</td><td>The extended public key</td><td>The viewing key: the two extended public keys and the blinding seed, which gives each address's secret. With the identity it finds every address and balance.</td></tr>
     <tr><td>Kept per address</td><td>A key</td><td>A key and a secret</td></tr>
     <tr><td>Keys outside the address branches</td><td>None</td><td>The controller key and the blinding branch</td></tr>
     <tr><td>Losing the seed</td><td>Loses the coins</td><td>A new seed takes over the identity and the coins are moved to its addresses</td></tr>
